@@ -1,0 +1,66 @@
+From 31b6df98b326611141ac80359c74004b5f7f61fe Mon Sep 17 00:00:00 2001
+Message-Id: <31b6df98b326611141ac80359c74004b5f7f61fe@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 5 Apr 2019 11:33:32 +0200
+Subject: [PATCH] cpu_x86: Do not cache microcode version
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The microcode version checks are used to invalidate cached CPU data we
+get from QEMU. To minimize /proc/cpuinfo parsing the microcode version
+was only read when libvirtd started and cached for the daemon's
+lifetime. However, the CPU microcode can change anytime (updating the
+microcode package can automatically upload it to the CPU) and we need to
+stop caching it to avoid using stale CPU model data.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit be46f613261d3b655a1f15afd635087e68a9c39b)
+
+CVE-2018-12126, CVE-2018-12127, CVE-2018-12130
+
+Conflicts:
+	src/cpu/cpu_x86.c
+            - the code is completely different in RHEL-6; the microcode
+              version is fetched in src/qemu/qemu_capabilities.c since
+              RHEL-6 commit 5c9fbf633e
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 12 ++----------
+ 1 file changed, 2 insertions(+), 10 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 2daee3fe53..f0db1a2bd9 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -801,8 +801,6 @@ static int
+ qemuCapsInitCPU(virCapsPtr caps,
+                 const char *arch)
+ {
+-    static unsigned int microcodeVersion = 0;
+-    static bool microcodeValid = false;
+     virCPUDefPtr cpu = NULL;
+     union cpuData *data = NULL;
+     virNodeInfo nodeinfo;
+@@ -827,14 +825,8 @@ qemuCapsInitCPU(virCapsPtr caps,
+         || cpuDecode(cpu, data, NULL, 0, NULL) < 0)
+         goto cleanup;
+ 
+-    if (STREQ(arch, "i686") || STREQ(arch, "x86_64")) {
+-        /* This is safe since we are called iff driver is locked */
+-        if (!microcodeValid) {
+-            microcodeVersion = virHostCPUGetMicrocodeVersion();
+-            microcodeValid = true;
+-        }
+-        cpu->microcodeVersion = microcodeVersion;
+-    }
++    if (STREQ(arch, "i686") || STREQ(arch, "x86_64"))
++        cpu->microcodeVersion = virHostCPUGetMicrocodeVersion();
+ 
+     ret = 0;
+ 
+-- 
+2.21.0
+

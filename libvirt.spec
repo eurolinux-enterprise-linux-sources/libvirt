@@ -319,7 +319,7 @@
 Summary: Library providing a simple virtualization API
 Name: libvirt
 Version: 0.10.2
-Release: 64%{?dist}%{?extra_release}
+Release: 64%{?dist}.1%{?extra_release}
 License: LGPLv2+
 Group: Development/Libraries
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
@@ -1282,6 +1282,8 @@ Patch947: libvirt-qemu-avoid-denial-of-service-reading-from-QEMU-monitor-CVE-201
 Patch948: libvirt-qemu-avoid-denial-of-service-reading-from-QEMU-guest-agent-CVE-2018-1064.patch
 Patch949: libvirt-cpu-define-the-ssbd-CPUID-feature-bit-CVE-2018-3639.patch
 Patch950: libvirt-cpu-define-the-virt-ssbd-CPUID-feature-bit-CVE-2018-3639.patch
+Patch951: libvirt-cpu_x86-Do-not-cache-microcode-version.patch
+Patch952: libvirt-cpu_map-Define-md-clear-CPUID-bit.patch
 
 
 # All runtime requirements for the libvirt package (runtime requrements
@@ -2462,6 +2464,10 @@ rm -f $RPM_BUILD_ROOT%{_sysconfdir}/sysctl.d/libvirtd
 %endif
 
 %changelog
+* Thu Apr 18 2019 Jiri Denemark <jdenemar@redhat.com> - 0.10.2-64.el6_10.1
+- cpu_x86: Do not cache microcode version (CVE-2018-12126, CVE-2018-12130, CVE-2018-12127)
+- cpu_map: Define md-clear CPUID bit (CVE-2018-12126, CVE-2018-12130, CVE-2018-12127)
+
 * Tue May 22 2018 Jiri Denemark <jdenemar@redhat.com> - 0.10.2-64
 - cpu: define the 'ssbd' CPUID feature bit (CVE-2018-3639)
 - cpu: define the 'virt-ssbd' CPUID feature bit (CVE-2018-3639)

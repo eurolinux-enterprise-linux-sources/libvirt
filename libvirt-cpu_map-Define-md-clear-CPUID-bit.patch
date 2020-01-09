@@ -1,0 +1,55 @@
+From 94f0381d3afbe1b78d3460c5cedce8bcc28d89e1 Mon Sep 17 00:00:00 2001
+Message-Id: <94f0381d3afbe1b78d3460c5cedce8bcc28d89e1@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 5 Apr 2019 15:11:20 +0200
+Subject: [PATCH] cpu_map: Define md-clear CPUID bit
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+CVE-2018-12126, CVE-2018-12127, CVE-2018-12130
+
+The bit is set when microcode provides the mechanism to invoke a flush
+of various exploitable CPU buffers by invoking the VERW instruction.
+
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from a private commit)
+
+Conflicts:
+	src/cpu_map/x86_features.xml
+            - no CPU map split downstream
+            - "ecx_in" does not exist in RHEL-6
+            - "eax_in" is called "function" in RHEL-6
+
+	tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-enabled.xml
+	tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-guest.xml
+	tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-host.xml
+	tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-json.xml
+	tests/cputestdata/x86_64-cpuid-Xeon-Platinum-8268-guest.xml
+	tests/cputestdata/x86_64-cpuid-Xeon-Platinum-8268-host.xml
+            - CPUID testing is missing in RHEL-6
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/cpu/cpu_map.xml | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 45afc99274..91e20f0be8 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -188,6 +188,9 @@
+       <cpuid function='0x00000001' ecx='0x80000000'/>
+     </feature>
+ 
++    <feature name='md-clear'>
++      <cpuid function='0x07' edx='0x00000400'/>
++    </feature>
+     <feature name='spec-ctrl'>
+       <cpuid function='0x07' edx='0x04000000'/>
+     </feature>
+-- 
+2.21.0
+
