@@ -1,0 +1,63 @@
+From bc4ab32cb6994c4c1bf1fa2f12eb78e4f8c1258d Mon Sep 17 00:00:00 2001
+Message-Id: <bc4ab32cb6994c4c1bf1fa2f12eb78e4f8c1258d@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 19 Jun 2019 18:13:44 +0200
+Subject: [PATCH] api: disallow virDomainSaveImageGetXMLDesc on read-only
+ connections
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The virDomainSaveImageGetXMLDesc API is taking a path parameter,
+which can point to any path on the system. This file will then be
+read and parsed by libvirtd running with root privileges.
+
+Forbid it on read-only connections.
+
+Fixes: CVE-2019-10161
+Reported-by: Matthias Gerstner <mgerstner@suse.de>
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+
+Conflicts:
+  src/libvirt-domain.c
+  src/remote/remote_protocol.x
+  src/qemu/qemu_driver.c
+
+The branch based on 0.10.2 is completely different to upstream,
+missing the ACL checks:
+commit e341435e5090677c67a0d3d4ca0393102054841f
+    Add ACL annotations to all RPC messages
+commit abf75aea247ef6e432e5a51bcdb21972e50a4cd1
+    Add ACL checks into the QEMU driver
+So the only changes are needed in src/libvirt.c, which was not
+yet split:
+commit 67c08fccdcad2f5d034875be2b052b46c61eb575
+    Move virDomain related APIs out of libvirt.c
+
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Message-Id: <93621e7da6c1cfd8896ee9a9790bc40694979ad3.1560960796.git.jtomko@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index ababbb5307..5bf6823abb 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -2871,9 +2871,8 @@ virDomainSaveImageGetXMLDesc(virConnectPtr conn, const char *file,
+     }
+     virCheckNonNullArgGoto(file, error);
+ 
+-    if ((conn->flags & VIR_CONNECT_RO) && (flags & VIR_DOMAIN_XML_SECURE)) {
+-        virLibConnError(VIR_ERR_OPERATION_DENIED, "%s",
+-                        _("virDomainSaveImageGetXMLDesc with secure flag"));
++    if (conn->flags & VIR_CONNECT_RO) {
++        virLibConnError(VIR_ERR_OPERATION_DENIED, __FUNCTION__);
+         goto error;
+     }
+ 
+-- 
+2.22.0
+

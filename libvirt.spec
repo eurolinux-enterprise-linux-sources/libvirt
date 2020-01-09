@@ -319,7 +319,7 @@
 Summary: Library providing a simple virtualization API
 Name: libvirt
 Version: 0.10.2
-Release: 64%{?dist}.1%{?extra_release}
+Release: 64%{?dist}.2%{?extra_release}
 License: LGPLv2+
 Group: Development/Libraries
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
@@ -1284,6 +1284,7 @@ Patch949: libvirt-cpu-define-the-ssbd-CPUID-feature-bit-CVE-2018-3639.patch
 Patch950: libvirt-cpu-define-the-virt-ssbd-CPUID-feature-bit-CVE-2018-3639.patch
 Patch951: libvirt-cpu_x86-Do-not-cache-microcode-version.patch
 Patch952: libvirt-cpu_map-Define-md-clear-CPUID-bit.patch
+Patch953: libvirt-api-disallow-virDomainSaveImageGetXMLDesc-on-read-only-connections.patch
 
 
 # All runtime requirements for the libvirt package (runtime requrements
@@ -2464,6 +2465,9 @@ rm -f $RPM_BUILD_ROOT%{_sysconfdir}/sysctl.d/libvirtd
 %endif
 
 %changelog
+* Wed Jun 19 2019 Jiri Denemark <jdenemar@redhat.com> - 0.10.2-64.el6_10.2
+- api: disallow virDomainSaveImageGetXMLDesc on read-only connections (CVE-2019-10161)
+
 * Thu Apr 18 2019 Jiri Denemark <jdenemar@redhat.com> - 0.10.2-64.el6_10.1
 - cpu_x86: Do not cache microcode version (CVE-2018-12126, CVE-2018-12130, CVE-2018-12127)
 - cpu_map: Define md-clear CPUID bit (CVE-2018-12126, CVE-2018-12130, CVE-2018-12127)
