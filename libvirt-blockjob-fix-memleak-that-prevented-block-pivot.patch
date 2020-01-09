@@ -1,0 +1,40 @@
+From 3e18b4de3c1b48ce4a095d95d51a58fe47d8efa9 Mon Sep 17 00:00:00 2001
+Message-Id: <3e18b4de3c1b48ce4a095d95d51a58fe47d8efa9.1357206168.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 21 Dec 2012 14:06:21 -0700
+Subject: [PATCH] blockjob: fix memleak that prevented block pivot
+
+https://bugzilla.redhat.com/show_bug.cgi?id=888426
+
+The code for doing a block-copy was supposed to track the destination
+file in drive->mirror, but was set up to do all mallocs prior to
+starting the copy so that OOM wouldn't leave things partially started.
+However, the wrong variable was being written; later in the code we
+silently did 'disk->mirror = mirror' which was still NULL, and thus
+leaking memory and leaving libvirt to think that the mirror job was
+never started, which prevented a pivot operation after a copy.
+Problem introduced in commit 35c7701c6.
+
+* src/qemu/qemu_driver.c (qemuDomainBlockCopy): Initialize correct
+variable.
+(cherry picked from commit 08230dbd7d5b254b9eea0f30d3e4dcec68526f54)
+---
+ src/qemu/qemu_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 3e99b76..465457f 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -13338,7 +13338,7 @@ qemuDomainBlockCopy(virDomainPtr dom, const char *path,
+     }
+     if (!format && disk->mirrorFormat > 0)
+         format = virStorageFileFormatTypeToString(disk->mirrorFormat);
+-    if (!(disk->mirror = strdup(dest))) {
++    if (!(mirror = strdup(dest))) {
+         virReportOOMError();
+         goto endjob;
+     }
+-- 
+1.8.0.2
+

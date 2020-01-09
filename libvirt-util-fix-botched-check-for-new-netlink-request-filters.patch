@@ -1,0 +1,72 @@
+From cc7f89c4bc424fc7d83dfcec9679775bc284ca09 Mon Sep 17 00:00:00 2001
+Message-Id: <cc7f89c4bc424fc7d83dfcec9679775bc284ca09.1357206167.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Fri, 21 Dec 2012 16:23:31 -0500
+Subject: [PATCH] util: fix botched check for new netlink request filters
+
+This is an adjustment to the fix for
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=889319
+
+to account for two bonehead mistakes I made.
+
+commit ac2797cf2af2fd0e64c58a48409a8175d24d6f86 attempted to fix a
+problem with netlink in newer kernels requiring an extra attribute
+with a filter flag set in order to receive an IFLA_VFINFO_LIST from
+netlink. Unfortunately, the #ifdef that protected against compiling it
+in on systems without the new flag went a bit too far, assuring that
+the new code would *never* be compiled, and even if it had, the code
+was incorrect.
+
+The first problem was that, while some IFLA_* enum values are also
+their existence at compile time, IFLA_EXT_MASK *isn't* #defined, so
+checking to see if it's #defined is not a valid method of determining
+whether or not to add the attribute. Fortunately, the flag that is
+being set (RTEXT_FILTER_VF) *is* #defined, and it is never present if
+IFLA_EXT_MASK isn't, so it's sufficient to just check for that flag.
+
+And to top it off, due to the code not actually compiling when I
+thought it did, I didn't realize that I'd been given the wrong arglist
+to nla_put() - you can't just send a const value to nla_put, you have
+to send it a pointer to memory containing what you want to add to the
+message, along with the length of that memory.
+
+This time I've actually sent the patch over to the other machine
+that's experiencing the problem, applied it to the branch being used
+(0.10.2) and verified that it works properly, i.e. it does fix the
+problem it's supposed to fix. :-/
+(cherry picked from commit 7c36650699f33e54361720f824efdf164bc6e65d)
+---
+ src/util/virnetdev.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/util/virnetdev.c b/src/util/virnetdev.c
+index f5f4562..37eb3e9 100644
+--- a/src/util/virnetdev.c
++++ b/src/util/virnetdev.c
+@@ -1275,13 +1275,19 @@ virNetDevLinkDump(const char *ifname, int ifindex,
+             goto buffer_too_small;
+     }
+ 
+-# if defined(IFLA_EXT_MASK) && defined(RTEXT_FILTER_VF)
++# ifdef RTEXT_FILTER_VF
+     /* if this filter exists in the kernel's netlink implementation,
+      * we need to set it, otherwise the response message will not
+      * contain the IFLA_VFINFO_LIST that we're looking for.
+      */
+-    if (nla_put(nl_msg, IFLA_EXT_MASK, RTEXT_FILTER_VF) < 0)
+-       goto buffer_too_small;
++    {
++        uint32_t ifla_ext_mask = RTEXT_FILTER_VF;
++
++        if (nla_put(nl_msg, IFLA_EXT_MASK,
++                    sizeof(ifla_ext_mask), &ifla_ext_mask) < 0) {
++            goto buffer_too_small;
++        }
++    }
+ # endif
+ 
+     if (virNetlinkCommand(nl_msg, recvbuf, &recvbuflen,
+-- 
+1.8.0.2
+

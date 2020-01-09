@@ -1,0 +1,125 @@
+From 340023c6c4734109b34c94b5109af4888c6b7deb Mon Sep 17 00:00:00 2001
+Message-Id: <340023c6c4734109b34c94b5109af4888c6b7deb.1373271640.git.jdenemar@redhat.com>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 14 Mar 2013 11:19:10 -0400
+Subject: [PATCH] selinux: Resolve resource leak using the default disk label
+
+https://bugzilla.redhat.com/show_bug.cgi?id=906299
+
+Commit id a994ef2d1 changed the mechanism to store/update the default
+security label from using disk->seclabels[0] to allocating one on the
+fly. That change allocated the label, but never saved it.  This patch
+will save the label. The new virDomainDiskDefAddSecurityLabelDef() is
+a copy of the virDomainDefAddSecurityLabelDef().
+
+(cherry picked from commit 05cc03518987fa0f8399930d14c1d635591ca49b)
+---
+ src/conf/domain_conf.c          | 51 ++++++++++++++++++++++++++++++-----------
+ src/conf/domain_conf.h          |  3 +++
+ src/security/security_selinux.c |  6 ++---
+ 3 files changed, 44 insertions(+), 16 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 3fc1eab..f905018 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -15742,26 +15742,51 @@ virDomainDefAddSecurityLabelDef(virDomainDefPtr def, const char *model)
+ {
+     virSecurityLabelDefPtr seclabel = NULL;
+ 
+-    if (VIR_ALLOC(seclabel) < 0) {
+-        virReportOOMError();
+-        return NULL;
+-    }
++    if (VIR_ALLOC(seclabel) < 0)
++        goto no_memory;
+ 
+     if (model) {
+         seclabel->model = strdup(model);
+-        if (seclabel->model == NULL) {
+-            virReportOOMError();
+-            virSecurityLabelDefFree(seclabel);
+-            return NULL;
+-        }
++        if (seclabel->model == NULL)
++            goto no_memory;
+     }
+ 
+-    if (VIR_EXPAND_N(def->seclabels, def->nseclabels, 1) < 0) {
+-        virReportOOMError();
+-        virSecurityLabelDefFree(seclabel);
+-        return NULL;
++    if (VIR_EXPAND_N(def->seclabels, def->nseclabels, 1) < 0)
++        goto no_memory;
++
++    def->seclabels[def->nseclabels - 1] = seclabel;
++
++    return seclabel;
++
++no_memory:
++    virReportOOMError();
++    virSecurityLabelDefFree(seclabel);
++    return NULL;
++}
++
++virSecurityDeviceLabelDefPtr
++virDomainDiskDefAddSecurityLabelDef(virDomainDiskDefPtr def, const char *model)
++{
++    virSecurityDeviceLabelDefPtr seclabel = NULL;
++
++    if (VIR_ALLOC(seclabel) < 0)
++        goto no_memory;
++
++    if (model) {
++        seclabel->model = strdup(model);
++        if (seclabel->model == NULL)
++            goto no_memory;
+     }
++
++    if (VIR_EXPAND_N(def->seclabels, def->nseclabels, 1) < 0)
++        goto no_memory;
++
+     def->seclabels[def->nseclabels - 1] = seclabel;
+ 
+     return seclabel;
++
++no_memory:
++    virReportOOMError();
++    virSecurityDeviceLabelDefFree(seclabel);
++    return NULL;
+ }
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 3c97367..06406d4 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2187,6 +2187,9 @@ virDomainChrDefGetSecurityLabelDef(virDomainChrDefPtr def, const char *model);
+ virSecurityLabelDefPtr
+ virDomainDefAddSecurityLabelDef(virDomainDefPtr def, const char *model);
+ 
++virSecurityDeviceLabelDefPtr
++virDomainDiskDefAddSecurityLabelDef(virDomainDiskDefPtr def, const char *model);
++
+ typedef const char* (*virEventActionToStringFunc)(int type);
+ typedef int (*virEventActionFromStringFunc)(const char *type);
+ 
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index 879b823..1d6ec37 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -1046,10 +1046,10 @@ virSecuritySELinuxSetSecurityFileLabel(virDomainDiskDefPtr disk,
+     if (ret == 1 && !disk_seclabel) {
+         /* If we failed to set a label, but virt_use_nfs let us
+          * proceed anyway, then we don't need to relabel later.  */
+-        if (VIR_ALLOC(disk_seclabel) < 0) {
+-            virReportOOMError();
++        disk_seclabel =
++            virDomainDiskDefAddSecurityLabelDef(disk, SECURITY_SELINUX_NAME);
++        if (!disk_seclabel)
+             return -1;
+-        }
+         disk_seclabel->norelabel = true;
+         ret = 0;
+     }
+-- 
+1.8.2.1
+

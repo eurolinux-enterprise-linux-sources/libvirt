@@ -1,0 +1,203 @@
+From 131379552a6ff943a1c083b18cb2d4b9a6ca8555 Mon Sep 17 00:00:00 2001
+Message-Id: <131379552a6ff943a1c083b18cb2d4b9a6ca8555.1373271637.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 25 Feb 2013 16:21:51 -0700
+Subject: [PATCH] storage: refactor metadata lookup
+
+https://bugzilla.redhat.com/show_bug.cgi?id=903248
+
+Prior to this patch, we had the callchains:
+external users
+  \-> virStorageFileGetMetadataFromFD
+      \-> virStorageFileGetMetadataFromBuf
+virStorageFileGetMetadataRecurse
+  \-> virStorageFileGetMetadataFromFD
+      \-> virStorageFileGetMetadataFromBuf
+
+However, a future patch wants to add an additional parameter to
+the bottom of the chain, for use by virStorageFileGetMetadataRecurse,
+without affecting existing external callers.  Since there is only a
+single caller of the internal function, we can repurpose it to fit
+our needs, with this patch giving us:
+
+external users
+  \-> virStorageFileGetMetadataFromFD
+      \-> virStorageFileGetMetadataInternal
+virStorageFileGetMetadataRecurse /
+  \-> virStorageFileGetMetadataInternal
+
+* src/util/virstoragefile.c (virStorageFileGetMetadataFromFD):
+Move most of the guts...
+(virStorageFileGetMetadataFromBuf): ...here, and rename...
+(virStorageFileGetMetadataInternal): ...to this.
+(virStorageFileGetMetadataRecurse): Use internal helper.
+(cherry picked from commit 2485f921536659181c9afa30d4fc1ee99dc064ae)
+---
+ src/util/storage_file.c | 122 ++++++++++++++++++++++--------------------------
+ 1 file changed, 56 insertions(+), 66 deletions(-)
+
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index 778a274..72b3885 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -644,22 +644,63 @@ cleanup:
+ 
+ 
+ static virStorageFileMetadataPtr
+-virStorageFileGetMetadataFromBuf(int format,
+-                                 const char *path,
+-                                 unsigned char *buf,
+-                                 size_t len,
+-                                 virStorageFileMetadata *meta)
++virStorageFileGetMetadataInternal(const char *path,
++                                  int fd,
++                                  int format)
+ {
++    virStorageFileMetadata *meta = NULL;
++    unsigned char *buf = NULL;
++    ssize_t len = STORAGE_MAX_HEAD;
+     virStorageFileMetadata *ret = NULL;
++    struct stat sb;
++
++    VIR_DEBUG("path=%s, fd=%d, format=%d", path, fd, format);
+ 
+-    VIR_DEBUG("path=%s format=%d", path, format);
++    if (VIR_ALLOC(meta) < 0) {
++        virReportOOMError();
++        return NULL;
++    }
++
++    if (fstat(fd, &sb) < 0) {
++        virReportSystemError(errno,
++                             _("cannot stat file '%s'"),
++                             path);
++        goto cleanup;
++    }
++
++    /* No header to probe for directories, but also no backing file */
++    if (S_ISDIR(sb.st_mode))
++        return meta;
++
++    if (lseek(fd, 0, SEEK_SET) == (off_t)-1) {
++        virReportSystemError(errno, _("cannot seek to start of '%s'"), path);
++        goto cleanup;
++    }
++
++    if (VIR_ALLOC_N(buf, len) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    if ((len = read(fd, buf, len)) < 0) {
++        virReportSystemError(errno, _("cannot read header '%s'"), path);
++        goto cleanup;
++    }
++
++    if (format == VIR_STORAGE_FILE_AUTO)
++        format = virStorageFileProbeFormatFromBuf(path, buf, len);
++
++    if (format <= VIR_STORAGE_FILE_NONE ||
++        format >= VIR_STORAGE_FILE_LAST) {
++        virReportSystemError(EINVAL, _("unknown storage file format %d"),
++                             format);
++        goto cleanup;
++    }
+ 
+     /* XXX we should consider moving virStorageBackendUpdateVolInfo
+      * code into this method, for non-magic files
+      */
+-    if (format <= VIR_STORAGE_FILE_NONE ||
+-        format >= VIR_STORAGE_FILE_LAST ||
+-        !fileTypeInfo[format].magic)
++    if (!fileTypeInfo[format].magic)
+         goto done;
+ 
+     /* Optionally extract capacity from file */
+@@ -733,7 +774,11 @@ virStorageFileGetMetadataFromBuf(int format,
+ 
+ done:
+     ret = meta;
++    meta = NULL;
++
+ cleanup:
++    virStorageFileFreeMetadata(meta);
++    VIR_FREE(buf);
+     return ret;
+ }
+ 
+@@ -847,62 +892,7 @@ virStorageFileGetMetadataFromFD(const char *path,
+                                 int fd,
+                                 int format)
+ {
+-    virStorageFileMetadata *meta = NULL;
+-    unsigned char *buf = NULL;
+-    ssize_t len = STORAGE_MAX_HEAD;
+-    virStorageFileMetadata *ret = NULL;
+-    struct stat sb;
+-
+-    if (VIR_ALLOC(meta) < 0) {
+-        virReportOOMError();
+-        return NULL;
+-    }
+-
+-    if (fstat(fd, &sb) < 0) {
+-        virReportSystemError(errno,
+-                             _("cannot stat file '%s'"),
+-                             path);
+-        goto cleanup;
+-    }
+-
+-    /* No header to probe for directories, but also no backing file */
+-    if (S_ISDIR(sb.st_mode))
+-        return meta;
+-
+-    if (lseek(fd, 0, SEEK_SET) == (off_t)-1) {
+-        virReportSystemError(errno, _("cannot seek to start of '%s'"), path);
+-        goto cleanup;
+-    }
+-
+-    if (VIR_ALLOC_N(buf, len) < 0) {
+-        virReportOOMError();
+-        goto cleanup;
+-    }
+-
+-    if ((len = read(fd, buf, len)) < 0) {
+-        virReportSystemError(errno, _("cannot read header '%s'"), path);
+-        goto cleanup;
+-    }
+-
+-    if (format == VIR_STORAGE_FILE_AUTO)
+-        format = virStorageFileProbeFormatFromBuf(path, buf, len);
+-
+-    if (format <= VIR_STORAGE_FILE_NONE ||
+-        format >= VIR_STORAGE_FILE_LAST) {
+-        virReportSystemError(EINVAL, _("unknown storage file format %d"),
+-                             format);
+-        goto cleanup;
+-    }
+-
+-    if (!virStorageFileGetMetadataFromBuf(format, path, buf, len, meta))
+-        goto cleanup;
+-    ret = meta;
+-    meta = NULL;
+-
+-cleanup:
+-    virStorageFileFreeMetadata(meta);
+-    VIR_FREE(buf);
+-    return ret;
++    return virStorageFileGetMetadataInternal(path, fd, format);
+ }
+ 
+ /* Recursive workhorse for virStorageFileGetMetadata.  */
+@@ -931,7 +921,7 @@ virStorageFileGetMetadataRecurse(const char *path, int format,
+         return NULL;
+     }
+ 
+-    ret = virStorageFileGetMetadataFromFD(path, fd, format);
++    ret = virStorageFileGetMetadataInternal(path, fd, format);
+ 
+     if (VIR_CLOSE(fd) < 0)
+         VIR_WARN("could not close file %s", path);
+-- 
+1.8.2.1
+

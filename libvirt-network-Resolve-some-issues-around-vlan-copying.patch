@@ -1,0 +1,104 @@
+From 4737ccd7b00e1323106ccc8d36009f8e63bdf864 Mon Sep 17 00:00:00 2001
+Message-Id: <4737ccd7b00e1323106ccc8d36009f8e63bdf864@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Mon, 15 Feb 2016 06:19:40 -0500
+Subject: [PATCH] network: Resolve some issues around vlan copying
+
+Prerequisite patch for the fix to:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=1300843
+
+Remove extraneous check for 'netdef' when dereferencing for vlan.nTags.
+Prior code would already check if netdef was NULL.
+
+Coverity complained about a path where the 'vlan' was potentially valid,
+but a prior checks may not have allocated 'iface->data.network.actual',
+so like other paths it needs to be allocated on the fly.
+
+Move the copying of vlan up earlier in networkAllocateActualDevice, so
+that actual.type gets properly set.
+
+Since the first assignment to vlan is redundant except in the case of
+jumping immediately to validate from the start of the function,
+eliminate its initial setting at the top of the function in favor of
+calling the helper function virDomainNetGetActualVlan() (which doesn't
+depend on the local vlan pointer being initialized) down at validate:
+
+(cherry pick from 35ed25bde9e0d1061ef9a96edcd968a5b4c8a375 with small
+merge conflict due to forwardType becoming forward.type)
+
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 35 +++++++++++++++++++----------------
+ 1 file changed, 19 insertions(+), 16 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 7da1ca9..344619b 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -3640,10 +3640,6 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+     int ii;
+     int ret = -1;
+ 
+-    /* it's handy to have this initialized if we skip directly to validate */
+-    if (iface->vlan.nTags > 0)
+-        vlan = &iface->vlan;
+-
+     if (iface->type != VIR_DOMAIN_NET_TYPE_NETWORK)
+         goto validate;
+ 
+@@ -3683,6 +3679,24 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+             goto error;
+     }
+ 
++    /* copy appropriate vlan info to actualNet */
++    if (iface->vlan.nTags > 0)
++        vlan = &iface->vlan;
++    else if (portgroup && portgroup->vlan.nTags > 0)
++        vlan = &portgroup->vlan;
++    else if (netdef->vlan.nTags > 0)
++        vlan = &netdef->vlan;
++
++    if (vlan) {
++        if (!iface->data.network.actual
++            && (VIR_ALLOC(iface->data.network.actual) < 0)) {
++            virReportOOMError();
++            goto error;
++        }
++        if (virNetDevVlanCopy(&iface->data.network.actual->vlan, vlan) < 0)
++           goto error;
++    }
++
+     if ((netdef->forwardType == VIR_NETWORK_FORWARD_NONE) ||
+         (netdef->forwardType == VIR_NETWORK_FORWARD_NAT) ||
+         (netdef->forwardType == VIR_NETWORK_FORWARD_ROUTE)) {
+@@ -3915,24 +3929,13 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+     if (virNetDevVPortProfileCheckComplete(virtport, true) < 0)
+         goto error;
+ 
+-    /* copy appropriate vlan info to actualNet */
+-    if (iface->vlan.nTags > 0)
+-        vlan = &iface->vlan;
+-    else if (portgroup && portgroup->vlan.nTags > 0)
+-        vlan = &portgroup->vlan;
+-    else if (netdef && netdef->vlan.nTags > 0)
+-        vlan = &netdef->vlan;
+-
+-    if (virNetDevVlanCopy(&iface->data.network.actual->vlan, vlan) < 0)
+-        goto error;
+-
+ validate:
+     /* make sure that everything now specified for the device is
+      * actually supported on this type of network. NB: network,
+      * netdev, and iface->data.network.actual may all be NULL.
+      */
+ 
+-    if (vlan) {
++    if (virDomainNetGetActualVlan(iface)) {
+         /* vlan configuration via libvirt is only supported for
+          * PCI Passthrough SR-IOV devices and openvswitch bridges.
+          * otherwise log an error and fail
+-- 
+2.7.1
+

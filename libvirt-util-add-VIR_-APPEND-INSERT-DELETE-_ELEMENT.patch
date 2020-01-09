@@ -1,0 +1,444 @@
+From 52173e84b41bd9b690a76abad58e360c4d0d6e69 Mon Sep 17 00:00:00 2001
+Message-Id: <52173e84b41bd9b690a76abad58e360c4d0d6e69.1373271638.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Wed, 6 Mar 2013 15:03:50 -0700
+Subject: [PATCH] util: add VIR_(APPEND|INSERT|DELETE)_ELEMENT
+
+https://bugzilla.redhat.com/show_bug.cgi?id=896604
+
+I noticed when writing the backend functions for virNetworkUpdate that
+I was repeating the same sequence of memmove, VIR_REALLOC, nXXX-- (and
+messed up the args to memmove at least once), and had seen the same
+sequence in a lot of other places, so I decided to write a few
+utility functions/macros - see the .h file for full documentation.
+
+The intent is to reduce the number of lines of code, but more
+importantly to eliminate the need to check the element size and
+element count arithmetic every time we need to do this (I *always*
+make at least one mistake.)
+
+VIR_INSERT_ELEMENT: insert one element at an arbitrary index within an
+  array of objects. The size of each object is determined
+  automatically by the macro using sizeof(*array). The new element's
+  contents are copied into the inserted space, then the original copy
+  of contents are 0'ed out (if everything else was
+  successful). Compile-time assignment and size compatibility between
+  the array and the new element is guaranteed (see explanation below
+  [*])
+
+VIR_INSERT_ELEMENT_COPY: identical to VIR_INSERT_ELEMENT, except that
+  the original contents of newelem are not cleared to 0 (i.e. a copy
+  is made).
+
+VIR_APPEND_ELEMENT: This is just a special case of VIR_INSERT_ELEMENT
+  that "inserts" one past the current last element.
+
+VIR_APPEND_ELEMENT_COPY: identical to VIR_APPEND_ELEMENT, except that
+  the original contents of newelem are not cleared to 0 (i.e. a copy
+  is made).
+
+VIR_DELETE_ELEMENT: delete one element at an arbitrary index within an
+  array of objects. It's assumed that the element being deleted is
+  already saved elsewhere (or cleared, if that's what is appropriate).
+
+All five of these macros have an _INPLACE variant, which skips the
+memory re-allocation of the array, assuming that the caller has
+already done it (when inserting) or will do it later (when deleting).
+
+Note that VIR_DELETE_ELEMENT* can return a failure, but only if an
+invalid index is given (index + amount to delete is > current array
+size), so in most cases you can safely ignore the return (that's why
+the helper function virDeleteElementsN isn't declared with
+ATTRIBUTE_RETURN_CHECK). A warning is logged if this ever happens,
+since it is surely a coding error.
+
+[*] One initial problem with the INSERT and APPEND macros was that,
+due to both the array pointer and newelem pointer being cast to void*
+when passing to virInsertElementsN(), any chance of type-checking was
+lost. If we were going to move in newelem with a memmove anyway, we
+would be no worse off for this. However, most current open-coded
+insert/append operations use direct struct assignment to move the new
+element into place (or just populate the new element directly) - thus
+use of the new macros would open a possibility for new usage errors
+that didn't exist before (e.g. accidentally sending &newelemptr rather
+than newelemptr - I actually did this quite a lot in my test
+conversions of existing code).
+
+But thanks to Eric Blake's clever thinking, I was able to modify the
+INSERT and APPEND macros so that they *do* check for both assignment
+and size compatibility of *ptr (an element in the array) and newelem
+(the element being copied into the new position of the array). This is
+done via clever use of the C89-guaranteed fact that the sizeof()
+operator must have *no* side effects (so an assignment inside sizeof()
+is checked for validity, but not actually evaluated), and the fact
+that virInsertElementsN has a "# of new elements" argument that we
+want to always be 1.
+(cherry picked from commit 85b22f528f816d2360f29d5782d83b1371e19aa4)
+---
+ cfg.mk                   |   2 +-
+ src/libvirt_private.syms |   2 +
+ src/util/memory.c        | 114 +++++++++++++++++++++++++++++++-
+ src/util/memory.h        | 166 ++++++++++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 280 insertions(+), 4 deletions(-)
+
+diff --git a/cfg.mk b/cfg.mk
+index 6ad8378..f0d6966 100644
+--- a/cfg.mk
++++ b/cfg.mk
+@@ -315,7 +315,7 @@ sc_flags_usage:
+ 
+ # Avoid functions that should only be called via macro counterparts.
+ sc_prohibit_internal_functions:
+-	@prohibit='vir(Free|AllocN?|ReallocN|File(Close|Fclose|Fdopen)) *\(' \
++	@prohibit='vir(Free|AllocN?|ReallocN|(Insert|Delete)ElementsN|File(Close|Fclose|Fdopen)) *\(' \
+ 	halt='use VIR_ macros instead of internal functions'		\
+ 	  $(_sc_search_regexp)
+ 
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 408c31d..103ece7 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -817,8 +817,10 @@ virLogUnlock;
+ virAlloc;
+ virAllocN;
+ virAllocVar;
++virDeleteElementsN;
+ virExpandN;
+ virFree;
++virInsertElementsN;
+ virReallocN;
+ virResizeN;
+ virShrinkN;
+diff --git a/src/util/memory.c b/src/util/memory.c
+index 0f7aca1..b224f30 100644
+--- a/src/util/memory.c
++++ b/src/util/memory.c
+@@ -1,7 +1,7 @@
+ /*
+  * memory.c: safer memory allocation
+  *
+- * Copyright (C) 2010-2011 Red Hat, Inc.
++ * Copyright (C) 2010-2012 Red Hat, Inc.
+  * Copyright (C) 2008 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -24,7 +24,7 @@
+ #include <stdlib.h>
+ 
+ #include "memory.h"
+-
++#include "logging.h"
+ 
+ #if TEST_OOM
+ static int testMallocNext = 0;
+@@ -253,6 +253,116 @@ void virShrinkN(void *ptrptr, size_t size, size_t *countptr, size_t toremove)
+     }
+ }
+ 
++/**
++ * virInsertElementsN:
++ * @ptrptr:   pointer to hold address of allocated memory
++ * @size:     the size of one element in bytes
++ * @at:       index within array where new elements should be added
++ * @countptr: variable tracking number of elements currently allocated
++ * @add:      number of elements to add
++ * @newelems: pointer to array of one or more new elements to move into
++ *            place (the originals will be zeroed out if successful
++ *            and if clearOriginal is true)
++ * @clearOriginal: false if the new item in the array should be copied
++ *            from the original, and the original left intact.
++ *            true if the original should be 0'd out on success.
++ * @inPlace:  false if we should expand the allocated memory before
++ *            moving, true if we should assume someone else *has
++ *            already* done that.
++ *
++ * Re-allocate an array of *countptr elements, each sizeof(*ptrptr) bytes
++ * long, to be *countptr+add elements long, then appropriately move
++ * the elements starting at ptrptr[at] up by add elements, copy the
++ * items from newelems into ptrptr[at], then store the address of
++ * allocated memory in *ptrptr and the new size in *countptr.  If
++ * newelems is NULL, the new elements at ptrptr[at] are instead filled
++ * with zero.
++ *
++ * Returns -1 on failure, 0 on success
++ */
++int
++virInsertElementsN(void *ptrptr, size_t size, size_t at,
++                   size_t *countptr,
++                   size_t add, void *newelems,
++                   bool clearOriginal, bool inPlace)
++{
++    if (at > *countptr) {
++        VIR_WARN("out of bounds index - count %zu at %zu add %zu",
++                 *countptr, at, add);
++        return -1;
++    }
++
++    if (inPlace) {
++        *countptr += add;
++    } else if (virExpandN(ptrptr, size, countptr, add) < 0) {
++        return -1;
++    }
++
++    /* memory was successfully re-allocated. Move up all elements from
++     * ptrptr[at] to the end (if we're not "inserting" at the end
++     * already), memcpy in the new elements, and clear the elements
++     * from their original location. Remember that *countptr has
++     * already been updated with new element count!
++     */
++    if (at < *countptr - add) {
++        memmove(*(char**)ptrptr + (size * (at + add)),
++                *(char**)ptrptr + (size * at),
++                size * (*countptr - add - at));
++    }
++
++    if (newelems) {
++        memcpy(*(char**)ptrptr + (size * at), newelems, size * add);
++        if (clearOriginal)
++           memset((char*)newelems, 0, size * add);
++    } else if (inPlace || (at < *countptr - add)) {
++        /* NB: if inPlace, assume memory at the end wasn't initialized */
++        memset(*(char**)ptrptr + (size * at), 0, size * add);
++    }
++
++    return 0;
++}
++
++/**
++ * virDeleteElementsN:
++ * @ptrptr:   pointer to hold address of allocated memory
++ * @size:     the size of one element in bytes
++ * @at:       index within array where new elements should be deleted
++ * @countptr: variable tracking number of elements currently allocated
++ * @remove:   number of elements to remove
++ * @inPlace:  false if we should shrink the allocated memory when done,
++ *            true if we should assume someone else will do that.
++ *
++ * Re-allocate an array of *countptr elements, each sizeof(*ptrptr)
++ * bytes long, to be *countptr-remove elements long, then store the
++ * address of allocated memory in *ptrptr and the new size in *countptr.
++ * If *countptr <= remove, the entire array is freed.
++ *
++ * Returns -1 on failure, 0 on success
++ */
++int
++virDeleteElementsN(void *ptrptr, size_t size, size_t at,
++                   size_t *countptr, size_t remove,
++                   bool inPlace)
++{
++    if (at + remove > *countptr) {
++        VIR_WARN("out of bounds index - count %zu at %zu remove %zu",
++                 *countptr, at, remove);
++        return -1;
++    }
++
++    /* First move down the elements at the end that won't be deleted,
++     * then realloc. We assume that the items being deleted have
++     * already been cleared.
++    */
++    memmove(*(char**)ptrptr + (size * at),
++            *(char**)ptrptr + (size * (at + remove)),
++            size * (*countptr - remove - at));
++    if (inPlace)
++        *countptr -= remove;
++    else
++        virShrinkN(ptrptr, size, countptr, remove);
++    return 0;
++}
+ 
+ /**
+  * Vir_Alloc_Var:
+diff --git a/src/util/memory.h b/src/util/memory.h
+index ad8ee64..8398105 100644
+--- a/src/util/memory.h
++++ b/src/util/memory.h
+@@ -1,7 +1,7 @@
+ /*
+  * memory.c: safer memory allocation
+  *
+- * Copyright (C) 2010-2011 Red Hat, Inc.
++ * Copyright (C) 2010-2012 Red Hat, Inc.
+  * Copyright (C) 2008 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -59,6 +59,13 @@ int virResizeN(void *ptrptr, size_t size, size_t *alloc, size_t count,
+     ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
+ void virShrinkN(void *ptrptr, size_t size, size_t *count, size_t toremove)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
++int virInsertElementsN(void *ptrptr, size_t size, size_t at, size_t *countptr,
++                       size_t add, void *newelem,
++                       bool clearOriginal, bool inPlace)
++    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4);
++int virDeleteElementsN(void *ptrptr, size_t size, size_t at, size_t *countptr,
++                       size_t remove, bool inPlace)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(4);
+ int virAllocVar(void *ptrptr,
+                 size_t struct_size,
+                 size_t element_size,
+@@ -159,6 +166,163 @@ void virFree(void *ptrptr) ATTRIBUTE_NONNULL(1);
+     virShrinkN(&(ptr), sizeof(*(ptr)), &(count), remove)
+ 
+ /*
++ * VIR_TYPEMATCH:
++ *
++ * The following macro seems a bit cryptic, so it needs a thorough
++ * explanation. Its purpose is to check for assignment compatibility
++ * and identical size between two values without creating any side
++ * effects (by doing something silly like actually assigning one to
++ * the other). Note that it takes advantage of the C89-guaranteed
++ * property of sizeof() - it cannot have any side effects, so anything
++ * that happens inside sizeof() will not have any effect at runtime.
++ *
++ * VIR_TYPEMATCH evaluates to "1" if the two passed values are both
++ * assignment-compatible and the same size, and otherwise generates a
++ * compile-time error. It determines the result by performing the
++ * following three operations:
++ *
++ *    * sizeof(*(a) = *(b)) assures that *a and *b are
++ *      assignment-compatible (they may still have a different size
++ *      though! e.g. longVar = intVar) (If not, there is a compile-time
++ *      error. If so, the result of that subexpression is sizeof(*(a)),
++ *      i.e. one element of the array)
++ *
++ *    * sizeof(*(a) = *(b)) == sizeof(*(b)) checks if *a and *b are also
++ *      of the same size (so that, e.g. you don't accidentally copy an
++ *      int plus the random bytes following it into an array of long). It
++ *      evaluates to 1 if they are the same, and 0 otherwise.
++ *
++ *    * sizeof(char[2 * (result of previous step) - 1]) evaluates to 1
++ *      if the previous step was successful (char [(2*1) - 1] i.e.
++ *      char[1]), or generates a compile error if it wasn't successful
++ *      (char[2*0 -1] i.e. char[-1], which isn't valid in C).
++ *
++ * So VIR_TYPECHECK(a, b) will either abort the compile with an error,
++ * or evaluate to "1", and in the meantime check that we've actually
++ * added the correct &'s and/or *'s to the arguments. (Whew!)
++*/
++# define VIR_TYPEMATCH(a, b) \
++    sizeof(char[2 * (sizeof(*(a) = *(b)) == sizeof(*(b))) - 1])
++
++/**
++ * VIR_INSERT_ELEMENT:
++ * @ptr:     pointer to array of objects (*not* ptr to ptr)
++ * @at:      index within array where new elements should be added
++ * @count:   variable tracking number of elements currently allocated
++ * @newelem: the new element to move into place (*not* a pointer to
++ *           the element, but the element itself).
++ *           (the original will be zeroed out if successful)
++ *
++ * Re-allocate an array of 'count' elements, each sizeof(*ptr) bytes
++ * long, to be 'count' + 1 elements long, then appropriately move
++ * the elements starting at ptr[at] up by 1 element, copy the
++ * item 'newelem' into ptr[at], then store the address of
++ * allocated memory in 'ptr' and the new size in 'count'.
++ *
++ * VIR_INSERT_ELEMENT_COPY is identical, but doesn't clear out the
++ *   original element to 0 on success, so there are two copies of the
++ *   element. This is useful if the "element" is actually just a
++ *   pointer to the real data, and you want to maintain a reference to
++ *   it for use after the insert is completed; but if the "element" is
++ *   an object that points to other allocated memory, having multiple
++ *   copies can cause problems (e.g. double free).
++ *
++ * VIR_INSERT_ELEMENT_*INPLACE are identical, but assume any necessary
++ *   memory re-allocation has already been done.
++ *
++ * VIR_INSERT_ELEMENT_* all need to send "1" as the "add" argument to
++ * virInsertElementsN (which has the currently-unused capability of
++ * inserting multiple items at once). We use this to our advantage by
++ * replacing it with VIR_TYPECHECK(ptr, &newelem) so that we can be
++ * assured ptr and &newelem are of compatible types.
++ *
++ * Returns -1 on failure, 0 on success
++ *
++ *
++ */
++# define VIR_INSERT_ELEMENT(ptr, at, count, newelem) \
++    virInsertElementsN(&(ptr), sizeof(*(ptr)), at, &(count),    \
++                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), true, false)
++# define VIR_INSERT_ELEMENT_COPY(ptr, at, count, newelem) \
++    virInsertElementsN(&(ptr), sizeof(*(ptr)), at, &(count), \
++                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), false, false)
++# define VIR_INSERT_ELEMENT_INPLACE(ptr, at, count, newelem) \
++    virInsertElementsN(&(ptr), sizeof(*(ptr)), at, &(count), \
++                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), true, true)
++# define VIR_INSERT_ELEMENT_COPY_INPLACE(ptr, at, count, newelem) \
++    virInsertElementsN(&(ptr), sizeof(*(ptr)), at, &(count), \
++                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), false, true)
++
++/**
++ * VIR_APPEND_ELEMENT:
++ * @ptr:     pointer to array of objects (*not* ptr to ptr)
++ * @count:   variable tracking number of elements currently allocated
++ * @newelem: the new element to move into place (*not* a pointer to
++ *           the element, but the element itself).
++ *           (the original will be zeroed out if successful)
++ *
++ * Re-allocate an array of 'count' elements, each sizeof(*ptr) bytes
++ * long, to be 'count' + 1 elements long, then copy the item from
++ * 'newelem' into ptr[count+1], and store the address of allocated
++ * memory in 'ptr' and the new size in 'count'. If 'newelem' is NULL,
++ * the new element at ptr[at] is instead filled with zero.
++ *
++ * VIR_APPEND_ELEMENT_COPY is identical, but doesn't clear out the
++ *   original element to 0 on success, so there are two copies of the
++ *   element. This is useful if the "element" is actually just a
++ *   pointer to the real data, and you want to maintain a reference to
++ *   it for use after the append is completed; but if the "element" is
++ *   an object that points to other allocated memory, having multiple
++ *   copies can cause problems (e.g. double free).
++ *
++ * VIR_APPEND_ELEMENT_*INPLACE are identical, but assume any
++ *   necessary memory re-allocation has already been done.
++ *
++ * VIR_APPEND_ELEMENT_* all need to send "1" as the "add" argument to
++ * virInsertElementsN (which has the currently-unused capability of
++ * inserting multiple items at once). We use this to our advantage by
++ * replacing it with VIR_TYPECHECK(ptr, &newelem) so that we can be
++ * assured ptr and &newelem are of compatible types.
++ *
++ * Returns -1 on failure, 0 on success
++ *
++ *
++ */
++# define VIR_APPEND_ELEMENT(ptr, count, newelem) \
++    virInsertElementsN(&(ptr), sizeof(*(ptr)), count, &(count),  \
++                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), true, false)
++# define VIR_APPEND_ELEMENT_COPY(ptr, count, newelem) \
++    virInsertElementsN(&(ptr), sizeof(*(ptr)), count, &(count),  \
++                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), false, false)
++# define VIR_APPEND_ELEMENT_INPLACE(ptr, count, newelem) \
++    virInsertElementsN(&(ptr), sizeof(*(ptr)), count, &(count),  \
++                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), true, true)
++# define VIR_APPEND_ELEMENT_COPY_INPLACE(ptr, count, newelem) \
++    virInsertElementsN(&(ptr), sizeof(*(ptr)), count, &(count),  \
++                       VIR_TYPEMATCH(ptr, &(newelem)), &(newelem), false, true)
++
++/**
++ * VIR_DELETE_ELEMENT:
++ * @ptr:   pointer to array of objects (*not* ptr to ptr)
++ * @at:    index within array where new elements should be deleted
++ * @count: variable tracking number of elements currently allocated
++ *
++ * Re-allocate an array of 'count' elements, each sizeof(*ptr)
++ * bytes long, to be 'count' - 1 elements long, then store the
++ * address of allocated memory in 'ptr' and the new size in 'count'.
++ * If 'count' <= 1, the entire array is freed.
++ *
++ * VIR_DELETE_ELEMENT_INPLACE is identical, but assumes any
++ *   necessary memory re-allocation will be done later.
++ *
++ * Returns -1 on failure, 0 on success
++ */
++# define VIR_DELETE_ELEMENT(ptr, at, count) \
++    virDeleteElementsN(&(ptr), sizeof(*(ptr)), at, &(count), 1, false)
++# define VIR_DELETE_ELEMENT_INPLACE(ptr, at, count) \
++    virDeleteElementsN(&(ptr), sizeof(*(ptr)), at, &(count), 1, true)
++
++/*
+  * VIR_ALLOC_VAR_OVERSIZED:
+  * @M: size of base structure
+  * @N: number of array elements in trailing array
+-- 
+1.8.2.1
+

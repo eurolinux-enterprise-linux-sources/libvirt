@@ -1,0 +1,207 @@
+From ceb6e403183143cf245791e36245f72626747847 Mon Sep 17 00:00:00 2001
+Message-Id: <ceb6e403183143cf245791e36245f72626747847@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 11 Aug 2014 17:55:37 -0400
+Subject: [PATCH] network: make networkCreateInterfacePool more robust
+
+This resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1111455
+
+networkCreateInterfacePool was a bit loose in its error cleanup, which
+could result in a network definition with interfaces in the pool that
+were NULL. This would in turn lead to a libvirtd crash when a guest
+tried to attach an interface using the network with that pool.
+
+In particular this would happen when creating a pool to be used for
+macvtap connections. macvtap needs the netdev name of the virtual
+function in order to use it, and each VF only has a netdev name if it
+is currently bound to a network driver. If one of the VFs of a PF
+happened to be bound to the pci-stub or vfio-pci driver (indicating
+it's already in use for PCI passthrough), or no driver at all, it
+would have no name. In this case networkCreateInterfacePool would
+return an error, but would leave the netdef->forward.nifs set to the
+total number of VFs in the PF. The interface attach that triggered
+calling of networkCreateInterfacePool (it uses a "lazy fill" strategy)
+would simply fail, but the very next attempt to attach an interface
+using the same network pool would result in a crash.
+
+This patch refactors networkCreateInterfacePool to bring it more in
+line with current coding practices (label name, use of a switch with
+no default case) as well as providing the following two changes to
+behavior:
+
+1) If a VF with no netdev name is encountered, just log a warning and
+continue; only fail if exactly 0 devices are found to put in the pool.
+
+2) If the function fails, clean up any partial interface pool and set
+netdef->forward.nifs to 0.
+
+(cherry-picked from commit cd7759cb96db642aaa556f78f15801609885a650)
+
+Conflicts:
+  Several data types have changed names, and structures have
+  reorganized (everything having to do with the <forward> element was
+  a part of the main network object in 0.10.2, but upstream it has
+  been moved into a separate subordinate object).
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 123 ++++++++++++++++++++++++++++----------------
+ 1 file changed, 78 insertions(+), 45 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 783f5b3..223adba 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -3507,71 +3507,104 @@ int networkRegister(void) {
+  * Creates an implicit interface pool of VF's when a PF dev is given
+  */
+ static int
+-networkCreateInterfacePool(virNetworkDefPtr netdef) {
+-    unsigned int num_virt_fns = 0;
+-    char **vfname = NULL;
+-    struct pci_config_address **virt_fns;
+-    int ret = -1, ii = 0;
++networkCreateInterfacePool(virNetworkDefPtr netdef)
++{
++    unsigned int numVirtFns = 0;
++    char **vfNames = NULL;
++    struct pci_config_address **virtFns;
++
++    int ret = -1;
++    size_t i;
+ 
+     if ((virNetDevGetVirtualFunctions(netdef->forwardPfs->dev,
+-                                      &vfname, &virt_fns, &num_virt_fns)) < 0) {
++                                      &vfNames, &virtFns, &numVirtFns)) < 0) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("Could not get Virtual functions on %s"),
+                        netdef->forwardPfs->dev);
+-        goto finish;
++        goto cleanup;
+     }
+ 
+-    if (num_virt_fns == 0) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No Vf's present on SRIOV PF %s"),
+-                       netdef->forwardPfs->dev);
+-       goto finish;
+-    }
+-
+-    if ((VIR_ALLOC_N(netdef->forwardIfs, num_virt_fns)) < 0) {
++    netdef->nForwardIfs = 0;
++    if (VIR_ALLOC_N(netdef->forwardIfs, numVirtFns) < 0) {
+         virReportOOMError();
+-        goto finish;
++        goto cleanup;
+     }
+ 
+-    netdef->nForwardIfs = num_virt_fns;
++    for (i = 0; i < numVirtFns; i++) {
++        struct pci_config_address *thisVirtFn = virtFns[i];
++        const char *thisName = vfNames[i];
++        virNetworkForwardIfDefPtr thisIf
++            = &netdef->forwardIfs[netdef->nForwardIfs];
+ 
+-    for (ii = 0; ii < netdef->nForwardIfs; ii++) {
+-        if ((netdef->forwardType == VIR_NETWORK_FORWARD_BRIDGE) ||
+-            (netdef->forwardType == VIR_NETWORK_FORWARD_PRIVATE) ||
+-            (netdef->forwardType == VIR_NETWORK_FORWARD_VEPA) ||
+-            (netdef->forwardType == VIR_NETWORK_FORWARD_PASSTHROUGH)) {
+-            netdef->forwardIfs[ii].type = VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_NETDEV;
+-            if(vfname[ii]) {
+-                netdef->forwardIfs[ii].device.dev = strdup(vfname[ii]);
+-                if (!netdef->forwardIfs[ii].device.dev) {
++        switch (netdef->forwardType) {
++        case VIR_NETWORK_FORWARD_BRIDGE:
++        case VIR_NETWORK_FORWARD_PRIVATE:
++        case VIR_NETWORK_FORWARD_VEPA:
++        case VIR_NETWORK_FORWARD_PASSTHROUGH:
++            if (thisName) {
++                if (!(thisIf->device.dev = strdup(thisName))) {
+                     virReportOOMError();
+-                    goto finish;
++                    goto cleanup;
+                 }
++                thisIf->type = VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_NETDEV;
++                netdef->nForwardIfs++;
++            } else {
++                VIR_WARN("VF %zu of SRIOV PF %s couldn't be added to the "
++                         "interface pool because it isn't bound "
++                         "to a network driver - possibly in use elsewhere",
++                         i, netdef->forwardPfs->dev);
+             }
+-            else {
+-                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-                               _("Direct mode types require interface names"));
+-                goto finish;
+-            }
+-        }
+-        else if (netdef->forwardType == VIR_NETWORK_FORWARD_HOSTDEV) {
++            break;
++
++        case VIR_NETWORK_FORWARD_HOSTDEV:
+             /* VF's are always PCI devices */
+-            netdef->forwardIfs[ii].type = VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_PCI;
+-            netdef->forwardIfs[ii].device.pci.domain = virt_fns[ii]->domain;
+-            netdef->forwardIfs[ii].device.pci.bus = virt_fns[ii]->bus;
+-            netdef->forwardIfs[ii].device.pci.slot = virt_fns[ii]->slot;
+-            netdef->forwardIfs[ii].device.pci.function = virt_fns[ii]->function;
++            thisIf->type = VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_PCI;
++            thisIf->device.pci.domain = thisVirtFn->domain;
++            thisIf->device.pci.bus = thisVirtFn->bus;
++            thisIf->device.pci.slot = thisVirtFn->slot;
++            thisIf->device.pci.function = thisVirtFn->function;
++            netdef->nForwardIfs++;
++            break;
++
++        case VIR_NETWORK_FORWARD_NONE:
++        case VIR_NETWORK_FORWARD_NAT:
++        case VIR_NETWORK_FORWARD_ROUTE:
++        case VIR_NETWORK_FORWARD_LAST:
++            /* by definition these will never be encountered here */
++            break;
+         }
+     }
+ 
++    if (netdef->nForwardIfs == 0) {
++        /* If we don't get at least one interface in the pool, declare
++         * failure
++         */
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("No usable Vf's present on SRIOV PF %s"),
++                       netdef->forwardPfs->dev);
++        goto cleanup;
++    }
++
+     ret = 0;
+-finish:
+-    for (ii = 0; ii < num_virt_fns; ii++) {
+-        VIR_FREE(vfname[ii]);
+-        VIR_FREE(virt_fns[ii]);
++ cleanup:
++    if (ret < 0) {
++        /* free all the entries made before error */
++        for (i = 0; i < netdef->nForwardIfs; i++) {
++            if (netdef->forwardIfs[i].type
++                == VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_NETDEV)
++                VIR_FREE(netdef->forwardIfs[i].device.dev);
++        }
++        netdef->nForwardIfs = 0;
+     }
+-    VIR_FREE(vfname);
+-    VIR_FREE(virt_fns);
++    if (netdef->nForwardIfs == 0)
++        VIR_FREE(netdef->forwardIfs);
++
++    for (i = 0; i < numVirtFns; i++) {
++        VIR_FREE(vfNames[i]);
++        VIR_FREE(virtFns[i]);
++    }
++    VIR_FREE(vfNames);
++    VIR_FREE(virtFns);
+     return ret;
+ }
+ 
+-- 
+2.0.4
+

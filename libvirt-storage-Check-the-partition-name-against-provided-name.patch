@@ -1,0 +1,159 @@
+From bb89a6a7540b0ca9c48d185b409e3fbc3565e560 Mon Sep 17 00:00:00 2001
+Message-Id: <bb89a6a7540b0ca9c48d185b409e3fbc3565e560@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 29 Jan 2015 08:59:14 -0500
+Subject: [PATCH] storage: Check the partition name against provided name
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1138523 [6.7]
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1138516 [7.2]
+
+If the provided volume name doesn't match what parted generated as the
+partition name, then return a failure.
+
+Update virsh.pod and formatstorage.html.in to describe the 'name' restriction
+for disk pools as well as the usage of the <target>'s <format type='value'>.
+
+(cherry picked from commit 9bbbb9121654ad82931f21ef7f2fb1056670b955)
+
+Conflicts:
+	src/storage/storage_backend_disk.c
+
+  - RHEL6 doesn't have the virReportOOMError incorporated into VIR_ALLOC
+    and it doesn't have the VIR_STRDUP, so just adjusted the logic to
+    behave in an expected manner
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatstorage.html.in         | 12 ++++++++++--
+ src/storage/storage_backend_disk.c | 26 ++++++++++++++++++++++++--
+ tools/virsh.pod                    | 17 ++++++++++++++---
+ 3 files changed, 48 insertions(+), 7 deletions(-)
+
+diff --git a/docs/formatstorage.html.in b/docs/formatstorage.html.in
+index 8ac7ab1..1dd8fdd 100644
+--- a/docs/formatstorage.html.in
++++ b/docs/formatstorage.html.in
+@@ -236,7 +236,13 @@
+     <dl>
+       <dt><code>name</code></dt>
+       <dd>Providing a name for the volume which is unique to the pool.
+-        This is mandatory when defining a volume.  <span class="since">Since 0.4.1</span></dd>
++        This is mandatory when defining a volume. For a disk pool, the
++        name must be combination of the <code>source</code> device path
++        device and next partition number to be created. For example, if
++        the <code>source</code> device path is /dev/sdb and there are no
++        partitions on the disk, then the name must be sdb1 with the next
++        name being sdb2 and so on.
++        <span class="since">Since 0.4.1</span></dd>
+       <dt><code>key</code></dt>
+       <dd>Providing an identifier for the volume which is globally unique.
+           This cannot be set when creating a volume: it is always generated.
+@@ -319,7 +325,9 @@
+         <span class="since">Since 0.4.1</span></dd>
+       <dt><code>format</code></dt>
+       <dd>Provides information about the pool specific volume format.
+-        For disk pools it will provide the partition type. For filesystem
++        For disk pools it will provide the partition table format type, but is
++        not preserved after a pool refresh or libvirtd restart. Use extended
++        in order to create an extended disk extent partition. For filesystem
+         or directory pools it will provide the file format type, eg cow,
+         qcow, vmdk, raw. If omitted when creating a volume, the pool's
+         default format will be used. The actual format is specified via
+diff --git a/src/storage/storage_backend_disk.c b/src/storage/storage_backend_disk.c
+index 0f609f5..2cf4326 100644
+--- a/src/storage/storage_backend_disk.c
++++ b/src/storage/storage_backend_disk.c
+@@ -45,9 +45,20 @@ virStorageBackendDiskMakeDataVol(virStoragePoolObjPtr pool,
+                                  char **const groups,
+                                  virStorageVolDefPtr vol)
+ {
+-    char *tmp, *devpath;
++    char *tmp, *devpath, *partname;
++
++    /* Prepended path will be same for all partitions, so we can
++     * strip the path to form a reasonable pool-unique name
++     */
++    if ((tmp = strrchr(groups[0], '/')))
++        partname = tmp + 1;
++    else
++        partname = groups[0];
+ 
+     if (vol == NULL) {
++        /* This is typically a reload/restart/refresh path where
++         * we're discovering the existing partitions for the pool
++         */
+         if (VIR_ALLOC(vol) < 0) {
+             virReportOOMError();
+             return -1;
+@@ -65,7 +76,7 @@ virStorageBackendDiskMakeDataVol(virStoragePoolObjPtr pool,
+          * strip the path to form a reasonable pool-unique name
+          */
+         tmp = strrchr(groups[0], '/');
+-        if ((vol->name = strdup(tmp ? tmp + 1 : groups[0])) == NULL) {
++        if ((vol->name = strdup(partname)) == NULL) {
+             virReportOOMError();
+             return -1;
+         }
+@@ -89,6 +100,17 @@ virStorageBackendDiskMakeDataVol(virStoragePoolObjPtr pool,
+             return -1;
+     }
+ 
++    /* Enforce provided vol->name is the same as what parted created.
++     * We do this after filling target.path so that we have a chance at
++     * deleting the partition with this failure from CreateVol path
++     */
++    if (STRNEQ(vol->name, partname)) {
++        virReportError(VIR_ERR_INVALID_ARG,
++                       _("invalid partition name '%s', expected '%s'"),
++                       vol->name, partname);
++        return -1;
++    }
++
+     if (vol->key == NULL) {
+         /* XXX base off a unique key of the underlying disk */
+         if ((vol->key = strdup(vol->target.path)) == NULL) {
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index f8a9072..c4c6432 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -2333,7 +2333,11 @@ Create and start a pool object from the XML I<file>.
+ Create and start a pool object I<name> from the raw parameters.  If
+ I<--print-xml> is specified, then print the XML of the pool object
+ without creating the pool.  Otherwise, the pool has the specified
+-I<type>.
++I<type>. When using B<pool-create-as> for a pool of I<type> "disk",
++the existing partitions found on the I<--source-dev path> will be used
++to populate the disk pool. Therefore, it is suggested to use
++B<pool-define-as> and B<pool-build> with the I<--overwrite> in order
++to properly initialize the disk pool.
+ 
+ =item B<pool-define> I<file>
+ 
+@@ -2470,13 +2474,20 @@ I<vol-name-or-key-or-path>] [I<--backing-vol-format> I<string>]
+ Create a volume from a set of arguments.
+ I<pool-or-uuid> is the name or UUID of the storage pool to create the volume
+ in.
+-I<name> is the name of the new volume.
++I<name> is the name of the new volume. For a disk pool, this must match the
++partition name as determined from the pool's source device path and the next
++available partition. For example, a source device path of /dev/sdb and there
++are no partitions on the disk, then the name must be sdb1 with the next
++name being sdb2 and so on.
+ I<capacity> is the size of the volume to be created, as a scaled integer
+ (see B<NOTES> above), defaulting to bytes if there is no suffix.
+ I<--allocation> I<size> is the initial size to be allocated in the volume,
+ also as a scaled integer defaulting to bytes.
+ I<--format> I<string> is used in file based storage pools to specify the volume
+-file format to use; raw, bochs, qcow, qcow2, vmdk, qed.
++file format to use; raw, bochs, qcow, qcow2, vmdk, qed. Use extended for disk
++storage pools in order to create an extended partition (other values are
++validity checked but not preserved when libvirtd is restarted or the pool
++is refreshed).
+ I<--backing-vol> I<vol-name-or-key-or-path> is the source backing
+ volume to be used if taking a snapshot of an existing volume.
+ I<--backing-vol-format> I<string> is the format of the snapshot backing volume;
+-- 
+2.2.2
+

@@ -1,0 +1,81 @@
+From 979f65762e418bd697be9900535e4a131e263573 Mon Sep 17 00:00:00 2001
+Message-Id: <979f65762e418bd697be9900535e4a131e263573.1352118321.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Sun, 4 Nov 2012 20:47:38 +0100
+Subject: [PATCH] snapshot: qemu: Remove restrictions preventing external
+ checkpoints
+
+https://bugzilla.redhat.com/show_bug.cgi?id=638512
+
+Some of the pre-snapshot check have restrictions wired in regarding
+configuration options that influence taking of external checkpoints.
+
+This patch removes restrictions that would inhibit taking of such a
+snapshot.
+(cherry picked from commit 0dac29d89f9541d8054e28fddfa7033526e297ba)
+---
+ src/qemu/qemu_driver.c | 24 ++++++++++++------------
+ 1 file changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 542bf12..2c22e79 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -10780,14 +10780,6 @@ qemuDomainSnapshotPrepare(virDomainObjPtr vm, virDomainSnapshotDefPtr def,
+             break;
+ 
+         case VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL:
+-            if (def->state != VIR_DOMAIN_DISK_SNAPSHOT) {
+-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                               _("system checkpoint external snapshot for "
+-                                 "disk %s not implemented yet"),
+-                               disk->name);
+-                goto cleanup;
+-            }
+-
+             if (!disk->format) {
+                 disk->format = VIR_STORAGE_FILE_QCOW2;
+             } else if (disk->format != VIR_STORAGE_FILE_QCOW2 &&
+@@ -10833,12 +10825,15 @@ qemuDomainSnapshotPrepare(virDomainObjPtr vm, virDomainSnapshotDefPtr def,
+         }
+     }
+ 
+-    if (!found) {
++    /* external snapshot is possible without specifying a disk to snapshot */
++    if (!found &&
++        def->memory != VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+-                       _("snapshots require at least one disk to be "
+-                         "selected for snapshot"));
++                       _("internal and disk-only snapshots require at least "
++                         "one disk to be selected for snapshot"));
+         goto cleanup;
+     }
++
+     if (def->state != VIR_DOMAIN_DISK_SNAPSHOT && active) {
+         if (external == 1 ||
+             qemuCapsGet(priv->caps, QEMU_CAPS_TRANSACTION)) {
+@@ -11424,7 +11419,8 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+             snap = other;
+         }
+         if (def->dom) {
+-            if (def->state == VIR_DOMAIN_DISK_SNAPSHOT) {
++            if (def->state == VIR_DOMAIN_DISK_SNAPSHOT ||
++                def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL) {
+                 align_location = VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL;
+                 align_match = false;
+             }
+@@ -11452,6 +11448,10 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+             align_match = false;
+             def->state = VIR_DOMAIN_DISK_SNAPSHOT;
+             def->memory = VIR_DOMAIN_SNAPSHOT_LOCATION_NONE;
++        } else if (def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL) {
++            def->state = virDomainObjGetState(vm, NULL);
++            align_location = VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL;
++            align_match = false;
+         } else {
+             def->state = virDomainObjGetState(vm, NULL);
+             def->memory = (def->state == VIR_DOMAIN_SHUTOFF ?
+-- 
+1.8.0
+

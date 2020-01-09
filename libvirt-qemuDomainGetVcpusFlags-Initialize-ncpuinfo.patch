@@ -1,0 +1,37 @@
+From bbfaadf4a2a3e16030089b8b5039fa7509321be9 Mon Sep 17 00:00:00 2001
+Message-Id: <bbfaadf4a2a3e16030089b8b5039fa7509321be9.1373885147.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 13 Jun 2013 15:52:14 +0200
+Subject: [PATCH] qemuDomainGetVcpusFlags: Initialize ncpuinfo
+
+https://bugzilla.redhat.com/show_bug.cgi?id=924400
+
+Currently, there's a path to use the ncpuinfo variable uninitialized,
+which leads to a compiler warning:
+
+    qemu/qemu_driver.c: In function 'qemuDomainGetVcpusFlags':
+    qemu/qemu_driver.c:4573:9: error: 'ncpuinfo' may be used
+    uninitialized in this function [-Werror=maybe-uninitialized]
+             for (i = 0; i < ncpuinfo; i++) {
+             ^
+(cherry picked from commit cdd823c073c30f9f3e4f10d38dbe73694ca538ac)
+---
+ src/qemu/qemu_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index c793b98..5dd7a15 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -4739,7 +4739,7 @@ qemudDomainGetVcpusFlags(virDomainPtr dom, unsigned int flags)
+     int ret = -1;
+     qemuDomainObjPrivatePtr priv;
+     qemuAgentCPUInfoPtr cpuinfo = NULL;
+-    int ncpuinfo;
++    int ncpuinfo = -1;
+     int i;
+ 
+     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+-- 
+1.8.3.2
+

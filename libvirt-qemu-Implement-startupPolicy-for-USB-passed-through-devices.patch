@@ -1,0 +1,172 @@
+From 6c5285c6d7ee072d4ab2d6549ba54a6ed792c8d7 Mon Sep 17 00:00:00 2001
+Message-Id: <6c5285c6d7ee072d4ab2d6549ba54a6ed792c8d7.1350297258.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 4 Oct 2012 16:18:16 +0200
+Subject: [PATCH] qemu: Implement startupPolicy for USB passed through devices
+
+https://bugzilla.redhat.com/show_bug.cgi?id=843560
+
+(cherry picked from commit edc9269a2a80082a6898e14b1c10b4a94197b731)
+---
+ src/qemu/qemu_cgroup.c  |  2 ++
+ src/qemu/qemu_command.c | 20 +++++++++++++++-----
+ src/qemu/qemu_hostdev.c | 20 +++++++++++++++-----
+ src/qemu/qemu_hostdev.h |  3 ++-
+ src/qemu/qemu_process.c |  2 +-
+ 5 files changed, 35 insertions(+), 12 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 79faf8e..166f9b9 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -289,6 +289,8 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+                 continue;
+             if (hostdev->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB)
+                 continue;
++            if (hostdev->missing)
++                continue;
+ 
+             if ((usb = usbGetDevice(hostdev->source.subsys.u.usb.bus,
+                                     hostdev->source.subsys.u.usb.device)) == NULL)
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 669b08e..1515a70 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -3564,17 +3564,21 @@ qemuBuildUSBHostdevDevStr(virDomainHostdevDefPtr dev,
+ {
+     virBuffer buf = VIR_BUFFER_INITIALIZER;
+ 
+-    if (!dev->source.subsys.u.usb.bus &&
++    if (!dev->missing &&
++        !dev->source.subsys.u.usb.bus &&
+         !dev->source.subsys.u.usb.device) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("USB host device is missing bus/device information"));
+         return NULL;
+     }
+ 
+-    virBufferAsprintf(&buf, "usb-host,hostbus=%d,hostaddr=%d,id=%s",
+-                      dev->source.subsys.u.usb.bus,
+-                      dev->source.subsys.u.usb.device,
+-                      dev->info->alias);
++    virBufferAddLit(&buf, "usb-host");
++    if (!dev->missing) {
++        virBufferAsprintf(&buf, ",hostbus=%d,hostaddr=%d",
++                          dev->source.subsys.u.usb.bus,
++                          dev->source.subsys.u.usb.device);
++    }
++    virBufferAsprintf(&buf, ",id=%s", dev->info->alias);
+ 
+     if (qemuBuildDeviceAddressStr(&buf, dev->info, caps) < 0)
+         goto error;
+@@ -3634,6 +3638,12 @@ qemuBuildUSBHostdevUsbDevStr(virDomainHostdevDefPtr dev)
+ {
+     char *ret = NULL;
+ 
++    if (dev->missing) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("This QEMU doesn't not support missing USB devices"));
++        return NULL;
++    }
++
+     if (!dev->source.subsys.u.usb.bus &&
+         !dev->source.subsys.u.usb.device) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+diff --git a/src/qemu/qemu_hostdev.c b/src/qemu/qemu_hostdev.c
+index 32c858b..90dfd28 100644
+--- a/src/qemu/qemu_hostdev.c
++++ b/src/qemu/qemu_hostdev.c
+@@ -696,7 +696,8 @@ out:
+ 
+ static int
+ qemuPrepareHostUSBDevices(struct qemud_driver *driver,
+-                          virDomainDefPtr def)
++                          virDomainDefPtr def,
++                          bool coldBoot)
+ {
+     int i, ret = -1;
+     usbDeviceList *list;
+@@ -716,6 +717,7 @@ qemuPrepareHostUSBDevices(struct qemud_driver *driver,
+      */
+     for (i = 0 ; i < nhostdevs ; i++) {
+         virDomainHostdevDefPtr hostdev = hostdevs[i];
++        bool required = true;
+         usbDevice *usb;
+ 
+         if (hostdev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS)
+@@ -723,10 +725,15 @@ qemuPrepareHostUSBDevices(struct qemud_driver *driver,
+         if (hostdev->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB)
+             continue;
+ 
+-        if (qemuFindHostdevUSBDevice(hostdev, true, &usb) < 0)
++        if (hostdev->startupPolicy == VIR_DOMAIN_STARTUP_POLICY_OPTIONAL ||
++            (hostdev->startupPolicy == VIR_DOMAIN_STARTUP_POLICY_REQUISITE &&
++             !coldBoot))
++            required = false;
++
++        if (qemuFindHostdevUSBDevice(hostdev, required, &usb) < 0)
+             goto cleanup;
+ 
+-        if (usbDeviceListAdd(list, usb) < 0) {
++        if (usb && usbDeviceListAdd(list, usb) < 0) {
+             usbFreeDevice(usb);
+             goto cleanup;
+         }
+@@ -756,7 +763,8 @@ cleanup:
+ }
+ 
+ int qemuPrepareHostDevices(struct qemud_driver *driver,
+-                           virDomainDefPtr def)
++                           virDomainDefPtr def,
++                           bool coldBoot)
+ {
+     if (!def->nhostdevs)
+         return 0;
+@@ -764,7 +772,7 @@ int qemuPrepareHostDevices(struct qemud_driver *driver,
+     if (qemuPrepareHostPCIDevices(driver, def) < 0)
+         return -1;
+ 
+-    if (qemuPrepareHostUSBDevices(driver, def) < 0)
++    if (qemuPrepareHostUSBDevices(driver, def, coldBoot) < 0)
+         return -1;
+ 
+     return 0;
+@@ -891,6 +899,8 @@ qemuDomainReAttachHostUsbDevices(struct qemud_driver *driver,
+             continue;
+         if (hostdev->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB)
+             continue;
++        if (hostdev->missing)
++            continue;
+ 
+         usb = usbGetDevice(hostdev->source.subsys.u.usb.bus,
+                            hostdev->source.subsys.u.usb.device);
+diff --git a/src/qemu/qemu_hostdev.h b/src/qemu/qemu_hostdev.h
+index 74dd2ce..0da25f9 100644
+--- a/src/qemu/qemu_hostdev.h
++++ b/src/qemu/qemu_hostdev.h
+@@ -43,7 +43,8 @@ int qemuPrepareHostdevUSBDevices(struct qemud_driver *driver,
+                                  const char *name,
+                                  usbDeviceList *list);
+ int qemuPrepareHostDevices(struct qemud_driver *driver,
+-                           virDomainDefPtr def);
++                           virDomainDefPtr def,
++                           bool coldBoot);
+ void qemuReattachPciDevice(pciDevice *dev, struct qemud_driver *driver);
+ void qemuDomainReAttachHostdevDevices(struct qemud_driver *driver,
+                                       const char *name,
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 7fc6632..58c1f19 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3396,7 +3396,7 @@ int qemuProcessStart(virConnectPtr conn,
+ 
+     /* Must be run before security labelling */
+     VIR_DEBUG("Preparing host devices");
+-    if (qemuPrepareHostDevices(driver, vm->def) < 0)
++    if (qemuPrepareHostDevices(driver, vm->def, !migrateFrom) < 0)
+         goto cleanup;
+ 
+     VIR_DEBUG("Preparing chr devices");
+-- 
+1.7.12.3
+

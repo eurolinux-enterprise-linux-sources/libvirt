@@ -1,0 +1,64 @@
+From dd8a87fa66cf18f9f8d6bfe76720e8dcacd31b87 Mon Sep 17 00:00:00 2001
+Message-Id: <dd8a87fa66cf18f9f8d6bfe76720e8dcacd31b87@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 10 Jul 2013 00:10:32 +0200
+Subject: [PATCH] qemu: Separate controller removal into a standalone function
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit 92758a71d803e64ed565bd3f102c18d5b41a436c)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_hotplug.c - old spelling of virQEMUDriverPtr
+---
+ src/qemu/qemu_hotplug.c | 26 +++++++++++++++++++++++---
+ 1 file changed, 23 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 4121822..aaec88e 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1962,6 +1962,28 @@ qemuDomainRemoveDiskDevice(struct qemud_driver *driver,
+ }
+ 
+ 
++static void
++qemuDomainRemoveControllerDevice(struct qemud_driver *driver ATTRIBUTE_UNUSED,
++                                 virDomainObjPtr vm,
++                                 virDomainControllerDefPtr controller)
++{
++    size_t i;
++
++    VIR_DEBUG("Removing controller %s from domain %p %s",
++              controller->info.alias, vm, vm->def->name);
++
++    for (i = 0; i < vm->def->ncontrollers; i++) {
++        if (vm->def->controllers[i] == controller) {
++            virDomainControllerRemove(vm->def, i);
++            break;
++        }
++    }
++
++    qemuDomainReleaseDeviceAddress(vm, &controller->info, NULL);
++    virDomainControllerDefFree(controller);
++}
++
++
+ int qemuDomainDetachPciDiskDevice(struct qemud_driver *driver,
+                                   virDomainObjPtr vm,
+                                   virDomainDiskDefPtr detach)
+@@ -2181,9 +2203,7 @@ int qemuDomainDetachPciControllerDevice(struct qemud_driver *driver,
+     }
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+ 
+-    virDomainControllerRemove(vm->def, idx);
+-    qemuDomainReleaseDeviceAddress(vm, &detach->info, NULL);
+-    virDomainControllerDefFree(detach);
++    qemuDomainRemoveControllerDevice(driver, vm, detach);
+ 
+     ret = 0;
+ 
+-- 
+2.0.0
+

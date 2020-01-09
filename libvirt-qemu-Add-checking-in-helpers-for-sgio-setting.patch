@@ -1,0 +1,233 @@
+From ba6973b8cb8c2d859b6573f178f64b32ed6cf10b Mon Sep 17 00:00:00 2001
+Message-Id: <ba6973b8cb8c2d859b6573f178f64b32ed6cf10b.1373271637.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 11 Mar 2013 15:26:03 +0800
+Subject: [PATCH] qemu: Add checking in helpers for sgio setting
+
+https://bugzilla.redhat.com/show_bug.cgi?id=908073
+
+This moves the various checking into the helpers, to avoid the
+callers missing the checking.
+(cherry picked from commit dab878a861cdcdd7bade2fdac672fec7c128cdb7)
+
+Conflicts:
+  * Conflicts with commit 8cdd5faf (Pass virQEMUDriverPtr into APIs managed
+    shared disk list), which won't be backported to 6.4 for risks. Part of
+    commit 8cdd5faf (the cleanup label, which doesn't hurt) is merged into
+    this patch.
+
+	src/qemu/qemu_conf.c
+	src/qemu/qemu_conf.h
+	src/qemu/qemu_driver.c
+	src/qemu/qemu_process.c
+---
+ src/qemu/qemu_conf.c    | 64 +++++++++++++++++++++++++++----------------------
+ src/qemu/qemu_conf.h    |  5 ++--
+ src/qemu/qemu_driver.c  | 14 ++++-------
+ src/qemu/qemu_process.c | 22 +++++++++--------
+ 4 files changed, 56 insertions(+), 49 deletions(-)
+
+diff --git a/src/qemu/qemu_conf.c b/src/qemu/qemu_conf.c
+index 304d0b0..b6336b4 100644
+--- a/src/qemu/qemu_conf.c
++++ b/src/qemu/qemu_conf.c
+@@ -774,28 +774,35 @@ qemuGetSharedDiskKey(const char *disk_path)
+  */
+ int
+ qemuAddSharedDisk(virHashTablePtr sharedDisks,
+-                  const char *disk_path)
++                  virDomainDiskDefPtr disk)
+ {
+     size_t *ref = NULL;
+     char *key = NULL;
++    int ret = -1;
+ 
+-    if (!(key = qemuGetSharedDiskKey(disk_path)))
+-        return -1;
++    /* Currently the only conflicts we have to care about
++     * for the shared disk is "sgio" setting, which is only
++     * valid for block disk.
++     */
++    if (disk->type != VIR_DOMAIN_DISK_TYPE_BLOCK ||
++        !disk->shared || !disk->src)
++        return 0;
++
++    if (!(key = qemuGetSharedDiskKey(disk->src)))
++        goto cleanup;
+ 
+     if ((ref = virHashLookup(sharedDisks, key))) {
+-        if (virHashUpdateEntry(sharedDisks, key, ++ref) < 0) {
+-             VIR_FREE(key);
+-             return -1;
+-        }
++        if (virHashUpdateEntry(sharedDisks, key, ++ref) < 0)
++            goto cleanup;
+     } else {
+-        if (virHashAddEntry(sharedDisks, key, (void *)0x1)) {
+-            VIR_FREE(key);
+-            return -1;
+-        }
++        if (virHashAddEntry(sharedDisks, key, (void *)0x1))
++            goto cleanup;
+     }
+ 
++    ret = 0;
++cleanup:
+     VIR_FREE(key);
+-    return 0;
++    return ret;
+ }
+ 
+ /* Decrease the ref count if the entry already exists, otherwise
+@@ -803,31 +810,32 @@ qemuAddSharedDisk(virHashTablePtr sharedDisks,
+  */
+ int
+ qemuRemoveSharedDisk(virHashTablePtr sharedDisks,
+-                     const char *disk_path)
++                     virDomainDiskDefPtr disk)
+ {
+     size_t *ref = NULL;
+     char *key = NULL;
++    int ret = -1;
+ 
+-    if (!(key = qemuGetSharedDiskKey(disk_path)))
+-        return -1;
++    if (disk->type != VIR_DOMAIN_DISK_TYPE_BLOCK ||
++        !disk->shared || !disk->src)
++        return 0;
+ 
+-    if (!(ref = virHashLookup(sharedDisks, key))) {
+-        VIR_FREE(key);
+-        return -1;
+-    }
++    if (!(key = qemuGetSharedDiskKey(disk->src)))
++        goto cleanup;
++
++    if (!(ref = virHashLookup(sharedDisks, key)))
++        goto cleanup;
+ 
+     if (ref != (void *)0x1) {
+-        if (virHashUpdateEntry(sharedDisks, key, --ref) < 0) {
+-             VIR_FREE(key);
+-             return -1;
+-        }
++        if (virHashUpdateEntry(sharedDisks, key, --ref) < 0)
++            goto cleanup;
+     } else {
+-        if (virHashRemoveEntry(sharedDisks, key) < 0) {
+-            VIR_FREE(key);
+-            return -1;
+-        }
++        if (virHashRemoveEntry(sharedDisks, key) < 0)
++            goto cleanup;
+     }
+ 
++    ret = 0;
++cleanup:
+     VIR_FREE(key);
+-    return 0;
++    return ret;
+ }
+diff --git a/src/qemu/qemu_conf.h b/src/qemu/qemu_conf.h
+index 1c99d34..bd5d0ae 100644
+--- a/src/qemu/qemu_conf.h
++++ b/src/qemu/qemu_conf.h
+@@ -207,12 +207,13 @@ void qemuDriverCloseCallbackRunAll(struct qemud_driver *driver,
+                                    virConnectPtr conn);
+ 
+ int qemuAddSharedDisk(virHashTablePtr sharedDisks,
+-                      const char *disk_path)
++                      virDomainDiskDefPtr disk)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+ 
+ int qemuRemoveSharedDisk(virHashTablePtr sharedDisks,
+-                         const char *disk_path)
++                         virDomainDiskDefPtr disk)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
++
+ char * qemuGetSharedDiskKey(const char *disk_path)
+     ATTRIBUTE_NONNULL(1);
+ 
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index e327f0f..2a99a82 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5990,11 +5990,9 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+     }
+ 
+     if (ret == 0) {
+-        if (disk->type == VIR_DOMAIN_DISK_TYPE_BLOCK && disk->shared) {
+-            if (qemuAddSharedDisk(driver->sharedDisks, disk->src) < 0)
+-                VIR_WARN("Failed to add disk '%s' to shared disk table",
+-                         disk->src);
+-        }
++        if (qemuAddSharedDisk(driver->sharedDisks, disk) < 0)
++            VIR_WARN("Failed to add disk '%s' to shared disk table",
++                     disk->src);
+ 
+         if (qemuSetUnprivSGIO(disk) < 0)
+             VIR_WARN("Failed to set unpriv_sgio of disk '%s'", disk->src);
+@@ -6116,10 +6114,8 @@ qemuDomainDetachDeviceDiskLive(struct qemud_driver *driver,
+         break;
+     }
+ 
+-    if (ret == 0 &&
+-        disk->type == VIR_DOMAIN_DISK_TYPE_BLOCK &&
+-        disk->shared) {
+-        if (qemuRemoveSharedDisk(driver->sharedDisks, disk->src) < 0)
++    if (ret == 0) {
++        if (qemuRemoveSharedDisk(driver->sharedDisks, disk) < 0)
+              VIR_WARN("Failed to remove disk '%s' from shared disk table",
+                       disk->src);
+     }
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 7dc41e9..4a185b8 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3467,6 +3467,13 @@ qemuSetUnprivSGIO(virDomainDiskDefPtr disk)
+ {
+     int val = -1;
+ 
++    /* "sgio" is only valid for block disk; cdrom
++     * and floopy disk can have empty source.
++     */
++    if (disk->type != VIR_DOMAIN_DISK_TYPE_BLOCK ||
++        !disk->src)
++        return 0;
++
+     if (disk->sgio)
+         val = (disk->sgio == VIR_DOMAIN_DISK_SGIO_UNFILTERED);
+ 
+@@ -3876,13 +3883,11 @@ int qemuProcessStart(virConnectPtr conn,
+         if (vm->def->disks[i]->rawio == 1)
+             virCommandAllowCap(cmd, CAP_SYS_RAWIO);
+ 
+-        if (disk->type == VIR_DOMAIN_DISK_TYPE_BLOCK && disk->shared) {
+-            if (qemuAddSharedDisk(driver->sharedDisks, disk->src) < 0)
+-                goto cleanup;
++        if (qemuAddSharedDisk(driver->sharedDisks, disk) < 0)
++            goto cleanup;
+ 
+-            if (qemuCheckSharedDisk(driver->sharedDisks, disk) < 0)
+-                goto cleanup;
+-        }
++        if (qemuCheckSharedDisk(driver->sharedDisks, disk) < 0)
++            goto cleanup;
+ 
+         if (qemuSetUnprivSGIO(disk) < 0)
+             goto cleanup;
+@@ -4333,10 +4338,7 @@ void qemuProcessStop(struct qemud_driver *driver,
+ 
+     for (i = 0; i < vm->def->ndisks; i++) {
+         virDomainDiskDefPtr disk = vm->def->disks[i];
+-
+-        if (disk->type == VIR_DOMAIN_DISK_TYPE_BLOCK && disk->shared) {
+-            ignore_value(qemuRemoveSharedDisk(driver->sharedDisks, disk->src));
+-        }
++        ignore_value(qemuRemoveSharedDisk(driver->sharedDisks, disk));
+     }
+ 
+     /* Clear out dynamically assigned labels */
+-- 
+1.8.2.1
+

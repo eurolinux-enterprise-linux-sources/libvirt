@@ -1,0 +1,65 @@
+From 6af58eebeee72ed4c5a5816a6ae64eca280d8fc6 Mon Sep 17 00:00:00 2001
+Message-Id: <6af58eebeee72ed4c5a5816a6ae64eca280d8fc6.1357740563.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 8 Jan 2013 18:22:01 +0100
+Subject: [PATCH] qemu: Relax hard RSS limit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=891653
+
+Currently, if there's no hard memory limit defined for a domain,
+libvirt tries to calculate one, based on domain definition and magic
+equation and set it upon the domain startup. The rationale behind was,
+if there's a memory leak or exploit in qemu, we should prevent the
+host system trashing. However, the equation was too tightening, as it
+didn't reflect what the kernel counts into the memory used by a
+process. Since many hosts do have a swap, nobody hasn't noticed
+anything, because if hard memory limit is reached, process can
+continue allocating memory on a swap. However, if there is no swap on
+the host, the process gets killed by OOM killer. In our case, the qemu
+process it is.
+
+To prevent this, we need to relax the hard RSS limit. Moreover, we
+should reflect more precisely the kernel way of accounting the memory
+for process. That is, even the kernel caches are counted within the
+memory used by a process (within cgroups at least). Hence the magic
+equation has to be changed:
+
+  limit = 1.5 * (domain memory + total video memory) + (32MB for cache
+          per each disk) + 200MB
+(cherry picked from commit 3c83df679e8feab939c08b1f97c48f9290a5b8cd)
+---
+ src/qemu/qemu_cgroup.c | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 5ce748a..51ee301 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -342,15 +342,18 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+         unsigned long long hard_limit = vm->def->mem.hard_limit;
+ 
+         if (!hard_limit) {
+-            /* If there is no hard_limit set, set a reasonable
+-             * one to avoid system trashing caused by exploited qemu.
+-             * As 'reasonable limit' has been chosen:
+-             *     (1 + k) * (domain memory + total video memory) + F
+-             * where k = 0.02 and F = 200MB. */
++            /* If there is no hard_limit set, set a reasonable one to avoid
++             * system trashing caused by exploited qemu.  As 'reasonable limit'
++             * has been chosen:
++             *     (1 + k) * (domain memory + total video memory) + (32MB for
++             *     cache per each disk) + F
++             * where k = 0.5 and F = 200MB.  The cache for disks is important as
++             * kernel cache on the host side counts into the RSS limit. */
+             hard_limit = vm->def->mem.max_balloon;
+             for (i = 0; i < vm->def->nvideos; i++)
+                 hard_limit += vm->def->videos[i]->vram;
+-            hard_limit = hard_limit * 1.02 + 204800;
++            hard_limit = hard_limit * 1.5 + 204800;
++            hard_limit += vm->def->ndisks * 32768;
+         }
+ 
+         rc = virCgroupSetMemoryHardLimit(cgroup, hard_limit);
+-- 
+1.8.1
+

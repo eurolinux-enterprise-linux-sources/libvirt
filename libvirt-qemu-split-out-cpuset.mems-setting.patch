@@ -1,0 +1,135 @@
+From f7e3b505ba712a655bc239e3f4b92e9697eff60b Mon Sep 17 00:00:00 2001
+Message-Id: <f7e3b505ba712a655bc239e3f4b92e9697eff60b@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Wed, 16 Sep 2015 13:17:35 +0200
+Subject: [PATCH] qemu: split out cpuset.mems setting
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit aa668fccf078bf9833047776549a5a06435cf470)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1263263
+
+The patch is completely rewritten.
+
+The referenced upstream commit split it out of qemuSetupCpusetCgroup,
+but that refactor is not backported.
+Downstream also does not store the cgroup in domain's private data,
+so it has to be searched for on every use.
+The virDomainNumatuneMaybeFormatNodeset and other refactors are not
+present downstream, so the downstream versions copies the
+cpuset.mems-related part out of qemuSetupCgroup.
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_cgroup.c | 85 +++++++++++++++++++++++++++++++++++---------------
+ 1 file changed, 59 insertions(+), 26 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 127e79a..e132640 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -188,6 +188,63 @@ int qemuSetupHostUsbDeviceCgroup(usbDevice *dev ATTRIBUTE_UNUSED,
+     return 0;
+ }
+ 
++
++int
++qemuSetupCpusetMems(struct qemud_driver *driver,
++                    virDomainObjPtr vm,
++                    virBitmapPtr nodemask)
++{
++    virCgroupPtr cgroup = NULL;
++    int ret = -1;
++    int rc;
++
++    if (driver->cgroup == NULL)
++        return 0; /* Not supported, so claim success */
++
++    rc = virCgroupForDomain(driver->cgroup, vm->def->name, &cgroup, 0);
++    if (rc != 0) {
++        virReportSystemError(-rc,
++                             _("Unable to get cgroup for %s"),
++                             vm->def->name);
++        goto cleanup;
++    }
++
++    if ((vm->def->numatune.memory.nodemask ||
++         (vm->def->numatune.memory.placement_mode ==
++          VIR_DOMAIN_NUMATUNE_MEM_PLACEMENT_MODE_AUTO)) &&
++        vm->def->numatune.memory.mode == VIR_DOMAIN_NUMATUNE_MEM_STRICT &&
++        qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_CPUSET)) {
++        char *mask = NULL;
++        if (vm->def->numatune.memory.placement_mode ==
++            VIR_DOMAIN_NUMATUNE_MEM_PLACEMENT_MODE_AUTO)
++            mask = virBitmapFormat(nodemask);
++        else
++            mask = virBitmapFormat(vm->def->numatune.memory.nodemask);
++        if (!mask) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("failed to convert memory nodemask"));
++            goto cleanup;
++        }
++
++        rc = virCgroupSetCpusetMems(cgroup, mask);
++        VIR_FREE(mask);
++        if (rc != 0) {
++            virReportSystemError(-rc,
++                                 _("Unable to set cpuset.mems for domain %s"),
++                                 vm->def->name);
++            goto cleanup;
++        }
++    }
++
++    ret = 0;
++
++cleanup:
++    if (cgroup)
++        virCgroupFree(&cgroup);
++    return ret;
++}
++
++
+ int qemuSetupCgroup(struct qemud_driver *driver,
+                     virDomainObjPtr vm,
+                     virBitmapPtr nodemask)
+@@ -409,32 +466,8 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+         virCgroupSetCpusetMemoryMigrate(cgroup, true) < 0)
+         goto cleanup;
+ 
+-    if ((vm->def->numatune.memory.nodemask ||
+-         (vm->def->numatune.memory.placement_mode ==
+-          VIR_DOMAIN_NUMATUNE_MEM_PLACEMENT_MODE_AUTO)) &&
+-        vm->def->numatune.memory.mode == VIR_DOMAIN_NUMATUNE_MEM_STRICT &&
+-        qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_CPUSET)) {
+-        char *mask = NULL;
+-        if (vm->def->numatune.memory.placement_mode ==
+-            VIR_DOMAIN_NUMATUNE_MEM_PLACEMENT_MODE_AUTO)
+-            mask = virBitmapFormat(nodemask);
+-        else
+-            mask = virBitmapFormat(vm->def->numatune.memory.nodemask);
+-        if (!mask) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-                           _("failed to convert memory nodemask"));
+-            goto cleanup;
+-        }
+-
+-        rc = virCgroupSetCpusetMems(cgroup, mask);
+-        VIR_FREE(mask);
+-        if (rc != 0) {
+-            virReportSystemError(-rc,
+-                                 _("Unable to set cpuset.mems for domain %s"),
+-                                 vm->def->name);
+-            goto cleanup;
+-        }
+-    }
++    if (qemuSetupCpusetMems(driver, vm, nodemask) < 0)
++        goto cleanup;
+ 
+ done:
+     virCgroupFree(&cgroup);
+-- 
+2.6.2
+

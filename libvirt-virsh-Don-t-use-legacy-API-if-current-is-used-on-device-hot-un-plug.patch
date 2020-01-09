@@ -1,0 +1,70 @@
+From 2e3b8fd648e53fedd80b3b800eaec3146625caa2 Mon Sep 17 00:00:00 2001
+Message-Id: <2e3b8fd648e53fedd80b3b800eaec3146625caa2@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 28 Jan 2015 14:26:25 +0100
+Subject: [PATCH] virsh: Don't use legacy API if --current is used on device
+ hot(un)plug
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1125194
+https://bugzilla.redhat.com/show_bug.cgi?id=1049529
+
+The legacy virDomainAttachDevice and virDomainDetachDevice operate only
+on active domains. When a user specified --current flag with an inactive
+domain the old API was used and reported an error. Fix it by calling the
+new API if --current is specified explicitly.
+
+(cherry picked from commit 0bb64df1fcbf8248d8b71c44c8c882ae7b17d846)
+
+Conflicts:
+	tools/virsh-domain.c - This patch backports only hunks of
+                               commands that were already tweaked to
+                               support the --current flag
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-domain.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index a0f3050..2ab5d9c 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -197,7 +197,7 @@ cmdAttachDevice(vshControl *ctl, const vshCmd *cmd)
+         return false;
+     }
+ 
+-    if (flags)
++    if (flags || current)
+         ret = virDomainAttachDeviceFlags(dom, buffer, flags);
+     else
+         ret = virDomainAttachDevice(dom, buffer);
+@@ -580,7 +580,7 @@ cmdAttachDisk(vshControl *ctl, const vshCmd *cmd)
+ 
+     xml = virBufferContentAndReset(&buf);
+ 
+-    if (flags)
++    if (flags || current)
+         ret = virDomainAttachDeviceFlags(dom, xml, flags);
+     else
+         ret = virDomainAttachDevice(dom, xml);
+@@ -7706,7 +7706,7 @@ cmdDetachDevice(vshControl *ctl, const vshCmd *cmd)
+         goto cleanup;
+     }
+ 
+-    if (flags != 0)
++    if (flags != 0 || current)
+         ret = virDomainDetachDeviceFlags(dom, buffer, flags);
+     else
+         ret = virDomainDetachDevice(dom, buffer);
+@@ -8262,7 +8262,7 @@ cmdDetachDisk(vshControl *ctl, const vshCmd *cmd)
+                                        VSH_PREPARE_DISK_XML_NONE)))
+         goto cleanup;
+ 
+-    if (flags != 0)
++    if (flags != 0 || current)
+         ret = virDomainDetachDeviceFlags(dom, disk_xml, flags);
+     else
+         ret = virDomainDetachDevice(dom, disk_xml);
+-- 
+2.2.2
+

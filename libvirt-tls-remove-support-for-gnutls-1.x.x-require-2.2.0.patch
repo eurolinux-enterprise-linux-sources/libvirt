@@ -1,0 +1,207 @@
+From 4e5d550dbad0d050f59533a48061414200d7f45b Mon Sep 17 00:00:00 2001
+Message-Id: <4e5d550dbad0d050f59533a48061414200d7f45b@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 27 Sep 2016 13:45:55 +0200
+Subject: [PATCH] tls: remove support for gnutls 1.x.x, require 2.2.0
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1333415
+
+We need to use the gnutls_priority_set_direct method which
+was not introduced until 2.1.7, so bump version to 2.2.0
+which is the first stable release with it included. This
+release dates from Dec 2007 so it is reasonable to ditch
+support for the 1.x.x series for gnutls releases entirely.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit d8a8af3492194089d1f101e10305421fba2d1760)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+ Conflicts:
+	configure.ac - Context: AVAHI_REQUIRED
+	deleted src/gnutls_1_0_compat.h has different content
+---
+ configure.ac               |  2 +-
+ src/Makefile.am            |  1 -
+ src/gnutls_1_0_compat.h    | 45 ---------------------------------------------
+ src/rpc/virnettlscontext.c | 18 ------------------
+ tests/virnettlshelpers.h   |  1 -
+ 5 files changed, 1 insertion(+), 66 deletions(-)
+ delete mode 100644 src/gnutls_1_0_compat.h
+
+diff --git a/configure.ac b/configure.ac
+index ba47276..fb6e404 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -97,7 +97,7 @@ fi
+ 
+ dnl Required minimum versions of all libs we depend on
+ LIBXML_REQUIRED="2.6.0"
+-GNUTLS_REQUIRED="1.0.25"
++GNUTLS_REQUIRED="2.2.0"
+ AVAHI_REQUIRED="0.6.0"
+ POLKIT_REQUIRED="0.6"
+ PARTED_REQUIRED="1.8.0"
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 25a5863..8879d62 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -251,7 +251,6 @@ $(srcdir)/remote/qemu_client_bodies.h: $(srcdir)/rpc/gendispatch.pl \
+ 	  -k qemu QEMU $(QEMU_PROTOCOL) > $@
+ 
+ REMOTE_DRIVER_SOURCES =						\
+-		gnutls_1_0_compat.h				\
+ 		remote/remote_driver.c remote/remote_driver.h	\
+ 		$(REMOTE_DRIVER_GENERATED)
+ 
+diff --git a/src/gnutls_1_0_compat.h b/src/gnutls_1_0_compat.h
+deleted file mode 100644
+index 217bc8c..0000000
+--- a/src/gnutls_1_0_compat.h
++++ /dev/null
+@@ -1,45 +0,0 @@
+-/*
+- * gnutls_1_0_compat.h: GnuTLS 1.0 compatibility
+- *
+- * Copyright (C) 2007 Red Hat, Inc.
+- *
+- * This library is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU Lesser General Public
+- * License as published by the Free Software Foundation; either
+- * version 2.1 of the License, or (at your option) any later version.
+- *
+- * This library is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * Lesser General Public License for more details.
+- *
+- * You should have received a copy of the GNU Lesser General Public
+- * License along with this library.  If not, see
+- * <http://www.gnu.org/licenses/>.
+- *
+- * Author: Richard W.M. Jones <rjones@redhat.com>
+- */
+-
+-#ifndef LIBVIRT_GNUTLS_1_0_COMPAT_H__
+-# define LIBVIRT_GNUTLS_1_0_COMPAT_H__
+-
+-# include <config.h>
+-
+-# include <gnutls/gnutls.h>
+-
+-/* enable backward compatibility macros for gnutls 1.x.y */
+-# if LIBGNUTLS_VERSION_MAJOR < 2
+-#  define GNUTLS_1_0_COMPAT
+-# endif
+-
+-# ifdef GNUTLS_1_0_COMPAT
+-#  define gnutls_session_t                 gnutls_session
+-#  define gnutls_x509_crt_t                gnutls_x509_crt
+-#  define gnutls_dh_params_t               gnutls_dh_params
+-#  define gnutls_transport_ptr_t           gnutls_transport_ptr
+-#  define gnutls_datum_t                   gnutls_datum
+-#  define gnutls_certificate_credentials_t gnutls_certificate_credentials
+-#  define gnutls_cipher_algorithm_t        gnutls_cipher_algorithm
+-# endif
+-
+-#endif /* LIBVIRT_GNUTLS_1_0_COMPAT_H__ */
+diff --git a/src/rpc/virnettlscontext.c b/src/rpc/virnettlscontext.c
+index ec6cbd8..4768fec 100644
+--- a/src/rpc/virnettlscontext.c
++++ b/src/rpc/virnettlscontext.c
+@@ -26,7 +26,6 @@
+ 
+ #include <gnutls/gnutls.h>
+ #include <gnutls/x509.h>
+-#include "gnutls_1_0_compat.h"
+ 
+ #include "virnettlscontext.h"
+ 
+@@ -162,14 +161,6 @@ static int virNetTLSContextCheckCertTimes(gnutls_x509_crt_t cert,
+ }
+ 
+ 
+-#ifndef GNUTLS_1_0_COMPAT
+-/*
+- * The gnutls_x509_crt_get_basic_constraints function isn't
+- * available in GNUTLS 1.0.x branches. This isn't critical
+- * though, since gnutls_certificate_verify_peers2 will do
+- * pretty much the same check at runtime, so we can just
+- * disable this code
+- */
+ static int virNetTLSContextCheckCertBasicConstraints(gnutls_x509_crt_t cert,
+                                                      const char *certFile,
+                                                      bool isServer,
+@@ -211,7 +202,6 @@ static int virNetTLSContextCheckCertBasicConstraints(gnutls_x509_crt_t cert,
+ 
+     return 0;
+ }
+-#endif
+ 
+ 
+ static int virNetTLSContextCheckCertKeyUsage(gnutls_x509_crt_t cert,
+@@ -432,11 +422,9 @@ static int virNetTLSContextCheckCert(gnutls_x509_crt_t cert,
+                                        isServer, isCA) < 0)
+         return -1;
+ 
+-#ifndef GNUTLS_1_0_COMPAT
+     if (virNetTLSContextCheckCertBasicConstraints(cert, certFile,
+                                                   isServer, isCA) < 0)
+         return -1;
+-#endif
+ 
+     if (virNetTLSContextCheckCertKeyUsage(cert, certFile,
+                                           isCA) < 0)
+@@ -483,10 +471,8 @@ static int virNetTLSContextCheckCertPair(gnutls_x509_crt_t cert,
+         if (status & GNUTLS_CERT_REVOKED)
+             reason = _("The certificate has been revoked.");
+ 
+-#ifndef GNUTLS_1_0_COMPAT
+         if (status & GNUTLS_CERT_INSECURE_ALGORITHM)
+             reason = _("The certificate uses an insecure algorithm");
+-#endif
+ 
+         virReportError(VIR_ERR_SYSTEM_ERROR,
+                        _("Our own certificate %s failed validation against %s: %s"),
+@@ -1021,10 +1007,8 @@ static int virNetTLSContextValidCertificate(virNetTLSContextPtr ctxt,
+         if (status & GNUTLS_CERT_REVOKED)
+             reason = _("The certificate has been revoked.");
+ 
+-#ifndef GNUTLS_1_0_COMPAT
+         if (status & GNUTLS_CERT_INSECURE_ALGORITHM)
+             reason = _("The certificate uses an insecure algorithm");
+-#endif
+ 
+         virReportError(VIR_ERR_SYSTEM_ERROR,
+                        _("Certificate failed validation: %s"),
+@@ -1085,13 +1069,11 @@ static int virNetTLSContextValidCertificate(virNetTLSContextPtr ctxt,
+             /* !sess->isServer, since on the client, we're validating the
+              * server's cert, and on the server, the client's cert
+              */
+-#ifndef GNUTLS_1_0_COMPAT
+             if (virNetTLSContextCheckCertBasicConstraints(cert, "[session]",
+                                                           !sess->isServer, false) < 0) {
+                 gnutls_x509_crt_deinit(cert);
+                 goto authdeny;
+             }
+-#endif
+ 
+             if (virNetTLSContextCheckCertKeyUsage(cert, "[session]",
+                                                   false) < 0) {
+diff --git a/tests/virnettlshelpers.h b/tests/virnettlshelpers.h
+index 3f6afb9..48e7431 100644
+--- a/tests/virnettlshelpers.h
++++ b/tests/virnettlshelpers.h
+@@ -22,7 +22,6 @@
+ #include <gnutls/x509.h>
+ 
+ #if !defined WIN32 && HAVE_LIBTASN1_H && LIBGNUTLS_VERSION_NUMBER >= 0x020600
+-# include "gnutls_1_0_compat.h"
+ 
+ # include <libtasn1.h>
+ 
+-- 
+2.10.1
+

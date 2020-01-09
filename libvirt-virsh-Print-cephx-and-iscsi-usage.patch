@@ -1,0 +1,81 @@
+From b8d1d8360710a63e1c398862f95ce0cb173f0679 Mon Sep 17 00:00:00 2001
+Message-Id: <b8d1d8360710a63e1c398862f95ce0cb173f0679@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Fri, 24 Oct 2014 08:58:01 -0400
+Subject: [PATCH] virsh: Print cephx and iscsi usage
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1156327
+
+When using virsh secret-list - if the secret types are cephx or iscsi,
+then allow fetch/print of the usage information. Prior to the change
+the following would print:
+
+UUID                                 Usage
+-----------------------------------------------------------
+1b40a534-8301-45d5-b1aa-11894ebb1735 Unused
+a5ba3efe-6adf-4a6a-b243-f010a043e314 Unused
+
+Afterwards:
+
+UUID                                 Usage
+-----------------------------------------------------------
+1b40a534-8301-45d5-b1aa-11894ebb1735 ceph ceph_example
+a5ba3efe-6adf-4a6a-b243-f010a043e314 iscsi libvirtiscsi
+
+(cherry picked from commit db1382f322841a7f8c877151644f49c147664fec)
+
+Conflicts:
+	tools/virsh-secret.c
+
+   The #includes from upstream were slightly different.  Just needed
+   to include the conf/secret_conf.h and go with the HEAD list of files
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-secret.c | 14 +++++---------
+ 1 file changed, 5 insertions(+), 9 deletions(-)
+
+diff --git a/tools/virsh-secret.c b/tools/virsh-secret.c
+index 52879e1..4136882 100644
+--- a/tools/virsh-secret.c
++++ b/tools/virsh-secret.c
+@@ -37,6 +37,7 @@
+ #include "memory.h"
+ #include "util.h"
+ #include "xml.h"
++#include "conf/secret_conf.h"
+ 
+ static virSecretPtr
+ vshCommandOptSecret(vshControl *ctl, const vshCmd *cmd, const char **name)
+@@ -470,15 +471,10 @@ cmdSecretList(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
+ 
+     for (i = 0; i < list->nsecrets; i++) {
+         virSecretPtr sec = list->secrets[i];
+-        const char *usageType = NULL;
+-
+-        switch (virSecretGetUsageType(sec)) {
+-        case VIR_SECRET_USAGE_TYPE_VOLUME:
+-            usageType = _("Volume");
+-            break;
+-        }
+-
++        int usageType = virSecretGetUsageType(sec);
++        const char *usageStr = virSecretUsageTypeTypeToString(usageType);
+         char uuid[VIR_UUID_STRING_BUFLEN];
++
+         if (virSecretGetUUIDString(list->secrets[i], uuid) < 0) {
+             vshError(ctl, "%s", _("Failed to get uuid of secret"));
+             goto cleanup;
+@@ -486,7 +482,7 @@ cmdSecretList(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
+ 
+         if (usageType) {
+             vshPrint(ctl, "%-36s %s %s\n",
+-                     uuid, usageType,
++                     uuid, usageStr,
+                      virSecretGetUsageID(sec));
+         } else {
+             vshPrint(ctl, "%-36s %s\n",
+-- 
+2.2.0
+

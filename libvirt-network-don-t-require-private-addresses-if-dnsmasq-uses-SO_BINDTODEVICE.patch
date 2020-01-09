@@ -1,0 +1,139 @@
+From 4960e7200f5aac1cea690bacdd86d21479109285 Mon Sep 17 00:00:00 2001
+Message-Id: <4960e7200f5aac1cea690bacdd86d21479109285.1355928878.git.jdenemar@redhat.com>
+From: Laine Stump <laine@redhat.com>
+Date: Mon, 17 Dec 2012 16:18:17 -0500
+Subject: [PATCH] network: don't require private addresses if dnsmasq uses
+ SO_BINDTODEVICE
+
+This is the *proper* libvirt fix to:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=882265
+
+and yet another refinement to the fix for CVE-2012-3411:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=833033
+
+It turns out that it is very intrusive to correctly backport the
+entire --bind-dynamic option to older dnsmasq versions
+(e.g. dnsmasq-2.48 that is used on RHEL6.x and CentOS 6.x), but very
+simple to patch those versions to just use SO_BINDTODEVICE on all
+their listening sockets (SO_BINDTODEVICE also has the desired effect
+of permitting only traffic that was received on the interface(s) where
+dnsmasq was set to listen.), so RHEL6.4's dnsmasq has chosen the
+latter method.
+
+This patch modifies the dnsmasq capabilities detection to detect the
+string:
+
+    --bind-interfaces with SO_BINDTODEVICE
+
+in the output of "dnsmasq --version", and in that case realize that
+using the old --bind-interfaces option is just as safe as
+--bind-dynamic (and therefore *not* forbid creation of networks that
+use public IP address ranges).
+
+If -bind-dynamic is available, it is still preferred over
+--bind-interfaces. (on RHEL6.4, it won't be available unless the user
+has built their own dnsmasq from upstream.)
+
+Note that this patch does no harm in upstream, or in any distro's
+downstream if it happens to end up there, but builds for distros that
+have a new enough dnsmasq to support --bind-dynamic do *NOT* need to
+specifically backport this patch; it's only required for distro
+releases that have dnsmasq too old to have --bind-dynamic (and those
+distros will need to add the SO_BINDTODEVICE patch to dnsmasq,
+*including the extra string in the --version output*, as well.
+(cherry picked from commit 4b31da3478ea8d4279aaba4ebe55a332ce2772fa)
+
+Conflicts:
+
+src/network/bridge_driver.c - an error log message that was changed by
+  this patch had been reformatted upstream in the interim, causing the
+  conflict. The actual text in the message hadn't been changed, so
+  resolution was trivial.
+---
+ src/network/bridge_driver.c | 21 +++++++++++++--------
+ src/util/dnsmasq.c          | 18 ++++++++++++++----
+ src/util/dnsmasq.h          |  1 +
+ 3 files changed, 28 insertions(+), 12 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index e79c311..b168017 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -654,18 +654,23 @@ networkBuildDnsmasqArgv(virNetworkObjPtr network,
+              * dnsmasq doesn't have --bind-dynamic, only allow listening on
+              * private/local IP addresses (see RFC1918/RFC3484/RFC4193)
+              */
+-            if (!virSocketAddrIsPrivate(&tmpipdef->address)) {
++            if (!dnsmasqCapsGet(caps, DNSMASQ_CAPS_BINDTODEVICE) &&
++                !virSocketAddrIsPrivate(&tmpipdef->address)) {
+                 unsigned long version = dnsmasqCapsGetVersion(caps);
+ 
+                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                                _("Publicly routable address %s is prohibited. "
+-                                 "The version of dnsmasq on this host (%d.%d) doesn't "
+-                                 "support the --bind-dynamic option, which is required "
+-                                 "for safe operation on a publicly routable subnet "
+-                                 "(see CVE-2012-3411). You must either upgrade dnsmasq, "
+-                                 "or use a private/local subnet range for this network "
+-                                 "(as described in RFC1918/RFC3484/RFC4193)."), ipaddr,
+-                               (int)version / 1000000, (int)(version % 1000000) / 1000);
++                                 "The version of dnsmasq on this host (%d.%d) "
++                                 "doesn't support the bind-dynamic option or "
++                                 "use SO_BINDTODEVICE on listening sockets, "
++                                 "one of which is required for safe operation "
++                                 "on a publicly routable subnet "
++                                 "(see CVE-2012-3411). You must either "
++                                 "upgrade dnsmasq, or use a private/local "
++                                 "subnet range for this network "
++                                 "(as described in RFC1918/RFC3484/RFC4193)."),
++                               ipaddr, (int)version / 1000000,
++                               (int)(version % 1000000) / 1000);
+                 goto cleanup;
+             }
+             virCommandAddArgList(cmd, "--listen-address", ipaddr, NULL);
+diff --git a/src/util/dnsmasq.c b/src/util/dnsmasq.c
+index bee3b61..e9b1ca3 100644
+--- a/src/util/dnsmasq.c
++++ b/src/util/dnsmasq.c
+@@ -651,10 +651,20 @@ dnsmasqCapsSetFromBuffer(dnsmasqCapsPtr caps, const char *buf)
+     if (strstr(buf, "--bind-dynamic"))
+         dnsmasqCapsSet(caps, DNSMASQ_CAPS_BIND_DYNAMIC);
+ 
+-    VIR_INFO("dnsmasq version is %d.%d, --bind-dynamic is %s",
+-             (int)caps->version / 1000000, (int)(caps->version % 1000000) / 1000,
+-             dnsmasqCapsGet(caps, DNSMASQ_CAPS_BIND_DYNAMIC)
+-             ? "present" : "NOT present");
++    /* if this string is a part of the --version output, dnsmasq
++     * has been patched to use SO_BINDTODEVICE when listening,
++     * so that it will only accept requests that arrived on the
++     * listening interface(s)
++     */
++    if (strstr(buf, "--bind-interfaces with SO_BINDTODEVICE"))
++        dnsmasqCapsSet(caps, DNSMASQ_CAPS_BINDTODEVICE);
++
++    VIR_INFO("dnsmasq version is %d.%d, --bind-dynamic is %spresent, "
++             "SO_BINDTODEVICE is %sin use",
++             (int)caps->version / 1000000,
++             (int)(caps->version % 1000000) / 1000,
++             dnsmasqCapsGet(caps, DNSMASQ_CAPS_BIND_DYNAMIC) ? "" : "NOT ",
++             dnsmasqCapsGet(caps, DNSMASQ_CAPS_BIND_DYNAMIC) ? "" : "NOT ");
+     return 0;
+ 
+ fail:
+diff --git a/src/util/dnsmasq.h b/src/util/dnsmasq.h
+index e8881a0..aef51fb 100644
+--- a/src/util/dnsmasq.h
++++ b/src/util/dnsmasq.h
+@@ -68,6 +68,7 @@ typedef struct
+ 
+ typedef enum {
+    DNSMASQ_CAPS_BIND_DYNAMIC = 0, /* support for --bind-dynamic */
++   DNSMASQ_CAPS_BINDTODEVICE = 1, /* uses SO_BINDTODEVICE for --bind-interfaces */
+ 
+    DNSMASQ_CAPS_LAST,             /* this must always be the last item */
+ } dnsmasqCapsFlags;
+-- 
+1.8.0.2
+

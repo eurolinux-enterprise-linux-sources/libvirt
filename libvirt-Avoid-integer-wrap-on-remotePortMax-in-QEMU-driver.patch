@@ -1,0 +1,72 @@
+From 1a18ecdc2120148c4b341ce7959a24c67294401f Mon Sep 17 00:00:00 2001
+Message-Id: <1a18ecdc2120148c4b341ce7959a24c67294401f@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Fri, 16 May 2014 13:43:01 +0200
+Subject: [PATCH] Avoid integer wrap on remotePortMax in QEMU driver
+
+The QEMU driver default max port is 65535, but it then increments
+this by 1 to 65536. This maps to 0 in an unsigned short :-( This
+was apparently done so that for() loops could use "< max" instead
+of "<= max". Remove this insanity and just make the loop do the
+right thing.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1018695
+
+(cherry picked from commit da5a8aee2b20f207bf30ceb9ca182e42ff3903ea)
+
+The change to src/qemu/qemu_conf.c is not backported since
+virPortAllocator is not used there in RHEL-6.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virportallocator.c  | 6 +++---
+ tests/virportallocatortest.c | 2 +-
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/util/virportallocator.c b/src/util/virportallocator.c
+index 3b9684e..224369f 100644
+--- a/src/util/virportallocator.c
++++ b/src/util/virportallocator.c
+@@ -92,7 +92,7 @@ virPortAllocatorPtr virPortAllocatorNew(unsigned short start,
+         return NULL;
+     }
+ 
+-    if (!(pa->bitmap = virBitmapNew(end-start))) {
++    if (!(pa->bitmap = virBitmapNew((end-start)+1))) {
+         virReportOOMError();
+         virObjectUnref(pa);
+         return NULL;
+@@ -111,7 +111,7 @@ int virPortAllocatorAcquire(virPortAllocatorPtr pa,
+     *port = 0;
+     virMutexLock(&pa->lock);
+ 
+-    for (i = pa->start ; i < pa->end && !*port; i++) {
++    for (i = pa->start ; i <= pa->end && !*port; i++) {
+         int reuse = 1;
+         struct sockaddr_in addr;
+         bool used = false;
+@@ -176,7 +176,7 @@ int virPortAllocatorRelease(virPortAllocatorPtr pa,
+     virMutexLock(&pa->lock);
+ 
+     if (port < pa->start ||
+-        port >= pa->end) {
++        port > pa->end) {
+         virReportInvalidArg(port, "port %d must be in range (%d, %d)",
+                             port, pa->start, pa->end);
+         goto cleanup;
+diff --git a/tests/virportallocatortest.c b/tests/virportallocatortest.c
+index a4eb1a3..41198e3 100644
+--- a/tests/virportallocatortest.c
++++ b/tests/virportallocatortest.c
+@@ -59,7 +59,7 @@ int bind(int sockfd ATTRIBUTE_UNUSED,
+ 
+ static int testAllocAll(const void *args ATTRIBUTE_UNUSED)
+ {
+-    virPortAllocatorPtr alloc = virPortAllocatorNew(5900, 5910);
++    virPortAllocatorPtr alloc = virPortAllocatorNew(5900, 5909);
+     int ret = -1;
+     unsigned short p1, p2, p3, p4, p5, p6, p7;
+ 
+-- 
+1.9.3
+

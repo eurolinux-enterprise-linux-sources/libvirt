@@ -1,0 +1,135 @@
+From ddb80312b6eaea5248c18a2b03814aa251472165 Mon Sep 17 00:00:00 2001
+Message-Id: <ddb80312b6eaea5248c18a2b03814aa251472165@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 19 May 2014 15:33:30 +0200
+Subject: [PATCH] qemuDomainObjBeginJobInternal: Return -2 for temporary
+ failures
+
+If job queue is full or waiting for a job times out, the function
+returns -2 so that it can be handled in a different way by callers.
+
+All callers are updated (when necessary) to only check for the return
+value to be less than zero.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1083238
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit dca377dbd63a514963a06f4f15aa61fb8cb7f19b)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_domain.c -- missing b090aa7d5; old spelling of
+	    maxQueuedJobs
+
+Downstream changes:
+    - qemuDomainObjBeginNestedJob is inlined in
+      qemuDomainObjBeginJobInternal
+    - more callers of qemuDomainObjBeginJobInternal had to be fixed
+---
+ src/qemu/qemu_domain.c | 43 ++++++++++++++++++++++++++++++-------------
+ 1 file changed, 30 insertions(+), 13 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 8d1fdbf..caa4e78 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -768,6 +768,7 @@ qemuDomainObjBeginJobInternal(struct qemud_driver *driver,
+     unsigned long long now;
+     unsigned long long then;
+     bool nested = job == QEMU_JOB_ASYNC_NESTED;
++    int ret;
+ 
+     priv->jobs_queued++;
+ 
+@@ -838,17 +839,21 @@ error:
+              qemuDomainAsyncJobTypeToString(priv->job.asyncJob),
+              priv->job.owner, priv->job.asyncOwner);
+ 
+-    if (errno == ETIMEDOUT)
++    ret = -1;
++    if (errno == ETIMEDOUT) {
+         virReportError(VIR_ERR_OPERATION_TIMEOUT,
+                        "%s", _("cannot acquire state change lock"));
+-    else if (driver->max_queued &&
+-             priv->jobs_queued > driver->max_queued)
++        ret = -2;
++    } else if (driver->max_queued &&
++               priv->jobs_queued > driver->max_queued) {
+         virReportError(VIR_ERR_OPERATION_FAILED,
+                        "%s", _("cannot acquire state change lock "
+                                "due to max_queued limit"));
+-    else
++        ret = -2;
++    } else {
+         virReportSystemError(errno,
+                              "%s", _("cannot acquire job mutex"));
++    }
+     priv->jobs_queued--;
+     if (driver_locked) {
+         virDomainObjUnlock(obj);
+@@ -856,7 +861,7 @@ error:
+         virDomainObjLock(obj);
+     }
+     virObjectUnref(obj);
+-    return -1;
++    return ret;
+ }
+ 
+ /*
+@@ -872,16 +877,22 @@ int qemuDomainObjBeginJob(struct qemud_driver *driver,
+                           virDomainObjPtr obj,
+                           enum qemuDomainJob job)
+ {
+-    return qemuDomainObjBeginJobInternal(driver, false, obj, job,
+-                                         QEMU_ASYNC_JOB_NONE);
++    if (qemuDomainObjBeginJobInternal(driver, false, obj, job,
++                                      QEMU_ASYNC_JOB_NONE) < 0)
++        return -1;
++    else
++        return 0;
+ }
+ 
+ int qemuDomainObjBeginAsyncJob(struct qemud_driver *driver,
+                                virDomainObjPtr obj,
+                                enum qemuDomainAsyncJob asyncJob)
+ {
+-    return qemuDomainObjBeginJobInternal(driver, false, obj, QEMU_JOB_ASYNC,
+-                                         asyncJob);
++    if (qemuDomainObjBeginJobInternal(driver, false, obj, QEMU_JOB_ASYNC,
++                                      asyncJob) < 0)
++        return -1;
++    else
++        return 0;
+ }
+ 
+ /*
+@@ -904,16 +915,22 @@ int qemuDomainObjBeginJobWithDriver(struct qemud_driver *driver,
+         return -1;
+     }
+ 
+-    return qemuDomainObjBeginJobInternal(driver, true, obj, job,
+-                                         QEMU_ASYNC_JOB_NONE);
++    if (qemuDomainObjBeginJobInternal(driver, true, obj, job,
++                                      QEMU_ASYNC_JOB_NONE) < 0)
++        return -1;
++    else
++        return 0;
+ }
+ 
+ int qemuDomainObjBeginAsyncJobWithDriver(struct qemud_driver *driver,
+                                          virDomainObjPtr obj,
+                                          enum qemuDomainAsyncJob asyncJob)
+ {
+-    return qemuDomainObjBeginJobInternal(driver, true, obj, QEMU_JOB_ASYNC,
+-                                         asyncJob);
++    if (qemuDomainObjBeginJobInternal(driver, true, obj, QEMU_JOB_ASYNC,
++                                      asyncJob) < 0)
++        return -1;
++    else
++        return 0;
+ }
+ 
+ /*
+-- 
+1.9.3
+

@@ -1,0 +1,31 @@
+From 8e7d9656863f2b25d5c622913643950a909e9c3f Mon Sep 17 00:00:00 2001
+Message-Id: <8e7d9656863f2b25d5c622913643950a909e9c3f@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 14 Apr 2014 16:16:33 +0200
+Subject: [PATCH] conf: fix error for parallel port mismatch
+
+https://bugzilla.redhat.com/show_bug.cgi?id=950830
+
+(cherry picked from commit 4e54714c725a320dfbdc3e6fe64c2624825819cf)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 5be1ddd..e31b1c2 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -11215,7 +11215,7 @@ static bool virDomainParallelDefCheckABIStability(virDomainChrDefPtr src,
+ 
+     if (src->target.port != dst->target.port) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target serial port %d does not match source %d"),
++                       _("Target parallel port %d does not match source %d"),
+                        dst->target.port, src->target.port);
+         goto cleanup;
+     }
+-- 
+1.9.2
+

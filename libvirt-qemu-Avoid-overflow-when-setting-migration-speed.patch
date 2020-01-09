@@ -1,0 +1,47 @@
+From 1573fe9d89347b41a4457eb1532ec49614e83c9f Mon Sep 17 00:00:00 2001
+Message-Id: <1573fe9d89347b41a4457eb1532ec49614e83c9f@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 25 Apr 2014 16:35:37 +0200
+Subject: [PATCH] qemu: Avoid overflow when setting migration speed
+
+When passing migration bandwidth to QEMU, we multiply it by 1024 * 1024
+to convert the speed to B/s and the result still needs to fit in
+int64_t.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1083483
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit c4206d7c7e2c82bcdabd8a7548e14c48cdab4e14)
+---
+ src/qemu/qemu_monitor.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index f2b30f7..15d027a 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -31,6 +31,7 @@
+ #include "qemu_monitor.h"
+ #include "qemu_monitor_text.h"
+ #include "qemu_monitor_json.h"
++#include "qemu_domain.h"
+ #include "virterror_internal.h"
+ #include "memory.h"
+ #include "logging.h"
+@@ -1839,6 +1840,13 @@ int qemuMonitorSetMigrationSpeed(qemuMonitorPtr mon,
+         return -1;
+     }
+ 
++    if (bandwidth > QEMU_DOMAIN_MIG_BANDWIDTH_MAX) {
++        virReportError(VIR_ERR_OVERFLOW,
++                       _("bandwidth must be less than %llu"),
++                       QEMU_DOMAIN_MIG_BANDWIDTH_MAX + 1ULL);
++        return -1;
++    }
++
+     if (mon->json)
+         ret = qemuMonitorJSONSetMigrationSpeed(mon, bandwidth);
+     else
+-- 
+1.9.2
+

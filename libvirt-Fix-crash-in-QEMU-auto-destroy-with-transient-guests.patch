@@ -1,0 +1,38 @@
+From 5b20aa2dfbc1054d43fc6eb2566f5d6af6ec0b75 Mon Sep 17 00:00:00 2001
+Message-Id: <5b20aa2dfbc1054d43fc6eb2566f5d6af6ec0b75.1373271641.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Apr 2013 22:00:02 -0600
+Subject: [PATCH] Fix crash in QEMU auto-destroy with transient guests
+
+https://bugzilla.redhat.com/show_bug.cgi?id=950286
+
+When the auto-destroy callback runs it is supposed to return
+NULL if the virDomainObjPtr is no longer valid. It was not
+doing this for transient guests, so we tried to virObjectUnlock
+a mutex which had been freed. This often led to a crash.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 7ccad0b16d12d7616c7c21b1359f6a55a9677521)
+---
+ src/qemu/qemu_process.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 281b13c..e9c45f0 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -4644,8 +4644,10 @@ qemuProcessAutoDestroy(struct qemud_driver *driver,
+ 
+     if (!qemuDomainObjEndJob(driver, dom))
+         dom = NULL;
+-    if (dom && !dom->persistent)
++    if (dom && !dom->persistent) {
+         qemuDomainRemoveInactive(driver, dom);
++        dom = NULL;
++    }
+     if (event)
+         qemuDomainEventQueue(driver, event);
+ 
+-- 
+1.8.2.1
+

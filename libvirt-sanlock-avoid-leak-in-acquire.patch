@@ -1,0 +1,51 @@
+From bd82640cc9a09224124ed961a0a81301145cc684 Mon Sep 17 00:00:00 2001
+Message-Id: <bd82640cc9a09224124ed961a0a81301145cc684@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Tue, 13 May 2014 13:56:25 +0200
+Subject: [PATCH] sanlock: avoid leak in acquire()
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1088034
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit 5884adc28a5bc17951c575e7cbf452e63d146927)
+
+Conflicts:
+	src/locking/lock_driver_sanlock.c -- 35048f31
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/locking/lock_driver_sanlock.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index 207bef6..3edcc95 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -924,11 +924,6 @@ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
+         return -1;
+     }
+ 
+-    if (VIR_ALLOC(opt) < 0) {
+-        virReportOOMError();
+-        return -1;
+-    }
+-
+     /* We only initialize 'sock' if we are in the real
+      * child process and we need it to be inherited
+      *
+@@ -963,6 +958,11 @@ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
+         return 0;
+     }
+ 
++    if (VIR_ALLOC(opt) < 0) {
++        virReportOOMError();
++        goto error;
++    }
++
+     /* sanlock doesn't use owner_name for anything, so it's safe to take just
+      * the first SANLK_NAME_LEN - 1 characters from vm_name */
+     ignore_value(virStrncpy(opt->owner_name, priv->vm_name,
+-- 
+1.9.3
+

@@ -1,0 +1,35 @@
+From f7fcd8997019e87bb8c08f01f018925d5488f2fa Mon Sep 17 00:00:00 2001
+Message-Id: <f7fcd8997019e87bb8c08f01f018925d5488f2fa.1350990677.git.jdenemar@redhat.com>
+From: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+Date: Thu, 18 Oct 2012 11:10:40 +0200
+Subject: [PATCH] qemu: Fixed default machine detection in
+ qemuCapsParseMachineTypesStr
+
+https://bugzilla.redhat.com/show_bug.cgi?id=867764
+
+The machine in the last output line of <qemu-binary> -M ?
+was always reported as default machine even if this wasn't the
+actual default. Trivial fix.
+
+Signed-off-by: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+(cherry picked from commit 19166795066a375b7a6f98f15dfc2271e0e549f1)
+---
+ src/qemu/qemu_capabilities.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index b626424..b18bbd5 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -285,7 +285,7 @@ qemuCapsParseMachineTypesStr(const char *output,
+             goto no_memory;
+ 
+         p = t;
+-        if (!(t = strstr(p, "(default)")) && (!next || t < next))
++        if ((t = strstr(p, "(default)")) && (!next || t < next))
+             defIdx = caps->nmachineTypes;
+ 
+         if ((t = strstr(p, "(alias of ")) && (!next || t < next)) {
+-- 
+1.7.12.4
+

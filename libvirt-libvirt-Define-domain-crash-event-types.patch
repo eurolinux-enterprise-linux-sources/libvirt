@@ -1,0 +1,192 @@
+From 602d6050a7e43eba0286451b6fa3afed97dc977a Mon Sep 17 00:00:00 2001
+Message-Id: <602d6050a7e43eba0286451b6fa3afed97dc977a.1374158622.git.jdenemar@redhat.com>
+From: Chen Fan <chen.fan.fnst@cn.fujitsu.com>
+Date: Tue, 9 Jul 2013 06:51:56 -0600
+Subject: [PATCH] libvirt: Define domain crash event types
+
+https://bugzilla.redhat.com/show_bug.cgi?id=822306
+https://bugzilla.redhat.com/show_bug.cgi?id=826315
+
+This patch introduces domain crashed types and crashed reasons which
+will be used while guest panicked.
+(cherry picked from commit 14e7e0ae8db9843aea80245a3d9e6cf5f2ef720d)
+---
+ examples/domain-events/events-c/event-test.c | 10 ++++++++++
+ include/libvirt/libvirt.h.in                 | 16 ++++++++++++++++
+ src/conf/domain_conf.c                       | 12 ++++++++----
+ tools/virsh-domain-monitor.c                 |  8 ++++++++
+ 4 files changed, 42 insertions(+), 4 deletions(-)
+
+diff --git a/examples/domain-events/events-c/event-test.c b/examples/domain-events/events-c/event-test.c
+index ede9796..ef872e2 100644
+--- a/examples/domain-events/events-c/event-test.c
++++ b/examples/domain-events/events-c/event-test.c
+@@ -93,6 +93,9 @@ const char *eventToString(int event) {
+         case VIR_DOMAIN_EVENT_PMSUSPENDED:
+             ret = "PMSuspended";
+             break;
++        case VIR_DOMAIN_EVENT_CRASHED:
++            ret = "Crashed";
++            break;
+     }
+     return ret;
+ }
+@@ -209,6 +212,13 @@ static const char *eventDetailToString(int event, int detail) {
+                 break;
+             }
+             break;
++        case VIR_DOMAIN_EVENT_CRASHED:
++           switch ((virDomainEventCrashedDetailType) detail) {
++           case VIR_DOMAIN_EVENT_CRASHED_PANICKED:
++               ret = "Panicked";
++               break;
++           }
++           break;
+     }
+     return ret;
+ }
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index 0264a93..00057c5 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -155,6 +155,7 @@ typedef enum {
+     VIR_DOMAIN_RUNNING_SAVE_CANCELED = 7,   /* returned from failed save process */
+     VIR_DOMAIN_RUNNING_WAKEUP = 8,          /* returned from pmsuspended due to
+                                                wakeup event */
++    VIR_DOMAIN_RUNNING_CRASHED = 9,         /* resumed from crashed */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_RUNNING_LAST
+@@ -180,6 +181,7 @@ typedef enum {
+     VIR_DOMAIN_PAUSED_FROM_SNAPSHOT = 7, /* paused after restoring from snapshot */
+     VIR_DOMAIN_PAUSED_SHUTTING_DOWN = 8, /* paused during shutdown process */
+     VIR_DOMAIN_PAUSED_SNAPSHOT = 9,      /* paused while creating a snapshot */
++    VIR_DOMAIN_PAUSED_GUEST_PANICKED = 10, /* paused due to a guest panicked event */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_PAUSED_LAST
+@@ -189,6 +191,7 @@ typedef enum {
+ typedef enum {
+     VIR_DOMAIN_SHUTDOWN_UNKNOWN = 0,    /* the reason is unknown */
+     VIR_DOMAIN_SHUTDOWN_USER = 1,       /* shutting down on user request */
++    VIR_DOMAIN_SHUTDOWN_CRASHED = 2,    /* domain crashed */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_SHUTDOWN_LAST
+@@ -212,6 +215,7 @@ typedef enum {
+ 
+ typedef enum {
+     VIR_DOMAIN_CRASHED_UNKNOWN = 0,     /* crashed for unknown reason */
++    VIR_DOMAIN_CRASHED_PANICKED = 1,    /* domain panicked */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_CRASHED_LAST
+@@ -3004,6 +3008,7 @@ typedef enum {
+     VIR_DOMAIN_EVENT_STOPPED = 5,
+     VIR_DOMAIN_EVENT_SHUTDOWN = 6,
+     VIR_DOMAIN_EVENT_PMSUSPENDED = 7,
++    VIR_DOMAIN_EVENT_CRASHED = 8,
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_EVENT_LAST
+@@ -3135,6 +3140,17 @@ typedef enum {
+ #endif
+ } virDomainEventPMSuspendedDetailType;
+ 
++/*
++ * Details about the 'crashed' lifecycle event
++ */
++typedef enum {
++    VIR_DOMAIN_EVENT_CRASHED_PANICKED = 0, /* Guest was panicked */
++
++#ifdef VIR_ENUM_SENTINELS
++    VIR_DOMAIN_EVENT_CRASHED_LAST
++#endif
++} virDomainEventCrashedDetailType;
++
+ /**
+  * virConnectDomainEventCallback:
+  * @conn: virConnect connection
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 9991b5c..5851bb9 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -577,7 +577,8 @@ VIR_ENUM_IMPL(virDomainRunningReason, VIR_DOMAIN_RUNNING_LAST,
+               "unpaused",
+               "migration canceled",
+               "save canceled",
+-              "wakeup")
++              "wakeup",
++              "crashed")
+ 
+ VIR_ENUM_IMPL(virDomainBlockedReason, VIR_DOMAIN_BLOCKED_LAST,
+               "unknown")
+@@ -592,11 +593,13 @@ VIR_ENUM_IMPL(virDomainPausedReason, VIR_DOMAIN_PAUSED_LAST,
+               "watchdog",
+               "from snapshot",
+               "shutdown",
+-              "snapshot")
++              "snapshot",
++              "panicked")
+ 
+ VIR_ENUM_IMPL(virDomainShutdownReason, VIR_DOMAIN_SHUTDOWN_LAST,
+               "unknown",
+-              "user")
++              "user",
++              "crashed")
+ 
+ VIR_ENUM_IMPL(virDomainShutoffReason, VIR_DOMAIN_SHUTOFF_LAST,
+               "unknown",
+@@ -609,7 +612,8 @@ VIR_ENUM_IMPL(virDomainShutoffReason, VIR_DOMAIN_SHUTOFF_LAST,
+               "from snapshot")
+ 
+ VIR_ENUM_IMPL(virDomainCrashedReason, VIR_DOMAIN_CRASHED_LAST,
+-              "unknown")
++              "unknown",
++              "panicked")
+ 
+ VIR_ENUM_IMPL(virDomainPMSuspendedReason, VIR_DOMAIN_PMSUSPENDED_LAST,
+               "unknown")
+diff --git a/tools/virsh-domain-monitor.c b/tools/virsh-domain-monitor.c
+index faf23fe..0c852b2 100644
+--- a/tools/virsh-domain-monitor.c
++++ b/tools/virsh-domain-monitor.c
+@@ -191,6 +191,8 @@ vshDomainStateReasonToString(int state, int reason)
+             return N_("save canceled");
+         case VIR_DOMAIN_RUNNING_WAKEUP:
+             return N_("event wakeup");
++        case VIR_DOMAIN_RUNNING_CRASHED:
++            return N_("crashed");
+         case VIR_DOMAIN_RUNNING_UNKNOWN:
+         case VIR_DOMAIN_RUNNING_LAST:
+             ;
+@@ -225,6 +227,8 @@ vshDomainStateReasonToString(int state, int reason)
+             return N_("shutting down");
+         case VIR_DOMAIN_PAUSED_SNAPSHOT:
+             return N_("creating snapshot");
++        case VIR_DOMAIN_PAUSED_GUEST_PANICKED:
++            return N_("guest panicked");
+         case VIR_DOMAIN_PAUSED_UNKNOWN:
+         case VIR_DOMAIN_PAUSED_LAST:
+             ;
+@@ -235,6 +239,8 @@ vshDomainStateReasonToString(int state, int reason)
+         switch ((virDomainShutdownReason) reason) {
+         case VIR_DOMAIN_SHUTDOWN_USER:
+             return N_("user");
++        case VIR_DOMAIN_SHUTDOWN_CRASHED:
++            return N_("crashed");
+         case VIR_DOMAIN_SHUTDOWN_UNKNOWN:
+         case VIR_DOMAIN_SHUTDOWN_LAST:
+             ;
+@@ -265,6 +271,8 @@ vshDomainStateReasonToString(int state, int reason)
+ 
+     case VIR_DOMAIN_CRASHED:
+         switch ((virDomainCrashedReason) reason) {
++        case VIR_DOMAIN_CRASHED_PANICKED:
++            return N_("panicked");
+         case VIR_DOMAIN_CRASHED_UNKNOWN:
+         case VIR_DOMAIN_CRASHED_LAST:
+             ;
+-- 
+1.8.3.2
+

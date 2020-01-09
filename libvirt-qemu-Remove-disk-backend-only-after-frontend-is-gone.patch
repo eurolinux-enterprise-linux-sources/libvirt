@@ -1,0 +1,169 @@
+From 92d766d59648ee0f5997fc988d35538e399bb1e4 Mon Sep 17 00:00:00 2001
+Message-Id: <92d766d59648ee0f5997fc988d35538e399bb1e4@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 27 May 2014 12:09:09 +0200
+Subject: [PATCH] qemu: Remove disk backend only after frontend is gone
+
+In general, we should only remove a backend after seeing DEVICE_DELETED
+event for a corresponding frontend. This doesn't make any difference for
+disks attached using -drive or drive_add since QEMU automatically
+removes their backends but it's still better to make our code
+consistent. And it may start making difference in case we switch to
+attaching disks using -blockdev.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 0635785b6e97a8a6ac818d9711633043f895f659)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_hotplug.c - old spelling of virQEMUDriverPtr;
+	    virAsprintf does not report OOM yet; *MonitorWithDriver APIs
+---
+ src/qemu/qemu_hotplug.c | 56 ++++++++++++++++++++-----------------------------
+ 1 file changed, 23 insertions(+), 33 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 4bc4a45..27c8c77 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1917,17 +1917,32 @@ static bool qemuIsMultiFunctionDevice(virDomainDefPtr def,
+ }
+ 
+ 
+-static void
++static int
+ qemuDomainRemoveDiskDevice(struct qemud_driver *driver,
+                            virDomainObjPtr vm,
+                            virDomainDiskDefPtr disk)
+ {
+     virDomainEventPtr event;
+     size_t i;
++    qemuDomainObjPrivatePtr priv = vm->privateData;
++    char *drivestr;
+ 
+     VIR_DEBUG("Removing disk %s from domain %p %s",
+               disk->info.alias, vm, vm->def->name);
+ 
++    /* build the actual drive id string as the disk->info.alias doesn't
++     * contain the QEMU_DRIVE_HOST_PREFIX that is passed to qemu */
++    if (virAsprintf(&drivestr, "%s%s",
++                    QEMU_DRIVE_HOST_PREFIX, disk->info.alias) < 0) {
++        virReportOOMError();
++        return -1;
++    }
++
++    qemuDomainObjEnterMonitorWithDriver(driver, vm);
++    qemuMonitorDriveDel(priv->mon, drivestr);
++    qemuDomainObjExitMonitorWithDriver(driver, vm);
++    VIR_FREE(drivestr);
++
+     virDomainAuditDisk(vm, disk->src, NULL, "detach", true);
+ 
+     event = virDomainEventDeviceRemovedNewFromObj(vm, disk->info.alias);
+@@ -1965,6 +1980,7 @@ qemuDomainRemoveDiskDevice(struct qemud_driver *driver,
+     ignore_value(qemuRemoveSharedDisk(driver->sharedDisks, disk, vm->def->name));
+ 
+     virDomainDiskDefFree(disk);
++    return 0;
+ }
+ 
+ 
+@@ -2341,7 +2357,6 @@ int qemuDomainDetachPciDiskDevice(struct qemud_driver *driver,
+ {
+     int ret = -1;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+-    char *drivestr = NULL;
+     int rc;
+ 
+     if (qemuIsMultiFunctionDevice(vm->def, &detach->info)) {
+@@ -2358,14 +2373,6 @@ int qemuDomainDetachPciDiskDevice(struct qemud_driver *driver,
+         goto cleanup;
+     }
+ 
+-    /* build the actual drive id string as the disk->info.alias doesn't
+-     * contain the QEMU_DRIVE_HOST_PREFIX that is passed to qemu */
+-    if (virAsprintf(&drivestr, "%s%s",
+-                    QEMU_DRIVE_HOST_PREFIX, detach->info.alias) < 0) {
+-        virReportOOMError();
+-        goto cleanup;
+-    }
+-
+     qemuDomainMarkDeviceForRemoval(vm, &detach->info);
+ 
+     qemuDomainObjEnterMonitorWithDriver(driver, vm);
+@@ -2383,20 +2390,16 @@ int qemuDomainDetachPciDiskDevice(struct qemud_driver *driver,
+             goto cleanup;
+         }
+     }
+-
+-    /* disconnect guest from host device */
+-    qemuMonitorDriveDel(priv->mon, drivestr);
+-
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+ 
+     rc = qemuDomainWaitForDeviceRemoval(driver, vm);
+     if (rc == 0 || rc == 1)
+-        qemuDomainRemoveDiskDevice(driver, vm, detach);
+-    ret = 0;
++        ret = qemuDomainRemoveDiskDevice(driver, vm, detach);
++    else
++        ret = 0;
+ 
+ cleanup:
+     qemuDomainResetDeviceRemoval(vm);
+-    VIR_FREE(drivestr);
+     return ret;
+ }
+ 
+@@ -2406,7 +2409,6 @@ int qemuDomainDetachDiskDevice(struct qemud_driver *driver,
+ {
+     int ret = -1;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+-    char *drivestr = NULL;
+     int rc;
+ 
+     if (!qemuCapsGet(priv->caps, QEMU_CAPS_DEVICE)) {
+@@ -2423,14 +2425,6 @@ int qemuDomainDetachDiskDevice(struct qemud_driver *driver,
+         goto cleanup;
+     }
+ 
+-    /* build the actual drive id string as the disk->info.alias doesn't
+-     * contain the QEMU_DRIVE_HOST_PREFIX that is passed to qemu */
+-    if (virAsprintf(&drivestr, "%s%s",
+-                    QEMU_DRIVE_HOST_PREFIX, detach->info.alias) < 0) {
+-        virReportOOMError();
+-        goto cleanup;
+-    }
+-
+     qemuDomainMarkDeviceForRemoval(vm, &detach->info);
+ 
+     qemuDomainObjEnterMonitorWithDriver(driver, vm);
+@@ -2439,20 +2433,16 @@ int qemuDomainDetachDiskDevice(struct qemud_driver *driver,
+         virDomainAuditDisk(vm, detach->src, NULL, "detach", false);
+         goto cleanup;
+     }
+-
+-    /* disconnect guest from host device */
+-    qemuMonitorDriveDel(priv->mon, drivestr);
+-
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+ 
+     rc = qemuDomainWaitForDeviceRemoval(driver, vm);
+     if (rc == 0 || rc == 1)
+-        qemuDomainRemoveDiskDevice(driver, vm, detach);
+-    ret = 0;
++        ret = qemuDomainRemoveDiskDevice(driver, vm, detach);
++    else
++        ret = 0;
+ 
+ cleanup:
+     qemuDomainResetDeviceRemoval(vm);
+-    VIR_FREE(drivestr);
+     return ret;
+ }
+ 
+-- 
+2.0.0
+

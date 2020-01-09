@@ -1,0 +1,28 @@
+From 6bb31b579368361a4ac3d1614eb6b460aa5ceb5d Mon Sep 17 00:00:00 2001
+Message-Id: <6bb31b579368361a4ac3d1614eb6b460aa5ceb5d.1373271639.git.jdenemar@redhat.com>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 14 Mar 2013 11:19:07 -0400
+Subject: [PATCH] storage: Resource resource leak using 'tmp_vols'
+
+https://bugzilla.redhat.com/show_bug.cgi?id=906299
+
+(cherry picked from commit 0f45d8a263e34527ece88c37a456386ba085d41a)
+---
+ src/storage/storage_driver.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/storage/storage_driver.c b/src/storage/storage_driver.c
+index 0533c25..ca7d8c4 100644
+--- a/src/storage/storage_driver.c
++++ b/src/storage/storage_driver.c
+@@ -1219,6 +1219,7 @@ storagePoolListAllVolumes(virStoragePoolPtr pool,
+             if (tmp_vols[i])
+                 virStorageVolFree(tmp_vols[i]);
+         }
++        VIR_FREE(tmp_vols);
+     }
+ 
+     if (obj)
+-- 
+1.8.2.1
+

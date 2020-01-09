@@ -1,0 +1,43 @@
+From 2623f14c5315ca68947b8cd0499c153a4ffa324d Mon Sep 17 00:00:00 2001
+Message-Id: <2623f14c5315ca68947b8cd0499c153a4ffa324d.1352726475.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Tue, 6 Nov 2012 11:14:11 +0100
+Subject: [PATCH] esx: Yet another connection fix for 5.1
+
+https://bugzilla.redhat.com/show_bug.cgi?id=873538
+
+After the connection to ESX 5.1 being broken since g1e7cd39, the fix
+in bab7752c helped a bit, but still missed a spot, so the connection
+is now successful, but some APIs (for example defineXML) don't work.
+Two cases missing are added in this patch to avoid that.
+(cherry picked from commit 9c294e6f9a2ae23f4fbfc98d0dc2aec1ce9eba0b)
+---
+ src/esx/esx_vi.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/esx/esx_vi.c b/src/esx/esx_vi.c
+index 92d2791..cfed054 100644
+--- a/src/esx/esx_vi.c
++++ b/src/esx/esx_vi.c
+@@ -2,7 +2,7 @@
+ /*
+  * esx_vi.c: client for the VMware VI API 2.5 to manage ESX hosts
+  *
+- * Copyright (C) 2010-2011 Red Hat, Inc.
++ * Copyright (C) 2010-2012 Red Hat, Inc.
+  * Copyright (C) 2009-2012 Matthias Bolte <matthias.bolte@googlemail.com>
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -4656,7 +4656,9 @@ esxVI_ProductVersionToDefaultVirtualHWVersion(esxVI_ProductVersion productVersio
+       case esxVI_ProductVersion_VPX50:
+         return 8;
+ 
++      case esxVI_ProductVersion_ESX51:
+       case esxVI_ProductVersion_ESX5x:
++      case esxVI_ProductVersion_VPX51:
+       case esxVI_ProductVersion_VPX5x:
+         return 8;
+ 
+-- 
+1.8.0
+

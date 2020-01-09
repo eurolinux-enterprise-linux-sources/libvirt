@@ -1,0 +1,114 @@
+From ea74bb83771a6cfb0d402c9ea86abfc2f9ab73ab Mon Sep 17 00:00:00 2001
+Message-Id: <ea74bb83771a6cfb0d402c9ea86abfc2f9ab73ab.1373271644.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 26 Jun 2013 12:14:47 +0200
+Subject: [PATCH] qemu: Move QEMU log reading into a separate function
+
+https://bugzilla.redhat.com/show_bug.cgi?id=954248
+
+(cherry picked from commit e4bdba8d7f86d2b0ea224b64e336b36ef52f6276)
+
+Conflicts:
+	src/qemu/qemu_process.c - the VIR_ERROR line is not in RHEL
+---
+ src/qemu/qemu_process.c | 60 +++++++++++++++++++++++++++++++------------------
+ 1 file changed, 38 insertions(+), 22 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 908ca9b..b7997da 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1394,6 +1394,41 @@ error:
+     return ret;
+ }
+ 
++static int
++qemuProcessReadLog(int fd, char *buf, int buflen, int off)
++{
++    char *filter_next = buf;
++    ssize_t bytes;
++    char *eol;
++
++    buf[0] = '\0';
++
++    while (off < buflen - 1) {
++        bytes = saferead(fd, buf + off, buflen - off - 1);
++        if (bytes < 0)
++            return -1;
++        else if (bytes == 0)
++            break;
++
++        off += bytes;
++        buf[off] = '\0';
++
++        /* Filter out debug messages from intermediate libvirt process */
++        while ((eol = strchr(filter_next, '\n'))) {
++            *eol = '\0';
++            if (virLogProbablyLogMessage(filter_next)) {
++                memmove(filter_next, eol + 1, off - (eol - buf));
++                off -= eol + 1 - filter_next;
++            } else {
++                filter_next = eol + 1;
++                *eol = '\n';
++            }
++        }
++    }
++
++    return off;
++}
++
+ typedef int qemuProcessLogHandleOutput(virDomainObjPtr vm,
+                                        const char *output,
+                                        int fd);
+@@ -1413,45 +1448,26 @@ qemuProcessReadLogOutput(virDomainObjPtr vm,
+     int retries = (timeout*10);
+     int got = 0;
+     int ret = -1;
+-    char *filter_next = buf;
+ 
+     buf[0] = '\0';
+ 
+     while (retries) {
+-        ssize_t func_ret, bytes;
++        ssize_t func_ret;
+         int isdead = 0;
+-        char *eol;
+ 
+         func_ret = func(vm, buf, fd);
+ 
+         if (kill(vm->pid, 0) == -1 && errno == ESRCH)
+             isdead = 1;
+ 
+-        /* Any failures should be detected before we read the log, so we
+-         * always have something useful to report on failure. */
+-        bytes = saferead(fd, buf+got, buflen-got-1);
+-        if (bytes < 0) {
++        got = qemuProcessReadLog(fd, buf, buflen, got);
++        if (got < 0) {
+             virReportSystemError(errno,
+                                  _("Failure while reading %s log output"),
+                                  what);
+             goto cleanup;
+         }
+ 
+-        got += bytes;
+-        buf[got] = '\0';
+-
+-        /* Filter out debug messages from intermediate libvirt process */
+-        while ((eol = strchr(filter_next, '\n'))) {
+-            *eol = '\0';
+-            if (virLogProbablyLogMessage(filter_next)) {
+-                memmove(filter_next, eol + 1, got - (eol - buf));
+-                got -= eol + 1 - filter_next;
+-            } else {
+-                filter_next = eol + 1;
+-                *eol = '\n';
+-            }
+-        }
+-
+         if (got == buflen-1) {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+                            _("Out of space while reading %s log output: %s"),
+-- 
+1.8.2.1
+

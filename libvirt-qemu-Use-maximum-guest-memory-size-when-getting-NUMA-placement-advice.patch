@@ -1,0 +1,38 @@
+From 58cc31167112f99d4d0574ef7ac5b20d9324482b Mon Sep 17 00:00:00 2001
+Message-Id: <58cc31167112f99d4d0574ef7ac5b20d9324482b@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 24 Apr 2014 15:34:29 +0200
+Subject: [PATCH] qemu: Use maximum guest memory size when getting NUMA
+ placement advice
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1011906
+
+When starting the VM the guest balloon driver is not loaded at that
+time. We need to ask numad for placement of the complete VM.
+
+(cherry picked from commit f8e2da01be0f9199ecfde1148b74173d68f393db)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_process.c -- 763edb5eb
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index d1a9dca..e6d49e9 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1985,7 +1985,7 @@ qemuGetNumadAdvice(virDomainDefPtr def)
+ 
+     cmd = virCommandNewArgList(NUMAD, "-w", NULL);
+     virCommandAddArgFormat(cmd, "%d:%llu", def->vcpus,
+-                           VIR_DIV_UP(def->mem.cur_balloon, 1024));
++                           VIR_DIV_UP(def->mem.max_balloon, 1024));
+ 
+     virCommandSetOutputBuffer(cmd, &output);
+ 
+-- 
+1.9.2
+

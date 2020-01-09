@@ -1,0 +1,66 @@
+From 5ed12920aa20ae8661efa4300b20ea762e490212 Mon Sep 17 00:00:00 2001
+Message-Id: <5ed12920aa20ae8661efa4300b20ea762e490212@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Wed, 14 May 2014 16:12:23 +0200
+Subject: [PATCH] conf: make virDomainNetDefFormat a public function
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+We will need to call virDomainNetDefFormat() from the network hook (in
+the network driver).
+
+(cherry picked from commit 7c39214cd4b7fe01e02efc3105c001fea0484b1a)
+
+Conflicts:
+	src/conf/domain_conf.h: Context
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c   | 2 +-
+ src/conf/domain_conf.h   | 4 ++++
+ src/libvirt_private.syms | 1 +
+ 3 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 2be9c9b..d9b0157 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -13077,7 +13077,7 @@ virDomainActualNetDefFormat(virBufferPtr buf,
+     return 0;
+ }
+ 
+-static int
++int
+ virDomainNetDefFormat(virBufferPtr buf,
+                       virDomainNetDefPtr def,
+                       unsigned int flags)
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index d46a864..25a8c44 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2080,6 +2080,10 @@ int virDomainDefFormatInternal(virDomainDefPtr def,
+                                unsigned int flags,
+                                virBufferPtr buf);
+ 
++int virDomainNetDefFormat(virBufferPtr buf,
++                          virDomainNetDefPtr def,
++                          unsigned int flags);
++
+ int virDomainDefCompatibleDevice(virDomainDefPtr def,
+                                  virDomainDeviceDefPtr dev);
+ 
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index f477d32..0558761 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -455,6 +455,7 @@ virDomainMemballoonModelTypeFromString;
+ virDomainMemballoonModelTypeToString;
+ virDomainMemDumpTypeFromString;
+ virDomainMemDumpTypeToString;
++virDomainNetDefFormat;
+ virDomainNetDefFree;
+ virDomainNetFind;
+ virDomainNetFindIdx;
+-- 
+1.9.3
+

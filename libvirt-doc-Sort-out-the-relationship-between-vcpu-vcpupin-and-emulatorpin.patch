@@ -1,0 +1,185 @@
+From 21e88853ee05d93c5265396b56b88a74016d3ecf Mon Sep 17 00:00:00 2001
+Message-Id: <21e88853ee05d93c5265396b56b88a74016d3ecf.1350297261.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 15 Oct 2012 12:36:09 +0800
+Subject: [PATCH] doc: Sort out the relationship between <vcpu>, <vcpupin>,
+ and <emulatorpin>
+
+https://bugzilla.redhat.com/show_bug.cgi?id=855218
+
+These 3 elements conflicts with each other in either the doc
+or the underlying codes.
+
+Current problems:
+
+Problem 1:
+
+The doc shouldn't simply say "These settings are superseded
+by CPU tuning. " for element <vcpu>. As except the tuning, <vcpu>
+allows to specify the current, maxmum vcpu number. Apart from that,
+<vcpu> also allows to specify the placement as "auto", which binds
+the domain process to the advisory nodeset from numad.
+
+Problem 2:
+
+Doc for <vcpu> says its "cpuset" specify the physical CPUs
+that the vcpus can be pinned. But it's not the truth, as
+actually it only pin domain process to the specified physical
+CPUs. So either it's a document bug, or code bug.
+
+Problem 3:
+
+Doc for <vcpupin> says it supersed "cpuset" of <vcpu>, it's
+not quite correct, as each <vcpupin> specify the pinning policy
+only for one vcpu. How about the ones which doesn't have
+<vcpupin> specified? it says the vcpu will be pinned to all
+available physical CPUs, but what's the meaning of attribute
+"cpuset" of <vcpu> then?
+
+Problem 4:
+
+Doc for <emulatorpin> says it pin the emulator threads (domain
+process in other context, perhaps another follow up patch to
+cleanup the inconsistency is needed) to the physical CPUs
+specified its attribute "cpuset". Which conflicts with
+<vcpu>'s "cpuset". And actually in the underlying codes,
+it set the affinity for domain process twice if both
+"cpuset" for <vcpu> and <emulatorpin> are specified,
+and <emulatorpin>'s pinning will override <vcpu>'s.
+
+Problem 5:
+
+When "placement" of <vcpu> is "auto" (I.e. uses numad to
+get the advisory nodeset to which the domain process is
+pinned to), it will also be overridden by <emulatorpin>,
+
+This patch is trying to sort out the conflicts or bugs by:
+
+1) Don't say <vcpu> is superseded by <cputune>
+
+2) Keep the semanteme for "cpuset" of <vcpu> (I.e. Still says it
+   specify the physical CPUs the virtual CPUs). But modifying it
+   to mention it also set the pinning policy for domain process,
+   and the CPU placement of domain process specified by "cpuset"
+   of <vcpu> will be ingored if <emulatorpin> specified, and
+   similary, the CPU placement of vcpu thread will be ignored
+   if it has <vcpupin> specified, for vcpu which doesn't have
+   <vcpupin> specified, it inherits "cpuset" of <vcpu>.
+
+3) Don't say <vcpu> is supersed by <vcpupin>. If neither <vcpupin>
+   nor "cpuset" of <vcpu> is specified, the vcpu will be pinned
+   to all available pCPUs.
+
+4) If neither <emulatorpin> nor "cpuset" of <vcpu> is specified,
+   the domain process (emulator threads in the context) will be
+   pinned to all available pCPUs.
+
+5) If "placement" of <vcpu> is "auto", <emulatorpin> is not allowed.
+
+6) hotplugged vcpus will also inherit "cpuset" of <vcpu>
+
+Codes changes according to above document changes:
+
+1) Inherit def->cpumask for each vcpu which doesn't have <vcpupin>
+   specified, during parsing.
+
+2) ping the vcpu which doesn't have <vcpupin> specified to def->cpumask
+   either by cgroup for sched_setaffinity(2), which is actually done
+   by 1).
+
+3) Error out if "placement" == "auto", and <emulatorpin> is specified.
+   Otherwise, <emulatorpin> is honored, and "cpuset" of <cpuset> is
+   ignored.
+
+4) Setup cgroup for each hotplugged vcpu, and setup the pinning policy
+   by either cgroup or sched_setaffinity(2).
+
+5) Remove cgroup and <vcpupin> for each hot unplugged vcpu.
+
+Patches are following (6 in total except this patch)
+
+Conflicts:
+    docs/formatdomain.html.in (149c87b49 fixed typo "ommitted",
+which is simple to resolve, and not deserved to backport).
+
+(cherry picked from f108944ae0a88866a0d0b70bc42fb6724e5a3782)
+---
+ docs/formatdomain.html.in | 42 +++++++++++++++++++++++++++---------------
+ 1 file changed, 27 insertions(+), 15 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index f93b1a3..665e0f8 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -357,8 +357,18 @@
+         the maximum supported by the hypervisor.  <span class="since">Since
+         0.4.4</span>, this element can contain an optional
+         <code>cpuset</code> attribute, which is a comma-separated
+-        list of physical CPU numbers that virtual CPUs can be pinned
+-        to.  Each element in that list is either a single CPU number,
++        list of physical CPU numbers that domain process and virtual CPUs
++        can be pinned to by default. (NB: The pinning policy of domain
++        process and virtual CPUs can be specified separately by
++        <code>cputune</code>. If attribute <code>emulatorpin</code>
++        of <code>cputune</code> is specified, <code>cpuset</code>
++        specified by <code>vcpu</code> here will be ingored; Similarly,
++        For virtual CPUs which has <code>vcpupin</code> specified,
++        <code>cpuset</code> specified by <code>cpuset</code> here
++        will be ignored; For virtual CPUs which doesn't have
++        <code>vcpupin</code> specified, it will be pinned to the physical
++        CPUs specified by <code>cpuset</code> here).
++        Each element in that list is either a single CPU number,
+         a range of CPU numbers, or a caret followed by a CPU number to
+         be excluded from a previous range.  <span class="since">Since
+         0.8.5</span>, the optional attribute <code>current</code> can
+@@ -374,8 +384,7 @@
+         if it's specified. If both <code>cpuset</code> and <code>placement</code>
+         are not specified, or if <code>placement</code> is "static", but no
+         <code>cpuset</code> is specified, the domain process will be pinned to
+-        all the available physical CPUs. These settings are superseded
+-        by <a href="#elementsCPUTuning">CPU tuning</a>.
++        all the available physical CPUs.
+       </dd>
+     </dl>
+ 
+@@ -411,23 +420,26 @@
+       <dt><code>vcpupin</code></dt>
+       <dd>
+         The optional <code>vcpupin</code> element specifies which of host's
+-        physical CPUs the domain VCPU will be pinned to. This setting supersedes
+-        previous VCPU placement specified in <a href="#elementsCPUAllocation">CPU
+-        Allocation</a> using <code>vcpu</code> element. If this is omitted,
+-        each VCPU is pinned to all the physical CPUs by default. It contains two
+-        required attributes, the attribute <code>vcpu</code> specifies vcpu id,
+-        and the attribute <code>cpuset</code> is same as
+-        attribute <code>cpuset</code>
+-        of element <code>vcpu</code>. (NB: Only qemu driver support)
++        physical CPUs the domain VCPU will be pinned to. If this is omitted,
++        and attribute <code>cpuset</code> of element <code>vcpu</code> is
++        not specified, the vCPU is pinned to all the physical CPUs by default.
++        It contains two required attributes, the attribute <code>vcpu</code>
++        specifies vcpu id, and the attribute <code>cpuset</code> is same as
++        attribute <code>cpuset</code> of element <code>vcpu</code>.
++        (NB: Only qemu driver support)
+         <span class="since">Since 0.9.0</span>
+        </dd>
+        <dt><code>emulatorpin</code></dt>
+        <dd>
+          The optional <code>emulatorpin</code> element specifies which of host
+          physical CPUs the "emulator", a subset of a domain not including vcpu,
+-         will be pinned to. If this is ommitted, "emulator" is pinned to all
+-         the physical CPUs by default. It contains one required attribute
+-         <code>cpuset</code> specifying which physical CPUs to pin to.
++         will be pinned to. If this is omitted, and attribute
++         <code>cpuset</code> of element <code>vcpu</code> is not specified,
++         "emulator" is pinned to all the physical CPUs by default. It contains
++         one required attribute <code>cpuset</code> specifying which physical
++         CPUs to pin to. NB, <code>emulatorpin</code> is not allowed if
++         attribute <code>placement</code> of element <code>vcpu</code> is
++         "auto".
+        </dd>
+       <dt><code>shares</code></dt>
+       <dd>
+-- 
+1.7.12.3
+

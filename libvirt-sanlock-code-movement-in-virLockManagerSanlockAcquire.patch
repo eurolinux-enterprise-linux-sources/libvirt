@@ -1,0 +1,89 @@
+From 1f01da7f9138223c5ee7c78630829024e267354e Mon Sep 17 00:00:00 2001
+Message-Id: <1f01da7f9138223c5ee7c78630829024e267354e@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Tue, 13 May 2014 13:34:25 +0200
+Subject: [PATCH] sanlock: code movement in virLockManagerSanlockAcquire
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1088034
+
+Just move some code around for future patches to ease the review.
+With this patch there is no need for drastic cleanup path later.
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit d99057423c4c9310cfc324d73e201eeb83c7d6b8)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/locking/lock_driver_sanlock.c | 50 +++++++++++++++++++--------------------
+ 1 file changed, 25 insertions(+), 25 deletions(-)
+
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index de838fc..3ab8ef3 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -915,31 +915,6 @@ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
+         return -1;
+     }
+ 
+-    /* sanlock doesn't use owner_name for anything, so it's safe to take just
+-     * the first SANLK_NAME_LEN - 1 characters from vm_name */
+-    ignore_value(virStrncpy(opt->owner_name, priv->vm_name,
+-                            SANLK_NAME_LEN - 1, SANLK_NAME_LEN));
+-
+-    if (state && STRNEQ(state, "")) {
+-        if ((rv = sanlock_state_to_args((char *)state,
+-                                        &res_count,
+-                                        &res_args)) < 0) {
+-            if (rv <= -200)
+-                virReportError(VIR_ERR_INTERNAL_ERROR,
+-                               _("Unable to parse lock state %s: error %d"),
+-                               state, rv);
+-            else
+-                virReportSystemError(-rv,
+-                                     _("Unable to parse lock state %s"),
+-                                     state);
+-            goto error;
+-        }
+-        res_free = true;
+-    } else {
+-        res_args = priv->res_args;
+-        res_count = priv->res_count;
+-    }
+-
+     /* We only initialize 'sock' if we are in the real
+      * child process and we need it to be inherited
+      *
+@@ -968,6 +943,31 @@ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
+         }
+     }
+ 
++    /* sanlock doesn't use owner_name for anything, so it's safe to take just
++     * the first SANLK_NAME_LEN - 1 characters from vm_name */
++    ignore_value(virStrncpy(opt->owner_name, priv->vm_name,
++                            SANLK_NAME_LEN - 1, SANLK_NAME_LEN));
++
++    if (state && STRNEQ(state, "")) {
++        if ((rv = sanlock_state_to_args((char *)state,
++                                        &res_count,
++                                        &res_args)) < 0) {
++            if (rv <= -200)
++                virReportError(VIR_ERR_INTERNAL_ERROR,
++                               _("Unable to parse lock state %s: error %d"),
++                               state, rv);
++            else
++                virReportSystemError(-rv,
++                                     _("Unable to parse lock state %s"),
++                                     state);
++            goto error;
++        }
++        res_free = true;
++    } else {
++        res_args = priv->res_args;
++        res_count = priv->res_count;
++    }
++
+     if (!(flags & VIR_LOCK_MANAGER_ACQUIRE_REGISTER_ONLY)) {
+         VIR_DEBUG("Acquiring object %u", priv->res_count);
+         if ((rv = sanlock_acquire(sock, priv->vm_pid, 0,
+-- 
+1.9.3
+

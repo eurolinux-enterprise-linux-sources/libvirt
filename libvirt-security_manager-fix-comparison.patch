@@ -1,0 +1,67 @@
+From 7ed5d8d94789eccf2361a994833343ec9d9e936f Mon Sep 17 00:00:00 2001
+Message-Id: <7ed5d8d94789eccf2361a994833343ec9d9e936f.1374158623.git.jdenemar@redhat.com>
+From: =?UTF-8?q?Guido=20G=C3=BCnther?= <agx@sigxcpu.org>
+Date: Tue, 16 Jul 2013 12:20:52 +0200
+Subject: [PATCH] security_manager: fix comparison
+
+https://bugzilla.redhat.com/show_bug.cgi?id=984793
+
+otherwise we crash later on if we don't find a match like:
+
+ #0  0xb72c2b4f in virSecurityManagerGenLabel (mgr=0xb8e42d20, vm=0xb8ef40c0) at security/security_manager.c:424
+ #1  0xb18811f3 in qemuProcessStart (conn=conn@entry=0xb8eed880, driver=driver@entry=0xb8e3b1e0, vm=vm@entry=0xb8ef58f0,
+     migrateFrom=migrateFrom@entry=0xb18f6088 "stdio", stdin_fd=18,
+     stdin_path=stdin_path@entry=0xb8ea7798 "/var/lib/jenkins/jobs/libvirt-tck-build/workspace/tck.img", snapshot=snapshot@entry=0x0,
+     vmop=vmop@entry=VIR_NETDEV_VPORT_PROFILE_OP_RESTORE, flags=flags@entry=2) at qemu/qemu_process.c:3364
+ #2  0xb18d6cb2 in qemuDomainSaveImageStartVM (conn=conn@entry=0xb8eed880, driver=driver@entry=0xb8e3b1e0, vm=0xb8ef58f0, fd=fd@entry=0xb6bf3f98,
+     header=header@entry=0xb6bf3fa0, path=path@entry=0xb8ea7798 "/var/lib/jenkins/jobs/libvirt-tck-build/workspace/tck.img",
+     start_paused=start_paused@entry=false) at qemu/qemu_driver.c:4843
+ #3  0xb18d7eeb in qemuDomainRestoreFlags (conn=conn@entry=0xb8eed880,
+     path=path@entry=0xb8ea7798 "/var/lib/jenkins/jobs/libvirt-tck-build/workspace/tck.img", dxml=dxml@entry=0x0, flags=flags@entry=0)
+     at qemu/qemu_driver.c:4962
+ #4  0xb18d8123 in qemuDomainRestore (conn=0xb8eed880, path=0xb8ea7798 "/var/lib/jenkins/jobs/libvirt-tck-build/workspace/tck.img")
+     at qemu/qemu_driver.c:4987
+ #5  0xb718d186 in virDomainRestore (conn=0xb8eed880, from=0xb8ea87d8 "/var/lib/jenkins/jobs/libvirt-tck-build/workspace/tck.img") at libvirt.c:2768
+ #6  0xb7736363 in remoteDispatchDomainRestore (args=<optimized out>, rerr=0xb6bf41f0, client=0xb8eedaf0, server=<optimized out>, msg=<optimized out>)
+     at remote_dispatch.h:4679
+ #7  remoteDispatchDomainRestoreHelper (server=0xb8e1a3e0, client=0xb8eedaf0, msg=0xb8ee72c8, rerr=0xb6bf41f0, args=0xb8ea8968, ret=0xb8ef5330)
+     at remote_dispatch.h:4661
+ #8  0xb720db01 in virNetServerProgramDispatchCall (msg=0xb8ee72c8, client=0xb8eedaf0, server=0xb8e1a3e0, prog=0xb8e216b0)
+     at rpc/virnetserverprogram.c:439
+ #9  virNetServerProgramDispatch (prog=0xb8e216b0, server=server@entry=0xb8e1a3e0, client=0xb8eedaf0, msg=0xb8ee72c8) at rpc/virnetserverprogram.c:305
+ #10 0xb7206e97 in virNetServerProcessMsg (msg=<optimized out>, prog=<optimized out>, client=<optimized out>, srv=0xb8e1a3e0) at rpc/virnetserver.c:162
+ #11 virNetServerHandleJob (jobOpaque=0xb8ea7720, opaque=0xb8e1a3e0) at rpc/virnetserver.c:183
+ #12 0xb70f9f78 in virThreadPoolWorker (opaque=opaque@entry=0xb8e1a540) at util/virthreadpool.c:144
+ #13 0xb70f94a5 in virThreadHelper (data=0xb8e0e558) at util/virthreadpthread.c:161
+ #14 0xb705d954 in start_thread (arg=0xb6bf4b70) at pthread_create.c:304
+ #15 0xb6fd595e in clone () at ../sysdeps/unix/sysv/linux/i386/clone.S:130
+
+This unbreaks libvirt-tck's domain/100-transient-save-restore.t with
+qemu:///session and selinux compiled in but disabled.
+
+Introduced by 8d68cbeaa8a64759323da1d64526e2a941eb93e1
+(cherry picked from commit ea151935bb5cfacc0290f60960f8d515ca52ab29)
+
+Conflicts:
+	src/security/security_manager.c: Context as 48b49a63 is not
+    backported yet.
+---
+ src/security/security_manager.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/security/security_manager.c b/src/security/security_manager.c
+index 89feb73..b513dda 100644
+--- a/src/security/security_manager.c
++++ b/src/security/security_manager.c
+@@ -332,7 +332,7 @@ int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
+     if ((sec_managers = virSecurityManagerGetNested(mgr)) == NULL)
+         return ret;
+ 
+-    for (i = 0; vm->nseclabels; i++) {
++    for (i = 0; i < vm->nseclabels; i++) {
+         for (j = 0; sec_managers[j]; j++)
+             if (STREQ(vm->seclabels[i]->model, sec_managers[j]->drv->name))
+                 break;
+-- 
+1.8.3.2
+

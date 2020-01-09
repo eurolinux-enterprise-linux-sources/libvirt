@@ -1,0 +1,36 @@
+From 380e07b50478c0dac256bfbd96b3612ce6139d0f Mon Sep 17 00:00:00 2001
+Message-Id: <380e07b50478c0dac256bfbd96b3612ce6139d0f@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 7 May 2014 09:00:07 -0400
+Subject: [PATCH] qemuSetupCgroup: Fix reference to cgroup
+
+RHEL-only
+
+As noted in a post commit code review of an earlier backport (298eb3db)
+of upstream commit a39f69d2bb5494d661be917956baa437d01a4d13 the code
+should have used the local 'cgroup' not the 'driver->cgroup'.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1012846
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_cgroup.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 44d4351..99be07e 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -455,7 +455,7 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+             goto cleanup;
+         }
+ 
+-        rc = virCgroupSetCpusetCpus(driver->cgroup, cpu_mask);
++        rc = virCgroupSetCpusetCpus(cgroup, cpu_mask);
+         VIR_FREE(cpu_mask);
+         if (rc != 0) {
+             virReportSystemError(-rc,
+-- 
+1.9.3
+

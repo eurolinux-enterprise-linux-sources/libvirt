@@ -1,0 +1,82 @@
+From a398ad3082009ea19a2e0b9301909128b69eb261 Mon Sep 17 00:00:00 2001
+Message-Id: <a398ad3082009ea19a2e0b9301909128b69eb261@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 11 Apr 2014 10:43:58 +0200
+Subject: [PATCH] conf: Report errors on cputune parameter parsing
+
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1040784
+
+This patch adds proper error reporting if parsing of cputune parameters
+fails due to incorrect values provided by the user. Previously no errors
+were reported in such a case and the failure was silently ignored.
+
+(cherry picked from commit 7fc4864a3a28018ee41b56b1069c34878d417565)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 38 ++++++++++++++++++++++++++------------
+ 1 file changed, 26 insertions(+), 12 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index ffe6638..9e8cb84 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -9167,29 +9167,43 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+ 
+     /* Extract cpu tunables. */
+     if (virXPathULong("string(./cputune/shares[1])", ctxt,
+-                      &def->cputune.shares) < 0)
+-        def->cputune.shares = 0;
++                      &def->cputune.shares) < -1) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("can't parse cputune shares value"));
++        goto error;
++    }
+ 
+     if (virXPathULongLong("string(./cputune/period[1])", ctxt,
+-                          &def->cputune.period) < 0)
+-        def->cputune.period = 0;
++                          &def->cputune.period) < -1) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("can't parse cputune period value"));
++        goto error;
++    }
+ 
+     if (virXPathLongLong("string(./cputune/quota[1])", ctxt,
+-                         &def->cputune.quota) < 0)
+-        def->cputune.quota = 0;
++                         &def->cputune.quota) < -1) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("can't parse cputune quota value"));
++        goto error;
++    }
+ 
+     if (virXPathULongLong("string(./cputune/emulator_period[1])", ctxt,
+-                          &def->cputune.emulator_period) < 0)
+-        def->cputune.emulator_period = 0;
++                          &def->cputune.emulator_period) < -1) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("can't parse cputune emulator period value"));
++        goto error;
++    }
+ 
+     if (virXPathLongLong("string(./cputune/emulator_quota[1])", ctxt,
+-                         &def->cputune.emulator_quota) < 0)
+-        def->cputune.emulator_quota = 0;
+-
+-    if ((n = virXPathNodeSet("./cputune/vcpupin", ctxt, &nodes)) < 0) {
++                         &def->cputune.emulator_quota) < -1) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("can't parse cputune emulator quota value"));
+         goto error;
+     }
+ 
++    if ((n = virXPathNodeSet("./cputune/vcpupin", ctxt, &nodes)) < 0)
++        goto error;
++
+     if (n && VIR_ALLOC_N(def->cputune.vcpupin, n) < 0)
+         goto no_memory;
+ 
+-- 
+1.9.2
+

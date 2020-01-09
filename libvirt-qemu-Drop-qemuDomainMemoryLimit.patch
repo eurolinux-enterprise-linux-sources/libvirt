@@ -1,0 +1,113 @@
+From ea988d07c0d3ffb4a36102c71e859d75143a0829 Mon Sep 17 00:00:00 2001
+Message-Id: <ea988d07c0d3ffb4a36102c71e859d75143a0829.1380730269.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 30 Sep 2013 20:14:53 +0200
+Subject: [PATCH] qemu: Drop qemuDomainMemoryLimit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1013758
+
+This function is to guess the correct limit for maximal memory
+usage by qemu for given domain. This can never be guessed
+correctly, not to mention all the pains and sleepless nights this
+code has caused. Once somebody discovers algorithm to solve the
+Halting Problem, we can compute the limit algorithmically. But
+till then, this code should never see the light of the release
+again.
+(cherry picked from commit 16bcb3b61675a88bff00317336b9610080c31000)
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_cgroup.c: Context
+	src/qemu/qemu_domain.c: Context
+	src/qemu/qemu_domain.h: Context
+	src/qemu/qemu_hotplug.c: Context
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_cgroup.c  |  3 +--
+ src/qemu/qemu_command.c |  2 +-
+ src/qemu/qemu_domain.c  | 32 --------------------------------
+ src/qemu/qemu_domain.h  |  1 -
+ 4 files changed, 2 insertions(+), 36 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index e4a5452..f6f9d8c 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -343,8 +343,7 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+     }
+ 
+     if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_MEMORY)) {
+-        rc = virCgroupSetMemoryHardLimit(cgroup,
+-                                         qemuDomainMemoryLimit(vm->def));
++        rc = virCgroupSetMemoryHardLimit(cgroup, vm->def->mem.hard_limit);
+         if (rc != 0) {
+             virReportSystemError(-rc,
+                                  _("Unable to set memory hard limit for domain %s"),
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 7cdbac7..628f8d4 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -6958,7 +6958,7 @@ qemuBuildCommandLine(virConnectPtr conn,
+     }
+ 
+     if (mlock)
+-        virCommandSetMaxMemLock(cmd, qemuDomainMemoryLimit(def) * 1024);
++        virCommandSetMaxMemLock(cmd, def->mem.hard_limit * 1024);
+ 
+     return cmd;
+ 
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index faf4a73..5c577c5 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -2031,35 +2031,3 @@ qemuDomainDetermineDiskChain(struct qemud_driver *driver,
+     return 0;
+ }
+ 
+-
+-unsigned long long
+-qemuDomainMemoryLimit(virDomainDefPtr def)
+-{
+-    unsigned long long mem;
+-    int i;
+-
+-    if (def->mem.hard_limit) {
+-        mem = def->mem.hard_limit;
+-    } else {
+-        /* If there is no hard_limit set, compute a reasonable one to avoid
+-         * system thrashing caused by exploited qemu.  A 'reasonable
+-         * limit' has been chosen:
+-         *     (1 + k) * (domain memory + total video memory) + (32MB for
+-         *     cache per each disk) + F
+-         * where k = 0.5 and F = 200MB.  The cache for disks is important as
+-         * kernel cache on the host side counts into the RSS limit.
+-         *
+-         * Technically, the disk cache does not have to be included in
+-         * RLIMIT_MEMLOCK but it doesn't hurt as it's just an upper limit and
+-         * it makes this function and its usage simpler.
+-         */
+-        mem = def->mem.max_balloon;
+-        for (i = 0; i < def->nvideos; i++)
+-            mem += def->videos[i]->vram;
+-        mem *= 1.5;
+-        mem += def->ndisks * 32768;
+-        mem += 204800;
+-    }
+-
+-    return mem;
+-}
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 5056d8c..c010a3e 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -364,6 +364,5 @@ void qemuDomainCleanupRemove(virDomainObjPtr vm,
+ void qemuDomainCleanupRun(struct qemud_driver *driver,
+                           virDomainObjPtr vm);
+ 
+-unsigned long long qemuDomainMemoryLimit(virDomainDefPtr def);
+ 
+ #endif /* __QEMU_DOMAIN_H__ */
+-- 
+1.8.3.2
+

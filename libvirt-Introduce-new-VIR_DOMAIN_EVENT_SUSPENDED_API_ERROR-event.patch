@@ -1,0 +1,61 @@
+From 28e754d3257343cfce7f41d6c9f61e666f492eb0 Mon Sep 17 00:00:00 2001
+Message-Id: <28e754d3257343cfce7f41d6c9f61e666f492eb0.1352726475.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 7 Nov 2012 12:18:02 +0100
+Subject: [PATCH] Introduce new VIR_DOMAIN_EVENT_SUSPENDED_API_ERROR event
+
+https://bugzilla.redhat.com/show_bug.cgi?id=866388
+
+This is supposed to be thrown every time we need to pause domain
+because of API execution (e.g. qemuDomainSaveInternal) but fails
+to restore it back after. In this case, domain remains paused,
+however, none of existing reasons can fit this scenario.
+(cherry picked from commit adb29a88694a4ae5d2a2de6d9edf5fe36f2cd42d)
+---
+ examples/domain-events/events-c/event-test.c       | 3 +++
+ examples/domain-events/events-python/event-test.py | 2 +-
+ include/libvirt/libvirt.h.in                       | 1 +
+ 3 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/examples/domain-events/events-c/event-test.c b/examples/domain-events/events-c/event-test.c
+index 39bea49..ede9796 100644
+--- a/examples/domain-events/events-c/event-test.c
++++ b/examples/domain-events/events-c/event-test.c
+@@ -149,6 +149,9 @@ static const char *eventDetailToString(int event, int detail) {
+             case VIR_DOMAIN_EVENT_SUSPENDED_FROM_SNAPSHOT:
+                 ret = "Snapshot";
+                 break;
++            case VIR_DOMAIN_EVENT_SUSPENDED_API_ERROR:
++                ret = "API error";
++                break;
+             }
+             break;
+         case VIR_DOMAIN_EVENT_RESUMED:
+diff --git a/examples/domain-events/events-python/event-test.py b/examples/domain-events/events-python/event-test.py
+index 445e017..786e158 100644
+--- a/examples/domain-events/events-python/event-test.py
++++ b/examples/domain-events/events-python/event-test.py
+@@ -445,7 +445,7 @@ def detailToString(event, detail):
+         ( "Added", "Updated" ),
+         ( "Removed", ),
+         ( "Booted", "Migrated", "Restored", "Snapshot", "Wakeup" ),
+-        ( "Paused", "Migrated", "IOError", "Watchdog", "Restored", "Snapshot" ),
++        ( "Paused", "Migrated", "IOError", "Watchdog", "Restored", "Snapshot", "API error" ),
+         ( "Unpaused", "Migrated", "Snapshot" ),
+         ( "Shutdown", "Destroyed", "Crashed", "Migrated", "Saved", "Failed", "Snapshot"),
+         ( "Finished", ),
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index 1db6e2f..ece08ca 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -3062,6 +3062,7 @@ typedef enum {
+     VIR_DOMAIN_EVENT_SUSPENDED_WATCHDOG = 3,  /* Suspended due to a watchdog firing */
+     VIR_DOMAIN_EVENT_SUSPENDED_RESTORED = 4,  /* Restored from paused state file */
+     VIR_DOMAIN_EVENT_SUSPENDED_FROM_SNAPSHOT = 5, /* Restored from paused snapshot */
++    VIR_DOMAIN_EVENT_SUSPENDED_API_ERROR = 6, /* suspended after failure during libvirt API call */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_EVENT_SUSPENDED_LAST
+-- 
+1.8.0
+

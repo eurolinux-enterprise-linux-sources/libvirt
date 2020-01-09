@@ -1,0 +1,526 @@
+From 5084279581ac0e97f5c844ebd82d0f0bec9e502a Mon Sep 17 00:00:00 2001
+Message-Id: <5084279581ac0e97f5c844ebd82d0f0bec9e502a.1352118320.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Sun, 4 Nov 2012 20:47:27 +0100
+Subject: [PATCH] snapshot: new XML for external system checkpoint
+
+https://bugzilla.redhat.com/show_bug.cgi?id=638512
+
+Each <domainsnapshot> can now contain an optional <memory>
+element that describes how the VM state was handled, similar
+to disk snapshots.  The new element will always appear in
+output; for back-compat, an input that lacks the element will
+assume 'no' or 'internal' according to the domain state.
+
+Along with this change, it is now possible to pass <disks> in
+the XML for an offline snapshot; this also needs to be wired up
+in a future patch, to make it possible to choose internal vs.
+external on a per-disk basis for each disk in an offline domain.
+At that point, using the --disk-only flag for an offline domain
+will be able to work.
+
+For some examples below, remember that qemu supports the
+following snapshot actions:
+
+qemu-img: offline external and internal disk
+savevm: online internal VM and disk
+migrate: online external VM
+transaction: online external disk
+
+=====
+<domainsnapshot>
+  <memory snapshot='no'/>
+  ...
+</domainsnapshot>
+
+implies that there is no VM state saved (mandatory for
+offline and disk-only snapshots, not possible otherwise);
+using qemu-img for offline domains and transaction for online.
+
+=====
+<domainsnapshot>
+  <memory snapshot='internal'/>
+  ...
+</domainsnapshot>
+
+state is saved inside one of the disks (as in qemu's 'savevm'
+system checkpoint implementation).  If needed in the future,
+we can also add an attribute pointing out _which_ disk saved
+the internal state; maybe disk='vda'.
+
+=====
+<domainsnapshot>
+  <memory snapshot='external' file='/path/to/state'/>
+  ...
+</domainsnapshot>
+
+This is not wired up yet, but future patches will allow this to
+control a combination of 'virsh save /path/to/state' plus disk
+snapshots from the same point in time.
+
+=====
+
+So for 1.0.1 (and later, as needed), I plan to implement this table
+of combinations, with '*' designating new code and '+' designating
+existing code reached through new combinations of xml and/or the
+existing DISK_ONLY flag:
+
+domain  memory  disk   disk-only | result
+-----------------------------------------
+offline omit    omit   any       | memory=no disk=int, via qemu-img
+offline no      omit   any       |+memory=no disk=int, via qemu-img
+offline omit/no no     any       | invalid combination (nothing to snapshot)
+offline omit/no int    any       |+memory=no disk=int, via qemu-img
+offline omit/no ext    any       |*memory=no disk=ext, via qemu-img
+offline int/ext any    any       | invalid combination (no memory to save)
+online  omit    omit   off       | memory=int disk=int, via savevm
+online  omit    omit   on        | memory=no disk=default, via transaction
+online  omit    no/ext off       | unsupported for now
+online  omit    no     on        | invalid combination (nothing to snapshot)
+online  omit    ext    on        | memory=no disk=ext, via transaction
+online  omit    int    off       |+memory=int disk=int, via savevm
+online  omit    int    on        | unsupported for now
+online  no      omit   any       |+memory=no disk=default, via transaction
+online  no      no     any       | invalid combination (nothing to snapshot)
+online  no      int    any       | unsupported for now
+online  no      ext    any       |+memory=no disk=ext, via transaction
+online  int/ext any    on        | invalid combination (disk-only vs. memory)
+online  int     omit   off       |+memory=int disk=int, via savevm
+online  int     no/ext off       | unsupported for now
+online  int     int    off       |+memory=int disk=int, via savevm
+online  ext     omit   off       |*memory=ext disk=default, via migrate+trans
+online  ext     no     off       |+memory=ext disk=no, via migrate
+online  ext     int    off       | unsupported for now
+online  ext     ext    off       |*memory=ext disk=ext, via migrate+transaction
+
+* docs/schemas/domainsnapshot.rng (memory): New RNG element.
+* docs/formatsnapshot.html.in: Document it.
+* src/conf/snapshot_conf.h (virDomainSnapshotDef): New fields.
+* src/conf/domain_conf.c (virDomainSnapshotDefFree)
+(virDomainSnapshotDefParseString, virDomainSnapshotDefFormat):
+Manage new fields.
+* tests/domainsnapshotxml2xmltest.c: New test.
+* tests/domainsnapshotxml2xmlin/*.xml: Update existing tests.
+* tests/domainsnapshotxml2xmlout/*.xml: Likewise.
+(cherry picked from commit 4201a7ea1c6daeaf2960fa00cfe8e30ec3e66531)
+---
+ docs/formatsnapshot.html.in                        | 20 ++++++--
+ docs/schemas/domainsnapshot.rng                    | 23 +++++++++
+ src/conf/snapshot_conf.c                           | 54 ++++++++++++++++++++--
+ src/conf/snapshot_conf.h                           |  4 ++
+ tests/domainsnapshotxml2xmlin/external_vm.xml      | 10 ++++
+ tests/domainsnapshotxml2xmlin/noparent.xml         |  9 ++++
+ tests/domainsnapshotxml2xmlout/all_parameters.xml  |  1 +
+ tests/domainsnapshotxml2xmlout/disk_snapshot.xml   |  1 +
+ tests/domainsnapshotxml2xmlout/external_vm.xml     | 43 +++++++++++++++++
+ tests/domainsnapshotxml2xmlout/full_domain.xml     |  1 +
+ tests/domainsnapshotxml2xmlout/metadata.xml        |  1 +
+ tests/domainsnapshotxml2xmlout/noparent.xml        |  1 +
+ .../noparent_nodescription.xml                     |  1 +
+ .../noparent_nodescription_noactive.xml            |  1 +
+ tests/domainsnapshotxml2xmltest.c                  |  1 +
+ 15 files changed, 162 insertions(+), 9 deletions(-)
+ create mode 100644 tests/domainsnapshotxml2xmlin/external_vm.xml
+ create mode 100644 tests/domainsnapshotxml2xmlin/noparent.xml
+ create mode 100644 tests/domainsnapshotxml2xmlout/external_vm.xml
+
+diff --git a/docs/formatsnapshot.html.in b/docs/formatsnapshot.html.in
+index ec5ebf3..8fcc04c 100644
+--- a/docs/formatsnapshot.html.in
++++ b/docs/formatsnapshot.html.in
+@@ -24,7 +24,7 @@
+         since the snapshot in a single file) and external (the
+         snapshot is one file, and the changes since the snapshot are
+         in another file).</dd>
+-      <dt>VM state</dt>
++      <dt>memory state (or VM state)</dt>
+       <dd>Tracks only the state of RAM and all other resources in use
+         by the VM.  If the disks are unmodified between the time a VM
+         state snapshot is taken and restored, then the guest will
+@@ -33,7 +33,7 @@
+         corruption.</dd>
+       <dt>system checkpoint</dt>
+       <dd>A combination of disk snapshots for all disks as well as VM
+-        state, which can be used to resume the guest from where it
++        memory state, which can be used to resume the guest from where it
+         left off with symptoms similar to hibernation (that is, TCP
+         connections in the guest may have timed out, but no files or
+         processes are lost).</dd>
+@@ -41,7 +41,7 @@
+ 
+     <p>
+       Libvirt can manage all three types of snapshots.  For now, VM
+-      state snapshots are created only by
++      state (memory) snapshots are created only by
+       the <code>virDomainSave()</code>, <code>virDomainSaveFlags</code>,
+       and <code>virDomainManagedSave()</code> functions, and restored
+       via the <code>virDomainRestore()</code>,
+@@ -106,6 +106,17 @@
+         description is omitted when initially creating the snapshot,
+         then this field will be empty.
+       </dd>
++      <dt><code>memory</code></dt>
++      <dd>On input, this is an optional request for how to handle VM
++        memory state.  For an offline domain or a disk-only snapshot,
++        attribute <code>snapshot</code> must be <code>no</code>, since
++        there is no VM state saved; otherwise, the attribute can
++        be <code>internal</code> if the memory state is piggy-backed with
++        other internal disk state, or <code>external</code> along with
++        a second attribute <code>file</code> giving the absolute path
++        of the file holding the VM memory state.  <span class="since">Since
++        1.0.1</span>
++      </dd>
+       <dt><code>disks</code></dt>
+       <dd>On input, this is an optional listing of specific
+         instructions for disk snapshots; it is needed when making a
+@@ -172,7 +183,7 @@
+         to <code>virDomainRevertToSnapshot()</code>.  Additionally,
+         this field can be the value "disk-snapshot"
+         (<span class="since">since 0.9.5</span>) when it represents
+-        only a disk snapshot (no VM state), and reverting to this
++        only a disk snapshot (no VM memory state), and reverting to this
+         snapshot will default to an inactive guest.  Readonly.
+       </dd>
+       <dt><code>parent</code></dt>
+@@ -222,6 +233,7 @@
+   &lt;parent&gt;
+     &lt;name&gt;bare-os-install&lt;/name&gt;
+   &lt;/parent&gt;
++  &lt;memory snapshot='no'/&gt;
+   &lt;disks&gt;
+     &lt;disk name='vda' snapshot='external'&gt;
+       &lt;driver type='qcow2'/&gt;
+diff --git a/docs/schemas/domainsnapshot.rng b/docs/schemas/domainsnapshot.rng
+index ecaafe9..45d55b5 100644
+--- a/docs/schemas/domainsnapshot.rng
++++ b/docs/schemas/domainsnapshot.rng
+@@ -31,6 +31,29 @@
+           </element>
+         </optional>
+         <optional>
++          <element name='memory'>
++            <choice>
++              <attribute name='snapshot'>
++                <choice>
++                  <value>no</value>
++                  <value>internal</value>
++                </choice>
++              </attribute>
++              <group>
++                <optional>
++                  <attribute name='snapshot'>
++                    <value>external</value>
++                  </attribute>
++                </optional>
++                <attribute name='file'>
++                  <ref name='absFilePath'/>
++                </attribute>
++              </group>
++            </choice>
++            <empty/>
++          </element>
++        </optional>
++        <optional>
+           <element name='disks'>
+             <zeroOrMore>
+               <ref name='disksnapshot'/>
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index 16c844d..d55aa6b 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -94,6 +94,7 @@ void virDomainSnapshotDefFree(virDomainSnapshotDefPtr def)
+     VIR_FREE(def->name);
+     VIR_FREE(def->description);
+     VIR_FREE(def->parent);
++    VIR_FREE(def->file);
+     for (i = 0; i < def->ndisks; i++)
+         virDomainSnapshotDiskDefClear(&def->disks[i]);
+     VIR_FREE(def->disks);
+@@ -182,6 +183,9 @@ virDomainSnapshotDefParseString(const char *xmlStr,
+     int active;
+     char *tmp;
+     int keepBlanksDefault = xmlKeepBlanksDefault(0);
++    char *memorySnapshot = NULL;
++    char *memoryFile = NULL;
++    bool offline = !!(flags & VIR_DOMAIN_SNAPSHOT_PARSE_OFFLINE);
+ 
+     xml = virXMLParseCtxt(NULL, xmlStr, _("(domain_snapshot)"), &ctxt);
+     if (!xml) {
+@@ -247,6 +251,8 @@ virDomainSnapshotDefParseString(const char *xmlStr,
+                            state);
+             goto cleanup;
+         }
++        offline = (def->state == VIR_DOMAIN_SHUTOFF ||
++                   def->state == VIR_DOMAIN_DISK_SNAPSHOT);
+ 
+         /* Older snapshots were created with just <domain>/<uuid>, and
+          * lack domain/@type.  In that case, leave dom NULL, and
+@@ -274,11 +280,42 @@ virDomainSnapshotDefParseString(const char *xmlStr,
+         def->creationTime = tv.tv_sec;
+     }
+ 
++    memorySnapshot = virXPathString("string(./memory/@snapshot)", ctxt);
++    memoryFile = virXPathString("string(./memory/@file)", ctxt);
++    if (memorySnapshot) {
++        def->memory = virDomainSnapshotLocationTypeFromString(memorySnapshot);
++        if (def->memory <= 0) {
++            virReportError(VIR_ERR_XML_ERROR,
++                           _("unknown memory snapshot setting '%s'"),
++                           memorySnapshot);
++            goto cleanup;
++        }
++        if (memoryFile &&
++            def->memory != VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL) {
++            virReportError(VIR_ERR_XML_ERROR,
++                           _("memory filename '%s' requires external snapshot"),
++                           memoryFile);
++            goto cleanup;
++        }
++    } else if (memoryFile) {
++        def->memory = VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL;
++    } else if (flags & VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE) {
++        def->memory = (offline ?
++                       VIR_DOMAIN_SNAPSHOT_LOCATION_NONE :
++                       VIR_DOMAIN_SNAPSHOT_LOCATION_INTERNAL);
++    }
++    if (offline && def->memory &&
++        def->memory != VIR_DOMAIN_SNAPSHOT_LOCATION_NONE) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("memory state cannot be saved with offline snapshot"));
++        goto cleanup;
++    }
++    def->file = memoryFile;
++    memoryFile = NULL;
++
+     if ((i = virXPathNodeSet("./disks/*", ctxt, &nodes)) < 0)
+         goto cleanup;
+-    if (flags & VIR_DOMAIN_SNAPSHOT_PARSE_DISKS ||
+-        (flags & VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE &&
+-         def->state == VIR_DOMAIN_DISK_SNAPSHOT)) {
++    if (flags & VIR_DOMAIN_SNAPSHOT_PARSE_DISKS) {
+         def->ndisks = i;
+         if (def->ndisks && VIR_ALLOC_N(def->disks, def->ndisks) < 0) {
+             virReportOOMError();
+@@ -310,6 +347,8 @@ cleanup:
+     VIR_FREE(creation);
+     VIR_FREE(state);
+     VIR_FREE(nodes);
++    VIR_FREE(memorySnapshot);
++    VIR_FREE(memoryFile);
+     xmlXPathFreeContext(ctxt);
+     if (ret == NULL)
+         virDomainSnapshotDefFree(def);
+@@ -531,8 +570,13 @@ char *virDomainSnapshotDefFormat(const char *domain_uuid,
+     }
+     virBufferAsprintf(&buf, "  <creationTime>%lld</creationTime>\n",
+                       def->creationTime);
+-    /* For now, only output <disks> on disk-snapshot */
+-    if (def->state == VIR_DOMAIN_DISK_SNAPSHOT) {
++    if (def->memory) {
++        virBufferAsprintf(&buf, "  <memory snapshot='%s'",
++                          virDomainSnapshotLocationTypeToString(def->memory));
++        virBufferEscapeString(&buf, " file='%s'", def->file);
++        virBufferAddLit(&buf, "/>\n");
++    }
++    if (def->ndisks) {
+         virBufferAddLit(&buf, "  <disks>\n");
+         for (i = 0; i < def->ndisks; i++) {
+             virDomainSnapshotDiskDefPtr disk = &def->disks[i];
+diff --git a/src/conf/snapshot_conf.h b/src/conf/snapshot_conf.h
+index c00347f..00775ae 100644
+--- a/src/conf/snapshot_conf.h
++++ b/src/conf/snapshot_conf.h
+@@ -66,6 +66,9 @@ struct _virDomainSnapshotDef {
+     long long creationTime; /* in seconds */
+     int state; /* enum virDomainSnapshotState */
+ 
++    int memory; /* enum virDomainMemorySnapshot */
++    char *file; /* memory state file when snapshot is external */
++
+     size_t ndisks; /* should not exceed dom->ndisks */
+     virDomainSnapshotDiskDef *disks;
+ 
+@@ -93,6 +96,7 @@ typedef enum {
+     VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE = 1 << 0,
+     VIR_DOMAIN_SNAPSHOT_PARSE_DISKS    = 1 << 1,
+     VIR_DOMAIN_SNAPSHOT_PARSE_INTERNAL = 1 << 2,
++    VIR_DOMAIN_SNAPSHOT_PARSE_OFFLINE  = 1 << 3,
+ } virDomainSnapshotParseFlags;
+ 
+ virDomainSnapshotDefPtr virDomainSnapshotDefParseString(const char *xmlStr,
+diff --git a/tests/domainsnapshotxml2xmlin/external_vm.xml b/tests/domainsnapshotxml2xmlin/external_vm.xml
+new file mode 100644
+index 0000000..3bcd150
+--- /dev/null
++++ b/tests/domainsnapshotxml2xmlin/external_vm.xml
+@@ -0,0 +1,10 @@
++<domainsnapshot>
++  <name>my snap name</name>
++  <description>!@#$%^</description>
++  <state>running</state>
++  <memory snapshot='external' file='/dev/HostVG/GuestMemory'/>
++  <parent>
++    <name>earlier_snap</name>
++  </parent>
++  <creationTime>1272917631</creationTime>
++</domainsnapshot>
+diff --git a/tests/domainsnapshotxml2xmlin/noparent.xml b/tests/domainsnapshotxml2xmlin/noparent.xml
+new file mode 100644
+index 0000000..cbac0d8
+--- /dev/null
++++ b/tests/domainsnapshotxml2xmlin/noparent.xml
+@@ -0,0 +1,9 @@
++<domainsnapshot>
++  <name>my snap name</name>
++  <description>!@#$%^</description>
++  <state>running</state>
++  <creationTime>1272917631</creationTime>
++  <domain>
++    <uuid>9d37b878-a7cc-9f9a-b78f-49b3abad25a8</uuid>
++  </domain>
++</domainsnapshot>
+diff --git a/tests/domainsnapshotxml2xmlout/all_parameters.xml b/tests/domainsnapshotxml2xmlout/all_parameters.xml
+index eb2ee85..4178ac6 100644
+--- a/tests/domainsnapshotxml2xmlout/all_parameters.xml
++++ b/tests/domainsnapshotxml2xmlout/all_parameters.xml
+@@ -6,6 +6,7 @@
+     <name>earlier_snap</name>
+   </parent>
+   <creationTime>1272917631</creationTime>
++  <memory snapshot='internal'/>
+   <domain>
+     <uuid>9d37b878-a7cc-9f9a-b78f-49b3abad25a8</uuid>
+   </domain>
+diff --git a/tests/domainsnapshotxml2xmlout/disk_snapshot.xml b/tests/domainsnapshotxml2xmlout/disk_snapshot.xml
+index 0a4b179..57aef16 100644
+--- a/tests/domainsnapshotxml2xmlout/disk_snapshot.xml
++++ b/tests/domainsnapshotxml2xmlout/disk_snapshot.xml
+@@ -6,6 +6,7 @@
+     <name>earlier_snap</name>
+   </parent>
+   <creationTime>1272917631</creationTime>
++  <memory snapshot='no'/>
+   <disks>
+     <disk name='hda' snapshot='no'/>
+     <disk name='hdb' snapshot='no'/>
+diff --git a/tests/domainsnapshotxml2xmlout/external_vm.xml b/tests/domainsnapshotxml2xmlout/external_vm.xml
+new file mode 100644
+index 0000000..8814bce
+--- /dev/null
++++ b/tests/domainsnapshotxml2xmlout/external_vm.xml
+@@ -0,0 +1,43 @@
++<domainsnapshot>
++  <name>my snap name</name>
++  <description>!@#$%^</description>
++  <state>running</state>
++  <parent>
++    <name>earlier_snap</name>
++  </parent>
++  <creationTime>1272917631</creationTime>
++  <memory snapshot='external' file='/dev/HostVG/GuestMemory'/>
++  <disks>
++    <disk name='hda' snapshot='no'/>
++  </disks>
++  <domain type='qemu'>
++    <name>QEMUGuest1</name>
++    <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++    <metadata>
++      <app1:foo xmlns:app1="http://foo.org/">fooish</app1:foo>
++      <app2:bar xmlns:app2="http://bar.com/" maman="baz">barish</app2:bar>
++    </metadata>
++    <memory unit='KiB'>219100</memory>
++    <currentMemory unit='KiB'>219100</currentMemory>
++    <vcpu placement='static' cpuset='1-4,8-20,525'>1</vcpu>
++    <os>
++      <type arch='i686' machine='pc'>hvm</type>
++      <boot dev='hd'/>
++    </os>
++    <clock offset='utc'/>
++    <on_poweroff>destroy</on_poweroff>
++    <on_reboot>restart</on_reboot>
++    <on_crash>destroy</on_crash>
++    <devices>
++      <emulator>/usr/bin/qemu</emulator>
++      <disk type='block' device='disk' snapshot='no'>
++        <source dev='/dev/HostVG/QEMUGuest1'/>
++        <target dev='hda' bus='ide'/>
++        <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++      </disk>
++      <controller type='usb' index='0'/>
++      <controller type='ide' index='0'/>
++      <memballoon model='virtio'/>
++    </devices>
++  </domain>
++</domainsnapshot>
+diff --git a/tests/domainsnapshotxml2xmlout/full_domain.xml b/tests/domainsnapshotxml2xmlout/full_domain.xml
+index 27cf41d..65d1469 100644
+--- a/tests/domainsnapshotxml2xmlout/full_domain.xml
++++ b/tests/domainsnapshotxml2xmlout/full_domain.xml
+@@ -6,6 +6,7 @@
+     <name>earlier_snap</name>
+   </parent>
+   <creationTime>1272917631</creationTime>
++  <memory snapshot='internal'/>
+   <domain type='qemu'>
+     <name>QEMUGuest1</name>
+     <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
+diff --git a/tests/domainsnapshotxml2xmlout/metadata.xml b/tests/domainsnapshotxml2xmlout/metadata.xml
+index 93c9f39..f961458 100644
+--- a/tests/domainsnapshotxml2xmlout/metadata.xml
++++ b/tests/domainsnapshotxml2xmlout/metadata.xml
+@@ -6,6 +6,7 @@
+     <name>earlier_snap</name>
+   </parent>
+   <creationTime>1272917631</creationTime>
++  <memory snapshot='internal'/>
+   <domain type='qemu'>
+     <name>QEMUGuest1</name>
+     <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
+diff --git a/tests/domainsnapshotxml2xmlout/noparent.xml b/tests/domainsnapshotxml2xmlout/noparent.xml
+index cbac0d8..0cbbb65 100644
+--- a/tests/domainsnapshotxml2xmlout/noparent.xml
++++ b/tests/domainsnapshotxml2xmlout/noparent.xml
+@@ -3,6 +3,7 @@
+   <description>!@#$%^</description>
+   <state>running</state>
+   <creationTime>1272917631</creationTime>
++  <memory snapshot='internal'/>
+   <domain>
+     <uuid>9d37b878-a7cc-9f9a-b78f-49b3abad25a8</uuid>
+   </domain>
+diff --git a/tests/domainsnapshotxml2xmlout/noparent_nodescription.xml b/tests/domainsnapshotxml2xmlout/noparent_nodescription.xml
+index 0de202d..4eb4016 100644
+--- a/tests/domainsnapshotxml2xmlout/noparent_nodescription.xml
++++ b/tests/domainsnapshotxml2xmlout/noparent_nodescription.xml
+@@ -3,5 +3,6 @@
+   <description>!@#$%^</description>
+   <state>running</state>
+   <creationTime>1272917631</creationTime>
++  <memory snapshot='internal'/>
+   <active>1</active>
+ </domainsnapshot>
+diff --git a/tests/domainsnapshotxml2xmlout/noparent_nodescription_noactive.xml b/tests/domainsnapshotxml2xmlout/noparent_nodescription_noactive.xml
+index 25b60f3..94d59a3 100644
+--- a/tests/domainsnapshotxml2xmlout/noparent_nodescription_noactive.xml
++++ b/tests/domainsnapshotxml2xmlout/noparent_nodescription_noactive.xml
+@@ -3,4 +3,5 @@
+   <description>!@#$%^</description>
+   <state>running</state>
+   <creationTime>1272917631</creationTime>
++  <memory snapshot='no'/>
+ </domainsnapshot>
+diff --git a/tests/domainsnapshotxml2xmltest.c b/tests/domainsnapshotxml2xmltest.c
+index e363c99..84278d6 100644
+--- a/tests/domainsnapshotxml2xmltest.c
++++ b/tests/domainsnapshotxml2xmltest.c
+@@ -110,6 +110,7 @@ mymain(void)
+     DO_TEST("noparent_nodescription", NULL, 1);
+     DO_TEST("noparent", "9d37b878-a7cc-9f9a-b78f-49b3abad25a8", 0);
+     DO_TEST("metadata", "c7a5fdbd-edaf-9455-926a-d65c16db1809", 0);
++    DO_TEST("external_vm", "c7a5fdbd-edaf-9455-926a-d65c16db1809", 0);
+ 
+     virCapabilitiesFree(driver.caps);
+ 
+-- 
+1.8.0
+

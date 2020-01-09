@@ -1,0 +1,83 @@
+From 7398e6637c79877c188c2a102aaaf5a4f8d063b0 Mon Sep 17 00:00:00 2001
+Message-Id: <7398e6637c79877c188c2a102aaaf5a4f8d063b0.1373271635.git.jdenemar@redhat.com>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 7 Feb 2013 18:28:17 +0100
+Subject: [PATCH] xen: Resolve resource leak with 'cpuset'
+
+https://bugzilla.redhat.com/show_bug.cgi?id=888503
+
+Make cpuset local to the while loop and free it once done with it each
+time through the loop.  Add a sa_assert() to virBitmapParse() to keep Coverity
+from believing there could be a negative return and possible resource leak.
+(cherry picked from commit 8bc18eaac6e57ce8897ae8d303defee0ac716676)
+---
+ src/util/bitmap.c       |  1 +
+ src/xen/xend_internal.c | 12 +++---------
+ 2 files changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/src/util/bitmap.c b/src/util/bitmap.c
+index ea89eee..01926b5 100644
+--- a/src/util/bitmap.c
++++ b/src/util/bitmap.c
+@@ -372,6 +372,7 @@ int virBitmapParse(const char *str,
+         }
+     }
+ 
++    sa_assert(ret >= 0);
+     return ret;
+ 
+ parse_error:
+diff --git a/src/xen/xend_internal.c b/src/xen/xend_internal.c
+index 95152f8..da9bf32 100644
+--- a/src/xen/xend_internal.c
++++ b/src/xen/xend_internal.c
+@@ -1113,7 +1113,6 @@ sexpr_to_xend_topology(const struct sexpr *root,
+ {
+     const char *nodeToCpu;
+     const char *cur;
+-    virBitmapPtr cpuset = NULL;
+     int *cpuNums = NULL;
+     int cell, cpu, nb_cpus;
+     int n = 0;
+@@ -1131,6 +1130,7 @@ sexpr_to_xend_topology(const struct sexpr *root,
+ 
+     cur = nodeToCpu;
+     while (*cur != 0) {
++        virBitmapPtr cpuset = NULL;
+         /*
+          * Find the next NUMA cell described in the xend output
+          */
+@@ -1163,28 +1163,22 @@ sexpr_to_xend_topology(const struct sexpr *root,
+             if (used)
+                 cpuNums[n++] = cpu;
+         }
++        virBitmapFree(cpuset);
+ 
+-        if (virCapabilitiesAddHostNUMACell(caps,
+-                                           cell,
+-                                           nb_cpus,
+-                                           cpuNums) < 0)
++        if (virCapabilitiesAddHostNUMACell(caps, cell, nb_cpus, cpuNums) < 0)
+             goto memory_error;
+     }
+     VIR_FREE(cpuNums);
+-    virBitmapFree(cpuset);
+     return 0;
+ 
+   parse_error:
+     virReportError(VIR_ERR_XEN_CALL, "%s", _("topology syntax error"));
+   error:
+     VIR_FREE(cpuNums);
+-    virBitmapFree(cpuset);
+-
+     return -1;
+ 
+   memory_error:
+     VIR_FREE(cpuNums);
+-    virBitmapFree(cpuset);
+     virReportOOMError();
+     return -1;
+ }
+-- 
+1.8.2.1
+

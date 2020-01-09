@@ -1,0 +1,1853 @@
+From ed30d38451509672eee49d4444888556c754fc07 Mon Sep 17 00:00:00 2001
+Message-Id: <ed30d38451509672eee49d4444888556c754fc07.1353330051.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 13 Nov 2012 00:50:21 +0100
+Subject: [PATCH] nodeinfotest: Add test data for 2 processor host with broken
+ NUMA
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=874050
+
+This test data was gathered on an AMD MagnyCours machine that reports it
+has only one NUMA node although the hardware is consisting of 4. As
+duplicate core id's are ignored the reported topology was bogous. This
+should be fixed by the previous patch.
+
+Reported and data provided by George-Cristian Bîrzan.
+(cherry picked from commit 86748976f18423c359e94294bd57df9fd9d98ce4)
+---
+ .../linux-test7/cpu/cpu0/topology/core_id          |   1 +
+ .../cpu/cpu0/topology/physical_package_id          |   1 +
+ .../linux-test7/cpu/cpu0/topology/thread_siblings  |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu1/online     |   1 +
+ .../linux-test7/cpu/cpu1/topology/core_id          |   1 +
+ .../cpu/cpu1/topology/physical_package_id          |   1 +
+ .../linux-test7/cpu/cpu1/topology/thread_siblings  |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu10/online    |   1 +
+ .../linux-test7/cpu/cpu10/topology/core_id         |   1 +
+ .../cpu/cpu10/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu10/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu11/online    |   1 +
+ .../linux-test7/cpu/cpu11/topology/core_id         |   1 +
+ .../cpu/cpu11/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu11/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu12/online    |   1 +
+ .../linux-test7/cpu/cpu12/topology/core_id         |   1 +
+ .../cpu/cpu12/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu12/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu13/online    |   1 +
+ .../linux-test7/cpu/cpu13/topology/core_id         |   1 +
+ .../cpu/cpu13/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu13/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu14/online    |   1 +
+ .../linux-test7/cpu/cpu14/topology/core_id         |   1 +
+ .../cpu/cpu14/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu14/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu15/online    |   1 +
+ .../linux-test7/cpu/cpu15/topology/core_id         |   1 +
+ .../cpu/cpu15/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu15/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu16/online    |   1 +
+ .../linux-test7/cpu/cpu16/topology/core_id         |   1 +
+ .../cpu/cpu16/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu16/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu17/online    |   1 +
+ .../linux-test7/cpu/cpu17/topology/core_id         |   1 +
+ .../cpu/cpu17/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu17/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu18/online    |   1 +
+ .../linux-test7/cpu/cpu18/topology/core_id         |   1 +
+ .../cpu/cpu18/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu18/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu19/online    |   1 +
+ .../linux-test7/cpu/cpu19/topology/core_id         |   1 +
+ .../cpu/cpu19/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu19/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu2/online     |   1 +
+ .../linux-test7/cpu/cpu2/topology/core_id          |   1 +
+ .../cpu/cpu2/topology/physical_package_id          |   1 +
+ .../linux-test7/cpu/cpu2/topology/thread_siblings  |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu20/online    |   1 +
+ .../linux-test7/cpu/cpu20/topology/core_id         |   1 +
+ .../cpu/cpu20/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu20/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu21/online    |   1 +
+ .../linux-test7/cpu/cpu21/topology/core_id         |   1 +
+ .../cpu/cpu21/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu21/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu22/online    |   1 +
+ .../linux-test7/cpu/cpu22/topology/core_id         |   1 +
+ .../cpu/cpu22/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu22/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu23/online    |   1 +
+ .../linux-test7/cpu/cpu23/topology/core_id         |   1 +
+ .../cpu/cpu23/topology/physical_package_id         |   1 +
+ .../linux-test7/cpu/cpu23/topology/thread_siblings |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu3/online     |   1 +
+ .../linux-test7/cpu/cpu3/topology/core_id          |   1 +
+ .../cpu/cpu3/topology/physical_package_id          |   1 +
+ .../linux-test7/cpu/cpu3/topology/thread_siblings  |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu4/online     |   1 +
+ .../linux-test7/cpu/cpu4/topology/core_id          |   1 +
+ .../cpu/cpu4/topology/physical_package_id          |   1 +
+ .../linux-test7/cpu/cpu4/topology/thread_siblings  |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu5/online     |   1 +
+ .../linux-test7/cpu/cpu5/topology/core_id          |   1 +
+ .../cpu/cpu5/topology/physical_package_id          |   1 +
+ .../linux-test7/cpu/cpu5/topology/thread_siblings  |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu6/online     |   1 +
+ .../linux-test7/cpu/cpu6/topology/core_id          |   1 +
+ .../cpu/cpu6/topology/physical_package_id          |   1 +
+ .../linux-test7/cpu/cpu6/topology/thread_siblings  |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu7/online     |   1 +
+ .../linux-test7/cpu/cpu7/topology/core_id          |   1 +
+ .../cpu/cpu7/topology/physical_package_id          |   1 +
+ .../linux-test7/cpu/cpu7/topology/thread_siblings  |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu8/online     |   1 +
+ .../linux-test7/cpu/cpu8/topology/core_id          |   1 +
+ .../cpu/cpu8/topology/physical_package_id          |   1 +
+ .../linux-test7/cpu/cpu8/topology/thread_siblings  |   1 +
+ tests/nodeinfodata/linux-test7/cpu/cpu9/online     |   1 +
+ .../linux-test7/cpu/cpu9/topology/core_id          |   1 +
+ .../cpu/cpu9/topology/physical_package_id          |   1 +
+ .../linux-test7/cpu/cpu9/topology/thread_siblings  |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu0     |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu1     |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu10    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu11    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu12    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu13    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu14    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu15    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu16    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu17    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu18    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu19    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu2     |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu20    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu21    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu22    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu23    |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu3     |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu4     |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu5     |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu6     |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu7     |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu8     |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/cpu9     |   1 +
+ tests/nodeinfodata/linux-test7/node/node0/meminfo  |  29 +
+ tests/nodeinfodata/linux-test7/node/online         |   1 +
+ tests/nodeinfodata/linux-test7/node/possible       |   1 +
+ tests/nodeinfodata/linux-x86-test7.cpuinfo         | 648 +++++++++++++++++++++
+ tests/nodeinfodata/linux-x86-test7.expected        |   1 +
+ tests/nodeinfotest.c                               |   1 +
+ 125 files changed, 800 insertions(+)
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu0/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu0/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu0/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu1/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu1/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu1/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu1/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu10/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu10/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu10/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu10/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu11/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu11/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu11/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu11/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu12/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu12/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu12/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu12/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu13/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu13/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu13/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu13/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu14/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu14/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu14/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu14/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu15/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu15/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu15/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu15/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu16/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu16/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu16/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu16/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu17/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu17/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu17/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu17/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu18/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu18/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu18/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu18/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu19/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu19/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu19/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu19/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu2/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu2/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu2/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu2/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu20/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu20/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu20/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu20/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu21/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu21/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu21/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu21/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu22/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu22/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu22/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu22/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu23/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu23/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu23/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu23/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu3/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu3/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu3/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu3/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu4/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu4/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu4/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu4/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu5/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu5/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu5/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu5/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu6/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu6/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu6/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu6/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu7/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu7/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu7/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu7/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu8/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu8/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu8/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu8/topology/thread_siblings
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu9/online
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu9/topology/core_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu9/topology/physical_package_id
+ create mode 100644 tests/nodeinfodata/linux-test7/cpu/cpu9/topology/thread_siblings
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu0
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu1
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu10
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu11
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu12
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu13
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu14
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu15
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu16
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu17
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu18
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu19
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu2
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu20
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu21
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu22
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu23
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu3
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu4
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu5
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu6
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu7
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu8
+ create mode 120000 tests/nodeinfodata/linux-test7/node/node0/cpu9
+ create mode 100644 tests/nodeinfodata/linux-test7/node/node0/meminfo
+ create mode 100644 tests/nodeinfodata/linux-test7/node/online
+ create mode 100644 tests/nodeinfodata/linux-test7/node/possible
+ create mode 100644 tests/nodeinfodata/linux-x86-test7.cpuinfo
+ create mode 100644 tests/nodeinfodata/linux-x86-test7.expected
+
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu0/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu0/topology/core_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu0/topology/core_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu0/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu0/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu0/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu0/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu0/topology/thread_siblings
+new file mode 100644
+index 0000000..3dc19f2
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu0/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000001
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu1/online b/tests/nodeinfodata/linux-test7/cpu/cpu1/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu1/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu1/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu1/topology/core_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu1/topology/core_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu1/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu1/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu1/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu1/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu1/topology/thread_siblings
+new file mode 100644
+index 0000000..7d4e089
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu1/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000002
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu10/online b/tests/nodeinfodata/linux-test7/cpu/cpu10/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu10/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu10/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu10/topology/core_id
+new file mode 100644
+index 0000000..b8626c4
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu10/topology/core_id
+@@ -0,0 +1 @@
++4
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu10/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu10/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu10/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu10/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu10/topology/thread_siblings
+new file mode 100644
+index 0000000..de0e54d
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu10/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000400
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu11/online b/tests/nodeinfodata/linux-test7/cpu/cpu11/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu11/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu11/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu11/topology/core_id
+new file mode 100644
+index 0000000..7ed6ff8
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu11/topology/core_id
+@@ -0,0 +1 @@
++5
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu11/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu11/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu11/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu11/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu11/topology/thread_siblings
+new file mode 100644
+index 0000000..b1e6e03
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu11/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000800
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu12/online b/tests/nodeinfodata/linux-test7/cpu/cpu12/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu12/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu12/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu12/topology/core_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu12/topology/core_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu12/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu12/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu12/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu12/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu12/topology/thread_siblings
+new file mode 100644
+index 0000000..73f3cf7
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu12/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00001000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu13/online b/tests/nodeinfodata/linux-test7/cpu/cpu13/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu13/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu13/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu13/topology/core_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu13/topology/core_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu13/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu13/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu13/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu13/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu13/topology/thread_siblings
+new file mode 100644
+index 0000000..b60939a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu13/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00002000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu14/online b/tests/nodeinfodata/linux-test7/cpu/cpu14/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu14/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu14/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu14/topology/core_id
+new file mode 100644
+index 0000000..0cfbf08
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu14/topology/core_id
+@@ -0,0 +1 @@
++2
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu14/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu14/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu14/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu14/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu14/topology/thread_siblings
+new file mode 100644
+index 0000000..0159580
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu14/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00004000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu15/online b/tests/nodeinfodata/linux-test7/cpu/cpu15/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu15/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu15/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu15/topology/core_id
+new file mode 100644
+index 0000000..00750ed
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu15/topology/core_id
+@@ -0,0 +1 @@
++3
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu15/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu15/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu15/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu15/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu15/topology/thread_siblings
+new file mode 100644
+index 0000000..c5e4575
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu15/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00008000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu16/online b/tests/nodeinfodata/linux-test7/cpu/cpu16/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu16/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu16/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu16/topology/core_id
+new file mode 100644
+index 0000000..b8626c4
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu16/topology/core_id
+@@ -0,0 +1 @@
++4
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu16/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu16/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu16/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu16/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu16/topology/thread_siblings
+new file mode 100644
+index 0000000..a5a8466
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu16/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00010000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu17/online b/tests/nodeinfodata/linux-test7/cpu/cpu17/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu17/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu17/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu17/topology/core_id
+new file mode 100644
+index 0000000..7ed6ff8
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu17/topology/core_id
+@@ -0,0 +1 @@
++5
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu17/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu17/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu17/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu17/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu17/topology/thread_siblings
+new file mode 100644
+index 0000000..b563c50
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu17/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00020000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu18/online b/tests/nodeinfodata/linux-test7/cpu/cpu18/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu18/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu18/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu18/topology/core_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu18/topology/core_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu18/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu18/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu18/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu18/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu18/topology/thread_siblings
+new file mode 100644
+index 0000000..5bae96b
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu18/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00040000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu19/online b/tests/nodeinfodata/linux-test7/cpu/cpu19/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu19/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu19/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu19/topology/core_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu19/topology/core_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu19/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu19/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu19/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu19/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu19/topology/thread_siblings
+new file mode 100644
+index 0000000..03f1958
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu19/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00080000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu2/online b/tests/nodeinfodata/linux-test7/cpu/cpu2/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu2/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu2/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu2/topology/core_id
+new file mode 100644
+index 0000000..0cfbf08
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu2/topology/core_id
+@@ -0,0 +1 @@
++2
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu2/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu2/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu2/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu2/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu2/topology/thread_siblings
+new file mode 100644
+index 0000000..bc1eab3
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu2/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000004
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu20/online b/tests/nodeinfodata/linux-test7/cpu/cpu20/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu20/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu20/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu20/topology/core_id
+new file mode 100644
+index 0000000..0cfbf08
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu20/topology/core_id
+@@ -0,0 +1 @@
++2
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu20/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu20/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu20/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu20/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu20/topology/thread_siblings
+new file mode 100644
+index 0000000..a3242c0
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu20/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00100000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu21/online b/tests/nodeinfodata/linux-test7/cpu/cpu21/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu21/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu21/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu21/topology/core_id
+new file mode 100644
+index 0000000..00750ed
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu21/topology/core_id
+@@ -0,0 +1 @@
++3
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu21/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu21/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu21/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu21/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu21/topology/thread_siblings
+new file mode 100644
+index 0000000..fac7d63
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu21/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00200000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu22/online b/tests/nodeinfodata/linux-test7/cpu/cpu22/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu22/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu22/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu22/topology/core_id
+new file mode 100644
+index 0000000..b8626c4
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu22/topology/core_id
+@@ -0,0 +1 @@
++4
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu22/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu22/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu22/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu22/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu22/topology/thread_siblings
+new file mode 100644
+index 0000000..74389e7
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu22/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00400000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu23/online b/tests/nodeinfodata/linux-test7/cpu/cpu23/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu23/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu23/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu23/topology/core_id
+new file mode 100644
+index 0000000..7ed6ff8
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu23/topology/core_id
+@@ -0,0 +1 @@
++5
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu23/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu23/topology/physical_package_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu23/topology/physical_package_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu23/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu23/topology/thread_siblings
+new file mode 100644
+index 0000000..6c55473
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu23/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00800000
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu3/online b/tests/nodeinfodata/linux-test7/cpu/cpu3/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu3/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu3/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu3/topology/core_id
+new file mode 100644
+index 0000000..00750ed
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu3/topology/core_id
+@@ -0,0 +1 @@
++3
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu3/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu3/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu3/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu3/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu3/topology/thread_siblings
+new file mode 100644
+index 0000000..13c4744
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu3/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000008
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu4/online b/tests/nodeinfodata/linux-test7/cpu/cpu4/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu4/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu4/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu4/topology/core_id
+new file mode 100644
+index 0000000..b8626c4
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu4/topology/core_id
+@@ -0,0 +1 @@
++4
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu4/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu4/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu4/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu4/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu4/topology/thread_siblings
+new file mode 100644
+index 0000000..5ce9ab8
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu4/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000010
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu5/online b/tests/nodeinfodata/linux-test7/cpu/cpu5/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu5/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu5/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu5/topology/core_id
+new file mode 100644
+index 0000000..7ed6ff8
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu5/topology/core_id
+@@ -0,0 +1 @@
++5
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu5/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu5/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu5/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu5/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu5/topology/thread_siblings
+new file mode 100644
+index 0000000..ae752a0
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu5/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000020
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu6/online b/tests/nodeinfodata/linux-test7/cpu/cpu6/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu6/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu6/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu6/topology/core_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu6/topology/core_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu6/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu6/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu6/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu6/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu6/topology/thread_siblings
+new file mode 100644
+index 0000000..024ff71
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu6/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000040
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu7/online b/tests/nodeinfodata/linux-test7/cpu/cpu7/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu7/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu7/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu7/topology/core_id
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu7/topology/core_id
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu7/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu7/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu7/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu7/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu7/topology/thread_siblings
+new file mode 100644
+index 0000000..bb5a722
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu7/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000080
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu8/online b/tests/nodeinfodata/linux-test7/cpu/cpu8/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu8/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu8/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu8/topology/core_id
+new file mode 100644
+index 0000000..0cfbf08
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu8/topology/core_id
+@@ -0,0 +1 @@
++2
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu8/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu8/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu8/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu8/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu8/topology/thread_siblings
+new file mode 100644
+index 0000000..5bd120b
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu8/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000100
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu9/online b/tests/nodeinfodata/linux-test7/cpu/cpu9/online
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu9/online
+@@ -0,0 +1 @@
++1
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu9/topology/core_id b/tests/nodeinfodata/linux-test7/cpu/cpu9/topology/core_id
+new file mode 100644
+index 0000000..00750ed
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu9/topology/core_id
+@@ -0,0 +1 @@
++3
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu9/topology/physical_package_id b/tests/nodeinfodata/linux-test7/cpu/cpu9/topology/physical_package_id
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu9/topology/physical_package_id
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/cpu/cpu9/topology/thread_siblings b/tests/nodeinfodata/linux-test7/cpu/cpu9/topology/thread_siblings
+new file mode 100644
+index 0000000..3572438
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/cpu/cpu9/topology/thread_siblings
+@@ -0,0 +1 @@
++00000000,00000000,00000000,00000200
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu0 b/tests/nodeinfodata/linux-test7/node/node0/cpu0
+new file mode 120000
+index 0000000..c841bea
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu0
+@@ -0,0 +1 @@
++../../cpu/cpu0
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu1 b/tests/nodeinfodata/linux-test7/node/node0/cpu1
+new file mode 120000
+index 0000000..5f45362
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu1
+@@ -0,0 +1 @@
++../../cpu/cpu1
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu10 b/tests/nodeinfodata/linux-test7/node/node0/cpu10
+new file mode 120000
+index 0000000..a6dc6bb
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu10
+@@ -0,0 +1 @@
++../../cpu/cpu10
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu11 b/tests/nodeinfodata/linux-test7/node/node0/cpu11
+new file mode 120000
+index 0000000..e29d898
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu11
+@@ -0,0 +1 @@
++../../cpu/cpu11
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu12 b/tests/nodeinfodata/linux-test7/node/node0/cpu12
+new file mode 120000
+index 0000000..211519e
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu12
+@@ -0,0 +1 @@
++../../cpu/cpu12
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu13 b/tests/nodeinfodata/linux-test7/node/node0/cpu13
+new file mode 120000
+index 0000000..52d3b69
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu13
+@@ -0,0 +1 @@
++../../cpu/cpu13
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu14 b/tests/nodeinfodata/linux-test7/node/node0/cpu14
+new file mode 120000
+index 0000000..24cb3b4
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu14
+@@ -0,0 +1 @@
++../../cpu/cpu14
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu15 b/tests/nodeinfodata/linux-test7/node/node0/cpu15
+new file mode 120000
+index 0000000..e905d85
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu15
+@@ -0,0 +1 @@
++../../cpu/cpu15
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu16 b/tests/nodeinfodata/linux-test7/node/node0/cpu16
+new file mode 120000
+index 0000000..445de40
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu16
+@@ -0,0 +1 @@
++../../cpu/cpu16
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu17 b/tests/nodeinfodata/linux-test7/node/node0/cpu17
+new file mode 120000
+index 0000000..13929db
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu17
+@@ -0,0 +1 @@
++../../cpu/cpu17
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu18 b/tests/nodeinfodata/linux-test7/node/node0/cpu18
+new file mode 120000
+index 0000000..3809adc
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu18
+@@ -0,0 +1 @@
++../../cpu/cpu18
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu19 b/tests/nodeinfodata/linux-test7/node/node0/cpu19
+new file mode 120000
+index 0000000..c671083
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu19
+@@ -0,0 +1 @@
++../../cpu/cpu19
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu2 b/tests/nodeinfodata/linux-test7/node/node0/cpu2
+new file mode 120000
+index 0000000..2dcca33
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu2
+@@ -0,0 +1 @@
++../../cpu/cpu2
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu20 b/tests/nodeinfodata/linux-test7/node/node0/cpu20
+new file mode 120000
+index 0000000..a37c370
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu20
+@@ -0,0 +1 @@
++../../cpu/cpu20
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu21 b/tests/nodeinfodata/linux-test7/node/node0/cpu21
+new file mode 120000
+index 0000000..68a7cad
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu21
+@@ -0,0 +1 @@
++../../cpu/cpu21
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu22 b/tests/nodeinfodata/linux-test7/node/node0/cpu22
+new file mode 120000
+index 0000000..2c226ae
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu22
+@@ -0,0 +1 @@
++../../cpu/cpu22
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu23 b/tests/nodeinfodata/linux-test7/node/node0/cpu23
+new file mode 120000
+index 0000000..75c2f57
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu23
+@@ -0,0 +1 @@
++../../cpu/cpu23
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu3 b/tests/nodeinfodata/linux-test7/node/node0/cpu3
+new file mode 120000
+index 0000000..c7690e5
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu3
+@@ -0,0 +1 @@
++../../cpu/cpu3
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu4 b/tests/nodeinfodata/linux-test7/node/node0/cpu4
+new file mode 120000
+index 0000000..9e77a64
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu4
+@@ -0,0 +1 @@
++../../cpu/cpu4
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu5 b/tests/nodeinfodata/linux-test7/node/node0/cpu5
+new file mode 120000
+index 0000000..cc07c3b
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu5
+@@ -0,0 +1 @@
++../../cpu/cpu5
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu6 b/tests/nodeinfodata/linux-test7/node/node0/cpu6
+new file mode 120000
+index 0000000..2e75763
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu6
+@@ -0,0 +1 @@
++../../cpu/cpu6
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu7 b/tests/nodeinfodata/linux-test7/node/node0/cpu7
+new file mode 120000
+index 0000000..09e3f79
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu7
+@@ -0,0 +1 @@
++../../cpu/cpu7
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu8 b/tests/nodeinfodata/linux-test7/node/node0/cpu8
+new file mode 120000
+index 0000000..bda10cc
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu8
+@@ -0,0 +1 @@
++../../cpu/cpu8
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/cpu9 b/tests/nodeinfodata/linux-test7/node/node0/cpu9
+new file mode 120000
+index 0000000..1ec1db2
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/cpu9
+@@ -0,0 +1 @@
++../../cpu/cpu9
+\ No newline at end of file
+diff --git a/tests/nodeinfodata/linux-test7/node/node0/meminfo b/tests/nodeinfodata/linux-test7/node/node0/meminfo
+new file mode 100644
+index 0000000..09a9d24
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/node0/meminfo
+@@ -0,0 +1,29 @@
++Node 0 MemTotal:       134215764 kB
++Node 0 MemFree:         4659184 kB
++Node 0 MemUsed:        129556580 kB
++Node 0 Active:         57038240 kB
++Node 0 Inactive:       50860308 kB
++Node 0 Active(anon):    7992112 kB
++Node 0 Inactive(anon):  2321780 kB
++Node 0 Active(file):   49046128 kB
++Node 0 Inactive(file): 48538528 kB
++Node 0 Unevictable:        3492 kB
++Node 0 Mlocked:            3492 kB
++Node 0 Dirty:              7736 kB
++Node 0 Writeback:             0 kB
++Node 0 FilePages:      97948672 kB
++Node 0 Mapped:            39292 kB
++Node 0 AnonPages:       9953768 kB
++Node 0 Shmem:            361396 kB
++Node 0 KernelStack:        4792 kB
++Node 0 PageTables:        48328 kB
++Node 0 NFS_Unstable:          0 kB
++Node 0 Bounce:                0 kB
++Node 0 WritebackTmp:          0 kB
++Node 0 Slab:            1572840 kB
++Node 0 SReclaimable:    1463196 kB
++Node 0 SUnreclaim:       109644 kB
++Node 0 AnonHugePages:   9218048 kB
++Node 0 HugePages_Total:  8192
++Node 0 HugePages_Free:   4466
++Node 0 HugePages_Surp:      0
+diff --git a/tests/nodeinfodata/linux-test7/node/online b/tests/nodeinfodata/linux-test7/node/online
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/online
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-test7/node/possible b/tests/nodeinfodata/linux-test7/node/possible
+new file mode 100644
+index 0000000..573541a
+--- /dev/null
++++ b/tests/nodeinfodata/linux-test7/node/possible
+@@ -0,0 +1 @@
++0
+diff --git a/tests/nodeinfodata/linux-x86-test7.cpuinfo b/tests/nodeinfodata/linux-x86-test7.cpuinfo
+new file mode 100644
+index 0000000..4be2980
+--- /dev/null
++++ b/tests/nodeinfodata/linux-x86-test7.cpuinfo
+@@ -0,0 +1,648 @@
++processor	: 0
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 0
++cpu cores	: 12
++apicid		: 16
++initial apicid	: 0
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 1
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 1
++cpu cores	: 12
++apicid		: 17
++initial apicid	: 1
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 2
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 2
++cpu cores	: 12
++apicid		: 18
++initial apicid	: 2
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 3
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 3
++cpu cores	: 12
++apicid		: 19
++initial apicid	: 3
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 4
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 4
++cpu cores	: 12
++apicid		: 20
++initial apicid	: 4
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 5
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 5
++cpu cores	: 12
++apicid		: 21
++initial apicid	: 5
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 6
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 0
++cpu cores	: 12
++apicid		: 22
++initial apicid	: 6
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 7
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 1
++cpu cores	: 12
++apicid		: 23
++initial apicid	: 7
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 8
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 2
++cpu cores	: 12
++apicid		: 24
++initial apicid	: 8
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 9
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 3
++cpu cores	: 12
++apicid		: 25
++initial apicid	: 9
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 10
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 4
++cpu cores	: 12
++apicid		: 26
++initial apicid	: 10
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 11
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 0
++siblings	: 12
++core id		: 5
++cpu cores	: 12
++apicid		: 27
++initial apicid	: 11
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.30
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 12
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 0
++cpu cores	: 12
++apicid		: 32
++initial apicid	: 16
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 13
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 1
++cpu cores	: 12
++apicid		: 33
++initial apicid	: 17
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 14
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 2
++cpu cores	: 12
++apicid		: 34
++initial apicid	: 18
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 15
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 3
++cpu cores	: 12
++apicid		: 35
++initial apicid	: 19
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 16
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 4
++cpu cores	: 12
++apicid		: 36
++initial apicid	: 20
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 17
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 5
++cpu cores	: 12
++apicid		: 37
++initial apicid	: 21
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 18
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 0
++cpu cores	: 12
++apicid		: 38
++initial apicid	: 22
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 19
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 1
++cpu cores	: 12
++apicid		: 39
++initial apicid	: 23
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 20
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 2
++cpu cores	: 12
++apicid		: 40
++initial apicid	: 24
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 21
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 3
++cpu cores	: 12
++apicid		: 41
++initial apicid	: 25
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 22
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 4
++cpu cores	: 12
++apicid		: 42
++initial apicid	: 26
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
++processor	: 23
++vendor_id	: AuthenticAMD
++cpu family	: 16
++model		: 9
++model name	: AMD Opteron(tm) Processor 6174
++stepping	: 1
++microcode	: 0x10000d4
++cpu MHz		: 2200.000
++cache size	: 512 KB
++physical id	: 1
++siblings	: 12
++core id		: 5
++cpu cores	: 12
++apicid		: 43
++initial apicid	: 27
++fpu		: yes
++fpu_exception	: yes
++cpuid level	: 5
++wp		: yes
++flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowext 3dnow constant_tsc rep_good nopl nonstop_tsc extd_apicid amd_dcm pni monitor cx16 popcnt lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt nodeid_msr hw_pstate npt lbrv svm_lock nrip_save pausefilter
++bogomips	: 4390.52
++TLB size	: 1024 4K pages
++clflush size	: 64
++cache_alignment	: 64
++address sizes	: 48 bits physical, 48 bits virtual
++power management: ts ttp tm stc 100mhzsteps hwpstate
++
+diff --git a/tests/nodeinfodata/linux-x86-test7.expected b/tests/nodeinfodata/linux-x86-test7.expected
+new file mode 100644
+index 0000000..e56360d
+--- /dev/null
++++ b/tests/nodeinfodata/linux-x86-test7.expected
+@@ -0,0 +1 @@
++CPUs: 24/24, MHz: 2200, Nodes: 1, Sockets: 1, Cores: 24, Threads: 1
+diff --git a/tests/nodeinfotest.c b/tests/nodeinfotest.c
+index c44cc8a..7dae580 100644
+--- a/tests/nodeinfotest.c
++++ b/tests/nodeinfotest.c
+@@ -131,6 +131,7 @@ mymain(void)
+         "test4",
+         "test5",
+         "test6",
++        "test7",
+ # endif
+     };
+ 
+-- 
+1.8.0
+

@@ -1,0 +1,244 @@
+From 25417675775c72313db073fe86f21a67904d519e Mon Sep 17 00:00:00 2001
+Message-Id: <25417675775c72313db073fe86f21a67904d519e@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 2 Jul 2014 15:49:26 +0200
+Subject: [PATCH] conf: Add support for requesting of XML metadata via the API
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115039
+
+The virDomainGetMetadata function was designed to support also retrieval
+of app specific metadata from the <metadata> element. This functionality
+was never implemented originally.
+
+(cherry picked from commit ac38bff077642daa17f9a82480062ebef4c11a7b)
+
+Conflicts:
+	src/conf/domain_conf.c - VIR_STRDUP ...
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c   |  24 ++++++----
+ src/libvirt_private.syms |   1 +
+ src/util/xml.c           | 122 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/util/xml.h           |   7 +++
+ 4 files changed, 144 insertions(+), 10 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 2f743ca..e08a39f 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -16586,7 +16586,6 @@ virDomainObjGetMetadata(virDomainObjPtr vm,
+                         unsigned int flags)
+ {
+     virDomainDefPtr def;
+-    char *field = NULL;
+     char *ret = NULL;
+ 
+     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+@@ -16601,17 +16600,25 @@ virDomainObjGetMetadata(virDomainObjPtr vm,
+ 
+     switch ((virDomainMetadataType) type) {
+     case VIR_DOMAIN_METADATA_DESCRIPTION:
+-        field = def->description;
++        if (!(ret = strdup(def->description))) {
++            virReportOOMError();
++            goto cleanup;
++        }
+         break;
+ 
+     case VIR_DOMAIN_METADATA_TITLE:
+-        field = def->title;
++        if (!(ret = strdup(def->title))) {
++            virReportOOMError();
++            goto cleanup;
++        }
+         break;
+ 
+     case VIR_DOMAIN_METADATA_ELEMENT:
+-        virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
+-                       _("<metadata> element is not yet supported"));
+-        goto cleanup;
++        if (!def->metadata)
++            break;
++
++        if (virXMLExtractNamespaceXML(def->metadata, uri, &ret) < 0)
++            goto cleanup;
+         break;
+ 
+     default:
+@@ -16621,13 +16628,10 @@ virDomainObjGetMetadata(virDomainObjPtr vm,
+         break;
+     }
+ 
+-    if (!field)
++    if (!ret)
+         virReportError(VIR_ERR_NO_DOMAIN_METADATA, "%s",
+                        _("Requested metadata element is not present"));
+ 
+-    if (!(ret = strdup(field)))
+-        virReportOOMError();
+-
+ cleanup:
+     return ret;
+ }
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 0f0e43e..0eda32e 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1863,6 +1863,7 @@ virURIParse;
+ 
+ # xml.h
+ virXMLChildElementCount;
++virXMLExtractNamespaceXML;
+ virXMLNodeToString;
+ virXMLParseHelper;
+ virXMLPickShellSafeComment;
+diff --git a/src/util/xml.c b/src/util/xml.c
+index de509d1..e8187fc 100644
+--- a/src/util/xml.c
++++ b/src/util/xml.c
+@@ -920,3 +920,125 @@ cleanup:
+ 
+      return ret;
+ }
++
++typedef int (*virXMLForeachCallback)(xmlNodePtr node,
++                                     void *opaque);
++
++static int
++virXMLForeachNode(xmlNodePtr root,
++                  virXMLForeachCallback cb,
++                  void *opaque);
++
++static int
++virXMLForeachNode(xmlNodePtr root,
++                  virXMLForeachCallback cb,
++                  void *opaque)
++{
++    xmlNodePtr next;
++    int ret;
++
++    for (next = root; next; next = next->next) {
++        if ((ret = cb(next, opaque)) != 0)
++            return ret;
++
++        /* recurse into children */
++        if (next->children) {
++            if ((ret = virXMLForeachNode(next->children, cb, opaque)) != 0)
++                return ret;
++        }
++    }
++
++    return 0;
++}
++
++
++static int
++virXMLRemoveElementNamespace(xmlNodePtr node,
++                             void *opaque)
++{
++    const char *uri = opaque;
++
++    if (node->ns &&
++        STREQ_NULLABLE((const char *)node->ns->href, uri))
++        xmlSetNs(node, NULL);
++    return 0;
++}
++
++
++xmlNodePtr
++virXMLFindChildNodeByNs(xmlNodePtr root,
++                        const char *uri)
++{
++    xmlNodePtr next;
++
++    for (next = root->children; next; next = next->next) {
++        if (next->ns &&
++            STREQ_NULLABLE((const char *) next->ns->href, uri))
++            return next;
++    }
++
++    return NULL;
++}
++
++
++/**
++ * virXMLExtractNamespaceXML: extract a sub-namespace of XML as string
++ */
++int
++virXMLExtractNamespaceXML(xmlNodePtr root,
++                          const char *uri,
++                          char **doc)
++{
++    xmlNodePtr node;
++    xmlNodePtr nodeCopy = NULL;
++    xmlNsPtr actualNs;
++    xmlNsPtr prevNs = NULL;
++    char *xmlstr = NULL;
++    int ret = -1;
++
++    if (!(node = virXMLFindChildNodeByNs(root, uri))) {
++        /* node not found */
++        ret = 1;
++        goto cleanup;
++    }
++
++    /* copy the node so that we can modify the namespace */
++    if (!(nodeCopy = xmlCopyNode(node, 1))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("Failed to copy XML node"));
++        goto cleanup;
++    }
++
++    virXMLForeachNode(nodeCopy, virXMLRemoveElementNamespace,
++                      (void *)uri);
++
++    /* remove the namespace declaration
++     *  - it's only a single linked list ... doh */
++    for (actualNs = nodeCopy->nsDef; actualNs; actualNs = actualNs->next) {
++        if (STREQ_NULLABLE((const char *)actualNs->href, uri)) {
++
++            /* unlink */
++            if (prevNs)
++                prevNs->next = actualNs->next;
++            else
++                nodeCopy->nsDef = actualNs->next;
++
++            /* discard */
++            xmlFreeNs(actualNs);
++            break;
++        }
++
++        prevNs = actualNs;
++    }
++
++    if (!(xmlstr = virXMLNodeToString(nodeCopy->doc, nodeCopy)))
++        goto cleanup;
++
++    ret = 0;
++
++cleanup:
++    if (doc)
++        *doc = xmlstr;
++    xmlFreeNode(nodeCopy);
++    return ret;
++}
+diff --git a/src/util/xml.h b/src/util/xml.h
+index fc61f49..f7a51a4 100644
+--- a/src/util/xml.h
++++ b/src/util/xml.h
+@@ -147,4 +147,11 @@ int virXMLSaveFile(const char *path,
+ 
+ char *virXMLNodeToString(xmlDocPtr doc, xmlNodePtr node);
+ 
++xmlNodePtr virXMLFindChildNodeByNs(xmlNodePtr root,
++                                   const char *uri);
++
++int virXMLExtractNamespaceXML(xmlNodePtr root,
++                              const char *uri,
++                              char **doc);
++
+ #endif                          /* __VIR_XML_H__ */
+-- 
+2.0.0
+

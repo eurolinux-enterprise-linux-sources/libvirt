@@ -1,0 +1,73 @@
+From 80ab17f37bd6eb71ecacb91ea06aa60f1cf0e797 Mon Sep 17 00:00:00 2001
+Message-Id: <80ab17f37bd6eb71ecacb91ea06aa60f1cf0e797.1381312399.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 2 Oct 2013 11:02:14 +0200
+Subject: [PATCH] qemu_hotplug: Allow QoS update in qemuDomainChangeNet
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1014198
+
+The qemuDomainChangeNet() is called when 'virsh update-device' is
+invoked on a NIC. Currently, we fail to update the QoS even though
+we have routines for that.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 9fa10d3901a14997f724fe50ad8a33d7f0d23abe)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 19 +++++++++++++++++--
+ 1 file changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index f04025c..ab38a39 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1360,6 +1360,7 @@ qemuDomainChangeNet(struct qemud_driver *driver,
+     bool needBridgeChange = false;
+     bool needLinkStateChange = false;
+     bool needReplaceDevDef = false;
++    bool needBandwidthSet = false;
+     int ret = -1;
+ 
+     if (!devslot || !(olddev = *devslot)) {
+@@ -1626,8 +1627,6 @@ qemuDomainChangeNet(struct qemud_driver *driver,
+         virDomainNetGetActualDirectMode(olddev) != virDomainNetGetActualDirectMode(olddev) ||
+         !virNetDevVPortProfileEqual(virDomainNetGetActualVirtPortProfile(olddev),
+                                     virDomainNetGetActualVirtPortProfile(newdev)) ||
+-        !virNetDevBandwidthEqual(virDomainNetGetActualBandwidth(olddev),
+-                                 virDomainNetGetActualBandwidth(newdev)) ||
+         !virNetDevVlanEqual(virDomainNetGetActualVlan(olddev),
+                             virDomainNetGetActualVlan(newdev))) {
+         needReconnect = true;
+@@ -1636,6 +1635,10 @@ qemuDomainChangeNet(struct qemud_driver *driver,
+     if (olddev->linkstate != newdev->linkstate)
+         needLinkStateChange = true;
+ 
++    if (!virNetDevBandwidthEqual(virDomainNetGetActualBandwidth(olddev),
++                                 virDomainNetGetActualBandwidth(newdev)))
++        needBandwidthSet = true;
++
+     /* FINALLY - actually perform the required actions */
+ 
+     if (needReconnect) {
+@@ -1645,6 +1648,18 @@ qemuDomainChangeNet(struct qemud_driver *driver,
+         goto cleanup;
+     }
+ 
++    if (needBandwidthSet) {
++        if (virNetDevBandwidthSet(newdev->ifname,
++                                  virDomainNetGetActualBandwidth(newdev),
++                                  false) < 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("cannot set bandwidth limits on %s"),
++                           newdev->ifname);
++            goto cleanup;
++        }
++        needReplaceDevDef = true;
++    }
++
+     if (needBridgeChange) {
+         if (qemuDomainChangeNetBridge(dom->conn, vm, olddev, newdev) < 0)
+             goto cleanup;
+-- 
+1.8.3.2
+

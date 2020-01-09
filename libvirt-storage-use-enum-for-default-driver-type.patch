@@ -1,0 +1,88 @@
+From 02c535d365ef2d23b88b20021768ee10cdaddd99 Mon Sep 17 00:00:00 2001
+Message-Id: <02c535d365ef2d23b88b20021768ee10cdaddd99.1350990678.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:30 -0600
+Subject: [PATCH] storage: use enum for default driver type
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+Express the default disk type as an enum, for easier handling.
+
+* src/conf/capabilities.h (_virCaps): Store enum rather than
+string for disk type.
+* src/conf/domain_conf.c (virDomainDiskDefParseXML): Adjust
+clients.
+* src/qemu/qemu_driver.c (qemuCreateCapabilities): Likewise.
+(cherry picked from commit 09e7fb5e1fec3f9bcfcceba83f4880bc3d0e7346)
+---
+ src/conf/capabilities.h | 4 ++--
+ src/conf/domain_conf.c  | 6 ++++--
+ src/qemu/qemu_driver.c  | 4 ++--
+ 3 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/src/conf/capabilities.h b/src/conf/capabilities.h
+index 0d56290..99056f8 100644
+--- a/src/conf/capabilities.h
++++ b/src/conf/capabilities.h
+@@ -1,7 +1,7 @@
+ /*
+  * capabilities.h: hypervisor capabilities
+  *
+- * Copyright (C) 2006-2008, 2010 Red Hat, Inc.
++ * Copyright (C) 2006-2008, 2010, 2012 Red Hat, Inc.
+  * Copyright (C) 2006-2008 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -149,7 +149,7 @@ struct _virCaps {
+     unsigned char macPrefix[VIR_MAC_PREFIX_BUFLEN];
+     unsigned int emulatorRequired : 1;
+     const char *defaultDiskDriverName;
+-    const char *defaultDiskDriverType;
++    int defaultDiskDriverType; /* enum virStorageFileFormat */
+     int (*defaultConsoleTargetType)(const char *ostype);
+     void *(*privateDataAllocFunc)(void);
+     void (*privateDataFreeFunc)(void *);
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 79930bf..6824972 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -4192,7 +4192,8 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+ 
+     if (!def->driverType &&
+         caps->defaultDiskDriverType &&
+-        !(def->driverType = strdup(caps->defaultDiskDriverType)))
++        !(def->driverType = strdup(virStorageFileFormatTypeToString(
++                                       caps->defaultDiskDriverType))))
+         goto no_memory;
+ 
+     if (!def->driverName &&
+@@ -4203,7 +4204,8 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+ 
+     if (def->mirror && !def->mirrorFormat &&
+         caps->defaultDiskDriverType &&
+-        !(def->mirrorFormat = strdup(caps->defaultDiskDriverType)))
++        !(def->mirrorFormat = strdup(virStorageFileFormatTypeToString(
++                                         caps->defaultDiskDriverType))))
+         goto no_memory;
+ 
+     if (def->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 3f82e63..e301b66 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -394,10 +394,10 @@ qemuCreateCapabilities(struct qemud_driver *driver)
+ 
+     if (driver->allowDiskFormatProbing) {
+         caps->defaultDiskDriverName = NULL;
+-        caps->defaultDiskDriverType = NULL;
++        caps->defaultDiskDriverType = VIR_STORAGE_FILE_AUTO;
+     } else {
+         caps->defaultDiskDriverName = "qemu";
+-        caps->defaultDiskDriverType = "raw";
++        caps->defaultDiskDriverType = VIR_STORAGE_FILE_RAW;
+     }
+ 
+     qemuDomainSetPrivateDataHooks(caps);
+-- 
+1.7.12.4
+

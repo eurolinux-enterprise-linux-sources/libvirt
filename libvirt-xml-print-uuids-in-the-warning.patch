@@ -1,0 +1,260 @@
+From 8b9ebc44faf74221f1c5450a5ac70132afa918d8 Mon Sep 17 00:00:00 2001
+Message-Id: <8b9ebc44faf74221f1c5450a5ac70132afa918d8.1351526126.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 29 Oct 2012 13:15:55 +0100
+Subject: [PATCH] xml: print uuids in the warning
+
+https://bugzilla.redhat.com/show_bug.cgi?id=868692
+
+In the XML warning, we print a virsh command line that can be used to
+edit that XML. This patch prints UUIDs if the entity name contains
+special characters (like shell metacharacters, or "--" that would break
+parsing of the XML comment). If the entity doesn't have a UUID, just
+print the virsh command that can be used to edit it.
+(cherry picked from commit 0b121614a2086a8e66ae1f004fe912ba7c1d8a75)
+---
+ src/conf/domain_conf.c            |  6 +++++-
+ src/conf/network_conf.c           |  6 +++++-
+ src/conf/nwfilter_conf.c          | 12 ++++++++++--
+ src/conf/storage_conf.c           |  6 +++++-
+ src/libvirt_private.syms          |  1 +
+ src/parallels/parallels_storage.c |  3 +--
+ src/qemu/qemu_domain.c            |  9 +--------
+ src/util/xml.c                    | 18 +++++++++++++-----
+ src/util/xml.h                    |  1 +
+ 9 files changed, 42 insertions(+), 20 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 4c34f42..65d4aa0 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -14297,6 +14297,7 @@ int virDomainSaveXML(const char *configDir,
+                      virDomainDefPtr def,
+                      const char *xml)
+ {
++    char uuidstr[VIR_UUID_STRING_BUFLEN];
+     char *configFile = NULL;
+     int ret = -1;
+ 
+@@ -14310,7 +14311,10 @@ int virDomainSaveXML(const char *configDir,
+         goto cleanup;
+     }
+ 
+-    ret = virXMLSaveFile(configFile, def->name, "edit", xml);
++    virUUIDFormat(def->uuid, uuidstr);
++    ret = virXMLSaveFile(configFile,
++                         virXMLPickShellSafeComment(def->name, uuidstr), "edit",
++                         xml);
+ 
+  cleanup:
+     VIR_FREE(configFile);
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index 8976f2a..a55339d 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -1978,6 +1978,7 @@ int virNetworkSaveXML(const char *configDir,
+                       virNetworkDefPtr def,
+                       const char *xml)
+ {
++    char uuidstr[VIR_UUID_STRING_BUFLEN];
+     char *configFile = NULL;
+     int ret = -1;
+ 
+@@ -1991,7 +1992,10 @@ int virNetworkSaveXML(const char *configDir,
+         goto cleanup;
+     }
+ 
+-    ret = virXMLSaveFile(configFile, def->name, "net-edit", xml);
++    virUUIDFormat(def->uuid, uuidstr);
++    ret = virXMLSaveFile(configFile,
++                         virXMLPickShellSafeComment(def->name, uuidstr),
++                         "net-edit", xml);
+ 
+  cleanup:
+     VIR_FREE(configFile);
+diff --git a/src/conf/nwfilter_conf.c b/src/conf/nwfilter_conf.c
+index d1d5259..a80ca56 100644
+--- a/src/conf/nwfilter_conf.c
++++ b/src/conf/nwfilter_conf.c
+@@ -2717,6 +2717,7 @@ int virNWFilterSaveXML(const char *configDir,
+                        virNWFilterDefPtr def,
+                        const char *xml)
+ {
++    char uuidstr[VIR_UUID_STRING_BUFLEN];
+     char *configFile = NULL;
+     int ret = -1;
+ 
+@@ -2730,7 +2731,10 @@ int virNWFilterSaveXML(const char *configDir,
+         goto cleanup;
+     }
+ 
+-    ret = virXMLSaveFile(configFile, def->name, "nwfilter-edit", xml);
++    virUUIDFormat(def->uuid, uuidstr);
++    ret = virXMLSaveFile(configFile,
++                         virXMLPickShellSafeComment(def->name, uuidstr),
++                         "nwfilter-edit", xml);
+ 
+  cleanup:
+     VIR_FREE(configFile);
+@@ -3151,6 +3155,7 @@ virNWFilterObjSaveDef(virNWFilterDriverStatePtr driver,
+                       virNWFilterObjPtr nwfilter,
+                       virNWFilterDefPtr def)
+ {
++    char uuidstr[VIR_UUID_STRING_BUFLEN];
+     char *xml;
+     int ret;
+ 
+@@ -3174,7 +3179,10 @@ virNWFilterObjSaveDef(virNWFilterDriverStatePtr driver,
+         return -1;
+     }
+ 
+-    ret = virXMLSaveFile(nwfilter->configFile, def->name, "nwfilter-edit", xml);
++    virUUIDFormat(def->uuid, uuidstr);
++    ret = virXMLSaveFile(nwfilter->configFile,
++                         virXMLPickShellSafeComment(def->name, uuidstr),
++                         "nwfilter-edit", xml);
+     VIR_FREE(xml);
+ 
+     return ret;
+diff --git a/src/conf/storage_conf.c b/src/conf/storage_conf.c
+index 5d9e61a..9a765d8 100644
+--- a/src/conf/storage_conf.c
++++ b/src/conf/storage_conf.c
+@@ -1637,6 +1637,7 @@ virStoragePoolObjSaveDef(virStorageDriverStatePtr driver,
+                          virStoragePoolObjPtr pool,
+                          virStoragePoolDefPtr def)
+ {
++    char uuidstr[VIR_UUID_STRING_BUFLEN];
+     char *xml;
+     int ret = -1;
+ 
+@@ -1666,7 +1667,10 @@ virStoragePoolObjSaveDef(virStorageDriverStatePtr driver,
+         return -1;
+     }
+ 
+-    ret = virXMLSaveFile(pool->configFile, def->name, "pool-edit", xml);
++    virUUIDFormat(def->uuid, uuidstr);
++    ret = virXMLSaveFile(pool->configFile,
++                         virXMLPickShellSafeComment(def->name, uuidstr),
++                         "pool-edit", xml);
+     VIR_FREE(xml);
+ 
+     return ret;
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index a26d0e5..410d6f0 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1785,6 +1785,7 @@ virURIParse;
+ # xml.h
+ virXMLChildElementCount;
+ virXMLParseHelper;
++virXMLPickShellSafeComment;
+ virXMLPropString;
+ virXMLSaveFile;
+ virXPathBoolean;
+diff --git a/src/parallels/parallels_storage.c b/src/parallels/parallels_storage.c
+index 112e288..2fca89c 100644
+--- a/src/parallels/parallels_storage.c
++++ b/src/parallels/parallels_storage.c
+@@ -971,8 +971,7 @@ parallelsStorageVolumeDefine(virStoragePoolObjPtr pool,
+         if (!xml_path)
+             goto cleanup;
+ 
+-        if (virXMLSaveFile(xml_path, privvol->name,
+-                           "volume-create", xmldesc)) {
++        if (virXMLSaveFile(xml_path, NULL, "volume-create", xmldesc)) {
+             virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+                            _("Can't create file with volume description"));
+             goto cleanup;
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index a6f8931..d819011 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -1583,7 +1583,6 @@ qemuDomainSnapshotWriteMetadata(virDomainObjPtr vm,
+     char *snapDir = NULL;
+     char *snapFile = NULL;
+     char uuidstr[VIR_UUID_STRING_BUFLEN];
+-    char *tmp;
+ 
+     virUUIDFormat(vm->def->uuid, uuidstr);
+     newxml = virDomainSnapshotDefFormat(uuidstr, snapshot->def,
+@@ -1606,13 +1605,7 @@ qemuDomainSnapshotWriteMetadata(virDomainObjPtr vm,
+         goto cleanup;
+     }
+ 
+-    if (virAsprintf(&tmp, "snapshot-edit %s", vm->def->name) < 0) {
+-        virReportOOMError();
+-        goto cleanup;
+-    }
+-
+-    ret = virXMLSaveFile(snapFile, snapshot->def->name, tmp, newxml);
+-    VIR_FREE(tmp);
++    ret = virXMLSaveFile(snapFile, NULL, "snapshot-edit", newxml);
+ 
+ cleanup:
+     VIR_FREE(snapFile);
+diff --git a/src/util/xml.c b/src/util/xml.c
+index f3dc256..dad9227 100644
+--- a/src/util/xml.c
++++ b/src/util/xml.c
+@@ -780,6 +780,16 @@ error:
+     goto cleanup;
+ }
+ 
++const char *virXMLPickShellSafeComment(const char *str1, const char *str2)
++{
++    if(str1 && !strpbrk(str1, "\r\t\n !\"#$&'()*;<>?[\\]^`{|}~") &&
++       !strstr(str1, "--"))
++        return str1;
++    if(str2 && !strpbrk(str2, "\r\t\n !\"#$&'()*;<>?[\\]^`{|}~") &&
++       !strstr(str2, "--"))
++        return str2;
++    return NULL;
++}
+ 
+ static int virXMLEmitWarning(int fd,
+                              const char *name,
+@@ -794,7 +804,7 @@ OVERWRITTEN AND LOST. Changes to this xml configuration should be made using:\n\
+ or other application using the libvirt API.\n\
+ -->\n\n";
+ 
+-    if (fd < 0 || !name || !cmd) {
++    if (fd < 0 || !cmd) {
+         errno = EINVAL;
+         return -1;
+     }
+@@ -807,9 +817,7 @@ or other application using the libvirt API.\n\
+     if (safewrite(fd, cmd, len) != len)
+         return -1;
+ 
+-    /* Omit the domain name if it contains a double hyphen
+-     * because they aren't allowed in XML comments */
+-    if (!strstr(name, "--")) {
++    if (name) {
+         if (safewrite(fd, " ", 1) != 1)
+             return -1;
+ 
+@@ -837,7 +845,7 @@ virXMLRewriteFile(int fd, void *opaque)
+ {
+     struct virXMLRewriteFileData *data = opaque;
+ 
+-    if (data->warnName && data->warnCommand) {
++    if (data->warnCommand) {
+         if (virXMLEmitWarning(fd, data->warnName, data->warnCommand) < 0)
+             return -1;
+     }
+diff --git a/src/util/xml.h b/src/util/xml.h
+index a3750fa..c3b05df 100644
+--- a/src/util/xml.h
++++ b/src/util/xml.h
+@@ -61,6 +61,7 @@ xmlDocPtr      virXMLParseHelper(int domcode,
+                                  const char *url,
+                                  xmlXPathContextPtr *pctxt);
+ 
++const char *virXMLPickShellSafeComment(const char *str1, const char *str2);
+ /**
+  * virXMLParse:
+  * @filename: file to parse, or NULL for string parsing
+-- 
+1.7.12.4
+

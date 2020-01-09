@@ -1,0 +1,37 @@
+From b5747c6663ff69153103b3199f6ea4c758b53dd0 Mon Sep 17 00:00:00 2001
+Message-Id: <b5747c6663ff69153103b3199f6ea4c758b53dd0.1350990680.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Mon, 22 Oct 2012 19:51:22 +0800
+Subject: [PATCH] selinux: remove unused variables in socket labelling
+
+BZ:https://bugzilla.redhat.com/show_bug.cgi?id=851981
+(cherry picked from commit d37a3a1d6c6508f235965185453602ba310cc66e)
+---
+ src/security/security_selinux.c | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index ebed692..eee8d71 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -1623,8 +1623,6 @@ virSecuritySELinuxSetSecurityDaemonSocketLabel(virSecurityManagerPtr mgr,
+ {
+     /* TODO: verify DOI */
+     virSecurityLabelDefPtr secdef;
+-    context_t execcon = NULL;
+-    context_t proccon = NULL;
+     security_context_t scon = NULL;
+     char *str = NULL;
+     int rc = -1;
+@@ -1667,8 +1665,6 @@ done:
+ 
+     if (security_getenforce() != 1)
+         rc = 0;
+-    if (execcon) context_free(execcon);
+-    if (proccon) context_free(proccon);
+     freecon(scon);
+     VIR_FREE(str);
+     return rc;
+-- 
+1.7.12.4
+

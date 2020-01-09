@@ -1,0 +1,42 @@
+From 2bac3337c469f9ec529a7a8ad5056b5f4587b64f Mon Sep 17 00:00:00 2001
+Message-Id: <2bac3337c469f9ec529a7a8ad5056b5f4587b64f@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Feb 2016 06:59:38 -0500
+Subject: [PATCH] util: add missing newline
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1276478
+
+Somehow I managed to backspace over the newline between the closing
+brace and goto cleanup; in commit 36e244f3.
+
+(cherry picked from commit 79ba107670c61f9a22746422826cf0cc77a002cf)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdevvportprofile.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/virnetdevvportprofile.c b/src/util/virnetdevvportprofile.c
+index d19536e..ef3b829 100644
+--- a/src/util/virnetdevvportprofile.c
++++ b/src/util/virnetdevvportprofile.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2009-2012 Red Hat, Inc.
++ * Copyright (C) 2009-2016 Red Hat, Inc.
+  *
+  * This library is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU Lesser General Public
+@@ -578,7 +578,8 @@ virNetDevVPortProfileGetStatus(struct nlattr **tb, int32_t vf,
+                              tb_port[IFLA_PORT_VF] ?
+                              *(uint32_t *)RTA_DATA(tb_port[IFLA_PORT_VF]) : -1,
+                              uuidstr);
+-                }                goto cleanup;
++                }
++                goto cleanup;
+             }
+         } else {
+             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-- 
+2.7.1
+

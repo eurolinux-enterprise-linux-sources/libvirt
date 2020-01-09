@@ -1,0 +1,89 @@
+From e1f643e071945ba45000da5641d3fd61845dcad2 Mon Sep 17 00:00:00 2001
+Message-Id: <e1f643e071945ba45000da5641d3fd61845dcad2@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 27 Feb 2014 09:32:41 +0100
+Subject: [PATCH] sanlock: Truncate domain names longer than SANLK_NAME_LEN
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1060557
+https://bugzilla.redhat.com/show_bug.cgi?id=1070905
+
+Libvirt uses a domain name to fill in owner_name in sanlock_options in
+virLockManagerSanlockAcquire. Unfortunately, owner_name is limited to
+SANLK_NAME_LEN characters (including trailing '\0'), which means domains
+with longer names fail to start when sanlock is enabled. However, we can
+truncate the name when setting owner_name as explained by sanlock's
+author:
+
+Setting sanlk_options or the owner_name is unnecessary, and has very
+little to no benefit.  If you do provide something in owner_name, it can
+be anything, sanlock doesn't care or use it.
+
+If you run the command "sanlock status", the output will display a list
+of clients connected to the sanlock daemon.  This client list is
+displayed as "pid owner_name" if the client has provided an owner_name
+via sanlk_options. This debugging output is the only usage of
+owner_name, so its only benefit is to potentially provide a more human
+friendly output for debugging purposes.
+
+(cherry picked from commit 8f10c1e77fdbc165ff6d6b4a5a42ab7b31e30819)
+
+Changes:
+	src/locking/lock_driver_sanlock.c: no VIR_STRDUP in RHEL-6
+---
+ src/locking/lock_driver_sanlock.c | 19 ++++++++-----------
+ 1 file changed, 8 insertions(+), 11 deletions(-)
+
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index 3c9d7c2..17b6971 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -81,7 +81,7 @@ static virLockManagerSanlockDriver *driver = NULL;
+ 
+ struct _virLockManagerSanlockPrivate {
+     const char *vm_uri;
+-    char vm_name[SANLK_NAME_LEN];
++    char *vm_name;
+     unsigned char vm_uuid[VIR_UUID_BUFLEN];
+     unsigned int vm_id;
+     unsigned int vm_pid;
+@@ -476,10 +476,8 @@ static int virLockManagerSanlockNew(virLockManagerPtr lock,
+         if (STREQ(param->key, "uuid")) {
+             memcpy(priv->vm_uuid, param->value.uuid, 16);
+         } else if (STREQ(param->key, "name")) {
+-            if (!virStrcpy(priv->vm_name, param->value.str, SANLK_NAME_LEN)) {
+-                virReportError(VIR_ERR_INTERNAL_ERROR,
+-                               _("Domain name '%s' exceeded %d characters"),
+-                               param->value.str, SANLK_NAME_LEN);
++            if (!(priv->vm_name = strdup(param->value.str))) {
++                virReportOOMError();
+                 goto error;
+             }
+         } else if (STREQ(param->key, "pid")) {
+@@ -507,6 +505,7 @@ static void virLockManagerSanlockFree(virLockManagerPtr lock)
+     if (!priv)
+         return;
+ 
++    VIR_FREE(priv->vm_name);
+     for (i = 0; i < priv->res_count; i++)
+         VIR_FREE(priv->res_args[i]);
+     VIR_FREE(priv);
+@@ -906,12 +905,10 @@ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
+         return -1;
+     }
+ 
+-    if (!virStrcpy(opt->owner_name, priv->vm_name, SANLK_NAME_LEN)) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("Domain name '%s' exceeded %d characters"),
+-                       priv->vm_name, SANLK_NAME_LEN);
+-        goto error;
+-    }
++    /* sanlock doesn't use owner_name for anything, so it's safe to take just
++     * the first SANLK_NAME_LEN - 1 characters from vm_name */
++    ignore_value(virStrncpy(opt->owner_name, priv->vm_name,
++                            SANLK_NAME_LEN - 1, SANLK_NAME_LEN));
+ 
+     if (state && STRNEQ(state, "")) {
+         if ((rv = sanlock_state_to_args((char *)state,
+-- 
+1.9.1
+

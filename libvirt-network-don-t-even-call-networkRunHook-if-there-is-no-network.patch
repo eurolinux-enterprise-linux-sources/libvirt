@@ -1,0 +1,98 @@
+From 770004ace95f2c4c07c0279ed51ae3d45c7dbf82 Mon Sep 17 00:00:00 2001
+Message-Id: <770004ace95f2c4c07c0279ed51ae3d45c7dbf82@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Wed, 14 May 2014 16:12:29 +0200
+Subject: [PATCH] network: don't even call networkRunHook if there is no
+ network
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+networkAllocateActualDevice() is called for *all* interfaces, not just
+those with type='network'. In that case, it will jump down to its
+validate: label immediately, without allocating anything. After
+validation is done, two counters are potentially updated (one for the
+network, and one for any particular physical device that is chosen),
+and then networkRunHook() is called.
+
+This patch refactors that code a slight bit so that networkRunHook()
+doesn't get called if netdef is NULL (i.e. type != network) and to
+place the conditional increment of dev->connections inside the "if
+(netdef)" as well - dev can never be non-null if netdef is null
+(because "dev" is the pointer to a device in a network's pool of
+devices), so this doesn't have any functional effect, it just makes
+the code clearer.
+
+(cherry picked from commit 0700a3dac4d20a7984f46d4f1862890a922512fd)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 47 ++++++++++++++++++++++-----------------------
+ 1 file changed, 23 insertions(+), 24 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 508c8b0..783f5b3 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -3920,36 +3920,35 @@ validate:
+         }
+     }
+ 
+-    if (dev) {
+-        /* mark the allocation */
+-        dev->connections++;
+-        if (actualType != VIR_DOMAIN_NET_TYPE_HOSTDEV) {
+-            VIR_DEBUG("Using physical device %s, %d connections",
+-                      dev->device.dev, dev->connections);
+-        } else {
+-            VIR_DEBUG("Using physical device %04x:%02x:%02x.%x, connections %d",
+-                      dev->device.pci.domain, dev->device.pci.bus,
+-                      dev->device.pci.slot, dev->device.pci.function,
+-                      dev->connections);
+-        }
+-    }
+-
+     if (netdef) {
+         netdef->connections++;
+         VIR_DEBUG("Using network %s, %d connections",
+                   netdef->name, netdef->connections);
+-    }
+ 
+-    /* finally we can call the 'plugged' hook script if any */
+-    if (networkRunHook(network, dom, iface,
+-                       VIR_HOOK_NETWORK_OP_IFACE_PLUGGED,
+-                       VIR_HOOK_SUBOP_BEGIN) < 0) {
+-        /* adjust for failure */
+-        if (dev)
+-            dev->connections--;
+-        if (netdef)
++        if (dev) {
++            /* mark the allocation */
++            dev->connections++;
++            if (actualType != VIR_DOMAIN_NET_TYPE_HOSTDEV) {
++                VIR_DEBUG("Using physical device %s, %d connections",
++                          dev->device.dev, dev->connections);
++            } else {
++                VIR_DEBUG("Using physical device %04x:%02x:%02x.%x, connections %d",
++                          dev->device.pci.domain, dev->device.pci.bus,
++                          dev->device.pci.slot, dev->device.pci.function,
++                          dev->connections);
++            }
++        }
++
++        /* finally we can call the 'plugged' hook script if any */
++        if (networkRunHook(network, dom, iface,
++                           VIR_HOOK_NETWORK_OP_IFACE_PLUGGED,
++                           VIR_HOOK_SUBOP_BEGIN) < 0) {
++            /* adjust for failure */
+             netdef->connections--;
+-        goto error;
++            if (dev)
++                dev->connections--;
++            goto error;
++        }
+     }
+ 
+     ret = 0;
+-- 
+1.9.3
+

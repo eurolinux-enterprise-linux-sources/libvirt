@@ -1,0 +1,37 @@
+From 172d0da6646026eb42d679e9cbb2ee81d5f90b30 Mon Sep 17 00:00:00 2001
+Message-Id: <172d0da6646026eb42d679e9cbb2ee81d5f90b30.1353944811.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 26 Nov 2012 14:25:35 +0100
+Subject: [PATCH] storage: fix logical volume cloning
+
+Commit 258e06c removed setting of the volume type to
+VIR_STORAGE_VOL_BLOCK, which leads to failures in
+storageVolumeCreateXMLFrom.
+
+The type (and target.format) of the volume was set to zero. In
+virStorageBackendGetBuildVolFromFunction, this gets interpreted as
+VIR_STORAGE_FILE_NONE and the qemu-img tool is called with unknown
+"none" format.
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=879780
+(cherry picked from commit 70f0bbe8e046dae1b811378f735872d3e61f4609)
+---
+ src/storage/storage_backend_logical.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/storage/storage_backend_logical.c b/src/storage/storage_backend_logical.c
+index a9d785c..238a23b 100644
+--- a/src/storage/storage_backend_logical.c
++++ b/src/storage/storage_backend_logical.c
+@@ -707,6 +707,8 @@ virStorageBackendLogicalCreateVol(virConnectPtr conn,
+         return -1;
+     }
+ 
++    vol->type = VIR_STORAGE_VOL_BLOCK;
++
+     if (vol->target.path != NULL) {
+         /* A target path passed to CreateVol has no meaning */
+         VIR_FREE(vol->target.path);
+-- 
+1.8.0
+

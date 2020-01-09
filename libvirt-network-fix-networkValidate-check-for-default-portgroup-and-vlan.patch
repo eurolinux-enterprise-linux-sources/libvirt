@@ -1,0 +1,111 @@
+From f567890af401e024c93cc5211a4a812e1b95c651 Mon Sep 17 00:00:00 2001
+Message-Id: <f567890af401e024c93cc5211a4a812e1b95c651.1351526125.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Fri, 26 Oct 2012 20:57:32 -0400
+Subject: [PATCH] network: fix networkValidate check for default portgroup and
+ vlan
+
+This was found during testing of the fix for:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=868483
+
+networkValidate was supposed to check for the existence of multiple
+portgroups and report an error if this was encountered. It did, but
+there were two problems:
+
+1) even though it logged an error, it still returned success, allowing
+the operation to continue.
+
+2) It could exit the portgroup checking loop early (or possibly not
+even do it once) if a vlan tag was supplied in the base network config
+or one of the portgroups.
+
+This patch fixes networkValidate to return failure in addition to
+logging the error, and also changes it to not exit the portgroup
+checking loop early. The logic was a bit off in the checking for vlan
+anyway, and it's intertwined with fixing the early loop exit, so I
+fixed that as well. Now it correctly checks for combinations where a
+<virtualport> is specified in the base network def and <vlan> is given
+in a portgroup, as well as the opposite (<vlan> in base network def
+and <virtualport> in portgroup), and ignores the case of a disallowed
+vlan when using *no* portgroup if there is a default portgroup (since
+in that case there is no way to not use any portgroup).
+(cherry picked from commit d8aae15aa1ab173fd3c57f5806b6febae6b640af)
+---
+ src/network/bridge_driver.c | 42 +++++++++++++++++++++++++++++-------------
+ 1 file changed, 29 insertions(+), 13 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 099d33a..adbee9f 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -2597,8 +2597,8 @@ static int
+ networkValidate(virNetworkDefPtr def)
+ {
+     int ii;
+-    bool vlanUsed, vlanAllowed;
+-    const char *defaultPortGroup = NULL;
++    bool vlanUsed, vlanAllowed, badVlanUse = false;
++    virPortGroupDefPtr defaultPortGroup = NULL;
+ 
+     /* The only type of networks that currently support transparent
+      * vlan configuration are those using hostdev sr-iov devices from
+@@ -2610,14 +2610,23 @@ networkValidate(virNetworkDefPtr def)
+                    def->virtPortProfile->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH);
+ 
+     vlanUsed = def->vlan.nTags > 0;
+-    for (ii = 0; ii < def->nPortGroups && !(vlanUsed && vlanAllowed); ii++) {
+-        if (def->portGroups[ii].vlan.nTags > 0)
+-            vlanUsed = true;
+-        if (def->forwardType == VIR_NETWORK_FORWARD_BRIDGE &&
+-            def->portGroups[ii].virtPortProfile &&
+-            (def->portGroups[ii].virtPortProfile->virtPortType
+-             == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH)) {
+-            vlanAllowed = true;
++    for (ii = 0; ii < def->nPortGroups; ii++) {
++        if (vlanUsed || def->portGroups[ii].vlan.nTags > 0) {
++            /* anyone using this portgroup will get a vlan tag. Verify
++             * that they will also be using an openvswitch connection,
++             * as that is the only type of network that currently
++             * supports a vlan tag.
++             */
++            if (def->portGroups[ii].virtPortProfile) {
++                if (def->forwardType != VIR_NETWORK_FORWARD_BRIDGE ||
++                    def->portGroups[ii].virtPortProfile->virtPortType
++                    != VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH) {
++                    badVlanUse = true;
++                }
++            } else if (!vlanAllowed) {
++                /* virtualport taken from base network definition */
++                badVlanUse = true;
++            }
+         }
+         if (def->portGroups[ii].isDefault) {
+             if (defaultPortGroup) {
+@@ -2625,13 +2634,20 @@ networkValidate(virNetworkDefPtr def)
+                                _("network '%s' has multiple default "
+                                  "<portgroup> elements (%s and %s), "
+                                  "but only one default is allowed"),
+-                               def->name, defaultPortGroup,
++                               def->name, defaultPortGroup->name,
+                                def->portGroups[ii].name);
++                return -1;
+             }
+-            defaultPortGroup = def->portGroups[ii].name;
++            defaultPortGroup = &def->portGroups[ii];
+         }
+     }
+-    if (vlanUsed && !vlanAllowed) {
++    if (badVlanUse ||
++        (vlanUsed && !vlanAllowed && !defaultPortGroup)) {
++        /* NB: if defaultPortGroup is set, we don't directly look at
++         * vlanUsed && !vlanAllowed, because the network will never be
++         * used without having a portgroup added in, so all necessary
++         * checks were done in the loop above.
++         */
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("<vlan> element specified for network %s, "
+                          "whose type doesn't support vlan configuration"),
+-- 
+1.7.12.4
+

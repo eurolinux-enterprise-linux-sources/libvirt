@@ -1,0 +1,105 @@
+From 7a9f80dab7a75875bcf331b8a2bdcd2782eebee3 Mon Sep 17 00:00:00 2001
+Message-Id: <7a9f80dab7a75875bcf331b8a2bdcd2782eebee3@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 15 May 2014 15:57:31 +0200
+Subject: [PATCH] qemu: Avoid leak in qemuDomainCheckRemoveOptionalDisk
+
+Coverity complains about event being leaked in
+qemuDomainCheckRemoveOptionalDisk. The best fix for it is to remove the
+disk directly since we already know its index.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1014730
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit a4693c76f5beb280869dac9d103ceb632c6c1403)
+
+Conflicts:
+	src/qemu/qemu_domain.c -- context because of various refactoring
+	    done upstream
+---
+ src/qemu/qemu_domain.c | 25 ++++++++++---------------
+ 1 file changed, 10 insertions(+), 15 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index c6a8eee..8d1fdbf 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -1866,11 +1866,11 @@ qemuDomainSetFakeReboot(struct qemud_driver *driver,
+ static int
+ qemuDomainCheckRemoveOptionalDisk(struct qemud_driver *driver,
+                                   virDomainObjPtr vm,
+-                                  virDomainDiskDefPtr disk)
++                                  size_t diskIndex)
+ {
+     char uuid[VIR_UUID_STRING_BUFLEN];
+     virDomainEventPtr event = NULL;
+-    virDomainDiskDefPtr del_disk = NULL;
++    virDomainDiskDefPtr disk = vm->def->disks[diskIndex];
+ 
+     virUUIDFormat(vm->def->uuid, uuid);
+ 
+@@ -1889,13 +1889,8 @@ qemuDomainCheckRemoveOptionalDisk(struct qemud_driver *driver,
+         event = virDomainEventDiskChangeNewFromObj(vm, disk->src, NULL,
+                                                    disk->info.alias,
+                                                    VIR_DOMAIN_EVENT_DISK_DROP_MISSING_ON_START);
+-
+-        if (!(del_disk = virDomainDiskRemoveByName(vm->def, disk->src))) {
+-            virReportError(VIR_ERR_INVALID_ARG,
+-                           _("no source device %s"), disk->src);
+-            return -1;
+-        }
+-        virDomainDiskDefFree(del_disk);
++        virDomainDiskRemove(vm->def, diskIndex);
++        virDomainDiskDefFree(disk);
+     }
+ 
+     if (event)
+@@ -1907,11 +1902,11 @@ qemuDomainCheckRemoveOptionalDisk(struct qemud_driver *driver,
+ static int
+ qemuDomainCheckDiskStartupPolicy(struct qemud_driver *driver,
+                                  virDomainObjPtr vm,
+-                                 virDomainDiskDefPtr disk,
++                                 size_t diskIndex,
+                                  bool cold_boot)
+ {
+     char uuid[VIR_UUID_STRING_BUFLEN];
+-    int startupPolicy = disk->startupPolicy;
++    int startupPolicy = vm->def->disks[diskIndex]->startupPolicy;
+ 
+     virUUIDFormat(vm->def->uuid, uuid);
+ 
+@@ -1933,7 +1928,7 @@ qemuDomainCheckDiskStartupPolicy(struct qemud_driver *driver,
+             break;
+     }
+ 
+-    if (qemuDomainCheckRemoveOptionalDisk(driver, vm, disk) < 0)
++    if (qemuDomainCheckRemoveOptionalDisk(driver, vm, diskIndex) < 0)
+         goto error;
+ 
+     return 0;
+@@ -1949,11 +1944,11 @@ qemuDomainCheckDiskPresence(struct qemud_driver *driver,
+ {
+     int ret = -1;
+     int i;
+-    virDomainDiskDefPtr disk;
+ 
+     VIR_DEBUG("Checking for disk presence");
+     for (i = vm->def->ndisks; i > 0; i--) {
+-        disk = vm->def->disks[i - 1];
++        size_t idx = i - 1;
++        virDomainDiskDefPtr disk = vm->def->disks[idx];
+ 
+         if (!disk->src)
+             continue;
+@@ -1972,7 +1967,7 @@ qemuDomainCheckDiskPresence(struct qemud_driver *driver,
+             continue;
+ 
+         if (disk->startupPolicy &&
+-            qemuDomainCheckDiskStartupPolicy(driver, vm, disk,
++            qemuDomainCheckDiskStartupPolicy(driver, vm, idx,
+                                              cold_boot) >= 0) {
+             virResetLastError();
+             continue;
+-- 
+1.9.3
+

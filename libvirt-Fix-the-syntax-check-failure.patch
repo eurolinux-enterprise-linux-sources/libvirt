@@ -1,0 +1,33 @@
+From 18c4639198ba3bd693f72716d9be763b3023879e Mon Sep 17 00:00:00 2001
+Message-Id: <18c4639198ba3bd693f72716d9be763b3023879e@dist-git>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 14 Apr 2014 17:49:44 +0200
+Subject: [PATCH] Fix the syntax-check failure
+
+https://bugzilla.redhat.com/show_bug.cgi?id=884382
+
+Introduced by commit 7ac2c4fe624, pushed under build-breaker rule.
+
+(cherry picked from commit 1f9dcbc7f1ad828a7233a1c04ad73734a02a399d)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/interface_conf.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/conf/interface_conf.h b/src/conf/interface_conf.h
+index 68cb08b..d5819f7 100644
+--- a/src/conf/interface_conf.h
++++ b/src/conf/interface_conf.h
+@@ -211,7 +211,7 @@ char *virInterfaceDefFormat(const virInterfaceDefPtr def);
+ void virInterfaceObjLock(virInterfaceObjPtr obj);
+ void virInterfaceObjUnlock(virInterfaceObjPtr obj);
+ 
+-#define VIR_CONNECT_LIST_INTERFACES_FILTERS_ACTIVE   \
++# define VIR_CONNECT_LIST_INTERFACES_FILTERS_ACTIVE   \
+                 (VIR_CONNECT_LIST_INTERFACES_ACTIVE | \
+                  VIR_CONNECT_LIST_INTERFACES_INACTIVE)
+ 
+-- 
+1.9.2
+

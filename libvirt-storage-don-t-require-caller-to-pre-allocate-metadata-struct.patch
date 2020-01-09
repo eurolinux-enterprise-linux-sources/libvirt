@@ -1,0 +1,243 @@
+From f20cc647b4df35ba939334d268fecd3b6161d08d Mon Sep 17 00:00:00 2001
+Message-Id: <f20cc647b4df35ba939334d268fecd3b6161d08d.1350990678.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:35 -0600
+Subject: [PATCH] storage: don't require caller to pre-allocate metadata
+ struct
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+Requiring pre-allocation was an unusual idiom.  It allowed iteration
+over the backing chain to use fewer mallocs, but made one-shot
+clients harder to read.  Also, this makes it easier for a future
+patch to move away from opening fds on every iteration over the chain.
+
+* src/util/storage_file.h (virStorageFileGetMetadataFromFD): Alter
+signature.
+* src/util/storage_file.c (virStorageFileGetMetadataFromFD): Allocate
+return value.
+ (virStorageFileGetMetadata): Update clients.
+* src/conf/domain_conf.c (virDomainDiskDefForeachPath): Likewise.
+* src/qemu/qemu_driver.c (qemuDomainGetBlockInfo): Likewise.
+* src/storage/storage_backend_fs.c (virStorageBackendProbeTarget):
+Likewise.
+(cherry picked from commit 1fc9593271c5981dc42d2d41e11ee38ee7c67ec5)
+---
+ src/conf/domain_conf.c           | 11 ++++------
+ src/qemu/qemu_driver.c           |  9 +-------
+ src/storage/storage_backend_fs.c | 12 +++-------
+ src/util/storage_file.c          | 47 +++++++++++++++++++---------------------
+ src/util/storage_file.h          |  7 +++---
+ 5 files changed, 33 insertions(+), 53 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index cbfd5d9..e0d26e7 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -14857,16 +14857,11 @@ int virDomainDiskDefForeachPath(virDomainDiskDefPtr disk,
+     int ret = -1;
+     size_t depth = 0;
+     char *nextpath = NULL;
+-    virStorageFileMetadata *meta;
++    virStorageFileMetadata *meta = NULL;
+ 
+     if (!disk->src || disk->type == VIR_DOMAIN_DISK_TYPE_NETWORK)
+         return 0;
+ 
+-    if (VIR_ALLOC(meta) < 0) {
+-        virReportOOMError();
+-        return ret;
+-    }
+-
+     if (disk->format > 0) {
+         format = disk->format;
+     } else {
+@@ -14909,7 +14904,7 @@ int virDomainDiskDefForeachPath(virDomainDiskDefPtr disk,
+             }
+         }
+ 
+-        if (virStorageFileGetMetadataFromFD(path, fd, format, meta) < 0) {
++        if (!(meta = virStorageFileGetMetadataFromFD(path, fd, format))) {
+             VIR_FORCE_CLOSE(fd);
+             goto cleanup;
+         }
+@@ -14943,6 +14938,8 @@ int virDomainDiskDefForeachPath(virDomainDiskDefPtr disk,
+         /* Allow probing for image formats that are safe */
+         if (format == VIR_STORAGE_FILE_AUTO_SAFE)
+             format = VIR_STORAGE_FILE_AUTO;
++        virStorageFileFreeMetadata(meta);
++        meta = NULL;
+     } while (nextpath);
+ 
+     ret = 0;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index a34e530..ab94888 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -9310,14 +9310,7 @@ static int qemuDomainGetBlockInfo(virDomainPtr dom,
+         }
+     }
+ 
+-    if (VIR_ALLOC(meta) < 0) {
+-        virReportOOMError();
+-        goto cleanup;
+-    }
+-
+-    if (virStorageFileGetMetadataFromFD(path, fd,
+-                                        format,
+-                                        meta) < 0)
++    if (!(meta = virStorageFileGetMetadataFromFD(path, fd, format)))
+         goto cleanup;
+ 
+     /* Get info for normal formats */
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index db19b87..cecc2d2 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -68,12 +68,7 @@ virStorageBackendProbeTarget(virStorageVolTargetPtr target,
+ {
+     int fd = -1;
+     int ret = -1;
+-    virStorageFileMetadata *meta;
+-
+-    if (VIR_ALLOC(meta) < 0) {
+-        virReportOOMError();
+-        return ret;
+-    }
++    virStorageFileMetadata *meta = NULL;
+ 
+     *backingStore = NULL;
+     *backingStoreFormat = VIR_STORAGE_FILE_AUTO;
+@@ -96,9 +91,8 @@ virStorageBackendProbeTarget(virStorageVolTargetPtr target,
+         goto error;
+     }
+ 
+-    if (virStorageFileGetMetadataFromFD(target->path, fd,
+-                                        target->format,
+-                                        meta) < 0) {
++    if (!(meta = virStorageFileGetMetadataFromFD(target->path, fd,
++                                                 target->format))) {
+         ret = -1;
+         goto error;
+     }
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index 68c7605..76079bb 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -851,41 +851,43 @@ virStorageFileProbeFormat(const char *path)
+  * backing store. Callers are advised against probing for the
+  * backing store format in this case.
+  *
+- * Caller MUST free @meta after use via virStorageFileFreeMetadata.
++ * Caller MUST free the result after use via virStorageFileFreeMetadata.
+  */
+-int
++virStorageFileMetadataPtr
+ virStorageFileGetMetadataFromFD(const char *path,
+                                 int fd,
+-                                int format,
+-                                virStorageFileMetadata *meta)
++                                int format)
+ {
++    virStorageFileMetadata *meta = NULL;
+     unsigned char *head = NULL;
+     ssize_t len = STORAGE_MAX_HEAD;
+-    int ret = -1;
++    virStorageFileMetadata *ret = NULL;
+     struct stat sb;
+ 
+-    memset(meta, 0, sizeof(*meta));
++    if (VIR_ALLOC(meta) < 0) {
++        virReportOOMError();
++        return NULL;
++    }
+ 
+     if (fstat(fd, &sb) < 0) {
+         virReportSystemError(errno,
+                              _("cannot stat file '%s'"),
+                              path);
+-        return -1;
++        goto cleanup;
+     }
+ 
+-    /* No header to probe for directories */
+-    if (S_ISDIR(sb.st_mode)) {
+-        return 0;
+-    }
++    /* No header to probe for directories, but also no backing file */
++    if (S_ISDIR(sb.st_mode))
++        return meta;
+ 
+     if (lseek(fd, 0, SEEK_SET) == (off_t)-1) {
+         virReportSystemError(errno, _("cannot seek to start of '%s'"), path);
+-        return -1;
++        goto cleanup;
+     }
+ 
+     if (VIR_ALLOC_N(head, len) < 0) {
+         virReportOOMError();
+-        return -1;
++        goto cleanup;
+     }
+ 
+     if ((len = read(fd, head, len)) < 0) {
+@@ -903,9 +905,13 @@ virStorageFileGetMetadataFromFD(const char *path,
+         goto cleanup;
+     }
+ 
+-    ret = virStorageFileGetMetadataFromBuf(format, path, head, len, meta);
++    if (virStorageFileGetMetadataFromBuf(format, path, head, len, meta) < 0)
++        goto cleanup;
++    ret = meta;
++    meta = NULL;
+ 
+ cleanup:
++    virStorageFileFreeMetadata(meta);
+     VIR_FREE(head);
+     return ret;
+ }
+@@ -933,21 +939,12 @@ virStorageFileGetMetadataRecurse(const char *path, int format,
+         return NULL;
+     }
+ 
+-    if (VIR_ALLOC(ret) < 0) {
+-        virReportOOMError();
+-        VIR_FORCE_CLOSE(fd);
+-        return NULL;
+-    }
+-    if (virStorageFileGetMetadataFromFD(path, fd, format, ret) < 0) {
+-        virStorageFileFreeMetadata(ret);
+-        VIR_FORCE_CLOSE(fd);
+-        return NULL;
+-    }
++    ret = virStorageFileGetMetadataFromFD(path, fd, format);
+ 
+     if (VIR_CLOSE(fd) < 0)
+         VIR_WARN("could not close file %s", path);
+ 
+-    if (ret->backingStoreIsFile) {
++    if (ret && ret->backingStoreIsFile) {
+         if (ret->backingStoreFormat == VIR_STORAGE_FILE_AUTO && !allow_probe)
+             ret->backingStoreFormat = VIR_STORAGE_FILE_RAW;
+         else if (ret->backingStoreFormat == VIR_STORAGE_FILE_AUTO_SAFE)
+diff --git a/src/util/storage_file.h b/src/util/storage_file.h
+index 18dea6a..9a60451 100644
+--- a/src/util/storage_file.h
++++ b/src/util/storage_file.h
+@@ -73,10 +73,9 @@ virStorageFileMetadataPtr virStorageFileGetMetadata(const char *path,
+                                                     int format,
+                                                     uid_t uid, gid_t gid,
+                                                     bool allow_probe);
+-int virStorageFileGetMetadataFromFD(const char *path,
+-                                    int fd,
+-                                    int format,
+-                                    virStorageFileMetadata *meta);
++virStorageFileMetadataPtr virStorageFileGetMetadataFromFD(const char *path,
++                                                          int fd,
++                                                          int format);
+ 
+ void virStorageFileFreeMetadata(virStorageFileMetadataPtr meta);
+ 
+-- 
+1.7.12.4
+

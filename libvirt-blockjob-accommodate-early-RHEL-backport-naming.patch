@@ -1,0 +1,66 @@
+From 71dd8c72b6fa69c4b342359451af38bab462995b Mon Sep 17 00:00:00 2001
+Message-Id: <71dd8c72b6fa69c4b342359451af38bab462995b.1350990679.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 22 Oct 2012 08:12:25 -0600
+Subject: [PATCH] blockjob: accommodate early RHEL backport naming
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+RHEL-only; needed since RHEL 6.4 backported an early version of
+block-commit prior to the qemu 1.3 release, under the name
+__com.redhat_block-commit.  Support both names, so that RHEL
+libvirt will still work even with paired with upstream qemu.
+
+* src/qemu/qemu_capabilities.c (qemuCapsProbeQMPCommands):
+Recognize alternate name.
+* src/qemu/qemu_monitor_json.c (qemuMonitorJSONBlockCommit):
+Fall back to RHEL name if upstream name not found.
+---
+ src/qemu/qemu_capabilities.c |  3 ++-
+ src/qemu/qemu_monitor_json.c | 16 ++++++++++++++++
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index be805d4..39cd365 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1885,7 +1885,8 @@ qemuCapsProbeQMPCommands(qemuCapsPtr caps,
+             qemuCapsSet(caps, QEMU_CAPS_BLOCKJOB_ASYNC);
+         else if (STREQ(name, "dump-guest-memory"))
+             qemuCapsSet(caps, QEMU_CAPS_DUMP_GUEST_MEMORY);
+-        else if (STREQ(name, "block-commit"))
++        else if (STREQ(name, "block-commit") ||
++                 STREQ(name, "__com.redhat_block-commit"))
+             qemuCapsSet(caps, QEMU_CAPS_BLOCK_COMMIT);
+         VIR_FREE(name);
+     }
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 7cdd0d6..163da22 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -3430,6 +3430,22 @@ qemuMonitorJSONBlockCommit(qemuMonitorPtr mon, const char *device,
+ 
+     if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply)) < 0)
+         goto cleanup;
++    if (qemuMonitorJSONHasError(reply, "CommandNotFound")) {
++        VIR_DEBUG("block-commit command not found, trying RHEL version");
++        virJSONValueFree(cmd);
++        virJSONValueFree(reply);
++        reply = NULL;
++        cmd = qemuMonitorJSONMakeCommand("__com.redhat_block-commit",
++                                         "s:device", device,
++                                         "U:speed", speed,
++                                         "s:top", top,
++                                         base ? "s:base" : NULL, base,
++                                         NULL);
++        if (!cmd)
++            goto cleanup;
++        if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply)) < 0)
++            goto cleanup;
++    }
+     ret = qemuMonitorJSONCheckError(cmd, reply);
+ 
+ cleanup:
+-- 
+1.7.12.4
+

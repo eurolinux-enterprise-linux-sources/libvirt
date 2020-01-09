@@ -1,0 +1,72 @@
+From 510a765b2d1c2f818f203d27b1014aba6cb6e242 Mon Sep 17 00:00:00 2001
+Message-Id: <510a765b2d1c2f818f203d27b1014aba6cb6e242@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:50 +0100
+Subject: [PATCH] conf: Add RNG device ABI compatibility check
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+(cherry picked from commit 1d28aa05a6759bf302f899519591956ba536ce04)
+
+Conflicts:
+	src/conf/domain_conf.c - a few cleanup patches not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 33 +++++++++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 42c0706..f3a8c9e 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -11326,6 +11326,36 @@ cleanup:
+ }
+ 
+ 
++static bool
++virDomainRNGDefCheckABIStability(virDomainRNGDefPtr src,
++                                 virDomainRNGDefPtr dst)
++{
++    if (!src && !dst)
++        return true;
++
++    if (!src || !dst) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("Target domain RNG device count '%d' "
++                         "does not match source count '%d'"),
++                       src ? 1 : 0, dst ? 1 : 0);
++        return false;
++    }
++
++    if (src->model != dst->model) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("Target RNG model '%s' does not match source '%s'"),
++                       virDomainRNGModelTypeToString(dst->model),
++                       virDomainRNGModelTypeToString(src->model));
++        return false;
++    }
++
++    if (!virDomainDeviceInfoCheckABIStability(&src->info, &dst->info))
++        return false;
++
++    return true;
++}
++
++
+ static bool virDomainHubDefCheckABIStability(virDomainHubDefPtr src,
+                                                    virDomainHubDefPtr dst)
+ {
+@@ -11707,6 +11737,9 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+         !virDomainMemballoonDefCheckABIStability(src->memballoon, dst->memballoon))
+         goto cleanup;
+ 
++    if (!virDomainRNGDefCheckABIStability(src->rng, dst->rng))
++        goto cleanup;
++
+     identical = true;
+ 
+ cleanup:
+-- 
+1.9.1
+

@@ -1,0 +1,34 @@
+From c80ae15f6bdfb9bd669ae9e5b5779b8622f63c0b Mon Sep 17 00:00:00 2001
+Message-Id: <c80ae15f6bdfb9bd669ae9e5b5779b8622f63c0b@dist-git>
+From: Yanbing Du <ydu@redhat.com>
+Date: Tue, 26 Mar 2013 11:02:17 +0800
+Subject: [PATCH] Remove the redundant parentheses in migrate help
+
+https://bugzilla.redhat.com/show_bug.cgi?id=927497
+
+Signed-off-by: Yanbing Du <ydu@redhat.com>
+(cherry picked from commit 5c925a4d82b1946b3c8b2d521dda7782107816a6)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	tools/virsh-domain.c -- context
+---
+ tools/virsh-domain.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 838dfcf..ffa66cc 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -6689,7 +6689,7 @@ static const vshCmdOptDef opts_migrate[] = {
+     {"copy-storage-all", VSH_OT_BOOL, 0, N_("migration with non-shared storage with full disk copy")},
+     {"copy-storage-inc", VSH_OT_BOOL, 0, N_("migration with non-shared storage with incremental copy (same base image shared between source and destination)")},
+     {"change-protection", VSH_OT_BOOL, 0,
+-     N_("prevent any configuration changes to domain until migration ends)")},
++     N_("prevent any configuration changes to domain until migration ends")},
+     {"unsafe", VSH_OT_BOOL, 0, N_("force migration even if it may be unsafe")},
+     {"verbose", VSH_OT_BOOL, 0, N_("display the progress of migration")},
+     {"domain", VSH_OT_DATA, VSH_OFLAG_REQ, N_("domain name, id or uuid")},
+-- 
+1.9.2
+

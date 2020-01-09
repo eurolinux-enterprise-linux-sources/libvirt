@@ -1,0 +1,43 @@
+From c7599ee5d4f0995d4fb19f0326fce3c4414841d7 Mon Sep 17 00:00:00 2001
+Message-Id: <c7599ee5d4f0995d4fb19f0326fce3c4414841d7@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 7 Jul 2014 10:48:55 +0200
+Subject: [PATCH] Ignore additional fields in iscsiadm output
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1116741
+
+There has been a new field introduced in iscsiadm --mode session
+output [1], but our regex only expects four fields. This breaks
+startup of iscsi pools:
+error: Failed to start pool iscsi
+error: internal error: cannot find session
+
+Fix this by ignoring anything after the fourth field.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1067173
+
+[1] https://github.com/mikechristie/open-iscsi/commit/181af9a
+
+(cherry picked from commit 57e17a74b76fd8f93012d6d0407106e9a2d5c5e3)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/storage/storage_backend_iscsi.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/storage/storage_backend_iscsi.c b/src/storage/storage_backend_iscsi.c
+index 75758e1..8e2a2b5 100644
+--- a/src/storage/storage_backend_iscsi.c
++++ b/src/storage/storage_backend_iscsi.c
+@@ -146,7 +146,7 @@ virStorageBackendISCSISession(virStoragePoolObjPtr pool,
+      * Pull out 2nd and 4th fields
+      */
+     const char *regexes[] = {
+-        "^tcp:\\s+\\[(\\S+)\\]\\s+\\S+\\s+(\\S+)\\s*$"
++        "^tcp:\\s+\\[(\\S+)\\]\\s+\\S+\\s+(\\S+).*$"
+     };
+     int vars[] = {
+         2,
+-- 
+2.0.0
+

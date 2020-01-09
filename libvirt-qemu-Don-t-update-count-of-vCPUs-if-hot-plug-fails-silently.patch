@@ -1,0 +1,35 @@
+From 923fa04e558bdd0524b1ab72a9fccd846c397883 Mon Sep 17 00:00:00 2001
+Message-Id: <923fa04e558bdd0524b1ab72a9fccd846c397883@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:57 +0200
+Subject: [PATCH] qemu: Don't update count of vCPUs if hot-plug fails silently
+
+When cpu hotplug fails without reporting an error, we would fail the
+command but update the count of vCPUs anyways.
+
+Commit 761fc481365703b861429d73a341bde352ba8d41 fixed the case when CPU
+hot-unplug failed silently, but forgot to fix up the value in this case.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1000357
+(cherry picked from commit f17f164e3acefd590437da84cdcf08c63c7abb0b)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index c14e46d..917325f 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -4010,6 +4010,7 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+                        _("got wrong number of vCPU pids from QEMU monitor. "
+                          "got %d, wanted %d"),
+                        ncpupids, vcpus);
++        vcpus = oldvcpus;
+         ret = -1;
+         goto cleanup;
+     }
+-- 
+1.9.2
+

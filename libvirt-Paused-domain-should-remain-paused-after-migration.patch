@@ -1,0 +1,142 @@
+From 61802f187c8a8c8b18d24f74e09219bf38847d16 Mon Sep 17 00:00:00 2001
+Message-Id: <61802f187c8a8c8b18d24f74e09219bf38847d16.1373885147.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 10 Jul 2013 09:12:52 +0200
+Subject: [PATCH] Paused domain should remain paused after migration
+
+https://bugzilla.redhat.com/show_bug.cgi?id=972675 [6.5]
+https://bugzilla.redhat.com/show_bug.cgi?id=981139 [7.0]
+
+If a domain is paused before migration starts, we need to tell that to
+the destination libvirtd to prevent it from resuming the domain at the
+end of migration. This regression was introduced by commit 5379bb0.
+(cherry picked from commit d4ce75ba764e74f72c8043fdee5fefdcb4f6c8cc)
+
+Conflicts:
+	src/libvirt.c: commit 1c04f99970e7f7b969e6fc6cc883dbf978b3aea2 not
+                   backported: context difference merged into this patch
+                   (one space before function call brackets removed)
+
+	src/qemu/qemu_migration.c: context conflict with chagnes from
+                               35461438cbc8bc5ec13dba7cb33200b4378de352
+---
+ src/libvirt.c             | 26 +++++++++++++++-----------
+ src/qemu/qemu_migration.c |  8 ++++++--
+ 2 files changed, 21 insertions(+), 13 deletions(-)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 73b3cae..ec155c6 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -4524,16 +4524,17 @@ virDomainMigrateVersion1 (virDomainPtr domain,
+     char *cookie = NULL;
+     int cookielen = 0, ret;
+     virDomainInfo info;
+-    unsigned int destflags = flags & ~VIR_MIGRATE_ABORT_ON_ERROR;
++    unsigned int destflags;
+ 
+     VIR_DOMAIN_DEBUG(domain,
+                      "dconn=%p, flags=%lx, dname=%s, uri=%s, bandwidth=%lu",
+                      dconn, flags, NULLSTR(dname), NULLSTR(uri), bandwidth);
+ 
+-    ret = virDomainGetInfo (domain, &info);
+-    if (ret == 0 && info.state == VIR_DOMAIN_PAUSED) {
++    ret = virDomainGetInfo(domain, &info);
++    if (ret == 0 && info.state == VIR_DOMAIN_PAUSED)
+         flags |= VIR_MIGRATE_PAUSED;
+-    }
++
++    destflags = flags & ~VIR_MIGRATE_ABORT_ON_ERROR;
+ 
+     /* Prepare the migration.
+      *
+@@ -4620,7 +4621,7 @@ virDomainMigrateVersion2 (virDomainPtr domain,
+     virErrorPtr orig_err = NULL;
+     unsigned int getxml_flags = 0;
+     int cancelled;
+-    unsigned int destflags = flags & ~VIR_MIGRATE_ABORT_ON_ERROR;
++    unsigned long destflags;
+ 
+     VIR_DOMAIN_DEBUG(domain,
+                      "dconn=%p, flags=%lx, dname=%s, uri=%s, bandwidth=%lu",
+@@ -4659,12 +4660,13 @@ virDomainMigrateVersion2 (virDomainPtr domain,
+     if (!dom_xml)
+         return NULL;
+ 
+-    ret = virDomainGetInfo (domain, &info);
+-    if (ret == 0 && info.state == VIR_DOMAIN_PAUSED) {
++    ret = virDomainGetInfo(domain, &info);
++    if (ret == 0 && info.state == VIR_DOMAIN_PAUSED)
+         flags |= VIR_MIGRATE_PAUSED;
+-    }
+ 
+-    VIR_DEBUG("Prepare2 %p flags=%lx", dconn, flags);
++    destflags = flags & ~VIR_MIGRATE_ABORT_ON_ERROR;
++
++    VIR_DEBUG("Prepare2 %p flags=%lx", dconn, destflags);
+     ret = dconn->driver->domainMigratePrepare2
+         (dconn, &cookie, &cookielen, uri, &uri_out, destflags, dname,
+          bandwidth, dom_xml);
+@@ -4765,7 +4767,7 @@ virDomainMigrateVersion3(virDomainPtr domain,
+     int cancelled = 1;
+     unsigned long protection = 0;
+     bool notify_source = true;
+-    unsigned int destflags = flags & ~VIR_MIGRATE_ABORT_ON_ERROR;
++    unsigned int destflags;
+ 
+     VIR_DOMAIN_DEBUG(domain, "dconn=%p xmlin=%s, flags=%lx, "
+                      "dname=%s, uri=%s, bandwidth=%lu",
+@@ -4798,7 +4800,9 @@ virDomainMigrateVersion3(virDomainPtr domain,
+         flags |= VIR_MIGRATE_PAUSED;
+     }
+ 
+-    VIR_DEBUG("Prepare3 %p flags=%lx", dconn, flags);
++    destflags = flags & ~VIR_MIGRATE_ABORT_ON_ERROR;
++
++    VIR_DEBUG("Prepare3 %p flags=%x", dconn, destflags);
+     cookiein = cookieout;
+     cookieinlen = cookieoutlen;
+     cookieout = NULL;
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 9c39d1a..7e7e5f4 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -2370,7 +2370,7 @@ static int doPeer2PeerMigrate2(struct qemud_driver *driver,
+     virErrorPtr orig_err = NULL;
+     int cancelled;
+     virStreamPtr st = NULL;
+-    unsigned int destflags = flags & ~VIR_MIGRATE_ABORT_ON_ERROR;
++    unsigned long destflags;
+ 
+     VIR_DEBUG("driver=%p, sconn=%p, dconn=%p, vm=%p, dconnuri=%s, "
+               "flags=%lx, dname=%s, resource=%lu",
+@@ -2389,6 +2389,8 @@ static int doPeer2PeerMigrate2(struct qemud_driver *driver,
+     if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_PAUSED)
+         flags |= VIR_MIGRATE_PAUSED;
+ 
++    destflags = flags & ~VIR_MIGRATE_ABORT_ON_ERROR;
++
+     VIR_DEBUG("Prepare2 %p", dconn);
+     if (flags & VIR_MIGRATE_TUNNELLED) {
+         /*
+@@ -2515,7 +2517,7 @@ static int doPeer2PeerMigrate3(struct qemud_driver *driver,
+     virErrorPtr orig_err = NULL;
+     int cancelled;
+     virStreamPtr st = NULL;
+-    unsigned int destflags = flags & ~VIR_MIGRATE_ABORT_ON_ERROR;
++    unsigned long destflags;
+ 
+     VIR_DEBUG("driver=%p, sconn=%p, dconn=%p, vm=%p, xmlin=%s, "
+               "dconnuri=%s, uri=%s, flags=%lx, dname=%s, resource=%lu",
+@@ -2536,6 +2538,8 @@ static int doPeer2PeerMigrate3(struct qemud_driver *driver,
+     if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_PAUSED)
+         flags |= VIR_MIGRATE_PAUSED;
+ 
++    destflags = flags & ~VIR_MIGRATE_ABORT_ON_ERROR;
++
+     VIR_DEBUG("Prepare3 %p", dconn);
+     cookiein = cookieout;
+     cookieinlen = cookieoutlen;
+-- 
+1.8.3.2
+

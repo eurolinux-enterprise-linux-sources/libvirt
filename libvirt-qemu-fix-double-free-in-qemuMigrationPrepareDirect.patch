@@ -1,0 +1,39 @@
+From a79a4ab374ce5c261f5a85972600bf5ee7d4c3e7 Mon Sep 17 00:00:00 2001
+Message-Id: <a79a4ab374ce5c261f5a85972600bf5ee7d4c3e7.1373885147.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 10 Jul 2013 13:31:52 +0200
+Subject: [PATCH] qemu: fix double free in qemuMigrationPrepareDirect
+
+Remove assignment of the string freed by virURIFree
+to hostname, since it's not used anywhere.
+
+Double free introduced by ddf8ad8, useless code
+introduced by f03dcc5.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=977961
+(cherry picked from commit 5744d96f211160d406ec0498c2f814a67d1a3fc8)
+
+Conflicts:
+	src/qemu/qemu_migration.c
+Commits ecd8113 and 1004d63 which added qemuMigrationPrepareDef
+and qemuMigrationConfirmPhase are missing. (context)
+---
+ src/qemu/qemu_migration.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 7e7e5f4..5f4c181 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1686,8 +1686,6 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+             virReportError(VIR_ERR_INVALID_ARG, _("missing host in migration"
+                                                   " URI: %s"), uri_in);
+             goto cleanup;
+-        } else {
+-            hostname = uri->server;
+         }
+ 
+         if (uri->port == 0) {
+-- 
+1.8.3.2
+

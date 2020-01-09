@@ -1,0 +1,58 @@
+From 1bd49e6c6c82439596b3419e71f24c41db436747 Mon Sep 17 00:00:00 2001
+Message-Id: <1bd49e6c6c82439596b3419e71f24c41db436747.1373271643.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Mon, 24 Jun 2013 12:32:02 +0200
+Subject: [PATCH] esx: Support virtualHW version 9
+
+https://bugzilla.redhat.com/show_bug.cgi?id=955575
+
+We already support ESX 5.1, but virtualHW version used by such
+hypervisor [1] wasn't taken into account.
+
+[1] http://kb.vmware.com/selfservice/microsites/search.do?cmd=displayKC&externalId=1003746
+(cherry picked from commit e0eb672e0046af365a4039cc68311e5d844fc7bf)
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+---
+ src/vmx/vmx.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/vmx/vmx.c b/src/vmx/vmx.c
+index e051de5..abb255a 100644
+--- a/src/vmx/vmx.c
++++ b/src/vmx/vmx.c
+@@ -1,8 +1,7 @@
+-
+ /*
+  * vmx.c: VMware VMX parsing/formatting functions
+  *
+- * Copyright (C) 2010-2012 Red Hat, Inc.
++ * Copyright (C) 2010-2013 Red Hat, Inc.
+  * Copyright (C) 2009-2010 Matthias Bolte <matthias.bolte@googlemail.com>
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -45,6 +44,7 @@ domain-xml                        <=>   vmx
+                                         virtualHW.version = "4"                 # essential for ESX 3.5
+                                         virtualHW.version = "7"                 # essential for ESX 4.0
+                                         virtualHW.version = "8"                 # essential for ESX 5.0
++                                        virtualHW.version = "9"                 # essential for ESX 5.1
+ 
+ 
+ ???                               <=>   guestOS = "<value>"                     # essential, FIXME: not representable
+@@ -1304,10 +1304,10 @@ virVMXParseConfig(virVMXContext *ctx, virCapsPtr caps, const char *vmx)
+     }
+ 
+     if (virtualHW_version != 4 && virtualHW_version != 7 &&
+-        virtualHW_version != 8) {
++        virtualHW_version != 8 && virtualHW_version != 9) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("Expecting VMX entry 'virtualHW.version' to be 4, 7 or 8 "
+-                         "but found %lld"),
++                       _("Expecting VMX entry 'virtualHW.version' to be "
++                         "4, 7, 8 or 9 but found %lld"),
+                        virtualHW_version);
+         goto cleanup;
+     }
+-- 
+1.8.2.1
+

@@ -1,0 +1,208 @@
+From 70c8be833a747cf995c6c69652242bf04a73d416 Mon Sep 17 00:00:00 2001
+Message-Id: <70c8be833a747cf995c6c69652242bf04a73d416.1374158622.git.jdenemar@redhat.com>
+From: Chen Fan <chen.fan.fnst@cn.fujitsu.com>
+Date: Tue, 9 Jul 2013 06:51:57 -0600
+Subject: [PATCH] qemu: refactor processWatchdogEvent
+
+https://bugzilla.redhat.com/show_bug.cgi?id=822306
+https://bugzilla.redhat.com/show_bug.cgi?id=826315
+
+Split the code to make the driver workpool more generalized
+(cherry picked from commit bcf0c14491bc0399b4b9e59967df9fb5f77b3318)
+
+Conflicts:
+	src/qemu/qemu_driver.c - no backport of 4738c2a7 qemud_driver refactor
+---
+ src/qemu/qemu_domain.h  | 10 ++++++--
+ src/qemu/qemu_driver.c  | 63 ++++++++++++++++++++++++++++++++-----------------
+ src/qemu/qemu_process.c | 13 +++++-----
+ 3 files changed, 56 insertions(+), 30 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index a2acc0a..64a938a 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -162,9 +162,15 @@ struct _qemuDomainObjPrivate {
+     size_t ncleanupCallbacks_max;
+ };
+ 
+-struct qemuDomainWatchdogEvent
+-{
++typedef enum {
++    QEMU_PROCESS_EVENT_WATCHDOG = 0,
++
++    QEMU_PROCESS_EVENT_LAST
++} qemuProcessEventType;
++
++struct qemuProcessEvent {
+     virDomainObjPtr vm;
++    qemuProcessEventType eventType;
+     int action;
+ };
+ 
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 94d9edd..4707892 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -134,7 +134,11 @@
+ 
+ #define QEMU_NB_BANDWIDTH_PARAM 6
+ 
+-static void processWatchdogEvent(void *data, void *opaque);
++static void processWatchdogEvent(struct qemud_driver *driver,
++                                 virDomainObjPtr vm,
++                                 int action);
++
++static void qemuProcessEventHandler(void *data, void *opaque);
+ 
+ static int qemudShutdown(void);
+ 
+@@ -890,7 +894,7 @@ qemudStartup(int privileged) {
+     virHashForEach(qemu_driver->domains.objs, qemuDomainManagedSaveLoad,
+                    qemu_driver);
+ 
+-    qemu_driver->workerPool = virThreadPoolNew(0, 1, 0, processWatchdogEvent, qemu_driver);
++    qemu_driver->workerPool = virThreadPoolNew(0, 1, 0, qemuProcessEventHandler, qemu_driver);
+     if (!qemu_driver->workerPool)
+         goto error;
+ 
+@@ -3645,16 +3649,11 @@ cleanup:
+     return ret;
+ }
+ 
+-static void processWatchdogEvent(void *data, void *opaque)
++static void processWatchdogEvent(struct qemud_driver *driver, virDomainObjPtr vm, int action)
+ {
+     int ret;
+-    struct qemuDomainWatchdogEvent *wdEvent = data;
+-    struct qemud_driver *driver = opaque;
+ 
+-    qemuDriverLock(driver);
+-    virDomainObjLock(wdEvent->vm);
+-
+-    switch (wdEvent->action) {
++    switch (action) {
+     case VIR_DOMAIN_WATCHDOG_ACTION_DUMP:
+         {
+             char *dumpfile;
+@@ -3662,19 +3661,19 @@ static void processWatchdogEvent(void *data, void *opaque)
+ 
+             if (virAsprintf(&dumpfile, "%s/%s-%u",
+                             driver->autoDumpPath,
+-                            wdEvent->vm->def->name,
++                            vm->def->name,
+                             (unsigned int)time(NULL)) < 0) {
+                 virReportOOMError();
+-                goto unlock;
++                goto cleanup;
+             }
+ 
+-            if (qemuDomainObjBeginAsyncJobWithDriver(driver, wdEvent->vm,
++            if (qemuDomainObjBeginAsyncJobWithDriver(driver, vm,
+                                                      QEMU_ASYNC_JOB_DUMP) < 0) {
+                 VIR_FREE(dumpfile);
+-                goto unlock;
++                goto cleanup;
+             }
+ 
+-            if (!virDomainObjIsActive(wdEvent->vm)) {
++            if (!virDomainObjIsActive(vm)) {
+                 virReportError(VIR_ERR_OPERATION_INVALID,
+                                "%s", _("domain is not running"));
+                 VIR_FREE(dumpfile);
+@@ -3682,13 +3681,13 @@ static void processWatchdogEvent(void *data, void *opaque)
+             }
+ 
+             flags |= driver->autoDumpBypassCache ? VIR_DUMP_BYPASS_CACHE: 0;
+-            ret = doCoreDump(driver, wdEvent->vm, dumpfile,
++            ret = doCoreDump(driver, vm, dumpfile,
+                              getCompressionType(driver), flags);
+             if (ret < 0)
+                 virReportError(VIR_ERR_OPERATION_FAILED,
+                                "%s", _("Dump failed"));
+ 
+-            ret = qemuProcessStartCPUs(driver, wdEvent->vm, NULL,
++            ret = qemuProcessStartCPUs(driver, vm, NULL,
+                                        VIR_DOMAIN_RUNNING_UNPAUSED,
+                                        QEMU_ASYNC_JOB_DUMP);
+ 
+@@ -3700,20 +3699,40 @@ static void processWatchdogEvent(void *data, void *opaque)
+         }
+         break;
+     default:
+-        goto unlock;
++        goto cleanup;
+     }
+ 
+ endjob:
+     /* Safe to ignore value since ref count was incremented in
+      * qemuProcessHandleWatchdog().
+      */
+-    ignore_value(qemuDomainObjEndAsyncJob(driver, wdEvent->vm));
++    ignore_value(qemuDomainObjEndAsyncJob(driver, vm));
++
++cleanup:
++    ;
++}
+ 
+-unlock:
+-    virDomainObjUnlock(wdEvent->vm);
+-    virObjectUnref(wdEvent->vm);
++static void qemuProcessEventHandler(void *data, void *opaque)
++{
++    struct qemuProcessEvent *processEvent = data;
++    virDomainObjPtr vm = processEvent->vm;
++    struct qemud_driver *driver = opaque;
++
++    qemuDriverLock(driver);
++    virDomainObjLock(vm);
++
++    switch (processEvent->eventType) {
++    case QEMU_PROCESS_EVENT_WATCHDOG:
++        processWatchdogEvent(driver, vm, processEvent->action);
++        break;
++    default:
++       break;
++    }
++
++    virDomainObjUnlock(vm);
++    virObjectUnref(vm);
+     qemuDriverUnlock(driver);
+-    VIR_FREE(wdEvent);
++    VIR_FREE(processEvent);
+ }
+ 
+ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 51dd0db..9884496 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -864,18 +864,19 @@ qemuProcessHandleWatchdog(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+     }
+ 
+     if (vm->def->watchdog->action == VIR_DOMAIN_WATCHDOG_ACTION_DUMP) {
+-        struct qemuDomainWatchdogEvent *wdEvent;
+-        if (VIR_ALLOC(wdEvent) == 0) {
+-            wdEvent->action = VIR_DOMAIN_WATCHDOG_ACTION_DUMP;
+-            wdEvent->vm = vm;
++        struct qemuProcessEvent *processEvent;
++        if (VIR_ALLOC(processEvent) == 0) {
++            processEvent->eventType = QEMU_PROCESS_EVENT_WATCHDOG;
++            processEvent->action = VIR_DOMAIN_WATCHDOG_ACTION_DUMP;
++            processEvent->vm = vm;
+             /* Hold an extra reference because we can't allow 'vm' to be
+              * deleted before handling watchdog event is finished.
+              */
+             virObjectRef(vm);
+-            if (virThreadPoolSendJob(driver->workerPool, 0, wdEvent) < 0) {
++            if (virThreadPoolSendJob(driver->workerPool, 0, processEvent) < 0) {
+                 if (!virObjectUnref(vm))
+                     vm = NULL;
+-                VIR_FREE(wdEvent);
++                VIR_FREE(processEvent);
+             }
+         } else {
+             virReportOOMError();
+-- 
+1.8.3.2
+

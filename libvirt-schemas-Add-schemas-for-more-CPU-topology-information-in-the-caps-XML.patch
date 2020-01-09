@@ -1,0 +1,94 @@
+From f1c09d25c51c3eddec3246ae5e9ad3fc04a66b49 Mon Sep 17 00:00:00 2001
+Message-Id: <f1c09d25c51c3eddec3246ae5e9ad3fc04a66b49.1373271635.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 7 Feb 2013 18:28:19 +0100
+Subject: [PATCH] schemas: Add schemas for more CPU topology information in the
+ caps XML
+
+https://bugzilla.redhat.com/show_bug.cgi?id=888503
+
+This patch adds RNG schemas for adding more information in the topology
+output of the NUMA section in the capabilities XML.
+
+The added elements are designed to provide more information about the
+placement and topology of the processors in the system to management
+applications.
+
+A demonstration of supported XML added by this patch:
+<capabilities>
+  <host>
+    <topology>
+      <cells num='3'>
+        <cell id='0'>
+          <cpus num='4'> <!-- this is node with Hyperthreading -->
+            <cpu id='0' socket_id='0' core_id='0' siblings='0-1'/>
+            <cpu id='1' socket_id='0' core_id='0' siblings='0-1'/>
+            <cpu id='2' socket_id='0' core_id='1' siblings='2-3'/>
+            <cpu id='3' socket_id='0' core_id='1' siblings='2-3'/>
+          </cpus>
+        </cell>
+        <cell id='1'>
+          <cpus num='4'> <!-- this is node with modules (Bulldozer) -->
+            <cpu id='4' socket_id='0' core_id='2' siblings='4-5'/>
+            <cpu id='5' socket_id='0' core_id='3' siblings='4-5'/>
+            <cpu id='6' socket_id='0' core_id='4' siblings='6-7'/>
+            <cpu id='7' socket_id='0' core_id='5' siblings='6-7'/>
+          </cpus>
+         </cell>
+        <cell id='2'>
+          <cpus num='4'> <!-- this is a normal multi-core node -->
+            <cpu id='8' socket_id='1' core_id='0' siblings='8'/>
+            <cpu id='9' socket_id='1' core_id='1' siblings='9'/>
+            <cpu id='10' socket_id='1' core_id='2' siblings='10'/>
+            <cpu id='11' socket_id='1' core_id='3' siblings='11'/>
+          </cpus>
+         </cell>
+      </cells>
+    </topology>
+  </host>
+</capabilities>
+
+The socket_id field represents identification of the physical socket the
+CPU is plugged in. This ID may not be identical to the physical socket
+ID reported by the kernel.
+
+The core_id identifies a core within a socket. Also this field may not
+accurately represent physical ID's.
+
+The core_id is guaranteed to be unique within a cell and a socket. There
+may be duplicates between sockets. Only cores sharing core_id within one
+cell and one socket can be considered as threads. Cores sharing core_id
+within sparate cells are distinct cores.
+
+The siblings field is a list of CPU id's the cpu id's the CPU is sibling
+with - thus a thread. The list is in the cpuset format.
+(cherry picked from commit 828820e2d371205d6a6061301165d58a1a92e611)
+---
+ docs/schemas/capability.rng | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/docs/schemas/capability.rng b/docs/schemas/capability.rng
+index 8c928bc..734ed81 100644
+--- a/docs/schemas/capability.rng
++++ b/docs/schemas/capability.rng
+@@ -193,6 +193,17 @@
+       <attribute name='id'>
+         <ref name='unsignedInt'/>
+       </attribute>
++      <optional>
++        <attribute name='socket_id'>
++          <ref name='unsignedInt'/>
++        </attribute>
++        <attribute name='core_id'>
++          <ref name='unsignedInt'/>
++        </attribute>
++        <attribute name='siblings'>
++          <ref name='cpuset'/>
++        </attribute>
++      </optional>
+     </element>
+   </define>
+ 
+-- 
+1.8.2.1
+

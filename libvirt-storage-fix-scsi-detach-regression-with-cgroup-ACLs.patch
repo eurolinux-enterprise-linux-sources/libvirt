@@ -1,0 +1,55 @@
+From 120c4f440761927e03afe81406724060476dc355 Mon Sep 17 00:00:00 2001
+Message-Id: <120c4f440761927e03afe81406724060476dc355.1354720507.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 27 Nov 2012 06:55:00 -0700
+Subject: [PATCH] storage: fix scsi detach regression with cgroup ACLs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=876828
+
+Commit 38c4a9cc introduced a regression in hot unplugging of disks
+from qemu, where cgroup device ACLs were no longer being revoked
+(thankfully not a security hole: cgroup ACLs only prevent open()
+of the disk; so reverting the ACL prevents future abuse but doesn't
+stop abuse from an fd that was already opened before the ACL change).
+
+Commit 1b2ebf95 overlooked that there were two spots affected.
+
+* src/qemu/qemu_hotplug.c (qemuDomainDetachDiskDevice):
+Transfer backing chain before deletion.
+* src/qemu/qemu_driver.c (qemuDomainDetachDeviceDiskLive): Fix
+spacing (partly to ensure a different-looking patch).
+(cherry picked from commit ddd103d3426d31c4b27940b60e21247a2cbe1868)
+---
+ src/qemu/qemu_driver.c  | 2 +-
+ src/qemu/qemu_hotplug.c | 2 ++
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index f57d013..ff7f684 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -6055,7 +6055,7 @@ qemuDomainDetachDeviceDiskLive(struct qemud_driver *driver,
+         if (disk->bus == VIR_DOMAIN_DISK_BUS_VIRTIO)
+             ret = qemuDomainDetachPciDiskDevice(driver, vm, dev);
+         else if (disk->bus == VIR_DOMAIN_DISK_BUS_SCSI)
+-            ret =  qemuDomainDetachDiskDevice(driver, vm, dev);
++            ret = qemuDomainDetachDiskDevice(driver, vm, dev);
+         else if (dev->data.disk->bus == VIR_DOMAIN_DISK_BUS_USB)
+             ret = qemuDomainDetachDiskDevice(driver, vm, dev);
+         else
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 1568edd..fcfb4c5 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -2091,6 +2091,8 @@ int qemuDomainDetachDiskDevice(struct qemud_driver *driver,
+ 
+     virDomainDiskRemove(vm->def, i);
+ 
++    dev->data.disk->backingChain = detach->backingChain;
++    detach->backingChain = NULL;
+     virDomainDiskDefFree(detach);
+ 
+     if (virSecurityManagerRestoreImageLabel(driver->securityManager,
+-- 
+1.8.0
+

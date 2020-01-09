@@ -1,0 +1,31 @@
+From 03d8bf04e4032b4f2a60115a961e42a7728ecb06 Mon Sep 17 00:00:00 2001
+Message-Id: <03d8bf04e4032b4f2a60115a961e42a7728ecb06.1352726475.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 12 Nov 2012 12:11:27 +0100
+Subject: [PATCH] AbortJob: Fix documentation
+
+https://bugzilla.redhat.com/show_bug.cgi?id=873792
+
+This API was never synchronous and probably doesn't even need to be.
+(cherry picked from commit fd723164c7fbaad963c9af0d81228ab188095f51)
+---
+ src/libvirt.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 562fe97..b4145f7 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -17169,8 +17169,7 @@ error:
+  * @domain: a domain object
+  *
+  * Requests that the current background job be aborted at the
+- * soonest opportunity. This will block until the job has
+- * either completed, or aborted.
++ * soonest opportunity.
+  *
+  * Returns 0 in case of success and -1 in case of failure.
+  */
+-- 
+1.8.0
+

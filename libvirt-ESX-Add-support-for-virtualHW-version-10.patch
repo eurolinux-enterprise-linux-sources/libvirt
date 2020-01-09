@@ -1,0 +1,47 @@
+From 4ae7688bd662726468a4d54aecc63faaddc374b2 Mon Sep 17 00:00:00 2001
+Message-Id: <4ae7688bd662726468a4d54aecc63faaddc374b2@dist-git>
+From: Dawid Zamirski <dzamirski@dattobackup.com>
+Date: Tue, 13 May 2014 14:46:57 +0200
+Subject: [PATCH] ESX: Add support for virtualHW version 10
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1089389
+
+This follows the same pattern when v8 and v9 were added. I've tested
+this with my ESX 5.5 and seems to work fine.
+
+(cherry picked from commit 5cc3cce5cc81fc376b80225a723ea4ec21ff70d1)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/vmx/vmx.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/vmx/vmx.c b/src/vmx/vmx.c
+index f4f8016..9bb03bc 100644
+--- a/src/vmx/vmx.c
++++ b/src/vmx/vmx.c
+@@ -45,6 +45,7 @@ domain-xml                        <=>   vmx
+                                         virtualHW.version = "7"                 # essential for ESX 4.0
+                                         virtualHW.version = "8"                 # essential for ESX 5.0
+                                         virtualHW.version = "9"                 # essential for ESX 5.1
++                                        virtualHW.version = "10"                # essential for ESX 5.5
+ 
+ 
+ ???                               <=>   guestOS = "<value>"                     # essential, FIXME: not representable
+@@ -1304,10 +1305,11 @@ virVMXParseConfig(virVMXContext *ctx, virCapsPtr caps, const char *vmx)
+     }
+ 
+     if (virtualHW_version != 4 && virtualHW_version != 7 &&
+-        virtualHW_version != 8 && virtualHW_version != 9) {
++        virtualHW_version != 8 && virtualHW_version != 9 &&
++        virtualHW_version != 10) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("Expecting VMX entry 'virtualHW.version' to be "
+-                         "4, 7, 8 or 9 but found %lld"),
++                         "4, 7, 8, 9 or 10 but found %lld"),
+                        virtualHW_version);
+         goto cleanup;
+     }
+-- 
+1.9.3
+

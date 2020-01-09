@@ -1,0 +1,93 @@
+From 31bf6cc7730b4c466e477dfeda3f0cc14a672f4a Mon Sep 17 00:00:00 2001
+Message-Id: <31bf6cc7730b4c466e477dfeda3f0cc14a672f4a@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 27 Sep 2016 13:45:59 +0200
+Subject: [PATCH] remote: allow TLS protocol/cipher priority override in URI
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1333415
+
+Add support for a "tls_priority" URI parameter in remote
+driver URIs. eg
+
+ qemu+tls://localhost/session?tls_priority=NORMAL:-VERS-SSL3.0
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 416358d99df0929a3901735c557bda8f393820ea)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+ Conflicts:
+	src/remote/remote_driver.c
+    Missing f587c27768ee13f5bed6a9262106307b7a124403
+          Make TLS support conditional
+---
+ docs/remote.html.in        | 13 +++++++++++++
+ src/remote/remote_driver.c |  5 ++++-
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/docs/remote.html.in b/docs/remote.html.in
+index 40696b9..c8286cd 100644
+--- a/docs/remote.html.in
++++ b/docs/remote.html.in
+@@ -229,6 +229,19 @@ Note that parameter values must be
+       </tr>
+       <tr>
+         <td>
++          <code>tls_priority</code>
++        </td>
++        <td> tls </td>
++        <td>
++  A vaid GNUTLS priority string
++</td>
++      </tr>
++      <tr>
++        <td colspan="2"/>
++        <td> Example: <code>tls_priority=NORMAL:-VERS-SSL3.0</code> </td>
++      </tr>
++      <tr>
++        <td>
+           <code>command</code>
+         </td>
+         <td> ssh, ext </td>
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 71f3275..7b65008 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -423,6 +423,7 @@ doRemoteOpen(virConnectPtr conn,
+ #ifndef WIN32
+     const char *daemonPath;
+ #endif
++    char *tls_priority = NULL;
+ 
+     /* We handle *ALL* URIs here. The caller has rejected any
+      * URIs we don't care about */
+@@ -535,6 +536,7 @@ doRemoteOpen(virConnectPtr conn,
+             EXTRACT_URI_ARG_STR("pkipath", pkipath);
+             EXTRACT_URI_ARG_STR("known_hosts", knownHosts);
+             EXTRACT_URI_ARG_STR("known_hosts_verify", knownHostsVerify);
++            EXTRACT_URI_ARG_STR("tls_priority", tls_priority);
+ 
+             EXTRACT_URI_ARG_BOOL("no_sanity", sanity);
+             EXTRACT_URI_ARG_BOOL("no_verify", verify);
+@@ -605,7 +607,7 @@ doRemoteOpen(virConnectPtr conn,
+     case trans_tls:
+         priv->tls = virNetTLSContextNewClientPath(pkipath,
+                                                   geteuid() != 0 ? true : false,
+-                                                  NULL,
++                                                  tls_priority,
+                                                   sanity, verify);
+         if (!priv->tls)
+             goto failed;
+@@ -867,6 +869,7 @@ doRemoteOpen(virConnectPtr conn,
+     VIR_FREE(username);
+     VIR_FREE(port);
+     VIR_FREE(pkipath);
++    VIR_FREE(tls_priority);
+     VIR_FREE(knownHostsVerify);
+     VIR_FREE(knownHosts);
+ 
+-- 
+2.10.1
+

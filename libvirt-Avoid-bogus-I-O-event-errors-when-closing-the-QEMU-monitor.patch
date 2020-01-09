@@ -1,0 +1,61 @@
+From 4cbb6ec918ec242fc1601b406bc08f880ffe4e4d Mon Sep 17 00:00:00 2001
+Message-Id: <4cbb6ec918ec242fc1601b406bc08f880ffe4e4d.1350297261.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 17:00:47 -0600
+Subject: [PATCH] Avoid bogus I/O event errors when closing the QEMU monitor
+
+https://bugzilla.redhat.com/show_bug.cgi?id=859712
+
+After calling qemuMonitorClose(), it is still possible for
+the QEMU monitor I/O event callback to get invoked. This
+will trigger an error message because mon->fd has been set
+to -1 at this point. Silently ignore the case where mon->fd
+is -1, likewise for mon->watch being zero.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 89563efc0209b854d2b2e554423423d7602acdbd)
+---
+ src/qemu/qemu_monitor.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index c53ea11..bd9667d 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -537,6 +537,9 @@ static void qemuMonitorUpdateWatch(qemuMonitorPtr mon)
+         VIR_EVENT_HANDLE_HANGUP |
+         VIR_EVENT_HANDLE_ERROR;
+ 
++    if (!mon->watch)
++        return;
++
+     if (mon->lastError.code == VIR_ERR_OK) {
+         events |= VIR_EVENT_HANDLE_READABLE;
+ 
+@@ -562,6 +565,11 @@ qemuMonitorIO(int watch, int fd, int events, void *opaque) {
+ #if DEBUG_IO
+     VIR_DEBUG("Monitor %p I/O on watch %d fd %d events %d", mon, watch, fd, events);
+ #endif
++    if (mon->fd == -1 || mon->watch == 0) {
++        qemuMonitorUnlock(mon);
++        virObjectUnref(mon);
++        return;
++    }
+ 
+     if (mon->fd != fd || mon->watch != watch) {
+         if (events & (VIR_EVENT_HANDLE_HANGUP | VIR_EVENT_HANDLE_ERROR))
+@@ -829,8 +837,10 @@ void qemuMonitorClose(qemuMonitorPtr mon)
+           "mon=%p refs=%d", mon, mon->object.refs);
+ 
+     if (mon->fd >= 0) {
+-        if (mon->watch)
++        if (mon->watch) {
+             virEventRemoveHandle(mon->watch);
++            mon->watch = 0;
++        }
+         VIR_FORCE_CLOSE(mon->fd);
+     }
+ 
+-- 
+1.7.12.3
+

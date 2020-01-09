@@ -1,0 +1,50 @@
+From b1a15d97c6f5cf40f9f51db1a7e47f92844f0a1a Mon Sep 17 00:00:00 2001
+Message-Id: <b1a15d97c6f5cf40f9f51db1a7e47f92844f0a1a.1374158623.git.jdenemar@redhat.com>
+From: Chen Fan <chen.fan.fnst@cn.fujitsu.com>
+Date: Tue, 9 Jul 2013 06:51:58 -0600
+Subject: [PATCH] qemu: expose qemuProcessShutdownOrReboot()
+
+https://bugzilla.redhat.com/show_bug.cgi?id=822306
+https://bugzilla.redhat.com/show_bug.cgi?id=826315
+
+Later code will need this outside of qemu_process.c
+(cherry picked from commit e8ccf7ed8ae6530cf3e3dc0051d231c1f67232fe)
+
+Conflicts:
+	src/qemu/qemu_process.c - no backport of 4738c2a7 qemud_driver refactor
+	src/qemu/qemu_process.h - likewise
+---
+ src/qemu/qemu_process.c | 2 +-
+ src/qemu/qemu_process.h | 3 +++
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 9884496..6b42bb6 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -618,7 +618,7 @@ cleanup:
+ }
+ 
+ 
+-static void
++void
+ qemuProcessShutdownOrReboot(struct qemud_driver *driver,
+                             virDomainObjPtr vm)
+ {
+diff --git a/src/qemu/qemu_process.h b/src/qemu/qemu_process.h
+index 396b899..fdd7122 100644
+--- a/src/qemu/qemu_process.h
++++ b/src/qemu/qemu_process.h
+@@ -87,6 +87,9 @@ typedef enum {
+ int qemuProcessKill(struct qemud_driver *driver,
+                     virDomainObjPtr vm, unsigned int flags);
+ 
++void qemuProcessShutdownOrReboot(struct qemud_driver *driver,
++                                 virDomainObjPtr vm);
++
+ int qemuProcessAutoDestroyInit(struct qemud_driver *driver);
+ void qemuProcessAutoDestroyShutdown(struct qemud_driver *driver);
+ int qemuProcessAutoDestroyAdd(struct qemud_driver *driver,
+-- 
+1.8.3.2
+

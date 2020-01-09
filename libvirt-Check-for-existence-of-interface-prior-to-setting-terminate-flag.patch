@@ -1,0 +1,42 @@
+From f0728b9d85e3346e04bd8438df02402273b17835 Mon Sep 17 00:00:00 2001
+Message-Id: <f0728b9d85e3346e04bd8438df02402273b17835@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Fri, 11 Apr 2014 07:49:21 -0400
+Subject: [PATCH] Check for existence of interface prior to setting terminate
+ flag
+
+https://bugzilla.redhat.com/show_bug.cgi?id=903480
+
+During domain destruction it's possible that the learnIPAddressThread has
+already removed the interface prior to the teardown filter path being run.
+The teardown code would only be telling the thread to terminate.
+
+(cherry picked from commit 64919d978e4cc910a4475f77c0f04b866051935d)
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/nwfilter/nwfilter_learnipaddr.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/nwfilter/nwfilter_learnipaddr.c b/src/nwfilter/nwfilter_learnipaddr.c
+index 1d31a46..9dface8 100644
+--- a/src/nwfilter/nwfilter_learnipaddr.c
++++ b/src/nwfilter/nwfilter_learnipaddr.c
+@@ -250,6 +250,14 @@ virNWFilterTerminateLearnReq(const char *ifname) {
+     int ifindex;
+     virNWFilterIPAddrLearnReqPtr req;
+ 
++    /* It's possible that it's already been removed as a result of
++     * virNWFilterDeregisterLearnReq during learnIPAddressThread() exit
++     */
++    if (virNetDevExists(ifname) != 1) {
++        virResetLastError();
++        return 0;
++    }
++
+     if (virNetDevGetIndex(ifname, &ifindex) < 0) {
+         virResetLastError();
+         return rc;
+-- 
+1.9.2
+

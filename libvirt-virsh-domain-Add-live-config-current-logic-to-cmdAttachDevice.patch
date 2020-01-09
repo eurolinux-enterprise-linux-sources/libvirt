@@ -1,0 +1,146 @@
+From 2213aa2de29b98d35e7147df98b4a7f8c9cb7736 Mon Sep 17 00:00:00 2001
+Message-Id: <2213aa2de29b98d35e7147df98b4a7f8c9cb7736@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 16 Jul 2014 12:17:44 +0200
+Subject: [PATCH] virsh-domain: Add --live, --config, --current logic to
+ cmdAttachDevice
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1117177
+
+Use the approach established in commit
+69ce3ffa8d431e9810607c6e00b7cfcc481b491d to improve this function too.
+
+(cherry picked from commit f81c95b31f1c1cc95cb7e52cf8af98cbd624e0c1)
+
+Conflicts:
+	tools/virsh-domain.c - context ...
+	tools/virsh.pod - context
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-domain.c | 47 ++++++++++++++++++++++++++++++++++++++---------
+ tools/virsh.pod      | 16 +++++++++++++---
+ 2 files changed, 51 insertions(+), 12 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 0eeb0a2..cb9adf0 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -137,8 +137,22 @@ static const vshCmdInfo info_attach_device[] = {
+ static const vshCmdOptDef opts_attach_device[] = {
+     {"domain", VSH_OT_DATA, VSH_OFLAG_REQ, N_("domain name, id or uuid")},
+     {"file",   VSH_OT_DATA, VSH_OFLAG_REQ, N_("XML file")},
+-    {"persistent", VSH_OT_ALIAS, 0, "config"},
+-    {"config", VSH_OT_BOOL, 0, N_("affect next boot")},
++    {.name = "persistent",
++     .type = VSH_OT_BOOL,
++     .help = N_("make live change persistent")
++    },
++    {.name = "config",
++     .type = VSH_OT_BOOL,
++     .help = N_("affect next boot")
++    },
++    {.name = "live",
++     .type = VSH_OT_BOOL,
++     .help = N_("affect running domain")
++    },
++    {.name = "current",
++     .type = VSH_OT_BOOL,
++     .help = N_("affect current domain")
++    },
+     {NULL, 0, 0, NULL}
+ };
+ 
+@@ -149,7 +163,21 @@ cmdAttachDevice(vshControl *ctl, const vshCmd *cmd)
+     const char *from = NULL;
+     char *buffer;
+     int ret;
+-    unsigned int flags;
++    unsigned int flags = VIR_DOMAIN_AFFECT_CURRENT;
++    bool current = vshCommandOptBool(cmd, "current");
++    bool config = vshCommandOptBool(cmd, "config");
++    bool live = vshCommandOptBool(cmd, "live");
++    bool persistent = vshCommandOptBool(cmd, "persistent");
++
++    VSH_EXCLUSIVE_OPTIONS_VAR(persistent, current);
++
++    VSH_EXCLUSIVE_OPTIONS_VAR(current, live);
++    VSH_EXCLUSIVE_OPTIONS_VAR(current, config);
++
++    if (config || persistent)
++        flags |= VIR_DOMAIN_AFFECT_CONFIG;
++    if (live)
++        flags |= VIR_DOMAIN_AFFECT_LIVE;
+ 
+     if (!(dom = vshCommandOptDomain(ctl, cmd, NULL)))
+         return false;
+@@ -159,20 +187,21 @@ cmdAttachDevice(vshControl *ctl, const vshCmd *cmd)
+         return false;
+     }
+ 
++    if (persistent &&
++        virDomainIsActive(dom) == 1)
++        flags |= VIR_DOMAIN_AFFECT_LIVE;
++
+     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0) {
+         vshReportError(ctl);
+         virDomainFree(dom);
+         return false;
+     }
+ 
+-    if (vshCommandOptBool(cmd, "config")) {
+-        flags = VIR_DOMAIN_AFFECT_CONFIG;
+-        if (virDomainIsActive(dom) == 1)
+-           flags |= VIR_DOMAIN_AFFECT_LIVE;
++    if (flags)
+         ret = virDomainAttachDeviceFlags(dom, buffer, flags);
+-    } else {
++    else
+         ret = virDomainAttachDevice(dom, buffer);
+-    }
++
+     VIR_FREE(buffer);
+ 
+     if (ret < 0) {
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 25fa4f0..a7d6f58 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -1746,7 +1746,8 @@ format of the device sections to get the most accurate set of accepted values.
+ 
+ =over 4
+ 
+-=item B<attach-device> I<domain> I<FILE> [I<--config>]
++=item B<attach-device> I<domain> I<FILE>
++[[[I<--live>] [I<--config>] | [I<--current>]] | [I<--persistent>]]
+ 
+ Attach a device to the domain, using a device definition in an XML
+ file using a device definition element such as <disk> or <interface>
+@@ -1754,13 +1755,22 @@ as the top-level element.  See the documentation at
+ L<http://libvirt.org/formatdomain.html#elementsDevices> to learn about
+ libvirt XML format for a device.  If I<--config> is specified the
+ command alters the persistent domain configuration with the device
+-attach taking effect the next time libvirt starts the domain.  For
+-compatibility purposes, I<--persistent> is an alias of I<--config>.
++attach taking effect the next time libvirt starts the domain.
+ For cdrom and floppy devices, this command only replaces the media
+ within an existing device; consider using B<update-device> for this
+ usage.  For passthrough host devices, see also B<nodedev-detach>,
+ needed if the device does not use managed mode.
+ 
++If I<--live> is specified, affect a running domain.
++If I<--config> is specified, affect the next startup of a persistent domain.
++If I<--current> is specified, affect the current domain state.
++Both I<--live> and I<--config> flags may be given, but I<--current> is
++exclusive. When no flag is specified legacy API is used whose behavior depends
++on the hypervisor driver.
++
++For compatibility purposes, I<--persistent> behaves like I<--config> for
++an offline domain, and like I<--live> I<--config> for a running domain.
++
+ =item B<attach-disk> I<domain> I<source> I<target>
+ [[[I<--live>] [I<--config>] | [I<--current>]] | [I<--persistent>]]
+ [I<--driver driver>] [I<--subdriver subdriver>] [I<--cache cache>]
+-- 
+2.0.0
+

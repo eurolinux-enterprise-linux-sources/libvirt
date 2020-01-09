@@ -1,0 +1,193 @@
+From 73ba210322942dd56cc0f125a479aa5c79f9414a Mon Sep 17 00:00:00 2001
+Message-Id: <73ba210322942dd56cc0f125a479aa5c79f9414a@dist-git>
+From: Matthew Rosato <mjrosato@linux.vnet.ibm.com>
+Date: Mon, 15 Feb 2016 06:59:45 -0500
+Subject: [PATCH] util: Introduce flags field for macvtap creation
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1276478
+
+Currently, there is one flag passed in during macvtap creation
+(withTap) -- Let's convert this field to an unsigned int flag
+field for future expansion.
+
+Signed-off-by: Matthew Rosato <mjrosato@linux.vnet.ibm.com>
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+(cherry pick from commit 7199d2c523feb71be44836e3e3a609b631a26947 with
+some conflicts due to bandwidth being remove from arglist upstrean,
+and an enum being typedefed)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/lxc/lxc_process.c       |  4 ++--
+ src/qemu/qemu_command.c     |  6 ++++--
+ src/util/virnetdevmacvlan.c | 28 +++++++++++++++++-----------
+ src/util/virnetdevmacvlan.h | 14 ++++++++++----
+ 4 files changed, 33 insertions(+), 19 deletions(-)
+
+diff --git a/src/lxc/lxc_process.c b/src/lxc/lxc_process.c
+index dc196cd..660314a 100644
+--- a/src/lxc/lxc_process.c
++++ b/src/lxc/lxc_process.c
+@@ -405,12 +405,12 @@ static int virLXCProcessSetupInterfaceDirect(virConnectPtr conn,
+             net->ifname, &net->mac,
+             virDomainNetGetActualDirectDev(net),
+             virDomainNetGetActualDirectMode(net),
+-            false, false, def->uuid,
++            false, def->uuid,
+             virDomainNetGetActualVirtPortProfile(net),
+             &res_ifname,
+             VIR_NETDEV_VPORT_PROFILE_OP_CREATE,
+             driver->stateDir,
+-            virDomainNetGetActualBandwidth(net)) < 0)
++            virDomainNetGetActualBandwidth(net), 0) < 0)
+         goto cleanup;
+ 
+     (*veths)[(*nveths)] = res_ifname;
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 9cedb3a..3ad5c26 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -166,6 +166,7 @@ qemuPhysIfaceConnect(virDomainDefPtr def,
+     int rc;
+     char *res_ifname = NULL;
+     int vnet_hdr = 0;
++    unsigned int macvlan_create_flags = VIR_NETDEV_MACVLAN_CREATE_WITH_TAP;
+ 
+     if (qemuCapsGet(caps, QEMU_CAPS_VNET_HDR) &&
+         net->model && STREQ(net->model, "virtio"))
+@@ -175,11 +176,12 @@ qemuPhysIfaceConnect(virDomainDefPtr def,
+         net->ifname, &net->mac,
+         virDomainNetGetActualDirectDev(net),
+         virDomainNetGetActualDirectMode(net),
+-        true, vnet_hdr, def->uuid,
++        vnet_hdr, def->uuid,
+         virDomainNetGetActualVirtPortProfile(net),
+         &res_ifname,
+         vmop, driver->stateDir,
+-        virDomainNetGetActualBandwidth(net));
++        virDomainNetGetActualBandwidth(net),
++        macvlan_create_flags);
+     if (rc >= 0) {
+         if (virSecurityManagerSetTapFDLabel(driver->securityManager,
+                                             def, rc) < 0)
+diff --git a/src/util/virnetdevmacvlan.c b/src/util/virnetdevmacvlan.c
+index fd8d3f6..0795c23 100644
+--- a/src/util/virnetdevmacvlan.c
++++ b/src/util/virnetdevmacvlan.c
+@@ -807,26 +807,31 @@ error:
+  * @res_ifname: Pointer to a string pointer where the actual name of the
+  *     interface will be stored into if everything succeeded. It is up
+  *     to the caller to free the string.
++ * @flags: OR of virNetDevMacVLanCreateFlags.
+  *
+- * Returns file descriptor of the tap device in case of success with @withTap,
+- * otherwise returns 0; returns -1 on error.
++ * Returns file descriptor of the tap device in case of success with
++ * @flags & VIR_NETDEV_MACVLAN_CREATE_WITH_TAP, otherwise returns 0; returns
++ * -1 on error.
+  */
+ int virNetDevMacVLanCreateWithVPortProfile(const char *tgifname,
+                                            const virMacAddrPtr macaddress,
+                                            const char *linkdev,
+                                            enum virNetDevMacVLanMode mode,
+-                                           bool withTap,
+                                            int vnet_hdr,
+                                            const unsigned char *vmuuid,
+                                            virNetDevVPortProfilePtr virtPortProfile,
+                                            char **res_ifname,
+                                            enum virNetDevVPortProfileOp vmOp,
+                                            char *stateDir,
+-                                           virNetDevBandwidthPtr bandwidth)
++                                           virNetDevBandwidthPtr bandwidth,
++                                           unsigned int flags)
+ {
+-    const char *type = withTap ? "macvtap" : "macvlan";
+-    const char *prefix = withTap ? MACVTAP_NAME_PREFIX : MACVLAN_NAME_PREFIX;
+-    const char *pattern = withTap ? MACVTAP_NAME_PATTERN : MACVLAN_NAME_PATTERN;
++    const char *type = (flags & VIR_NETDEV_MACVLAN_CREATE_WITH_TAP) ?
++        "macvtap" : "macvlan";
++    const char *prefix = (flags & VIR_NETDEV_MACVLAN_CREATE_WITH_TAP) ?
++        MACVTAP_NAME_PREFIX : MACVLAN_NAME_PREFIX;
++    const char *pattern = (flags & VIR_NETDEV_MACVLAN_CREATE_WITH_TAP) ?
++        MACVTAP_NAME_PATTERN : MACVLAN_NAME_PATTERN;
+     int c, rc;
+     char ifname[IFNAMSIZ];
+     int retries, do_retry = 0;
+@@ -930,7 +935,7 @@ create_name:
+         goto disassociate_exit;
+     }
+ 
+-    if (withTap) {
++    if (flags & VIR_NETDEV_MACVLAN_CREATE_WITH_TAP) {
+         if ((rc = virNetDevMacVLanTapOpen(cr_ifname, 10)) < 0)
+             goto disassociate_exit;
+ 
+@@ -955,7 +960,7 @@ create_name:
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("cannot set bandwidth limits on %s"),
+                        cr_ifname);
+-        if (withTap)
++        if (flags & VIR_NETDEV_MACVLAN_CREATE_WITH_TAP)
+             VIR_FORCE_CLOSE(rc); /* sets rc to -1 */
+         else
+             rc = -1;
+@@ -1104,15 +1109,16 @@ int virNetDevMacVLanCreateWithVPortProfile(const char *ifname ATTRIBUTE_UNUSED,
+                                            const virMacAddrPtr macaddress ATTRIBUTE_UNUSED,
+                                            const char *linkdev ATTRIBUTE_UNUSED,
+                                            enum virNetDevMacVLanMode mode ATTRIBUTE_UNUSED,
+-                                           bool withTap ATTRIBUTE_UNUSED,
+                                            int vnet_hdr ATTRIBUTE_UNUSED,
+                                            const unsigned char *vmuuid ATTRIBUTE_UNUSED,
+                                            virNetDevVPortProfilePtr virtPortProfile ATTRIBUTE_UNUSED,
+                                            char **res_ifname ATTRIBUTE_UNUSED,
+                                            enum virNetDevVPortProfileOp vmop ATTRIBUTE_UNUSED,
+                                            char *stateDir ATTRIBUTE_UNUSED,
+-                                           virNetDevBandwidthPtr bandwidth ATTRIBUTE_UNUSED)
++                                           virNetDevBandwidthPtr bandwidth ATTRIBUTE_UNUSED,
++                                           unsigned int flags)
+ {
++    virCheckFlags(0, -1);
+     virReportSystemError(ENOSYS, "%s",
+                          _("Cannot create macvlan devices on this platform"));
+     return -1;
+diff --git a/src/util/virnetdevmacvlan.h b/src/util/virnetdevmacvlan.h
+index e44651d..fba2924 100644
+--- a/src/util/virnetdevmacvlan.h
++++ b/src/util/virnetdevmacvlan.h
+@@ -40,6 +40,12 @@ enum virNetDevMacVLanMode {
+ };
+ VIR_ENUM_DECL(virNetDevMacVLanMode)
+ 
++typedef enum {
++   VIR_NETDEV_MACVLAN_CREATE_NONE     = 0,
++   /* Create with a tap device */
++   VIR_NETDEV_MACVLAN_CREATE_WITH_TAP = 1 << 0,
++} virNetDevMacVLanCreateFlags;
++
+ int virNetDevMacVLanCreate(const char *ifname,
+                            const char *type,
+                            const virMacAddrPtr macaddress,
+@@ -56,16 +62,16 @@ int virNetDevMacVLanCreateWithVPortProfile(const char *ifname,
+                                            const virMacAddrPtr macaddress,
+                                            const char *linkdev,
+                                            enum virNetDevMacVLanMode mode,
+-                                           bool withTap,
+                                            int vnet_hdr,
+                                            const unsigned char *vmuuid,
+                                            virNetDevVPortProfilePtr virtPortProfile,
+                                            char **res_ifname,
+                                            enum virNetDevVPortProfileOp vmop,
+                                            char *stateDir,
+-                                           virNetDevBandwidthPtr bandwidth)
+-    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(7)
+-    ATTRIBUTE_NONNULL(9) ATTRIBUTE_NONNULL(11) ATTRIBUTE_RETURN_CHECK;
++                                           virNetDevBandwidthPtr bandwidth,
++                                           unsigned int flags)
++    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(6)
++    ATTRIBUTE_NONNULL(8) ATTRIBUTE_NONNULL(10) ATTRIBUTE_RETURN_CHECK;
+ 
+ int virNetDevMacVLanDeleteWithVPortProfile(const char *ifname,
+                                            const virMacAddrPtr macaddress,
+-- 
+2.7.1
+

@@ -1,0 +1,36 @@
+From e6f780a916d49f8e8e8f3c7f89f2da1970bf4ddc Mon Sep 17 00:00:00 2001
+Message-Id: <e6f780a916d49f8e8e8f3c7f89f2da1970bf4ddc@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 14 May 2014 16:12:16 +0200
+Subject: [PATCH] Avoid crash when LXC start fails with no interface target
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+If the <interface> device did not contain any <target>
+element, LXC would crash on a NULL pointer if starting
+the container failed
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 68dceb635d8d8f68e36caf4054c32f0f9cb13c22)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/lxc/lxc_process.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/lxc/lxc_process.c b/src/lxc/lxc_process.c
+index c705a91..0da3583 100644
+--- a/src/lxc/lxc_process.c
++++ b/src/lxc/lxc_process.c
+@@ -254,7 +254,8 @@ static void virLXCProcessCleanup(virLXCDriverPtr driver,
+     for (i = 0 ; i < vm->def->nnets ; i++) {
+         virDomainNetDefPtr iface = vm->def->nets[i];
+         vport = virDomainNetGetActualVirtPortProfile(iface);
+-        ignore_value(virNetDevSetOnline(iface->ifname, false));
++        if (iface->ifname)
++            ignore_value(virNetDevSetOnline(iface->ifname, false));
+         if (vport && vport->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH)
+             ignore_value(virNetDevOpenvswitchRemovePort(
+                             virDomainNetGetActualBridgeName(iface),
+-- 
+1.9.3
+

@@ -1,0 +1,280 @@
+From 7f606c4be58d61cd0df4da7a9ad348895c6774ea Mon Sep 17 00:00:00 2001
+Message-Id: <7f606c4be58d61cd0df4da7a9ad348895c6774ea@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Fri, 11 Apr 2014 10:43:59 +0200
+Subject: [PATCH] Treat zero cpu shares as a valid value
+
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1040784
+
+Currently, <cputune><shares>0</shares></cputune> is treated
+as if it were not specified.
+
+Treat is as a valid value if it was explicitly specified
+and write it to the cgroups.
+
+(cherry picked from commit bdffab0d5c52d31bd71422b0b69665efb6650953)
+
+Conflicts:
+	src/conf/domain_conf.c: missing commits (context):
+      1f50730 conf: Don't format cputune element when not needed
+      ca6dc7b conf: eliminate hardcoded indent from domain xml
+	src/lxc/lxc_cgroup.c: missing:
+      4dceffa LXC: add cpuset cgroup support for lxc
+      0d7f45a Convert remainder of cgroups code to report errors
+	src/lxc/lxc_native.c
+      not present in RHEL6
+	src/qemu/qemu_cgroup.c: missing 8da9516:
+      qemu: Abstract code for the cpu controller setting into a helper
+	src/qemu/qemu_command.c: missing 45ad1ad:
+      qemu: Reject unsupported tuning in session mode
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c                             | 12 ++++----
+ src/conf/domain_conf.h                             |  1 +
+ src/lxc/lxc_cgroup.c                               |  2 +-
+ src/lxc/lxc_driver.c                               |  2 ++
+ src/parallels/parallels_driver.c                   |  1 +
+ src/qemu/qemu_cgroup.c                             |  2 +-
+ src/qemu/qemu_driver.c                             |  6 +++-
+ src/vmx/vmx.c                                      |  3 +-
+ .../qemuxml2argv-cputune-zero-shares.args          |  5 ++++
+ .../qemuxml2argv-cputune-zero-shares.xml           | 34 ++++++++++++++++++++++
+ tests/qemuxml2argvtest.c                           |  1 +
+ tests/qemuxml2xmltest.c                            |  1 +
+ 12 files changed, 61 insertions(+), 9 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-cputune-zero-shares.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-cputune-zero-shares.xml
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 9e8cb84..1ce6dae 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -9166,11 +9166,13 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+     }
+ 
+     /* Extract cpu tunables. */
+-    if (virXPathULong("string(./cputune/shares[1])", ctxt,
+-                      &def->cputune.shares) < -1) {
++    if ((n = virXPathULong("string(./cputune/shares[1])", ctxt,
++                           &def->cputune.shares)) < -1) {
+         virReportError(VIR_ERR_XML_ERROR, "%s",
+                        _("can't parse cputune shares value"));
+         goto error;
++    } else if (n == 0) {
++        def->cputune.sharesSpecified = true;
+     }
+ 
+     if (virXPathULongLong("string(./cputune/period[1])", ctxt,
+@@ -14301,14 +14303,14 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+         virBufferAsprintf(buf, " current='%u'", def->vcpus);
+     virBufferAsprintf(buf, ">%u</vcpu>\n", def->maxvcpus);
+ 
+-    if (def->cputune.shares ||
++    if (def->cputune.sharesSpecified ||
+         (def->cputune.vcpupin && !virDomainIsAllVcpupinInherited(def)) ||
+         def->cputune.period || def->cputune.quota ||
+         def->cputune.emulatorpin ||
+         def->cputune.emulator_period || def->cputune.emulator_quota)
+         virBufferAddLit(buf, "  <cputune>\n");
+ 
+-    if (def->cputune.shares)
++    if (def->cputune.sharesSpecified)
+         virBufferAsprintf(buf, "    <shares>%lu</shares>\n",
+                           def->cputune.shares);
+     if (def->cputune.period)
+@@ -14369,7 +14371,7 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+         virBufferAsprintf(buf, "cpuset='%s'/>\n", cpumask);
+         VIR_FREE(cpumask);
+     }
+-    if (def->cputune.shares ||
++    if (def->cputune.sharesSpecified ||
+         (def->cputune.vcpupin && !virDomainIsAllVcpupinInherited(def)) ||
+         def->cputune.period || def->cputune.quota ||
+         def->cputune.emulatorpin ||
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index d2ae8a0..d67bd88 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1759,6 +1759,7 @@ struct _virDomainDef {
+ 
+     struct {
+         unsigned long shares;
++        bool sharesSpecified;
+         unsigned long long period;
+         long long quota;
+         unsigned long long emulator_period;
+diff --git a/src/lxc/lxc_cgroup.c b/src/lxc/lxc_cgroup.c
+index bdfaa54..0924469 100644
+--- a/src/lxc/lxc_cgroup.c
++++ b/src/lxc/lxc_cgroup.c
+@@ -34,7 +34,7 @@ static int virLXCCgroupSetupCpuTune(virDomainDefPtr def,
+                                     virCgroupPtr cgroup)
+ {
+     int ret = -1;
+-    if (def->cputune.shares != 0) {
++    if (def->cputune.sharesSpecified) {
+         int rc = virCgroupSetCpuShares(cgroup, def->cputune.shares);
+         if (rc != 0) {
+             virReportSystemError(-rc,
+diff --git a/src/lxc/lxc_driver.c b/src/lxc/lxc_driver.c
+index 87305db..b1208f7 100644
+--- a/src/lxc/lxc_driver.c
++++ b/src/lxc/lxc_driver.c
+@@ -1831,10 +1831,12 @@ lxcSetSchedulerParametersFlags(virDomainPtr dom,
+                 }
+ 
+                 vm->def->cputune.shares = params[i].value.ul;
++                vm->def->cputune.sharesSpecified = true;
+             }
+ 
+             if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+                 vmdef->cputune.shares = params[i].value.ul;
++                vmdef->cputune.sharesSpecified = true;
+             }
+         } else if (STREQ(param->field, VIR_DOMAIN_SCHEDULER_VCPU_PERIOD)) {
+             if (flags & VIR_DOMAIN_AFFECT_LIVE) {
+diff --git a/src/parallels/parallels_driver.c b/src/parallels/parallels_driver.c
+index a938199..2fd051c 100644
+--- a/src/parallels/parallels_driver.c
++++ b/src/parallels/parallels_driver.c
+@@ -1454,6 +1454,7 @@ parallelsApplyChanges(virDomainObjPtr dom, virDomainDefPtr new)
+     }
+ 
+     if (old->cputune.shares != new->cputune.shares ||
++        old->cputune.sharesSpecified != new->cputune.sharesSpecified ||
+         old->cputune.period != new->cputune.period ||
+         old->cputune.quota != new->cputune.quota ||
+         old->cputune.nvcpupin != new->cputune.nvcpupin) {
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 8fd0d8a2..3e8b0c6 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -381,7 +381,7 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+         VIR_WARN("Could not autoset a RSS limit for domain %s", vm->def->name);
+     }
+ 
+-    if (vm->def->cputune.shares != 0) {
++    if (vm->def->cputune.sharesSpecified) {
+         if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_CPU)) {
+             rc = virCgroupSetCpuShares(cgroup, vm->def->cputune.shares);
+             if(rc != 0) {
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 08495e3..e045be4 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -8679,10 +8679,14 @@ qemuSetSchedulerParametersFlags(virDomainPtr dom,
+                     goto cleanup;
+                 }
+                 vm->def->cputune.shares = value_ul;
++                vm->def->cputune.sharesSpecified = true;
+             }
+ 
+-            if (flags & VIR_DOMAIN_AFFECT_CONFIG)
++            if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+                 vmdef->cputune.shares = value_ul;
++                vmdef->cputune.sharesSpecified = true;
++            }
++
+ 
+         } else if (STREQ(param->field, VIR_DOMAIN_SCHEDULER_VCPU_PERIOD)) {
+             SCHED_RANGE_CHECK(value_ul, VIR_DOMAIN_SCHEDULER_VCPU_PERIOD,
+diff --git a/src/vmx/vmx.c b/src/vmx/vmx.c
+index abb255a..f4f8016 100644
+--- a/src/vmx/vmx.c
++++ b/src/vmx/vmx.c
+@@ -1501,6 +1501,7 @@ virVMXParseConfig(virVMXContext *ctx, virCapsPtr caps, const char *vmx)
+                              "found '%s'"), sched_cpu_shares);
+             goto cleanup;
+         }
++        def->cputune.sharesSpecified = true;
+     }
+ 
+     /* def:lifecycle */
+@@ -3200,7 +3201,7 @@ virVMXFormatConfig(virVMXContext *ctx, virCapsPtr caps, virDomainDefPtr def,
+     }
+ 
+     /* def:cputune.shares -> vmx:sched.cpu.shares */
+-    if (def->cputune.shares > 0) {
++    if (def->cputune.sharesSpecified) {
+         /* See http://www.vmware.com/support/developer/vc-sdk/visdk41pubs/ApiReference/vim.SharesInfo.Level.html */
+         if (def->cputune.shares == def->vcpus * 500) {
+             virBufferAddLit(&buffer, "sched.cpu.shares = \"low\"\n");
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-cputune-zero-shares.args b/tests/qemuxml2argvdata/qemuxml2argv-cputune-zero-shares.args
+new file mode 100644
+index 0000000..107b6fb
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-cputune-zero-shares.args
+@@ -0,0 +1,5 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test \
++/usr/bin/qemu \
++-name QEMUGuest1 -S -M pc -m 214 -smp 2 -nographic \
++-monitor unix:/tmp/test-monitor,server,nowait -no-acpi -boot c \
++-hda /dev/HostVG/QEMUGuest1 -net none -serial none -parallel none -usb
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-cputune-zero-shares.xml b/tests/qemuxml2argvdata/qemuxml2argv-cputune-zero-shares.xml
+new file mode 100644
+index 0000000..3d2d2dd
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-cputune-zero-shares.xml
+@@ -0,0 +1,34 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>2</vcpu>
++  <cputune>
++    <shares>0</shares>
++    <period>1000000</period>
++    <quota>-1</quota>
++    <vcpupin vcpu='0' cpuset='0'/>
++    <vcpupin vcpu='1' cpuset='1'/>
++    <emulatorpin cpuset='1'/>
++  </cputune>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='ide' index='0'/>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 2dac536..70614a8 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -804,6 +804,7 @@ mymain(void)
+     DO_TEST("blkiotune", QEMU_CAPS_NAME);
+     DO_TEST("blkiotune-device", QEMU_CAPS_NAME);
+     DO_TEST("cputune", QEMU_CAPS_NAME);
++    DO_TEST("cputune-zero-shares", QEMU_CAPS_NAME);
+     DO_TEST("numatune-memory", NONE);
+     DO_TEST("numatune-auto-nodeset-invalid", NONE);
+     DO_TEST("numad", NONE);
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 05ae41e..693ebfa 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -224,6 +224,7 @@ mymain(void)
+     DO_TEST("blkiotune");
+     DO_TEST("blkiotune-device");
+     DO_TEST("cputune");
++    DO_TEST("cputune-zero-shares");
+ 
+     DO_TEST("smp");
+     DO_TEST("lease");
+-- 
+1.9.2
+

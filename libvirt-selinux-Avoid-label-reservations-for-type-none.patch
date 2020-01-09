@@ -1,0 +1,41 @@
+From 8410fee479876858cb3e9d0357c5c4dc091d6283 Mon Sep 17 00:00:00 2001
+Message-Id: <8410fee479876858cb3e9d0357c5c4dc091d6283@dist-git>
+From: Shivaprasad G Bhat <shivaprasadbhat@gmail.com>
+Date: Tue, 20 Jan 2015 17:06:35 +0100
+Subject: [PATCH] selinux: Avoid label reservations for type = none
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1138488
+
+For security type='none' libvirt according to the docs should not
+generate seclabel be it for selinux or any model. So, skip the
+reservation of labels when type is none.
+
+Signed-off-by: Shivaprasad G Bhat <sbhat@linux.vnet.ibm.com>
+(cherry picked from commit a48362cdfeb5c948218a2e4bf7cc9354082fc1b6)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/security/security_selinux.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index 6325c0a..512c6d9 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -639,7 +639,9 @@ virSecuritySELinuxReserveSecurityLabel(virSecurityManagerPtr mgr,
+     virSecurityLabelDefPtr seclabel;
+ 
+     seclabel = virDomainDefGetSecurityLabelDef(def, SECURITY_SELINUX_NAME);
+-    if (!seclabel || seclabel->type == VIR_DOMAIN_SECLABEL_STATIC)
++    if (!seclabel ||
++        seclabel->type == VIR_DOMAIN_SECLABEL_NONE ||
++        seclabel->type == VIR_DOMAIN_SECLABEL_STATIC)
+         return 0;
+ 
+     if (getpidcon_raw(pid, &pctx) == -1) {
+-- 
+2.2.2
+

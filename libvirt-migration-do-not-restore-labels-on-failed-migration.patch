@@ -1,0 +1,53 @@
+From 6d49e0b11edf09d407169891776ad1e528e93d2a Mon Sep 17 00:00:00 2001
+Message-Id: <6d49e0b11edf09d407169891776ad1e528e93d2a.1379450584.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Wed, 21 Aug 2013 08:16:48 -0600
+Subject: [PATCH] migration: do not restore labels on failed migration
+
+6.5: https://bugzilla.redhat.com/show_bug.cgi?id=895826
+7.0: https://bugzilla.redhat.com/show_bug.cgi?id=822052
+
+When doing a live migration, if the destination fails for any
+reason after the point in which files should be labeled, then
+the cleanup of the destination would restore the labels to their
+defaults, even though the source is still trying to continue
+running with the image open.  Bug 822052 mentioned one source
+of live migration failure - a mismatch in SELinux virt_use_nfs
+settings (on for source, off for destination); but I found other
+situations that would also trigger it (for example, having a
+graphics device tied to port 5999 on the source, and a different
+domain on the destination already using that port, so that the
+destination cannot reuse the port).
+
+In short, just as cleanup of the source on a successful migration
+must not relabel files (because the destination would be crippled
+by the relabel), cleanup of the destination on a failed migration
+must not relabel files (because the source would be crippled).
+
+* src/qemu/qemu_process.c (qemuProcessStart): Set flag to avoid
+label restoration when cleaning up on failed migration.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit e4ddcf09fb3efa4c5014e0c3259a05beb0f719a8)
+---
+ src/qemu/qemu_process.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 72acf34..4785e5d 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3584,6 +3584,10 @@ int qemuProcessStart(virConnectPtr conn,
+      * restore any security label as we would overwrite labels
+      * we did not set. */
+     stop_flags = VIR_QEMU_PROCESS_STOP_NO_RELABEL;
++    /* If we fail while doing incoming migration, then we must not
++     * relabel, as the source is still using the files.  */
++    if (migrateFrom)
++        stop_flags |= VIR_QEMU_PROCESS_STOP_MIGRATED;
+ 
+     hookData.conn = conn;
+     hookData.vm = vm;
+-- 
+1.8.3.2
+

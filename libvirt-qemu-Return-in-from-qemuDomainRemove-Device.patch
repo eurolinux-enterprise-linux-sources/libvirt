@@ -1,0 +1,86 @@
+From 33e29bf774ee584c5ff8e3a25eaf290c2797bbf9 Mon Sep 17 00:00:00 2001
+Message-Id: <33e29bf774ee584c5ff8e3a25eaf290c2797bbf9@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 3 Jun 2014 10:18:48 +0200
+Subject: [PATCH] qemu: Return in from qemuDomainRemove*Device
+
+Some of the APIs already return int since they can produce errors that
+need to be propagated. For consistency reasons, this patch changes the
+rest of the APIs to also return int even though they do not fail or
+report any errors.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit 5bf670323e5db11f3b45b8a77a43e905e3256114)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_hotplug.c - old spelling of virQEMUDriverPtr;
+	    downstream changes made by earlier patches in this series
+---
+ src/qemu/qemu_hotplug.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 27c8c77..982f0c1 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1984,7 +1984,7 @@ qemuDomainRemoveDiskDevice(struct qemud_driver *driver,
+ }
+ 
+ 
+-static void
++static int
+ qemuDomainRemoveControllerDevice(struct qemud_driver *driver,
+                                  virDomainObjPtr vm,
+                                  virDomainControllerDefPtr controller)
+@@ -2008,6 +2008,7 @@ qemuDomainRemoveControllerDevice(struct qemud_driver *driver,
+ 
+     qemuDomainReleaseDeviceAddress(vm, &controller->info, NULL);
+     virDomainControllerDefFree(controller);
++    return 0;
+ }
+ 
+ 
+@@ -2159,7 +2160,7 @@ qemuDomainRemoveUSBHostDevice(struct qemud_driver *driver,
+     }
+ }
+ 
+-static void
++static int
+ qemuDomainRemoveHostDevice(struct qemud_driver *driver,
+                            virDomainObjPtr vm,
+                            virDomainHostdevDefPtr hostdev)
+@@ -2217,6 +2218,7 @@ qemuDomainRemoveHostDevice(struct qemud_driver *driver,
+         networkReleaseActualDevice(vm->def, net);
+         virDomainNetDefFree(net);
+     }
++    return 0;
+ }
+ 
+ 
+@@ -2561,9 +2563,9 @@ int qemuDomainDetachPciControllerDevice(struct qemud_driver *driver,
+ 
+     rc = qemuDomainWaitForDeviceRemoval(driver, vm);
+     if (rc == 0 || rc == 1)
+-        qemuDomainRemoveControllerDevice(driver, vm, detach);
+-
+-    ret = 0;
++        ret = qemuDomainRemoveControllerDevice(driver, vm, detach);
++    else
++        ret = 0;
+ 
+ cleanup:
+     qemuDomainResetDeviceRemoval(vm);
+@@ -2663,7 +2665,7 @@ int qemuDomainDetachThisHostDevice(struct qemud_driver *driver,
+     } else {
+         int rc = qemuDomainWaitForDeviceRemoval(driver, vm);
+         if (rc == 0 || rc == 1)
+-            qemuDomainRemoveHostDevice(driver, vm, detach);
++            ret = qemuDomainRemoveHostDevice(driver, vm, detach);
+     }
+ 
+     qemuDomainResetDeviceRemoval(vm);
+-- 
+2.0.0
+

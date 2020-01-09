@@ -1,0 +1,69 @@
+From 2b4d533dc4d53e8d6a093df37efd8566660777a9 Mon Sep 17 00:00:00 2001
+Message-Id: <2b4d533dc4d53e8d6a093df37efd8566660777a9@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 17 Jan 2014 16:19:58 -0700
+Subject: [PATCH] Don't crash if a connection closes early
+
+CVE-2014-1447
+
+When a client closes its connection to libvirtd early during
+virConnectOpen, more specifically just after making
+REMOTE_PROC_CONNECT_SUPPORTS_FEATURE call to check if
+VIR_DRV_FEATURE_PROGRAM_KEEPALIVE is supported without even waiting for
+the result, libvirtd may crash due to a race in keep-alive
+initialization. Once receiving the REMOTE_PROC_CONNECT_SUPPORTS_FEATURE
+call, the daemon's event loop delegates it to a worker thread. In case
+the event loop detects EOF on the connection and calls
+virNetServerClientClose before the worker thread starts to handle
+REMOTE_PROC_CONNECT_SUPPORTS_FEATURE call, client->keepalive will be
+disposed by the time virNetServerClientStartKeepAlive gets called from
+remoteDispatchConnectSupportsFeature. Because the flow is common for
+both authenticated and read-only connections, even unprivileged clients
+may cause the daemon to crash.
+
+To avoid the crash, virNetServerClientStartKeepAlive needs to check if
+the connection is still open before starting keep-alive protocol.
+
+Every libvirt release since 0.9.8 is affected by this bug.
+
+(cherry picked from commit 173c2914734eb5c32df6d35a82bf503e12261bcf)
+
+Conflicts:
+	src/rpc/virnetserverclient.c - older locking style
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/rpc/virnetserverclient.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/rpc/virnetserverclient.c b/src/rpc/virnetserverclient.c
+index 678f85b..3d294a5 100644
+--- a/src/rpc/virnetserverclient.c
++++ b/src/rpc/virnetserverclient.c
+@@ -1208,9 +1208,22 @@ cleanup:
+ int
+ virNetServerClientStartKeepAlive(virNetServerClientPtr client)
+ {
+-    int ret;
++    int ret = -1;
++
+     virNetServerClientLock(client);
++
++    /* The connection might have been closed before we got here and thus the
++     * keepalive object could have been removed too.
++     */
++    if (!client->sock) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("connection not open"));
++        goto cleanup;
++    }
++
+     ret = virKeepAliveStart(client->keepalive, 0, 0);
++
++cleanup:
+     virNetServerClientUnlock(client);
+     return ret;
+ }
+-- 
+1.9.1
+

@@ -1,0 +1,200 @@
+From 1a11ec779708c09bd13d55505659d0cff22ad823 Mon Sep 17 00:00:00 2001
+Message-Id: <1a11ec779708c09bd13d55505659d0cff22ad823@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Mon, 7 Apr 2014 10:25:04 +0200
+Subject: [PATCH] Expose ownership ID parsing
+
+https://bugzilla.redhat.com/show_bug.cgi?id=963881
+
+Parsing 'user:group' is useful even outside the DAC security driver,
+so expose the most abstract function which has no DAC security driver
+bits in itself.
+
+(cherry picked from commit bba579b6e06b1035776489432f70d048051eaa56)
+
+Conflicts:
+	src/libvirt_private.syms -- util->virutil rename
+	src/security/security_dac.c -- ditto
+	src/util/virutil.h -- ditto
+	src/util/virutil.c -- ditto + VIR_STRDUP
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms    |  1 +
+ src/security/security_dac.c | 53 ++--------------------------------------
+ src/util/util.c             | 59 +++++++++++++++++++++++++++++++++++++++++++++
+ src/util/util.h             |  2 ++
+ 4 files changed, 64 insertions(+), 51 deletions(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index cc37931..37b4d30 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1303,6 +1303,7 @@ virIndexToDiskName;
+ virIsDevMapperDevice;
+ virKillProcess;
+ virParseNumber;
++virParseOwnershipIds;
+ virParseVersionString;
+ virPipeReadUntilEOF;
+ virProcessSetMaxFiles;
+diff --git a/src/security/security_dac.c b/src/security/security_dac.c
+index 5d7d5ca..b1655f2 100644
+--- a/src/security/security_dac.c
++++ b/src/security/security_dac.c
+@@ -67,55 +67,6 @@ void virSecurityDACSetDynamicOwnership(virSecurityManagerPtr mgr,
+     priv->dynamicOwnership = dynamicOwnership;
+ }
+ 
+-static
+-int parseIds(const char *label, uid_t *uidPtr, gid_t *gidPtr)
+-{
+-    int rc = -1;
+-    uid_t theuid;
+-    gid_t thegid;
+-    char *tmp_label = NULL;
+-    char *sep = NULL;
+-    char *owner = NULL;
+-    char *group = NULL;
+-
+-    tmp_label = strdup(label);
+-    if (tmp_label == NULL) {
+-        virReportOOMError();
+-        goto cleanup;
+-    }
+-
+-    /* Split label */
+-    sep = strchr(tmp_label, ':');
+-    if (sep == NULL) {
+-        virReportError(VIR_ERR_INVALID_ARG,
+-                       _("Missing separator ':' in DAC label \"%s\""),
+-                       label);
+-        goto cleanup;
+-    }
+-    *sep = '\0';
+-    owner = tmp_label;
+-    group = sep + 1;
+-
+-    /* Parse owner and group, error message is defined by
+-     * virGetUserID or virGetGroupID.
+-     */
+-    if (virGetUserID(owner, &theuid) < 0 ||
+-        virGetGroupID(group, &thegid) < 0)
+-        goto cleanup;
+-
+-    if (uidPtr)
+-        *uidPtr = theuid;
+-    if (gidPtr)
+-        *gidPtr = thegid;
+-
+-    rc = 0;
+-
+-cleanup:
+-    VIR_FREE(tmp_label);
+-
+-    return rc;
+-}
+-
+ /* returns 1 if label isn't found, 0 on success, -1 on error */
+ static
+ int virSecurityDACParseIds(virDomainDefPtr def, uid_t *uidPtr, gid_t *gidPtr)
+@@ -133,7 +84,7 @@ int virSecurityDACParseIds(virDomainDefPtr def, uid_t *uidPtr, gid_t *gidPtr)
+         return 1;
+     }
+ 
+-    if (parseIds(seclabel->label, &uid, &gid) < 0)
++    if (virParseOwnershipIds(seclabel->label, &uid, &gid) < 0)
+         return -1;
+ 
+     if (uidPtr)
+@@ -200,7 +151,7 @@ int virSecurityDACParseImageIds(virDomainDefPtr def,
+         return 1;
+     }
+ 
+-    if (parseIds(seclabel->imagelabel, &uid, &gid) < 0)
++    if (virParseOwnershipIds(seclabel->imagelabel, &uid, &gid) < 0)
+         return -1;
+ 
+     if (uidPtr)
+diff --git a/src/util/util.c b/src/util/util.c
+index cb93a16..795b4fe 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -3421,3 +3421,62 @@ virProcessSetMaxFiles(pid_t pid ATTRIBUTE_UNUSED, unsigned int files)
+     return -1;
+ }
+ #endif /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NOFILE)) */
++
++/**
++ * virParseOwnershipIds:
++ *
++ * Parse the usual "uid:gid" ownership specification into uid_t and
++ * gid_t passed as parameters.  NULL value for those parameters mean
++ * the information is not needed.  Also, none of those values are
++ * changed in case of any error.
++ *
++ * Returns -1 on error, 0 otherwise.
++ */
++int
++virParseOwnershipIds(const char *label, uid_t *uidPtr, gid_t *gidPtr)
++{
++    int rc = -1;
++    uid_t theuid;
++    gid_t thegid;
++    char *tmp_label = NULL;
++    char *sep = NULL;
++    char *owner = NULL;
++    char *group = NULL;
++
++    tmp_label = strdup(label);
++    if (tmp_label == NULL) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    /* Split label */
++    sep = strchr(tmp_label, ':');
++    if (sep == NULL) {
++        virReportError(VIR_ERR_INVALID_ARG,
++                       _("Failed to parse uid and gid from '%s'"),
++                       label);
++        goto cleanup;
++    }
++    *sep = '\0';
++    owner = tmp_label;
++    group = sep + 1;
++
++    /* Parse owner and group, error message is defined by
++     * virGetUserID or virGetGroupID.
++     */
++    if (virGetUserID(owner, &theuid) < 0 ||
++        virGetGroupID(group, &thegid) < 0)
++        goto cleanup;
++
++    if (uidPtr)
++        *uidPtr = theuid;
++    if (gidPtr)
++        *gidPtr = thegid;
++
++    rc = 0;
++
++cleanup:
++    VIR_FREE(tmp_label);
++
++    return rc;
++}
+diff --git a/src/util/util.h b/src/util/util.h
+index 40c1923..47c2bc1 100644
+--- a/src/util/util.h
++++ b/src/util/util.h
+@@ -295,4 +295,6 @@ int virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes);
+ int virProcessSetMaxProcesses(pid_t pid, unsigned int procs);
+ int virProcessSetMaxFiles(pid_t pid, unsigned int files);
+ 
++int virParseOwnershipIds(const char *label, uid_t *uidPtr, gid_t *gidPtr);
++
+ #endif /* __VIR_UTIL_H__ */
+-- 
+1.9.1
+

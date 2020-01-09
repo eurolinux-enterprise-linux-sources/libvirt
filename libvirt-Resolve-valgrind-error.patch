@@ -1,0 +1,51 @@
+From 0f78cd426e7ce72bfb37ed0bb52870a98b8e6451 Mon Sep 17 00:00:00 2001
+Message-Id: <0f78cd426e7ce72bfb37ed0bb52870a98b8e6451@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:57 +0100
+Subject: [PATCH] Resolve valgrind error
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+Resolves the following valgrind error from qemuxml2argvtest:
+
+==20393== 5 bytes in 1 blocks are definitely lost in loss record 2 of 60
+==20393==    at 0x4A0883C: malloc (vg_replace_malloc.c:270)
+==20393==    by 0x38D690A167: __vasprintf_chk (in /usr/lib64/libc-2.16.so)
+==20393==    by 0x4CB0D97: virVasprintf (stdio2.h:210)
+==20393==    by 0x4CB0E53: virAsprintf (virutil.c:2017)
+==20393==    by 0x428DC5: qemuAssignDeviceAliases (qemu_command.c:791)
+==20393==    by 0x41DF93: testCompareXMLToArgvHelper (qemuxml2argvtest.c:151)
+==20393==    by 0x41F53F: virtTestRun (testutils.c:157)
+==20393==    by 0x41DA9B: mymain (qemuxml2argvtest.c:885)
+==20393==    by 0x41FB7A: virtTestMain (testutils.c:719)
+==20393==    by 0x38D6821A04: (below main) (in /usr/lib64/libc-2.16.so)
+==20393==
+
+>From qemu_command.c/line 791:
+
+    if (def->rng) {
+        if (virAsprintf(&def->rng->info.alias, "rng%d", 0) < 0)
+            goto no_memory;
+    }
+(cherry picked from commit 1cf4ef1fcaf685d78b59a8ecb8f03f352013b326)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index dce601a..151026d 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -13429,6 +13429,7 @@ virDomainRNGDefFree(virDomainRNGDefPtr def)
+         break;
+     }
+ 
++    virDomainDeviceInfoClear(&def->info);
+     VIR_FREE(def);
+ }
+ 
+-- 
+1.9.1
+

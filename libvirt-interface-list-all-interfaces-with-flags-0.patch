@@ -1,0 +1,108 @@
+From 3f900e623f755344d3f0c65a8be0b725312d53a4 Mon Sep 17 00:00:00 2001
+Message-Id: <3f900e623f755344d3f0c65a8be0b725312d53a4@dist-git>
+From: Guannan Ren <gren@redhat.com>
+Date: Mon, 14 Apr 2014 17:49:43 +0200
+Subject: [PATCH] interface: list all interfaces with flags == 0
+
+https://bugzilla.redhat.com/show_bug.cgi?id=884382
+
+virConnectListAllInterfaces should support to list all of
+interfaces when the value of flags is 0. The behaviour is
+consistent with other virConnectListAll* APIs
+
+(cherry picked from commit 7ac2c4fe624f30f2c8270116513fa2ddab07631f)
+
+Conflicts:
+	src/interface/interface_backend_udev.c: the file does not exist
+                                            in RHEL-6
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/interface_conf.h               |  4 ++++
+ src/interface/interface_backend_netcf.c | 29 +++++++++++++++--------------
+ 2 files changed, 19 insertions(+), 14 deletions(-)
+
+diff --git a/src/conf/interface_conf.h b/src/conf/interface_conf.h
+index 1749629..68cb08b 100644
+--- a/src/conf/interface_conf.h
++++ b/src/conf/interface_conf.h
+@@ -211,4 +211,8 @@ char *virInterfaceDefFormat(const virInterfaceDefPtr def);
+ void virInterfaceObjLock(virInterfaceObjPtr obj);
+ void virInterfaceObjUnlock(virInterfaceObjPtr obj);
+ 
++#define VIR_CONNECT_LIST_INTERFACES_FILTERS_ACTIVE   \
++                (VIR_CONNECT_LIST_INTERFACES_ACTIVE | \
++                 VIR_CONNECT_LIST_INTERFACES_INACTIVE)
++
+ #endif /* __INTERFACE_CONF_H__ */
+diff --git a/src/interface/interface_backend_netcf.c b/src/interface/interface_backend_netcf.c
+index e0d8e89..664471f 100644
+--- a/src/interface/interface_backend_netcf.c
++++ b/src/interface/interface_backend_netcf.c
+@@ -260,6 +260,7 @@ static int interfaceListDefinedInterfaces(virConnectPtr conn, char **const names
+ 
+ }
+ 
++#define MATCH(FLAG) (flags & (FLAG))
+ static int
+ interfaceListAllInterfaces(virConnectPtr conn,
+                            virInterfacePtr **ifaces,
+@@ -276,8 +277,7 @@ interfaceListAllInterfaces(virConnectPtr conn,
+     int ret = -1;
+     char **names = NULL;
+ 
+-    virCheckFlags(VIR_CONNECT_LIST_INTERFACES_ACTIVE |
+-                  VIR_CONNECT_LIST_INTERFACES_INACTIVE, -1);
++    virCheckFlags(VIR_CONNECT_LIST_INTERFACES_FILTERS_ACTIVE, -1);
+ 
+     interfaceDriverLock(driver);
+ 
+@@ -293,7 +293,6 @@ interfaceListAllInterfaces(virConnectPtr conn,
+                        _("failed to get number of host interfaces: %s%s%s"),
+                        errmsg, details ? " - " : "",
+                        details ? details : "");
+-        ret = -1;
+         goto cleanup;
+     }
+ 
+@@ -304,7 +303,6 @@ interfaceListAllInterfaces(virConnectPtr conn,
+ 
+     if (VIR_ALLOC_N(names, count) < 0) {
+         virReportOOMError();
+-        ret = -1;
+         goto cleanup;
+     }
+ 
+@@ -361,16 +359,19 @@ interfaceListAllInterfaces(virConnectPtr conn,
+         /* XXX: Filter the result, need to be splitted once new filter flags
+          * except active|inactive are supported.
+          */
+-        if (((status & NETCF_IFACE_ACTIVE) &&
+-             (flags & VIR_CONNECT_LIST_INTERFACES_ACTIVE)) ||
+-            ((status & NETCF_IFACE_INACTIVE) &&
+-             (flags & VIR_CONNECT_LIST_INTERFACES_INACTIVE))) {
+-            if (ifaces) {
+-                iface_obj = virGetInterface(conn, ncf_if_name(iface),
+-                                            ncf_if_mac_string(iface));
+-                tmp_iface_objs[niface_objs] = iface_obj;
+-            }
+-            niface_objs++;
++        if (MATCH(VIR_CONNECT_LIST_INTERFACES_FILTERS_ACTIVE) &&
++            !((MATCH(VIR_CONNECT_LIST_INTERFACES_ACTIVE) &&
++               (status & NETCF_IFACE_ACTIVE)) ||
++              (MATCH(VIR_CONNECT_LIST_INTERFACES_INACTIVE) &&
++               (status & NETCF_IFACE_INACTIVE)))) {
++            ncf_if_free(iface);
++            continue;
++        }
++
++        if (ifaces) {
++            iface_obj = virGetInterface(conn, ncf_if_name(iface),
++                                        ncf_if_mac_string(iface));
++            tmp_iface_objs[niface_objs++] = iface_obj;
+         }
+ 
+         ncf_if_free(iface);
+-- 
+1.9.2
+

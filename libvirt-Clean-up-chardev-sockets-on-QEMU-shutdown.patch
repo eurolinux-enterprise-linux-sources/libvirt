@@ -1,0 +1,68 @@
+From 0f0d0a7cb3ecd2909c1a0e5617493c47fa5c3e1a Mon Sep 17 00:00:00 2001
+Message-Id: <0f0d0a7cb3ecd2909c1a0e5617493c47fa5c3e1a@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Tue, 20 Jan 2015 17:24:14 +0100
+Subject: [PATCH] Clean up chardev sockets on QEMU shutdown
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+6.7: https://bugzilla.redhat.com/show_bug.cgi?id=1122367
+https://bugzilla.redhat.com/show_bug.cgi?id=1088787
+
+Clean up unix socket files for chardevs using mode='bind',
+like we clean up the monitor socket.
+They are created by QEMU on startup and not really useful
+after shutting it down.
+
+(cherry picked from commit 205010c40eb90c1088ddc250d4bcf3d2669b549c)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+Conflicts:
+  src/qemu/qemu_process.c - downstream misses commit 7bdf459
+      qemu: use new virCommandSetMax(Processes|Files)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 039340f..d5bdf95 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2817,6 +2817,19 @@ qemuProcessLimits(struct qemud_driver *driver)
+ }
+ 
+ 
++static int
++qemuProcessCleanupChardevDevice(virDomainDefPtr def ATTRIBUTE_UNUSED,
++                                virDomainChrDefPtr dev,
++                                void *opaque ATTRIBUTE_UNUSED)
++{
++    if (dev->source.type == VIR_DOMAIN_CHR_TYPE_UNIX &&
++        dev->source.data.nix.listen)
++        unlink(dev->source.data.nix.path);
++
++    return 0;
++}
++
++
+ struct qemuProcessHookData {
+     virConnectPtr conn;
+     virDomainObjPtr vm;
+@@ -4493,6 +4506,12 @@ void qemuProcessStop(struct qemud_driver *driver,
+         priv->monConfig = NULL;
+     }
+ 
++    ignore_value(virDomainChrDefForeach(vm->def,
++                                        false,
++                                        qemuProcessCleanupChardevDevice,
++                                        NULL));
++
++
+     /* shut it off for sure */
+     ignore_value(qemuProcessKill(driver, vm, VIR_QEMU_PROCESS_KILL_FORCE|
+                                              VIR_QEMU_PROCESS_KILL_NOCHECK));
+-- 
+2.2.2
+

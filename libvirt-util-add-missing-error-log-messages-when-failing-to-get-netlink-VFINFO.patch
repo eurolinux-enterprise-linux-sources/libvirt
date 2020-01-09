@@ -1,0 +1,132 @@
+From 8b1744965fc262c5ceebc869142196673b8a3275 Mon Sep 17 00:00:00 2001
+Message-Id: <8b1744965fc262c5ceebc869142196673b8a3275.1357206167.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 20 Dec 2012 16:29:43 -0500
+Subject: [PATCH] util: add missing error log messages when failing to get
+ netlink VFINFO
+
+https://bugzilla.redhat.com/show_bug.cgi?id=889319
+
+This patch fixes the lack of error messages when libvirt fails to find
+VFINFO in a returned netlinke response message.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=827519#c10 is an example
+of the error message that was previously logged when the
+IFLA_VFINFO_LIST object was missing from the netlink response. The
+reason for this failure is detailed in
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=889319
+
+Even though that root problem has been fixed, the experience of
+finding the root cause shows us how important it is to properly log an
+error message in these cases. This patch *seems* to replace the entire
+function, but really most of the changes are due to moving code that
+was previously inside an if() statement out to the top level of the
+function (the original if() was reversed and made to log an error and
+return).
+(cherry picked from commit 846770e5ff959f7819e2c32857598cb88e2e2f0e)
+---
+ src/util/virnetdev.c | 78 +++++++++++++++++++++++++++-------------------------
+ 1 file changed, 40 insertions(+), 38 deletions(-)
+
+diff --git a/src/util/virnetdev.c b/src/util/virnetdev.c
+index c345013..db0db1b 100644
+--- a/src/util/virnetdev.c
++++ b/src/util/virnetdev.c
+@@ -1456,53 +1456,55 @@ static int
+ virNetDevParseVfConfig(struct nlattr **tb, int32_t vf, virMacAddrPtr mac,
+                        int *vlanid)
+ {
+-    const char *msg = NULL;
+     int rc = -1;
++    struct ifla_vf_mac *vf_mac;
++    struct ifla_vf_vlan *vf_vlan;
++    struct nlattr *tb_vf_info = {NULL, };
++    struct nlattr *tb_vf[IFLA_VF_MAX+1];
++    int found = 0;
++    int rem;
++
++    if (!tb[IFLA_VFINFO_LIST]) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("missing IFLA_VF_INFO in netlink response"));
++        goto cleanup;
++    }
+ 
+-    if (tb[IFLA_VFINFO_LIST]) {
+-        struct ifla_vf_mac *vf_mac;
+-        struct ifla_vf_vlan *vf_vlan;
+-        struct nlattr *tb_vf_info = {NULL, };
+-        struct nlattr *tb_vf[IFLA_VF_MAX+1];
+-        int found = 0;
+-        int rem;
+-
+-        nla_for_each_nested(tb_vf_info, tb[IFLA_VFINFO_LIST], rem) {
+-            if (nla_type(tb_vf_info) != IFLA_VF_INFO)
+-                continue;
+-
+-            if (nla_parse_nested(tb_vf, IFLA_VF_MAX, tb_vf_info,
+-                                 ifla_vf_policy)) {
+-                msg = _("error parsing IFLA_VF_INFO");
+-                goto cleanup;
+-            }
++    nla_for_each_nested(tb_vf_info, tb[IFLA_VFINFO_LIST], rem) {
++        if (nla_type(tb_vf_info) != IFLA_VF_INFO)
++            continue;
+ 
+-            if (tb[IFLA_VF_MAC]) {
+-                vf_mac = RTA_DATA(tb_vf[IFLA_VF_MAC]);
+-                if (vf_mac && vf_mac->vf == vf)  {
+-                    virMacAddrSetRaw(mac, vf_mac->mac);
+-                    found = 1;
+-                }
+-            }
++        if (nla_parse_nested(tb_vf, IFLA_VF_MAX, tb_vf_info,
++                             ifla_vf_policy)) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("error parsing IFLA_VF_INFO"));
++            goto cleanup;
++        }
+ 
+-            if (tb[IFLA_VF_VLAN]) {
+-                vf_vlan = RTA_DATA(tb_vf[IFLA_VF_VLAN]);
+-                if (vf_vlan && vf_vlan->vf == vf)  {
+-                    *vlanid = vf_vlan->vlan;
+-                    found = 1;
+-                }
++        if (tb[IFLA_VF_MAC]) {
++            vf_mac = RTA_DATA(tb_vf[IFLA_VF_MAC]);
++            if (vf_mac && vf_mac->vf == vf)  {
++                virMacAddrSetRaw(mac, vf_mac->mac);
++                found = 1;
+             }
+-            if (found) {
+-                rc = 0;
+-                break;
++        }
++
++        if (tb[IFLA_VF_VLAN]) {
++            vf_vlan = RTA_DATA(tb_vf[IFLA_VF_VLAN]);
++            if (vf_vlan && vf_vlan->vf == vf)  {
++                *vlanid = vf_vlan->vlan;
++                found = 1;
+             }
+         }
++        if (found) {
++            rc = 0;
++            goto cleanup;
++        }
+     }
+-
++    virReportError(VIR_ERR_INTERNAL_ERROR,
++                   _("couldn't find IFLA_VF_INFO for VF %d "
++                     "in netlink response"), vf);
+ cleanup:
+-    if (msg)
+-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", msg);
+-
+     return rc;
+ }
+ 
+-- 
+1.8.0.2
+

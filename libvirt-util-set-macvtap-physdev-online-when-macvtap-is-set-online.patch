@@ -1,0 +1,86 @@
+From d99d2b717237c6958c7e6624f4d414425e6ca76e Mon Sep 17 00:00:00 2001
+Message-Id: <d99d2b717237c6958c7e6624f4d414425e6ca76e@dist-git>
+From: Laine Stump <laine@redhat.com>
+Date: Tue, 21 Apr 2015 14:13:37 -0400
+Subject: [PATCH] util: set macvtap physdev online when macvtap is set online
+
+This is the *DOWNSTREAM-only* alternative for upstream commit
+38172ed894ab20e0ee0072da6f695e4c97aecc4a, which would have required
+backporting 4 other patches in order to apply at all, in the process
+raising the possibility of related regressions. This patch is a much
+less intrusive modification.
+
+A further fix for:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=1113474
+
+Since there is no possibility that any type of macvtap will work if
+the parent physdev it's attached to is offline, we should bring the
+physdev online at the same time as the macvtap. When taking the
+macvtap offline, it's also necessary to take the physdev offline for
+macvtap passthrough mode (because the physdev has the same MAC address
+as the macvtap device, so could potentially cause problems with
+misdirected packets during migration, as outlined in commits 829770
+and 879c13). We can't set the physdev offline for other macvtap modes
+because:
+
+  1) there may be other macvtap devices attached to the same physdev
+     in the other modes whereas passthrough mode is exclusive to one
+     macvtap at a time.
+
+  2) there's no practical reason to do so anyway.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdevmacvlan.c | 24 +++++++++++++++++++++++-
+ 1 file changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/src/util/virnetdevmacvlan.c b/src/util/virnetdevmacvlan.c
+index 26dca46..4a66b43 100644
+--- a/src/util/virnetdevmacvlan.c
++++ b/src/util/virnetdevmacvlan.c
+@@ -849,8 +849,22 @@ int virNetDevMacVLanCreateWithVPortProfile(const char *tgifname,
+      * emulate their switch in firmware.
+      */
+     if (mode == VIR_NETDEV_MACVLAN_MODE_PASSTHRU) {
++        bool isOnline;
++
+         if (virNetDevReplaceNetConfig(linkdev, -1, macaddress, -1, stateDir) < 0)
+             return -1;
++        if (!virtPortProfile ||
++            virtPortProfile->virtPortType != VIR_NETDEV_VPORT_PROFILE_8021QBH) {
++            /* we don't set the physdev onlin for 802.1Qbh, because
++             * that code already does it itself (in
++             * virNetDevVPortProfileAssociate()), and we don't want to
++             * change their behavior in any way.
++             */
++            if (virNetDevIsOnline(linkdev, &isOnline) < 0)
++                return -1;
++            if (!isOnline && virNetDevSetOnline(linkdev, true) < 0)
++                return -1;
++        }
+     }
+ 
+     if (tgifname) {
+@@ -988,9 +1002,17 @@ int virNetDevMacVLanDeleteWithVPortProfile(const char *ifname,
+     int ret = 0;
+     int vf = -1;
+ 
+-    if (mode == VIR_NETDEV_MACVLAN_MODE_PASSTHRU)
++    if (mode == VIR_NETDEV_MACVLAN_MODE_PASSTHRU) {
+         ignore_value(virNetDevRestoreNetConfig(linkdev, vf, stateDir));
+ 
++        /* NB: we can set the linkdev offline even for 802.1Qbh here
++         * because that is the first thing that will happen for that
++         * virtport type when virNetDevVPortProfileDisassociate() is
++         * called anyway.
++         */
++        ignore_value(virNetDevSetOnline(linkdev, false));
++     }
++
+     if (ifname) {
+         if (virNetDevVPortProfileDisassociate(ifname,
+                                               virtPortProfile,
+-- 
+2.3.6
+

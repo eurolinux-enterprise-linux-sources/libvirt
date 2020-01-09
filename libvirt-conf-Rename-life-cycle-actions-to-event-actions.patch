@@ -1,0 +1,217 @@
+From 9239d73accae2eefa5d06dc7772bbbf13971174a Mon Sep 17 00:00:00 2001
+Message-Id: <9239d73accae2eefa5d06dc7772bbbf13971174a.1350297257.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 6 Sep 2012 21:56:49 +0200
+Subject: [PATCH] conf: Rename life cycle actions to event actions
+
+https://bugzilla.redhat.com/show_bug.cgi?id=832156
+
+While current on_{poweroff,reboot,crash} action configuration is about
+configuring life cycle actions, they can all be considered events and
+actions that need to be done on a particular event. Let's generalize the
+code by renaming life cycle actions to event actions so that it can be
+reused later for non-lifecycle events.
+(cherry picked from commit d0ea530b00e69801043fee52e78226cd44eb3194)
+---
+ docs/formatdomain.html.in     | 15 ++++++----
+ docs/schemas/domaincommon.rng |  8 +++---
+ src/conf/domain_conf.c        | 66 +++++++++++++++++++++++--------------------
+ src/conf/domain_conf.h        |  4 +--
+ 4 files changed, 51 insertions(+), 42 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 8a7f873..b972d55 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -916,15 +916,11 @@
+       This guest NUMA specification is currently available only for QEMU/KVM.
+     </p>
+ 
+-    <h3><a name="elementsLifecycle">Lifecycle control</a></h3>
++    <h3><a name="elementsEvents">Events configuration</a></h3>
+ 
+     <p>
+       It is sometimes necessary to override the default actions taken
+-      when a guest OS triggers a lifecycle operation. The following
+-      collections of elements allow the actions to be specified. A
+-      common use case is to force a reboot to be treated as a poweroff
+-      when doing the initial OS installation. This allows the VM to be
+-      re-configured for the first post-install bootup.
++      on various events.
+     </p>
+ 
+ <pre>
+@@ -934,6 +930,13 @@
+   &lt;on_crash&gt;restart&lt;/on_crash&gt;
+   ...</pre>
+ 
++    <p>
++      The following collections of elements allow the actions to be
++      specified when a guest OS triggers a lifecycle operation. A
++      common use case is to force a reboot to be treated as a poweroff
++      when doing the initial OS installation. This allows the VM to be
++      re-configured for the first post-install bootup.
++    </p>
+     <dl>
+       <dt><code>on_poweroff</code></dt>
+       <dd>The content of this element specifies the action to take when
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 45bb67c..4e63112 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -51,7 +51,7 @@
+         <ref name="clock"/>
+         <ref name="resources"/>
+         <ref name="features"/>
+-        <ref name="termination"/>
++        <ref name="events"/>
+         <optional>
+           <ref name="pm"/>
+         </optional>
+@@ -2231,10 +2231,10 @@
+     </element>
+   </define>
+   <!--
+-      When a domain terminates multiple policies can be applied depending
+-      on how it ended:
++      When a certain event happens, multiple policies can be applied
++      depends on what happened:
+     -->
+-  <define name="termination">
++  <define name="events">
+     <interleave>
+       <optional>
+         <element name="on_reboot">
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index af02f4a..8ab9ade 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -7520,11 +7520,12 @@ error:
+     return NULL;
+ }
+ 
+-static int virDomainLifecycleParseXML(xmlXPathContextPtr ctxt,
+-                                      const char *xpath,
+-                                      int *val,
+-                                      int defaultVal,
+-                                      virLifecycleFromStringFunc convFunc)
++static int virDomainEventActionParseXML(xmlXPathContextPtr ctxt,
++                                        const char *name,
++                                        const char *xpath,
++                                        int *val,
++                                        int defaultVal,
++                                        virEventActionFromStringFunc convFunc)
+ {
+     char *tmp = virXPathString(xpath, ctxt);
+     if (tmp == NULL) {
+@@ -7533,7 +7534,7 @@ static int virDomainLifecycleParseXML(xmlXPathContextPtr ctxt,
+         *val = convFunc(tmp);
+         if (*val < 0) {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("unknown lifecycle action %s"), tmp);
++                           _("unknown %s action: %s"), name, tmp);
+             VIR_FREE(tmp);
+             return -1;
+         }
+@@ -8947,20 +8948,25 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+         VIR_FREE(nodes);
+     }
+ 
+-    if (virDomainLifecycleParseXML(ctxt, "string(./on_reboot[1])",
+-                                   &def->onReboot, VIR_DOMAIN_LIFECYCLE_RESTART,
+-                                   virDomainLifecycleTypeFromString) < 0)
++    if (virDomainEventActionParseXML(ctxt, "on_reboot",
++                                     "string(./on_reboot[1])",
++                                     &def->onReboot,
++                                     VIR_DOMAIN_LIFECYCLE_RESTART,
++                                     virDomainLifecycleTypeFromString) < 0)
+         goto error;
+ 
+-    if (virDomainLifecycleParseXML(ctxt, "string(./on_poweroff[1])",
+-                                   &def->onPoweroff, VIR_DOMAIN_LIFECYCLE_DESTROY,
+-                                   virDomainLifecycleTypeFromString) < 0)
++    if (virDomainEventActionParseXML(ctxt, "on_poweroff",
++                                     "string(./on_poweroff[1])",
++                                     &def->onPoweroff,
++                                     VIR_DOMAIN_LIFECYCLE_DESTROY,
++                                     virDomainLifecycleTypeFromString) < 0)
+         goto error;
+ 
+-    if (virDomainLifecycleParseXML(ctxt, "string(./on_crash[1])",
+-                                        &def->onCrash,
+-                                   VIR_DOMAIN_LIFECYCLE_CRASH_DESTROY,
+-                                   virDomainLifecycleCrashTypeFromString) < 0)
++    if (virDomainEventActionParseXML(ctxt, "on_crash",
++                                     "string(./on_crash[1])",
++                                     &def->onCrash,
++                                     VIR_DOMAIN_LIFECYCLE_CRASH_DESTROY,
++                                     virDomainLifecycleCrashTypeFromString) < 0)
+         goto error;
+ 
+     if (virDomainPMStateParseXML(ctxt,
+@@ -11458,15 +11464,15 @@ virDomainEmulatorPinDel(virDomainDefPtr def)
+ }
+ 
+ static int
+-virDomainLifecycleDefFormat(virBufferPtr buf,
+-                            int type,
+-                            const char *name,
+-                            virLifecycleToStringFunc convFunc)
++virDomainEventActionDefFormat(virBufferPtr buf,
++                              int type,
++                              const char *name,
++                              virEventActionToStringFunc convFunc)
+ {
+     const char *typeStr = convFunc(type);
+     if (!typeStr) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("unexpected lifecycle type %d"), type);
++                       _("unexpected %s action: %d"), name, type);
+         return -1;
+     }
+ 
+@@ -13685,17 +13691,17 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+         virBufferAddLit(buf, "  </clock>\n");
+     }
+ 
+-    if (virDomainLifecycleDefFormat(buf, def->onPoweroff,
+-                                    "on_poweroff",
+-                                    virDomainLifecycleTypeToString) < 0)
++    if (virDomainEventActionDefFormat(buf, def->onPoweroff,
++                                      "on_poweroff",
++                                      virDomainLifecycleTypeToString) < 0)
+         goto cleanup;
+-    if (virDomainLifecycleDefFormat(buf, def->onReboot,
+-                                    "on_reboot",
+-                                    virDomainLifecycleTypeToString) < 0)
++    if (virDomainEventActionDefFormat(buf, def->onReboot,
++                                      "on_reboot",
++                                      virDomainLifecycleTypeToString) < 0)
+         goto cleanup;
+-    if (virDomainLifecycleDefFormat(buf, def->onCrash,
+-                                    "on_crash",
+-                                    virDomainLifecycleCrashTypeToString) < 0)
++    if (virDomainEventActionDefFormat(buf, def->onCrash,
++                                      "on_crash",
++                                      virDomainLifecycleCrashTypeToString) < 0)
+         goto cleanup;
+ 
+     if (def->pm.s3 || def->pm.s4) {
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 7a7ffca..1b0010b 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2145,8 +2145,8 @@ virDomainChrDefGetSecurityLabelDef(virDomainChrDefPtr def, const char *model);
+ virSecurityLabelDefPtr
+ virDomainDefAddSecurityLabelDef(virDomainDefPtr def, const char *model);
+ 
+-typedef const char* (*virLifecycleToStringFunc)(int type);
+-typedef int (*virLifecycleFromStringFunc)(const char *type);
++typedef const char* (*virEventActionToStringFunc)(int type);
++typedef int (*virEventActionFromStringFunc)(const char *type);
+ 
+ VIR_ENUM_DECL(virDomainTaint)
+ 
+-- 
+1.7.12.3
+

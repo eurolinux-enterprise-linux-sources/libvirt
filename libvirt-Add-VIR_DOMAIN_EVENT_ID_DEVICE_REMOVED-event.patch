@@ -1,0 +1,547 @@
+From 9dcc15e89773dd69956e72e022805394939ffedf Mon Sep 17 00:00:00 2001
+Message-Id: <9dcc15e89773dd69956e72e022805394939ffedf@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 19 Jun 2013 15:27:29 +0200
+Subject: [PATCH] Add VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED event
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit 4421e257dd29ccf5144984d902819828c4b90268)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/remote/remote_driver.c - context
+	src/remote/remote_protocol.x - no ACLs
+	src/remote_protocol-structs - RHEL-6 lacks several RPCs
+
+Downstream changes:
+    - no VIR_STRDUP in RHEL-6
+---
+ daemon/remote.c                       | 34 ++++++++++++++
+ include/libvirt/libvirt.h.in          | 18 ++++++++
+ python/libvirt-override-virConnect.py |  9 ++++
+ python/libvirt-override.c             | 52 ++++++++++++++++++++-
+ src/conf/domain_event.c               | 87 +++++++++++++++++++++++++++--------
+ src/conf/domain_event.h               |  5 ++
+ src/libvirt_private.syms              |  2 +
+ src/remote/remote_driver.c            | 32 +++++++++++++
+ src/remote/remote_protocol.x          |  9 +++-
+ src/remote_protocol-structs           |  5 ++
+ 10 files changed, 233 insertions(+), 20 deletions(-)
+
+diff --git a/daemon/remote.c b/daemon/remote.c
+index 0952ed5..67ed9bb 100644
+--- a/daemon/remote.c
++++ b/daemon/remote.c
+@@ -631,6 +631,39 @@ static int remoteRelayDomainEventPMSuspendDisk(virConnectPtr conn ATTRIBUTE_UNUS
+     return 0;
+ }
+ 
++static int
++remoteRelayDomainEventDeviceRemoved(virConnectPtr conn ATTRIBUTE_UNUSED,
++                                    virDomainPtr dom,
++                                    const char *devAlias,
++                                    void *opaque)
++{
++    virNetServerClientPtr client = opaque;
++    remote_domain_event_device_removed_msg data;
++
++    if (!client)
++        return -1;
++
++    VIR_DEBUG("Relaying domain device removed event %s %d %s",
++              dom->name, dom->id, devAlias);
++
++    /* build return data */
++    memset(&data, 0, sizeof(data));
++
++    if (!(data.devAlias = strdup(devAlias))) {
++        virReportOOMError();
++        return -1;
++    }
++
++    make_nonnull_domain(&data.dom, dom);
++
++    remoteDispatchDomainEventSend(client, remoteProgram,
++                                  REMOTE_PROC_DOMAIN_EVENT_DEVICE_REMOVED,
++                                  (xdrproc_t)xdr_remote_domain_event_device_removed_msg,
++                                  &data);
++
++    return 0;
++}
++
+ 
+ static virConnectDomainEventGenericCallback domainEventCallbacks[] = {
+     VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventLifecycle),
+@@ -648,6 +681,7 @@ static virConnectDomainEventGenericCallback domainEventCallbacks[] = {
+     VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventPMSuspend),
+     VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventBalloonChange),
+     VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventPMSuspendDisk),
++    VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventDeviceRemoved),
+ };
+ 
+ verify(ARRAY_CARDINALITY(domainEventCallbacks) == VIR_DOMAIN_EVENT_ID_LAST);
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index 038dadf..49df015 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -4237,6 +4237,23 @@ typedef void (*virConnectDomainEventPMSuspendDiskCallback)(virConnectPtr conn,
+                                                            int reason,
+                                                            void *opaque);
+ 
++/**
++ * virConnectDomainEventDeviceRemovedCallback:
++ * @conn: connection object
++ * @dom: domain on which the event occurred
++ * @devAlias: device alias
++ * @opaque: application specified data
++ *
++ * This callback occurs when a device is removed from the domain.
++ *
++ * The callback signature to use when registering for an event of type
++ * VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED with virConnectDomainEventRegisterAny()
++ */
++typedef void (*virConnectDomainEventDeviceRemovedCallback)(virConnectPtr conn,
++                                                           virDomainPtr dom,
++                                                           const char *devAlias,
++                                                           void *opaque);
++
+ 
+ /**
+  * VIR_DOMAIN_EVENT_CALLBACK:
+@@ -4263,6 +4280,7 @@ typedef enum {
+     VIR_DOMAIN_EVENT_ID_PMSUSPEND = 12,      /* virConnectDomainEventPMSuspendCallback */
+     VIR_DOMAIN_EVENT_ID_BALLOON_CHANGE = 13, /* virConnectDomainEventBalloonChangeCallback */
+     VIR_DOMAIN_EVENT_ID_PMSUSPEND_DISK = 14, /* virConnectDomainEventPMSuspendDiskCallback */
++    VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED = 15, /* virConnectDomainEventDeviceRemovedCallback */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     /*
+diff --git a/python/libvirt-override-virConnect.py b/python/libvirt-override-virConnect.py
+index cb8d892..42c2f58 100644
+--- a/python/libvirt-override-virConnect.py
++++ b/python/libvirt-override-virConnect.py
+@@ -179,6 +179,15 @@
+         cb(self, virDomain(self, _obj=dom), reason, opaque)
+         return 0;
+ 
++    def _dispatchDomainEventDeviceRemovedCallback(self, dom, devAlias, cbData):
++        """Dispatches event to python user domain device removed event callbacks
++        """
++        cb = cbData["cb"]
++        opaque = cbData["opaque"]
++
++        cb(self, virDomain(self, _obj=dom), devAlias, opaque)
++        return 0
++
+     def domainEventDeregisterAny(self, callbackID):
+         """Removes a Domain Event Callback. De-registering for a
+            domain callback will disable delivery of this event type """
+diff --git a/python/libvirt-override.c b/python/libvirt-override.c
+index 4d22844..11827f4 100644
+--- a/python/libvirt-override.c
++++ b/python/libvirt-override.c
+@@ -5824,6 +5824,51 @@ libvirt_virConnectDomainEventPMSuspendDiskCallback(virConnectPtr conn ATTRIBUTE_
+     return ret;
+ }
+ 
++static int
++libvirt_virConnectDomainEventDeviceRemovedCallback(virConnectPtr conn ATTRIBUTE_UNUSED,
++                                                   virDomainPtr dom,
++                                                   const char *devAlias,
++                                                   void *opaque)
++{
++    PyObject *pyobj_cbData = (PyObject*)opaque;
++    PyObject *pyobj_dom;
++    PyObject *pyobj_ret;
++    PyObject *pyobj_conn;
++    PyObject *dictKey;
++    int ret = -1;
++
++    LIBVIRT_ENSURE_THREAD_STATE;
++    /* Create a python instance of this virDomainPtr */
++    virDomainRef(dom);
++
++    pyobj_dom = libvirt_virDomainPtrWrap(dom);
++    Py_INCREF(pyobj_cbData);
++
++    dictKey = libvirt_constcharPtrWrap("conn");
++    pyobj_conn = PyDict_GetItem(pyobj_cbData, dictKey);
++    Py_DECREF(dictKey);
++
++    /* Call the Callback Dispatcher */
++    pyobj_ret = PyObject_CallMethod(pyobj_conn,
++                                    (char*)"_dispatchDomainEventDeviceRemovedCallback",
++                                    (char*)"OsO",
++                                    pyobj_dom, devAlias, pyobj_cbData);
++
++    Py_DECREF(pyobj_cbData);
++    Py_DECREF(pyobj_dom);
++
++    if (!pyobj_ret) {
++        DEBUG("%s - ret:%p\n", __FUNCTION__, pyobj_ret);
++        PyErr_Print();
++    } else {
++        Py_DECREF(pyobj_ret);
++        ret = 0;
++    }
++
++    LIBVIRT_RELEASE_THREAD_STATE;
++    return ret;
++}
++
+ static PyObject *
+ libvirt_virConnectDomainEventRegisterAny(ATTRIBUTE_UNUSED PyObject * self,
+                                          PyObject * args)
+@@ -5853,7 +5898,7 @@ libvirt_virConnectDomainEventRegisterAny(ATTRIBUTE_UNUSED PyObject * self,
+     else
+         dom = PyvirDomain_Get(pyobj_dom);
+ 
+-    switch (eventID) {
++    switch ((virDomainEventID) eventID) {
+     case VIR_DOMAIN_EVENT_ID_LIFECYCLE:
+         cb = VIR_DOMAIN_EVENT_CALLBACK(libvirt_virConnectDomainEventLifecycleCallback);
+         break;
+@@ -5899,6 +5944,11 @@ libvirt_virConnectDomainEventRegisterAny(ATTRIBUTE_UNUSED PyObject * self,
+     case VIR_DOMAIN_EVENT_ID_PMSUSPEND_DISK:
+         cb = VIR_DOMAIN_EVENT_CALLBACK(libvirt_virConnectDomainEventPMSuspendDiskCallback);
+         break;
++    case VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED:
++        cb = VIR_DOMAIN_EVENT_CALLBACK(libvirt_virConnectDomainEventDeviceRemovedCallback);
++
++    case VIR_DOMAIN_EVENT_ID_LAST:
++        break;
+     }
+ 
+     if (!cb) {
+diff --git a/src/conf/domain_event.c b/src/conf/domain_event.c
+index 3cfd9f0..cc53d81 100644
+--- a/src/conf/domain_event.c
++++ b/src/conf/domain_event.c
+@@ -121,6 +121,9 @@ struct _virDomainEvent {
+             /* In unit of 1024 bytes */
+             unsigned long long actual;
+         } balloonChange;
++        struct {
++            char *devAlias;
++        } deviceRemoved;
+     } data;
+ };
+ 
+@@ -1174,6 +1177,46 @@ virDomainEventPtr virDomainEventBalloonChangeNewFromObj(virDomainObjPtr obj,
+     return ev;
+ }
+ 
++static virDomainEventPtr
++virDomainEventDeviceRemovedNew(int id,
++                               const char *name,
++                               unsigned char *uuid,
++                               const char *devAlias)
++{
++    virDomainEventPtr ev =
++        virDomainEventNewInternal(VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED,
++                                  id, name, uuid);
++
++    if (ev) {
++        if (!(ev->data.deviceRemoved.devAlias = strdup(devAlias))) {
++            virReportOOMError();
++            goto error;
++        }
++    }
++
++    return ev;
++
++error:
++    virDomainEventFree(ev);
++    return NULL;
++}
++
++virDomainEventPtr
++virDomainEventDeviceRemovedNewFromObj(virDomainObjPtr obj,
++                                      const char *devAlias)
++{
++    return virDomainEventDeviceRemovedNew(obj->def->id, obj->def->name,
++                                          obj->def->uuid, devAlias);
++}
++
++virDomainEventPtr
++virDomainEventDeviceRemovedNewFromDom(virDomainPtr dom,
++                                      const char *devAlias)
++{
++    return virDomainEventDeviceRemovedNew(dom->id, dom->name, dom->uuid,
++                                          devAlias);
++}
++
+ /**
+  * virDomainEventQueuePush:
+  * @evtQueue: the dom event queue
+@@ -1223,30 +1266,30 @@ virDomainEventDispatchDefaultFunc(virConnectPtr conn,
+         return;
+     dom->id = event->dom.id;
+ 
+-    switch (event->eventID) {
++    switch ((virDomainEventID) event->eventID) {
+     case VIR_DOMAIN_EVENT_ID_LIFECYCLE:
+         ((virConnectDomainEventCallback)cb)(conn, dom,
+                                             event->data.lifecycle.type,
+                                             event->data.lifecycle.detail,
+                                             cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_REBOOT:
+         (cb)(conn, dom,
+              cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_RTC_CHANGE:
+         ((virConnectDomainEventRTCChangeCallback)cb)(conn, dom,
+                                                      event->data.rtcChange.offset,
+                                                      cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_WATCHDOG:
+         ((virConnectDomainEventWatchdogCallback)cb)(conn, dom,
+                                                     event->data.watchdog.action,
+                                                     cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_IO_ERROR:
+         ((virConnectDomainEventIOErrorCallback)cb)(conn, dom,
+@@ -1254,7 +1297,7 @@ virDomainEventDispatchDefaultFunc(virConnectPtr conn,
+                                                    event->data.ioError.devAlias,
+                                                    event->data.ioError.action,
+                                                    cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_IO_ERROR_REASON:
+         ((virConnectDomainEventIOErrorReasonCallback)cb)(conn, dom,
+@@ -1263,7 +1306,7 @@ virDomainEventDispatchDefaultFunc(virConnectPtr conn,
+                                                          event->data.ioError.action,
+                                                          event->data.ioError.reason,
+                                                          cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_GRAPHICS:
+         ((virConnectDomainEventGraphicsCallback)cb)(conn, dom,
+@@ -1273,12 +1316,12 @@ virDomainEventDispatchDefaultFunc(virConnectPtr conn,
+                                                     event->data.graphics.authScheme,
+                                                     event->data.graphics.subject,
+                                                     cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_CONTROL_ERROR:
+         (cb)(conn, dom,
+              cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_BLOCK_JOB:
+         ((virConnectDomainEventBlockJobCallback)cb)(conn, dom,
+@@ -1286,7 +1329,7 @@ virDomainEventDispatchDefaultFunc(virConnectPtr conn,
+                                                     event->data.blockJob.type,
+                                                     event->data.blockJob.status,
+                                                     cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_DISK_CHANGE:
+         ((virConnectDomainEventDiskChangeCallback)cb)(conn, dom,
+@@ -1295,38 +1338,46 @@ virDomainEventDispatchDefaultFunc(virConnectPtr conn,
+                                                       event->data.diskChange.devAlias,
+                                                       event->data.diskChange.reason,
+                                                       cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_TRAY_CHANGE:
+         ((virConnectDomainEventTrayChangeCallback)cb)(conn, dom,
+                                                       event->data.trayChange.devAlias,
+                                                       event->data.trayChange.reason,
+                                                       cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_PMWAKEUP:
+         ((virConnectDomainEventPMWakeupCallback)cb)(conn, dom, 0, cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_PMSUSPEND:
+         ((virConnectDomainEventPMSuspendCallback)cb)(conn, dom, 0, cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_BALLOON_CHANGE:
+         ((virConnectDomainEventBalloonChangeCallback)cb)(conn, dom,
+                                                          event->data.balloonChange.actual,
+                                                          cbopaque);
+-        break;
++        goto cleanup;
+ 
+     case VIR_DOMAIN_EVENT_ID_PMSUSPEND_DISK:
+         ((virConnectDomainEventPMSuspendDiskCallback)cb)(conn, dom, 0, cbopaque);
+-        break;
++        goto cleanup;
+ 
+-    default:
+-        VIR_WARN("Unexpected event ID %d", event->eventID);
++    case VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED:
++        ((virConnectDomainEventDeviceRemovedCallback)cb)(conn, dom,
++                                                         event->data.deviceRemoved.devAlias,
++                                                         cbopaque);
++        goto cleanup;
++
++    case VIR_DOMAIN_EVENT_ID_LAST:
+         break;
+     }
+ 
++    VIR_WARN("Unexpected event ID %d", event->eventID);
++
++cleanup:
+     virDomainFree(dom);
+ }
+ 
+diff --git a/src/conf/domain_event.h b/src/conf/domain_event.h
+index 5f64a47..f6b957d 100644
+--- a/src/conf/domain_event.h
++++ b/src/conf/domain_event.h
+@@ -132,6 +132,11 @@ virDomainEventPtr virDomainEventBalloonChangeNewFromObj(virDomainObjPtr obj, uns
+ virDomainEventPtr virDomainEventPMSuspendDiskNewFromObj(virDomainObjPtr obj);
+ virDomainEventPtr virDomainEventPMSuspendDiskNewFromDom(virDomainPtr dom);
+ 
++virDomainEventPtr virDomainEventDeviceRemovedNewFromObj(virDomainObjPtr obj,
++                                                        const char *devAlias);
++virDomainEventPtr virDomainEventDeviceRemovedNewFromDom(virDomainPtr dom,
++                                                        const char *devAlias);
++
+ void virDomainEventFree(virDomainEventPtr event);
+ 
+ void virDomainEventStateFree(virDomainEventStatePtr state);
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index eeb0fd3..b62ffba 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -572,6 +572,8 @@ virDomainEventBlockJobNewFromObj;
+ virDomainEventBlockJobNewFromDom;
+ virDomainEventControlErrorNewFromDom;
+ virDomainEventControlErrorNewFromObj;
++virDomainEventDeviceRemovedNewFromDom;
++virDomainEventDeviceRemovedNewFromObj;
+ virDomainEventDiskChangeNewFromDom;
+ virDomainEventDiskChangeNewFromObj;
+ virDomainEventFree;
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index b125fe1..709aca1 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -258,6 +258,11 @@ remoteDomainBuildEventPMSuspendDisk(virNetClientProgramPtr prog,
+                                   virNetClientPtr client,
+                                   void *evdata, void *opaque);
+ 
++static void
++remoteDomainBuildEventDeviceRemoved(virNetClientProgramPtr prog,
++                                    virNetClientPtr client,
++                                    void *evdata, void *opaque);
++
+ static virNetClientProgramEvent remoteDomainEvents[] = {
+     { REMOTE_PROC_DOMAIN_EVENT_RTC_CHANGE,
+       remoteDomainBuildEventRTCChange,
+@@ -319,6 +324,10 @@ static virNetClientProgramEvent remoteDomainEvents[] = {
+       remoteDomainBuildEventPMSuspendDisk,
+       sizeof(remote_domain_event_pmsuspend_disk_msg),
+       (xdrproc_t)xdr_remote_domain_event_pmsuspend_disk_msg },
++    { REMOTE_PROC_DOMAIN_EVENT_DEVICE_REMOVED,
++      remoteDomainBuildEventDeviceRemoved,
++      sizeof(remote_domain_event_device_removed_msg),
++      (xdrproc_t)xdr_remote_domain_event_device_removed_msg },
+ };
+ 
+ enum virDrvOpenRemoteFlags {
+@@ -4636,6 +4645,29 @@ remoteDomainBuildEventPMSuspendDisk(virNetClientProgramPtr prog ATTRIBUTE_UNUSED
+ }
+ 
+ 
++static void
++remoteDomainBuildEventDeviceRemoved(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
++                                    virNetClientPtr client ATTRIBUTE_UNUSED,
++                                    void *evdata, void *opaque)
++{
++    virConnectPtr conn = opaque;
++    struct private_data *priv = conn->privateData;
++    remote_domain_event_device_removed_msg *msg = evdata;
++    virDomainPtr dom;
++    virDomainEventPtr event = NULL;
++
++    dom = get_nonnull_domain(conn, msg->dom);
++    if (!dom)
++        return;
++
++    event = virDomainEventDeviceRemovedNewFromDom(dom, msg->devAlias);
++
++    virDomainFree(dom);
++
++    remoteDomainEventQueue(priv, event);
++}
++
++
+ static virDrvOpenStatus ATTRIBUTE_NONNULL (1)
+ remoteSecretOpen(virConnectPtr conn, virConnectAuthPtr auth,
+                  unsigned int flags)
+diff --git a/src/remote/remote_protocol.x b/src/remote/remote_protocol.x
+index d8998ce..62f1390 100644
+--- a/src/remote/remote_protocol.x
++++ b/src/remote/remote_protocol.x
+@@ -2670,6 +2670,11 @@ struct remote_node_get_memory_parameters_ret {
+     int nparams;
+ };
+ 
++struct remote_domain_event_device_removed_msg {
++    remote_nonnull_domain dom;
++    remote_nonnull_string devAlias;
++};
++
+ /*----- Protocol. -----*/
+ 
+ /* Define the program number, protocol version and procedure numbers here. */
+@@ -3013,7 +3018,9 @@ enum remote_procedure {
+     REMOTE_PROC_DOMAIN_BLOCK_COMMIT = 290, /* autogen autogen */
+ 
+     REMOTE_PROC_NETWORK_UPDATE = 291, /* autogen autogen priority:high */
+-    REMOTE_PROC_DOMAIN_EVENT_PMSUSPEND_DISK = 292 /* autogen autogen */
++    REMOTE_PROC_DOMAIN_EVENT_PMSUSPEND_DISK = 292, /* autogen autogen */
++
++    REMOTE_PROC_DOMAIN_EVENT_DEVICE_REMOVED = 311 /* autogen autogen */
+ 
+     /*
+      * Notice how the entries are grouped in sets of 10 ?
+diff --git a/src/remote_protocol-structs b/src/remote_protocol-structs
+index 0c0a317..4b4fbe1 100644
+--- a/src/remote_protocol-structs
++++ b/src/remote_protocol-structs
+@@ -2126,6 +2126,10 @@ struct remote_node_get_memory_parameters_ret {
+         } params;
+         int                        nparams;
+ };
++struct remote_domain_event_device_removed_msg {
++        remote_nonnull_domain      dom;
++        remote_nonnull_string      devAlias;
++};
+ enum remote_procedure {
+         REMOTE_PROC_OPEN = 1,
+         REMOTE_PROC_CLOSE = 2,
+@@ -2419,4 +2423,5 @@ enum remote_procedure {
+         REMOTE_PROC_DOMAIN_BLOCK_COMMIT = 290,
+         REMOTE_PROC_NETWORK_UPDATE = 291,
+         REMOTE_PROC_DOMAIN_EVENT_PMSUSPEND_DISK = 292,
++        REMOTE_PROC_DOMAIN_EVENT_DEVICE_REMOVED = 311,
+ };
+-- 
+2.0.0
+

@@ -1,0 +1,204 @@
+From ce6f6d92e63f199940b2f2a7935f7002ef5acc40 Mon Sep 17 00:00:00 2001
+Message-Id: <ce6f6d92e63f199940b2f2a7935f7002ef5acc40.1354720508.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 3 Dec 2012 15:20:23 +0100
+Subject: [PATCH] Fix error handling in virSecurityManagerGetMountOptions
+
+The impls of virSecurityManagerGetMountOptions had no way to
+return errors, since the code was treating 'NULL' as a success
+value. This is somewhat pointless, since the calling code did
+not want NULL in the first place and has to translate it into
+the empty string "". So change the code so that the impls can
+return "" directly, allowing use of NULL for error reporting
+once again
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 3f6470f7532eecdca5687a2dbbc5e25610d8030b)
+
+Conflicts:
+
+	src/lxc/lxc_container.c - just git being overly cautious
+
+Fixes:
+Error: CHECKED_RETURN (CWE-252):
+libvirt-0.10.2/src/security/security_selinux.c:1981:
+    unchecked_value: No check of the return value of "virAsprintf(&opts,
+    ",context=\"%s\"", (char const *)secdef->imagelabel)".
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=878376
+---
+ src/lxc/lxc_container.c          | 10 ++++++----
+ src/security/security_apparmor.c | 17 +++++++++++++++++
+ src/security/security_manager.c  |  5 +----
+ src/security/security_nop.c      | 15 +++++++++++++--
+ src/security/security_selinux.c  | 28 +++++++++++++++++-----------
+ 5 files changed, 54 insertions(+), 21 deletions(-)
+
+diff --git a/src/lxc/lxc_container.c b/src/lxc/lxc_container.c
+index 4bb2aff..59a2177 100644
+--- a/src/lxc/lxc_container.c
++++ b/src/lxc/lxc_container.c
+@@ -570,7 +570,7 @@ static int lxcContainerMountBasicFS(bool pivotRoot,
+          */
+ 
+         ignore_value(virAsprintf(&opts,
+-                                 "mode=755,size=65536%s",(sec_mount_options ? sec_mount_options : "")));
++                                 "mode=755,size=65536%s", sec_mount_options));
+         if (!opts) {
+             virReportOOMError();
+             goto cleanup;
+@@ -1082,7 +1082,7 @@ static int lxcContainerMountFSTmpfs(virDomainFSDefPtr fs,
+     char *data = NULL;
+ 
+     if (virAsprintf(&data,
+-                    "size=%lldk%s", fs->usage, (sec_mount_options ? sec_mount_options : "")) < 0) {
++                    "size=%lldk%s", fs->usage, sec_mount_options) < 0) {
+         virReportOOMError();
+         goto cleanup;
+     }
+@@ -1455,7 +1455,7 @@ static int lxcContainerMountCGroups(struct lxcContainerCGroup *mounts,
+     }
+ 
+     if (virAsprintf(&opts,
+-                    "mode=755,size=65536%s",(sec_mount_options ? sec_mount_options : "")) < 0 ) {
++                    "mode=755,size=65536%s", sec_mount_options) < 0) {
+         virReportOOMError();
+         return -1;
+     }
+@@ -1688,7 +1688,9 @@ static int lxcContainerSetupMounts(virDomainDefPtr vmDef,
+     if (lxcContainerResolveSymlinks(vmDef) < 0)
+         return -1;
+ 
+-    sec_mount_options = virSecurityManagerGetMountOptions(securityDriver, vmDef);
++    if (!(sec_mount_options = virSecurityManagerGetMountOptions(securityDriver, vmDef)))
++        return -1;
++
+     if (root && root->src)
+         rc =  lxcContainerSetupPivotRoot(vmDef, root, ttyPaths, nttyPaths, sec_mount_options);
+     else
+diff --git a/src/security/security_apparmor.c b/src/security/security_apparmor.c
+index 1315fe1..b0cdb65 100644
+--- a/src/security/security_apparmor.c
++++ b/src/security/security_apparmor.c
+@@ -881,6 +881,21 @@ AppArmorSetTapFDLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+     return 0;
+ }
+ 
++
++static char *
++AppArmorGetMountOptions(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
++                        virDomainDefPtr vm ATTRIBUTE_UNUSED)
++{
++    char *opts;
++
++    if (!(opts = strdup(""))) {
++        virReportOOMError();
++        return NULL;
++    }
++    return opts;
++}
++
++
+ virSecurityDriver virAppArmorSecurityDriver = {
+     .privateDataLen                     = 0,
+     .name                               = SECURITY_APPARMOR_NAME,
+@@ -918,4 +933,6 @@ virSecurityDriver virAppArmorSecurityDriver = {
+ 
+     .domainSetSecurityImageFDLabel      = AppArmorSetImageFDLabel,
+     .domainSetSecurityTapFDLabel        = AppArmorSetTapFDLabel,
++
++    .domainGetSecurityMountOptions      = AppArmorGetMountOptions,
+ };
+diff --git a/src/security/security_manager.c b/src/security/security_manager.c
+index d446607..0ebd53b 100644
+--- a/src/security/security_manager.c
++++ b/src/security/security_manager.c
+@@ -486,10 +486,7 @@ char *virSecurityManagerGetMountOptions(virSecurityManagerPtr mgr,
+     if (mgr->drv->domainGetSecurityMountOptions)
+         return mgr->drv->domainGetSecurityMountOptions(mgr, vm);
+ 
+-    /*
+-      I don't think this is an error, these should be optional
+-      virReportError(VIR_ERR_NO_SUPPORT, __FUNCTION__);
+-    */
++    virReportError(VIR_ERR_NO_SUPPORT, __FUNCTION__);
+     return NULL;
+ }
+ 
+diff --git a/src/security/security_nop.c b/src/security/security_nop.c
+index 86f644b..5f3270a 100644
+--- a/src/security/security_nop.c
++++ b/src/security/security_nop.c
+@@ -21,6 +21,10 @@
+ 
+ #include "security_nop.h"
+ 
++#include "virterror_internal.h"
++
++#define VIR_FROM_THIS VIR_FROM_SECURITY
++
+ static virSecurityDriverStatus virSecurityDriverProbeNop(const char *virtDriver ATTRIBUTE_UNUSED)
+ {
+     return SECURITY_DRIVER_ENABLE;
+@@ -165,8 +169,15 @@ static int virSecurityDomainSetFDLabelNop(virSecurityManagerPtr mgr ATTRIBUTE_UN
+ }
+ 
+ static char *virSecurityDomainGetMountOptionsNop(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+-                                                 virDomainDefPtr vm ATTRIBUTE_UNUSED) {
+-    return NULL;
++                                                 virDomainDefPtr vm ATTRIBUTE_UNUSED)
++{
++    char *opts;
++
++    if (!(opts = strdup(""))) {
++        virReportOOMError();
++        return NULL;
++    }
++    return opts;
+ }
+ 
+ virSecurityDriver virSecurityDriverNop = {
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index eee8d71..879b823 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -1970,20 +1970,26 @@ virSecuritySELinuxGetSecurityMountOptions(virSecurityManagerPtr mgr,
+     char *opts = NULL;
+     virSecurityLabelDefPtr secdef;
+ 
+-    secdef = virDomainDefGetSecurityLabelDef(def, SECURITY_SELINUX_NAME);
+-    if (secdef == NULL)
+-        return NULL;
+-
+-    if (! secdef->imagelabel)
+-        secdef->imagelabel = virSecuritySELinuxGenImageLabel(mgr,def);
++    if ((secdef = virDomainDefGetSecurityLabelDef(def, SECURITY_SELINUX_NAME))) {
++        if (!secdef->imagelabel)
++            secdef->imagelabel = virSecuritySELinuxGenImageLabel(mgr, def);
++
++        if (secdef->imagelabel &&
++            virAsprintf(&opts,
++                        ",context=\"%s\"",
++                        (const char*) secdef->imagelabel) < 0) {
++            virReportOOMError();
++            return NULL;
++        }
++    }
+ 
+-    if (secdef->imagelabel) {
+-        virAsprintf(&opts,
+-                    ",context=\"%s\"",
+-                    (const char*) secdef->imagelabel);
++    if (!opts &&
++        !(opts = strdup(""))) {
++        virReportOOMError();
++        return NULL;
+     }
+ 
+-    VIR_DEBUG("imageLabel=%s", secdef->imagelabel);
++    VIR_DEBUG("imageLabel=%s opts=%s", secdef->imagelabel, opts);
+     return opts;
+ }
+ 
+-- 
+1.8.0
+

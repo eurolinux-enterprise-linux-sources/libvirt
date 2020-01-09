@@ -1,0 +1,84 @@
+From 5245792178a8fb8631faf7457d46aabbbc694162 Mon Sep 17 00:00:00 2001
+Message-Id: <5245792178a8fb8631faf7457d46aabbbc694162.1350297262.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Oct 2012 05:08:59 -0400
+Subject: [PATCH] conf: virDomainDeviceInfoCopy utility function
+
+This is a prerequisite patch for the solution to:
+
+      https://bugzilla.redhat.com/show_bug.cgi?id=805071
+
+It was cherry picked from upstream commit
+11c47d979c885dec0799463cd9325e91fc4e46cc with no conflicts)
+
+This does a shallow copy of all the bits, then strdups the two items
+that are actually allocated separately.
+---
+ src/conf/domain_conf.c   | 24 ++++++++++++++++++++++++
+ src/conf/domain_conf.h   |  2 ++
+ src/libvirt_private.syms |  1 +
+ 3 files changed, 27 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index b7c9c87..650bc08 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -2011,6 +2011,30 @@ virDomainDeviceInfoIsSet(virDomainDeviceInfoPtr info, unsigned int flags)
+     return false;
+ }
+ 
++int
++virDomainDeviceInfoCopy(virDomainDeviceInfoPtr dst,
++                        virDomainDeviceInfoPtr src)
++{
++    /* Assume that dst is already cleared */
++
++    /* first a shallow copy of *everything* */
++    *dst = *src;
++
++    /* then redo the two fields that are pointers */
++    dst->alias = NULL;
++    dst->romfile = NULL;
++
++    if (src->alias && !(dst->alias = strdup(src->alias))) {
++        virReportOOMError();
++        return -1;
++    }
++    if (src->romfile && !(dst->romfile = strdup(src->romfile))) {
++        virReportOOMError();
++        return -1;
++    }
++    return 0;
++}
++
+ void virDomainDeviceInfoClear(virDomainDeviceInfoPtr info)
+ {
+     VIR_FREE(info->alias);
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index a112b14..6997fda 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1892,6 +1892,8 @@ virDomainDeviceDefPtr virDomainDeviceDefCopy(virCapsPtr caps,
+                                              virDomainDeviceDefPtr src);
+ int virDomainDeviceAddressIsValid(virDomainDeviceInfoPtr info,
+                                   int type);
++int virDomainDeviceInfoCopy(virDomainDeviceInfoPtr dst,
++                            virDomainDeviceInfoPtr src);
+ void virDomainDeviceInfoClear(virDomainDeviceInfoPtr info);
+ void virDomainDefClearPCIAddresses(virDomainDefPtr def);
+ void virDomainDefClearDeviceAliases(virDomainDefPtr def);
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 7ea52c9..1babbc4 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -331,6 +331,7 @@ virDomainDeviceAddressTypeToString;
+ virDomainDeviceDefCopy;
+ virDomainDeviceDefFree;
+ virDomainDeviceDefParse;
++virDomainDeviceInfoCopy;
+ virDomainDeviceInfoIterate;
+ virDomainDeviceTypeToString;
+ virDomainDiskBusTypeToString;
+-- 
+1.7.12.3
+

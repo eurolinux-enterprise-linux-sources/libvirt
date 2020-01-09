@@ -1,0 +1,65 @@
+From 3e4d539b279ce46aa10259a5b2826755b2ec9d84 Mon Sep 17 00:00:00 2001
+Message-Id: <3e4d539b279ce46aa10259a5b2826755b2ec9d84@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 14 Apr 2014 17:49:45 +0200
+Subject: [PATCH] Crash of libvirtd by unprivileged user in
+ virConnectListAllInterfaces
+
+https://bugzilla.redhat.com/show_bug.cgi?id=884382
+
+On Thu, Jun 27, 2013 at 03:56:42PM +0100, Daniel P. Berrange wrote:
+> Hi Security Team,
+>
+> I've discovered a way for an unprivileged user with a readonly connection
+> to libvirtd, to crash the daemon.
+
+Ok, the final patch for this is issue will be the simpler variant that
+Eric suggested
+
+The embargo can be considered to be lifted on Monday July 1st, at
+0900 UTC
+
+The following is the GIT change that DV or myself will apply to libvirt
+GIT master immediately before the 1.1.0 release:
+
+>From 177b4165c531a4b3ba7f6ab6aa41dca9ceb0b8cf Mon Sep 17 00:00:00 2001
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Fri, 28 Jun 2013 10:48:37 +0100
+Subject: [PATCH] CVE-2013-2218: Fix crash listing network interfaces with
+ filters
+
+The virConnectListAllInterfaces method has a double-free of the
+'struct netcf_if' object when any of the filtering flags cause
+an interface to be skipped over. For example when running the
+command 'virsh iface-list --inactive'
+
+This is a regression introduced in release 1.0.6 by
+
+  commit 7ac2c4fe624f30f2c8270116513fa2ddab07631f
+  Author: Guannan Ren <gren@redhat.com>
+  Date:   Tue May 21 21:29:38 2013 +0800
+
+    interface: list all interfaces with flags == 0
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 244e0b8cf15ca2ef48d82058e728656e6c4bad11)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/interface/interface_backend_netcf.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/interface/interface_backend_netcf.c b/src/interface/interface_backend_netcf.c
+index 664471f..9186dbd 100644
+--- a/src/interface/interface_backend_netcf.c
++++ b/src/interface/interface_backend_netcf.c
+@@ -365,6 +365,7 @@ interfaceListAllInterfaces(virConnectPtr conn,
+               (MATCH(VIR_CONNECT_LIST_INTERFACES_INACTIVE) &&
+                (status & NETCF_IFACE_INACTIVE)))) {
+             ncf_if_free(iface);
++            iface = NULL;
+             continue;
+         }
+ 
+-- 
+1.9.2
+

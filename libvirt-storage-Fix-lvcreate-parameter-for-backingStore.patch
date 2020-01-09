@@ -1,0 +1,42 @@
+From 481ef8f0861dc0b9d2c039533c01186740bc0961 Mon Sep 17 00:00:00 2001
+Message-Id: <481ef8f0861dc0b9d2c039533c01186740bc0961.1358948742.git.jdenemar@redhat.com>
+From: Atsushi Kumagai <kumagai-atsushi@mxc.nes.nec.co.jp>
+Date: Fri, 18 Jan 2013 15:43:09 +0800
+Subject: [PATCH] storage: Fix lvcreate parameter for backingStore.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=896398
+
+When virStorageBackendLogicalCreateVol() creates a snapshot for a
+logical volume with backingStore element, it fails with the message
+below:
+
+  2013-01-17 03:10:18.869+0000: 1967: error : virCommandWait:2345 :
+  internal error Child process (/sbin/lvcreate --name lvm-snapshot -L 51200K
+  -s=/dev/lvm-pool/lvm-volume) unexpected exit status 3: /sbin/lvcreate:
+  invalid option -- '='  Error during parsing of command line.
+
+This is because virCommandAddArgPair() uses '=' to connect the two
+parameters, it's unsuitable for -s option of the lvcreate.
+
+Signed-off-by: Atsushi Kumagai <kumagai-atsushi@mxc.nes.nec.co.jp>
+(cherry picked from commit ffee627a4a52bf13d787cec883054fe2e7d9465c)
+---
+ src/storage/storage_backend_logical.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/storage/storage_backend_logical.c b/src/storage/storage_backend_logical.c
+index 238a23b..b7ad88e 100644
+--- a/src/storage/storage_backend_logical.c
++++ b/src/storage/storage_backend_logical.c
+@@ -731,7 +731,7 @@ virStorageBackendLogicalCreateVol(virConnectPtr conn,
+     }
+     virCommandAddArgFormat(cmd, "%lluK", VIR_DIV_UP(vol->capacity, 1024));
+     if (vol->backingStore.path)
+-        virCommandAddArgPair(cmd, "-s", vol->backingStore.path);
++        virCommandAddArgList(cmd, "-s", vol->backingStore.path, NULL);
+     else
+         virCommandAddArg(cmd, pool->def->source.name);
+ 
+-- 
+1.8.1.1
+

@@ -1,0 +1,35 @@
+From 189e205352f91a8019371390706be2ba04986481 Mon Sep 17 00:00:00 2001
+Message-Id: <189e205352f91a8019371390706be2ba04986481.1380730269.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 30 Sep 2013 20:14:55 +0200
+Subject: [PATCH] docs: Clean 09adfdc62de2b up
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1013758
+
+(cherry picked from commit 8563b091fff4856a0cee7b568e52ff5b64d96ed3)
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index c3ed5a7..868a8ff 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -612,8 +612,9 @@
+       <dd> The optional <code>hard_limit</code> element is the maximum memory
+         the guest can use. The units for this value are kibibytes (i.e. blocks
+         of 1024 bytes). <strong>However, users of QEMU and KVM are strongly
+-        advised not to set this limit as domain may get killed by the kernel.
+-        To determine the memory needed for a process to run is
++        advised not to set this limit as domain may get killed by the kernel
++        if the guess is too low. To determine the memory needed for a process
++        to run is an
+         <a href="http://en.wikipedia.org/wiki/Undecidable_problem">
+         undecidable problem</a>.</strong></dd>
+       <dt><code>soft_limit</code></dt>
+-- 
+1.8.3.2
+

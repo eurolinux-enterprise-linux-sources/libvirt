@@ -1,0 +1,114 @@
+From 01ac8f1b000a6c850e552f4d0c4128db5378c2fb Mon Sep 17 00:00:00 2001
+Message-Id: <01ac8f1b000a6c850e552f4d0c4128db5378c2fb@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 15 Feb 2016 06:59:46 -0500
+Subject: [PATCH] virnetdevmacvlan.c: Introduce mutex for macvlan creation
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1276478
+
+Currently, after we removed the qemu driver lock, it may happen
+that two or more threads will start up a machine with macvlan and
+race over virNetDevMacVLanCreateWithVPortProfile(). However,
+there's a racy section in which we are generating a sequence of
+possible device names and detecting if they exits. If we found
+one which doesn't we try to create a device with that name.
+However, the other thread is doing just the same. Assume it will
+succeed and we must therefore fail. If this happens more than 5
+times (which in massive parallel startup surely will) we return
+-1 without any error reported. This patch is a simple hack to
+both of these problems. It introduces a mutex, so only one thread
+will enter the section, and if it runs out of possibilities,
+error is reported. Moreover, the number of retries is raised to 20.
+
+(cherry picked from commit 1cf97c87c05bc44d577d545d29d9c94764ea5975
+with minor merge conflict due to header renaming upstream)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdevmacvlan.c | 37 ++++++++++++++++++++++++++++++++-----
+ 1 file changed, 32 insertions(+), 5 deletions(-)
+
+diff --git a/src/util/virnetdevmacvlan.c b/src/util/virnetdevmacvlan.c
+index 0795c23..4a6cb69 100644
+--- a/src/util/virnetdevmacvlan.c
++++ b/src/util/virnetdevmacvlan.c
+@@ -31,6 +31,7 @@
+ #include "virmacaddr.h"
+ #include "util.h"
+ #include "virterror_internal.h"
++#include "threads.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_NET
+ 
+@@ -71,6 +72,19 @@ VIR_ENUM_IMPL(virNetDevMacVLanMode, VIR_NETDEV_MACVLAN_MODE_LAST,
+ # define MACVLAN_NAME_PREFIX	"macvlan"
+ # define MACVLAN_NAME_PATTERN	"macvlan%d"
+ 
++virMutex virNetDevMacVLanCreateMutex;
++
++static int virNetDevMacVLanCreateMutexOnceInit(void)
++{
++    if (virMutexInit(&virNetDevMacVLanCreateMutex) < 0) {
++        virReportSystemError(errno, "%s", _("unable to init mutex"));
++        return -1;
++    }
++    return 0;
++}
++
++VIR_ONCE_GLOBAL_INIT(virNetDevMacVLanCreateMutex);
++
+ /**
+  * virNetDevMacVLanCreate:
+  *
+@@ -836,7 +850,7 @@ int virNetDevMacVLanCreateWithVPortProfile(const char *tgifname,
+     char ifname[IFNAMSIZ];
+     int retries, do_retry = 0;
+     uint32_t macvtapMode;
+-    const char *cr_ifname;
++    const char *cr_ifname = NULL;
+     int ret;
+     int vf = -1;
+ 
+@@ -902,22 +916,35 @@ int virNetDevMacVLanCreateWithVPortProfile(const char *tgifname,
+     } else {
+ create_name:
+         retries = 5;
++        if (virNetDevMacVLanCreateMutexInitialize() < 0)
++            return -1;
++        virMutexLock(&virNetDevMacVLanCreateMutex);
+         for (c = 0; c < 8192; c++) {
+             snprintf(ifname, sizeof(ifname), pattern, c);
+-            if ((ret = virNetDevExists(ifname)) < 0)
++            if ((ret = virNetDevExists(ifname)) < 0) {
++                virMutexUnlock(&virNetDevMacVLanCreateMutex);
+                 return -1;
++            }
+             if (!ret) {
+                 rc = virNetDevMacVLanCreate(ifname, type, macaddress, linkdev,
+                                             macvtapMode, &do_retry);
+-                if (rc == 0)
++                if (rc == 0) {
++                    cr_ifname = ifname;
+                     break;
++                }
+ 
+                 if (do_retry && --retries)
+                     continue;
+-                return -1;
++                break;
+             }
+         }
+-        cr_ifname = ifname;
++
++        virMutexUnlock(&virNetDevMacVLanCreateMutex);
++        if (!cr_ifname) {
++            virReportError(VIR_ERR_OPERATION_FAILED, "%s",
++                           _("Unable to create macvlan device"));
++            return -1;
++        }
+     }
+ 
+     if (virNetDevVPortProfileAssociate(cr_ifname,
+-- 
+2.7.1
+

@@ -1,0 +1,229 @@
+From 244f8de7c23ee518354b4a3321cc482b67aecaf7 Mon Sep 17 00:00:00 2001
+Message-Id: <244f8de7c23ee518354b4a3321cc482b67aecaf7.1350990680.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Mon, 22 Oct 2012 19:51:18 +0800
+Subject: [PATCH] selinux: Use raw contexts
+
+BZ:https://bugzilla.redhat.com/show_bug.cgi?id=851981
+(cherry picked from commit 9674f2c637114fa6ac0680fe5658a41a62bb34a8)
+
+We are currently able to work only with non-translated SELinux
+contexts, but we are using functions that work with translated
+contexts throughout the code.  This patch swaps all SELinux context
+translation relative calls with their raw sisters to avoid parsing
+problems.
+
+The problems can be experienced with mcstrans for example.  The
+difference is that if you have translations enabled (yum install
+mcstrans; service mcstrans start), fgetfilecon_raw() will get you
+something like 'system_u:object_r:virt_image_t:s0', whereas
+fgetfilecon() will return 'system_u:object_r:virt_image_t:SystemLow'
+that we cannot parse.
+
+I was trying to confirm that the _raw variants were here since the dawn of
+time, but the only thing I see now is that it was imported together in
+the upstream repo [1] from svn, so before 2008.
+
+Thanks Laurent Bigonville for finding this out.
+
+[1] http://oss.tresys.com/git/selinux.git
+---
+ configure.ac                    |  4 ++--
+ src/security/security_selinux.c | 26 +++++++++++++-------------
+ src/storage/storage_backend.c   |  2 +-
+ tests/securityselinuxhelper.c   |  6 +++---
+ tests/securityselinuxtest.c     |  2 +-
+ 5 files changed, 20 insertions(+), 20 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 3e9073d..9958654 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1436,14 +1436,14 @@ if test "$with_selinux" != "no"; then
+   old_libs="$LIBS"
+   if test "$with_selinux" = "check"; then
+     AC_CHECK_HEADER([selinux/selinux.h],[],[with_selinux=no])
+-    AC_CHECK_LIB([selinux], [fgetfilecon],[],[with_selinux=no])
++    AC_CHECK_LIB([selinux], [fgetfilecon_raw],[],[with_selinux=no])
+     if test "$with_selinux" != "no"; then
+       with_selinux="yes"
+     fi
+   else
+     fail=0
+     AC_CHECK_HEADER([selinux/selinux.h],[],[fail=1])
+-    AC_CHECK_LIB([selinux], [fgetfilecon],[],[fail=1])
++    AC_CHECK_LIB([selinux], [fgetfilecon_raw],[],[fail=1])
+     test $fail = 1 &&
+       AC_MSG_ERROR([You must install the libselinux development package in order to compile libvirt with basic SELinux support])
+   fi
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index 4cd8f23..00c34c2 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -111,7 +111,7 @@ virSecuritySELinuxMCSFind(virSecurityManagerPtr mgr)
+     char *sens, *cat, *tmp;
+     int catMin, catMax, catRange;
+ 
+-    if (getcon(&ourSecContext) < 0) {
++    if (getcon_raw(&ourSecContext) < 0) {
+         virReportSystemError(errno, "%s",
+                              _("Unable to get current process SELinux context"));
+         goto cleanup;
+@@ -252,7 +252,7 @@ virSecuritySELinuxGenNewContext(const char *basecontext,
+     VIR_DEBUG("basecontext=%s mcs=%s isObjectContext=%d",
+               basecontext, mcs, isObjectContext);
+ 
+-    if (getcon(&ourSecContext) < 0) {
++    if (getcon_raw(&ourSecContext) < 0) {
+         virReportSystemError(errno, "%s",
+                              _("Unable to get current process SELinux context"));
+         goto cleanup;
+@@ -612,7 +612,7 @@ virSecuritySELinuxReserveSecurityLabel(virSecurityManagerPtr mgr,
+     if (seclabel->type == VIR_DOMAIN_SECLABEL_STATIC)
+         return 0;
+ 
+-    if (getpidcon(pid, &pctx) == -1) {
++    if (getpidcon_raw(pid, &pctx) == -1) {
+         virReportSystemError(errno,
+                              _("unable to get PID %d security context"), pid);
+         return -1;
+@@ -713,7 +713,7 @@ virSecuritySELinuxGetSecurityProcessLabel(virSecurityManagerPtr mgr ATTRIBUTE_UN
+ {
+     security_context_t ctx;
+ 
+-    if (getpidcon(pid, &ctx) == -1) {
++    if (getpidcon_raw(pid, &ctx) == -1) {
+         virReportSystemError(errno,
+                              _("unable to get PID %d security context"),
+                              pid);
+@@ -753,10 +753,10 @@ virSecuritySELinuxSetFileconHelper(const char *path, char *tcon, bool optional)
+ 
+     VIR_INFO("Setting SELinux context on '%s' to '%s'", path, tcon);
+ 
+-    if (setfilecon(path, tcon) < 0) {
++    if (setfilecon_raw(path, tcon) < 0) {
+         int setfilecon_errno = errno;
+ 
+-        if (getfilecon(path, &econ) >= 0) {
++        if (getfilecon_raw(path, &econ) >= 0) {
+             if (STREQ(tcon, econ)) {
+                 freecon(econ);
+                 /* It's alright, there's nothing to change anyway. */
+@@ -818,10 +818,10 @@ virSecuritySELinuxFSetFilecon(int fd, char *tcon)
+ 
+     VIR_INFO("Setting SELinux context on fd %d to '%s'", fd, tcon);
+ 
+-    if (fsetfilecon(fd, tcon) < 0) {
++    if (fsetfilecon_raw(fd, tcon) < 0) {
+         int fsetfilecon_errno = errno;
+ 
+-        if (fgetfilecon(fd, &econ) >= 0) {
++        if (fgetfilecon_raw(fd, &econ) >= 0) {
+             if (STREQ(tcon, econ)) {
+                 freecon(econ);
+                 /* It's alright, there's nothing to change anyway. */
+@@ -1566,7 +1566,7 @@ virSecuritySELinuxSetSecurityProcessLabel(virSecurityManagerPtr mgr,
+             return -1;
+     }
+ 
+-    if (setexeccon(secdef->label) == -1) {
++    if (setexeccon_raw(secdef->label) == -1) {
+         virReportSystemError(errno,
+                              _("unable to set security context '%s'"),
+                              secdef->label);
+@@ -1611,7 +1611,7 @@ virSecuritySELinuxSetSecurityDaemonSocketLabel(virSecurityManagerPtr mgr,
+         goto done;
+     }
+ 
+-    if (getcon(&scon) == -1) {
++    if (getcon_raw(&scon) == -1) {
+         virReportSystemError(errno,
+                              _("unable to get current process context '%s'"),
+                              secdef->label);
+@@ -1634,7 +1634,7 @@ virSecuritySELinuxSetSecurityDaemonSocketLabel(virSecurityManagerPtr mgr,
+ 
+     VIR_DEBUG("Setting VM %s socket context %s",
+               def->name, context_str(proccon));
+-    if (setsockcreatecon(context_str(proccon)) == -1) {
++    if (setsockcreatecon_raw(context_str(proccon)) == -1) {
+         virReportSystemError(errno,
+                              _("unable to set socket security context '%s'"),
+                              context_str(proccon));
+@@ -1677,7 +1677,7 @@ virSecuritySELinuxSetSecuritySocketLabel(virSecurityManagerPtr mgr,
+ 
+     VIR_DEBUG("Setting VM %s socket context %s",
+               vm->name, secdef->label);
+-    if (setsockcreatecon(secdef->label) == -1) {
++    if (setsockcreatecon_raw(secdef->label) == -1) {
+         virReportSystemError(errno,
+                              _("unable to set socket security context '%s'"),
+                              secdef->label);
+@@ -1717,7 +1717,7 @@ virSecuritySELinuxClearSecuritySocketLabel(virSecurityManagerPtr mgr,
+             return -1;
+     }
+ 
+-    if (setsockcreatecon(NULL) == -1) {
++    if (setsockcreatecon_raw(NULL) == -1) {
+         virReportSystemError(errno,
+                              _("unable to clear socket security context '%s'"),
+                              secdef->label);
+diff --git a/src/storage/storage_backend.c b/src/storage/storage_backend.c
+index 1d32232..a32942f 100644
+--- a/src/storage/storage_backend.c
++++ b/src/storage/storage_backend.c
+@@ -1227,7 +1227,7 @@ virStorageBackendUpdateVolTargetInfoFD(virStorageVolTargetPtr target,
+ 
+ #if HAVE_SELINUX
+     /* XXX: make this a security driver call */
+-    if (fgetfilecon(fd, &filecon) == -1) {
++    if (fgetfilecon_raw(fd, &filecon) == -1) {
+         if (errno != ENODATA && errno != ENOTSUP) {
+             virReportSystemError(errno,
+                                  _("cannot get file context of '%s'"),
+diff --git a/tests/securityselinuxhelper.c b/tests/securityselinuxhelper.c
+index 43676de..dc63ff3 100644
+--- a/tests/securityselinuxhelper.c
++++ b/tests/securityselinuxhelper.c
+@@ -31,7 +31,7 @@
+  * the process context, where as in fact we're faking it all
+  */
+ 
+-int getcon(security_context_t *context)
++int getcon_raw(security_context_t *context)
+ {
+     if (getenv("FAKE_CONTEXT") == NULL) {
+         *context = NULL;
+@@ -43,7 +43,7 @@ int getcon(security_context_t *context)
+     return 0;
+ }
+ 
+-int getpidcon(pid_t pid, security_context_t *context)
++int getpidcon_raw(pid_t pid, security_context_t *context)
+ {
+     if (pid != getpid()) {
+         *context = NULL;
+@@ -60,7 +60,7 @@ int getpidcon(pid_t pid, security_context_t *context)
+     return 0;
+ }
+ 
+-int setcon(security_context_t context)
++int setcon_raw(security_context_t context)
+ {
+     return setenv("FAKE_CONTEXT", context, 1);
+ }
+diff --git a/tests/securityselinuxtest.c b/tests/securityselinuxtest.c
+index 848a390..8bcf3a1 100644
+--- a/tests/securityselinuxtest.c
++++ b/tests/securityselinuxtest.c
+@@ -217,7 +217,7 @@ testSELinuxGenLabel(const void *opaque)
+     context_t con = NULL;
+     context_t imgcon = NULL;
+ 
+-    if (setcon((security_context_t)data->pidcon) < 0) {
++    if (setcon_raw((security_context_t)data->pidcon) < 0) {
+         perror("Cannot set process security context");
+         return -1;
+     }
+-- 
+1.7.12.4
+

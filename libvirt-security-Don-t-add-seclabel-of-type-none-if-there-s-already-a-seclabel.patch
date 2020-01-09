@@ -1,0 +1,49 @@
+From d4cf8bd30dcbd848da54415ecd1d3cefb80c1966 Mon Sep 17 00:00:00 2001
+Message-Id: <d4cf8bd30dcbd848da54415ecd1d3cefb80c1966.1373271640.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 28 Mar 2013 23:14:47 +0100
+Subject: [PATCH] security: Don't add seclabel of type none if there's already
+ a seclabel
+
+https://bugzilla.redhat.com/show_bug.cgi?id=923946
+
+The <seclabel type='none'/> should be added iff there is no other
+seclabel defined within a domain. This bug can be easily reproduced:
+1) configure selinux seclabel for a domain
+2) disable system's selinux and restart libvirtd
+3) observe <seclabel type='none'/> being appended to a domain on its
+   startup
+(cherry picked from commit e4a28a328188e715de8d587b390cb44e2d6c3fb4)
+---
+ src/security/security_manager.c | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/src/security/security_manager.c b/src/security/security_manager.c
+index 0cb961e..c282b39 100644
+--- a/src/security/security_manager.c
++++ b/src/security/security_manager.c
+@@ -350,11 +350,16 @@ int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
+             }
+         }
+ 
+-        if ((seclabel->type == VIR_DOMAIN_SECLABEL_NONE) &&
+-            sec_managers[i]->requireConfined) {
+-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+-                           _("Unconfined guests are not allowed on this host"));
+-            goto cleanup;
++        if (seclabel->type == VIR_DOMAIN_SECLABEL_NONE) {
++            if (sec_managers[i]->requireConfined) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                               _("Unconfined guests are not allowed on this host"));
++                goto cleanup;
++            } else if (vm->nseclabels && generated) {
++                VIR_DEBUG("Skipping auto generated seclabel of type none");
++                virSecurityLabelDefFree(seclabel);
++                continue;
++            }
+         }
+ 
+         if (!sec_managers[i]->drv->domainGenSecurityLabel) {
+-- 
+1.8.2.1
+

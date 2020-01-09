@@ -1,0 +1,44 @@
+From 1896273292e1e9916c87438d4461640447ae2f7f Mon Sep 17 00:00:00 2001
+Message-Id: <1896273292e1e9916c87438d4461640447ae2f7f@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Tue, 29 Apr 2014 11:40:19 +0200
+Subject: [PATCH] qemu: don't call virFileExists() for network type disks
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1019926
+
+Based on suggestion from Eric [1], because it might not get cleaned up
+before the release, so to avoid potential errors.
+
+[1] https://www.redhat.com/archives/libvir-list/2014-April/msg00929.html
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit f6ec6af8a6314c73165b751f55f3e1e4bf5229f5)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_domain.c -- Accessors
+	src/qemu/qemu_process.c -- No volume type disk
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_domain.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 35e0a4a..c6a8eee 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -1961,7 +1961,8 @@ qemuDomainCheckDiskPresence(struct qemud_driver *driver,
+         /* There is no need to check the backing chain for disks
+          * without backing support, the fact that the file exists is
+          * more than enough */
+-        if (disk->format >= VIR_STORAGE_FILE_NONE &&
++        if (disk->type != VIR_DOMAIN_DISK_TYPE_NETWORK &&
++            disk->format >= VIR_STORAGE_FILE_NONE &&
+             disk->format < VIR_STORAGE_FILE_BACKING &&
+             virFileExists(disk->src))
+             continue;
+-- 
+1.9.2
+

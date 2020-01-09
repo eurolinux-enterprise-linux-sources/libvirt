@@ -1,0 +1,49 @@
+From 327d726a66b354ddf62d5db98435294d3395c794 Mon Sep 17 00:00:00 2001
+Message-Id: <327d726a66b354ddf62d5db98435294d3395c794@dist-git>
+From: =?UTF-8?q?Guido=20G=C3=BCnther?= <agx@sigxcpu.org>
+Date: Wed, 1 Apr 2015 09:00:49 +0200
+Subject: [PATCH] Create directory for lease files if it's missing
+
+RHEL-6: https://bugzilla.redhat.com/show_bug.cgi?id=1200991
+Debian: http://bugs.debian.org/715200
+
+If we don't autostart a network it's not being created.
+
+(cherry picked from commit dc4cdc57c784ec47295c4964193ac2c95d0f79ff)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/nwfilter/nwfilter_dhcpsnoop.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/nwfilter/nwfilter_dhcpsnoop.c b/src/nwfilter/nwfilter_dhcpsnoop.c
+index a08ba21..f0d0e73 100644
+--- a/src/nwfilter/nwfilter_dhcpsnoop.c
++++ b/src/nwfilter/nwfilter_dhcpsnoop.c
+@@ -73,8 +73,9 @@
+ 
+ #ifdef HAVE_LIBPCAP
+ 
+-# define LEASEFILE LOCALSTATEDIR "/run/libvirt/network/nwfilter.leases"
+-# define TMPLEASEFILE LOCALSTATEDIR "/run/libvirt/network/nwfilter.ltmp"
++# define LEASEFILE_DIR LOCALSTATEDIR "/run/libvirt/network/"
++# define LEASEFILE LEASEFILE_DIR "nwfilter.leases"
++# define TMPLEASEFILE LEASEFILE_DIR "nwfilter.ltmp"
+ 
+ struct virNWFilterSnoopState {
+     /* lease file */
+@@ -1894,6 +1895,11 @@ virNWFilterSnoopLeaseFileRefresh(void)
+ {
+     int tfd;
+ 
++    if (virFileMakePathWithMode(LEASEFILE_DIR, 0700) < 0) {
++        virReportError(errno, _("mkdir(\"%s\")"), LEASEFILE_DIR);
++        return;
++    }
++
+     if (unlink(TMPLEASEFILE) < 0 && errno != ENOENT)
+         virReportSystemError(errno, _("unlink(\"%s\")"), TMPLEASEFILE);
+ 
+-- 
+2.3.5
+

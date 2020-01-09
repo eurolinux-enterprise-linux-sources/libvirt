@@ -1,0 +1,39 @@
+From ecd0695dbadf8dd1ba2125c579f4dcd27be3b908 Mon Sep 17 00:00:00 2001
+Message-Id: <ecd0695dbadf8dd1ba2125c579f4dcd27be3b908@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Thu, 22 Jan 2015 20:17:48 +0100
+Subject: [PATCH] Fix possible memory leak in util/virxml.c
+
+A "xmlstr" string may not be assigned into a "doc" pointer and it
+could cause memory leak. To fix it if the "doc" pointer is NULL and
+the "xmlstr" string is not assigned we should free it.
+
+This has been found by coverity.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 67fbf129fc8727c98f7c4123c12a48938ccdf3fa)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1136729
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/xml.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/util/xml.c b/src/util/xml.c
+index 842ef57..3558190 100644
+--- a/src/util/xml.c
++++ b/src/util/xml.c
+@@ -1039,6 +1039,8 @@ virXMLExtractNamespaceXML(xmlNodePtr root,
+ cleanup:
+     if (doc)
+         *doc = xmlstr;
++    else
++        VIR_FREE(xmlstr);
+     xmlFreeNode(nodeCopy);
+     return ret;
+ }
+-- 
+2.2.2
+

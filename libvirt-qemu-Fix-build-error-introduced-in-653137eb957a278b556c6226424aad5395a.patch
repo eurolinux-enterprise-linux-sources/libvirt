@@ -1,0 +1,35 @@
+From 2f6c438140d8e04684bb8b0e99a9e0d46962626c Mon Sep 17 00:00:00 2001
+Message-Id: <2f6c438140d8e04684bb8b0e99a9e0d46962626c@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 20 Jan 2015 10:37:22 +0100
+Subject: [PATCH] qemu: Fix build error introduced in
+ 653137eb957a278b556c6226424aad5395a
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1131821
+
+The build failure is caused by a false positive of some static analysys
+steps done by gcc (that don't happen on -O0).
+
+(cherry picked from commit e2f14211cf1b5aa9495889969de1828e8b313ee6)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 2f74921..7cf7d78 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -14482,7 +14482,7 @@ qemuDomainSetBlockIoTune(virDomainPtr dom,
+     int ret = -1;
+     int i;
+     int idx = -1;
+-    int conf_idx;
++    int conf_idx = -1;
+     bool set_bytes = false;
+     bool set_iops = false;
+ 
+-- 
+2.2.2
+

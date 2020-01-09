@@ -1,0 +1,288 @@
+From 6b6d5793dc7e15770a899d2a704ba5c1b90d9e5f Mon Sep 17 00:00:00 2001
+Message-Id: <6b6d5793dc7e15770a899d2a704ba5c1b90d9e5f@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 11 Jul 2013 11:14:16 +0200
+Subject: [PATCH] qemu: Separate host device removal into a standalone function
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit 53f3739afea44fc74b64cf18e6e35bc593bc7711)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_hotplug.c - old spelling of virPCIDevicePtr,
+	    virUSBDevicePtr, and related APIs; no SCSI host device code;
+	    network hooks
+---
+ src/qemu/qemu_hotplug.c | 196 +++++++++++++++++++++++++++++-------------------
+ 1 file changed, 117 insertions(+), 79 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 49a9a6f..e6215f7 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -2038,6 +2038,114 @@ qemuDomainRemoveNetDevice(struct qemud_driver *driver,
+ }
+ 
+ 
++static void
++qemuDomainRemovePCIHostDevice(struct qemud_driver *driver,
++                              virDomainObjPtr vm,
++                              virDomainHostdevDefPtr hostdev)
++{
++    virDomainHostdevSubsysPtr subsys = &hostdev->source.subsys;
++    pciDevice *pci;
++    pciDevice *activePci;
++
++    /*
++     * For SRIOV net host devices, unset mac and port profile before
++     * reset and reattach device
++     */
++    if (hostdev->parent.data.net)
++        qemuDomainHostdevNetConfigRestore(hostdev, driver->stateDir);
++
++    pci = pciGetDevice(subsys->u.pci.domain, subsys->u.pci.bus,
++                       subsys->u.pci.slot,   subsys->u.pci.function);
++    if (pci) {
++        activePci = pciDeviceListSteal(driver->activePciHostdevs, pci);
++        if (activePci &&
++            pciResetDevice(activePci, driver->activePciHostdevs,
++                           driver->inactivePciHostdevs) == 0) {
++            qemuReattachPciDevice(activePci, driver);
++        } else {
++            /* reset of the device failed, treat it as if it was returned */
++            pciFreeDevice(activePci);
++        }
++        pciFreeDevice(pci);
++    }
++
++    qemuDomainReleaseDeviceAddress(vm, hostdev->info, NULL);
++}
++
++static void
++qemuDomainRemoveUSBHostDevice(struct qemud_driver *driver,
++                              virDomainObjPtr vm ATTRIBUTE_UNUSED,
++                              virDomainHostdevDefPtr hostdev)
++{
++    virDomainHostdevSubsysPtr subsys = &hostdev->source.subsys;
++    usbDevice *usb;
++
++    usb = usbGetDevice(subsys->u.usb.bus, subsys->u.usb.device);
++    if (usb) {
++        usbDeviceListDel(driver->activeUsbHostdevs, usb);
++        usbFreeDevice(usb);
++    } else {
++        VIR_WARN("Unable to find device %03d.%03d in list of used USB devices",
++                 subsys->u.usb.bus, subsys->u.usb.device);
++    }
++}
++
++static void
++qemuDomainRemoveHostDevice(struct qemud_driver *driver,
++                           virDomainObjPtr vm,
++                           virDomainHostdevDefPtr hostdev)
++{
++    virDomainNetDefPtr net = NULL;
++    size_t i;
++
++    VIR_DEBUG("Removing host device %s from domain %p %s",
++              hostdev->info->alias, vm, vm->def->name);
++
++    if (hostdev->parent.type == VIR_DOMAIN_DEVICE_NET) {
++        net = hostdev->parent.data.net;
++
++        for (i = 0; i < vm->def->nnets; i++) {
++            if (vm->def->nets[i] == net) {
++                virDomainNetRemove(vm->def, i);
++                break;
++            }
++        }
++    }
++
++    for (i = 0; i < vm->def->nhostdevs; i++) {
++        if (vm->def->hostdevs[i] == hostdev) {
++            virDomainHostdevRemove(vm->def, i);
++            break;
++        }
++    }
++
++    virDomainAuditHostdev(vm, hostdev, "detach", true);
++
++    switch ((enum virDomainHostdevSubsysType) hostdev->source.subsys.type) {
++    case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
++        qemuDomainRemovePCIHostDevice(driver, vm, hostdev);
++        break;
++    case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB:
++        qemuDomainRemoveUSBHostDevice(driver, vm, hostdev);
++        break;
++    case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_LAST:
++        break;
++    }
++
++    if (virSecurityManagerRestoreHostdevLabel(driver->securityManager,
++                                              vm->def, hostdev) < 0) {
++        VIR_WARN("Failed to restore host device labelling");
++    }
++
++    virDomainHostdevDefFree(hostdev);
++
++    if (net) {
++        networkReleaseActualDevice(vm->def, net);
++        virDomainNetDefFree(net);
++    }
++}
++
++
+ int qemuDomainDetachPciDiskDevice(struct qemud_driver *driver,
+                                   virDomainObjPtr vm,
+                                   virDomainDiskDefPtr detach)
+@@ -2273,8 +2381,6 @@ qemuDomainDetachHostPciDevice(struct qemud_driver *driver,
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     virDomainHostdevSubsysPtr subsys = &detach->source.subsys;
+     int ret;
+-    pciDevice *pci;
+-    pciDevice *activePci;
+ 
+     if (qemuIsMultiFunctionDevice(vm->def, detach->info)) {
+         virReportError(VIR_ERR_OPERATION_FAILED,
+@@ -2298,36 +2404,6 @@ qemuDomainDetachHostPciDevice(struct qemud_driver *driver,
+         ret = qemuMonitorRemovePCIDevice(priv->mon, &detach->info->addr.pci);
+     }
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+-    virDomainAuditHostdev(vm, detach, "detach", ret == 0);
+-    if (ret < 0)
+-        return -1;
+-
+-    /*
+-     * For SRIOV net host devices, unset mac and port profile before
+-     * reset and reattach device
+-     */
+-     if (detach->parent.data.net)
+-         qemuDomainHostdevNetConfigRestore(detach, driver->stateDir);
+-
+-    pci = pciGetDevice(subsys->u.pci.domain, subsys->u.pci.bus,
+-                       subsys->u.pci.slot,   subsys->u.pci.function);
+-    if (pci) {
+-        activePci = pciDeviceListSteal(driver->activePciHostdevs, pci);
+-        if (activePci &&
+-            pciResetDevice(activePci, driver->activePciHostdevs,
+-                           driver->inactivePciHostdevs) == 0) {
+-            qemuReattachPciDevice(activePci, driver);
+-        } else {
+-            /* reset of the device failed, treat it as if it was returned */
+-            pciFreeDevice(activePci);
+-            ret = -1;
+-        }
+-        pciFreeDevice(pci);
+-    } else {
+-        ret = -1;
+-    }
+-
+-    qemuDomainReleaseDeviceAddress(vm, detach->info, NULL);
+ 
+     return ret;
+ }
+@@ -2338,8 +2414,6 @@ qemuDomainDetachHostUsbDevice(struct qemud_driver *driver,
+                               virDomainHostdevDefPtr detach)
+ {
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+-    virDomainHostdevSubsysPtr subsys = &detach->source.subsys;
+-    usbDevice *usb;
+     int ret;
+ 
+     if (!detach->info->alias) {
+@@ -2357,45 +2431,18 @@ qemuDomainDetachHostUsbDevice(struct qemud_driver *driver,
+     qemuDomainObjEnterMonitorWithDriver(driver, vm);
+     ret = qemuMonitorDelDevice(priv->mon, detach->info->alias);
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+-    virDomainAuditHostdev(vm, detach, "detach", ret == 0);
+-    if (ret < 0)
+-        return -1;
+ 
+-    usb = usbGetDevice(subsys->u.usb.bus, subsys->u.usb.device);
+-    if (usb) {
+-        usbDeviceListDel(driver->activeUsbHostdevs, usb);
+-        usbFreeDevice(usb);
+-    } else {
+-        VIR_WARN("Unable to find device %03d.%03d in list of used USB devices",
+-                 subsys->u.usb.bus, subsys->u.usb.device);
+-    }
+     return ret;
+ }
+ 
++
+ static
+ int qemuDomainDetachThisHostDevice(struct qemud_driver *driver,
+                                    virDomainObjPtr vm,
+-                                   virDomainHostdevDefPtr detach,
+-                                   int idx)
++                                   virDomainHostdevDefPtr detach)
+ {
+     int ret = -1;
+ 
+-    if (idx < 0) {
+-        /* caller didn't know index of hostdev in hostdevs list, so we
+-         * need to find it.
+-         */
+-        for (idx = 0; idx < vm->def->nhostdevs; idx++) {
+-            if (vm->def->hostdevs[idx] == detach)
+-                break;
+-        }
+-        if (idx >= vm->def->nhostdevs) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("device not found in hostdevs list (%zu entries)"),
+-                           vm->def->nhostdevs);
+-            return ret;
+-        }
+-    }
+-
+     switch (detach->source.subsys.type) {
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
+         ret = qemuDomainDetachHostPciDevice(driver, vm, detach);
+@@ -2410,14 +2457,11 @@ int qemuDomainDetachThisHostDevice(struct qemud_driver *driver,
+         return -1;
+     }
+ 
+-    if (!ret) {
+-        if (virSecurityManagerRestoreHostdevLabel(driver->securityManager,
+-                                                  vm->def, detach) < 0) {
+-            VIR_WARN("Failed to restore host device labelling");
+-        }
+-        virDomainHostdevRemove(vm->def, idx);
+-        virDomainHostdevDefFree(detach);
+-    }
++    if (ret < 0)
++        virDomainAuditHostdev(vm, detach, "detach", false);
++    else
++        qemuDomainRemoveHostDevice(driver, vm, detach);
++
+     return ret;
+ }
+ 
+@@ -2473,7 +2517,7 @@ int qemuDomainDetachHostDevice(struct qemud_driver *driver,
+     if (detach->parent.type == VIR_DOMAIN_DEVICE_NET)
+         return qemuDomainDetachNetDevice(driver, vm, &detach->parent);
+     else
+-        return qemuDomainDetachThisHostDevice(driver, vm, detach, idx);
++        return qemuDomainDetachThisHostDevice(driver, vm, detach);
+ }
+ 
+ int
+@@ -2505,13 +2549,7 @@ qemuDomainDetachNetDevice(struct qemud_driver *driver,
+ 
+     if (virDomainNetGetActualType(detach) == VIR_DOMAIN_NET_TYPE_HOSTDEV) {
+         ret = qemuDomainDetachThisHostDevice(driver, vm,
+-                                             virDomainNetGetActualHostdev(detach),
+-                                             -1);
+-        if (!ret) {
+-            networkReleaseActualDevice(vm->def, detach);
+-            virDomainNetRemove(vm->def, detachidx);
+-            virDomainNetDefFree(detach);
+-        }
++                                             virDomainNetGetActualHostdev(detach));
+         goto cleanup;
+     }
+ 
+-- 
+2.0.0
+

@@ -1,0 +1,53 @@
+From b158069d52c4236a29a9273fda0296d5050fed84 Mon Sep 17 00:00:00 2001
+Message-Id: <b158069d52c4236a29a9273fda0296d5050fed84@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 10 Apr 2014 18:23:09 +0200
+Subject: [PATCH] qemu: Improve error when setting invalid count of vcpus via
+ agent
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1035109
+
+When attempting to enable more vCPUs in the guest than is currently
+enabled in the guest but less than the maximum count for the VM we
+currently reported an unhelpful message:
+
+ error: internal error: guest agent reports less cpu than requested
+
+This patch changes it to:
+
+ error: invalid argument: requested vcpu count is greater than the count
+ of enabled vcpus in the domain: 3 > 2
+
+(cherry picked from commit 34b8449027adc44bd38151f384f5a5cdd64d996f)
+
+Conflicts:
+	src/qemu/qemu_driver.c - agent entering function takes the driver in
+    rhel6
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 917325f..9451afd 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -4305,6 +4305,14 @@ qemuDomainSetVcpusFlags(virDomainPtr dom, unsigned int nvcpus,
+             goto endjob;
+         }
+ 
++        if (nvcpus > vm->def->vcpus) {
++            virReportError(VIR_ERR_INVALID_ARG,
++                           _("requested vcpu count is greater than the count "
++                             "of enabled vcpus in the domain: %d > %d"),
++                           nvcpus, vm->def->vcpus);
++            goto endjob;
++        }
++
+         qemuDomainObjEnterAgent(driver, vm);
+         ncpuinfo = qemuAgentGetVCPUs(priv->agent, &cpuinfo);
+         qemuDomainObjExitAgent(driver, vm);
+-- 
+1.9.2
+

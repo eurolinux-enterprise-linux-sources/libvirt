@@ -1,0 +1,132 @@
+From 065d4d331313d0bd1579359f7f4a558aaa89dc1b Mon Sep 17 00:00:00 2001
+Message-Id: <065d4d331313d0bd1579359f7f4a558aaa89dc1b@dist-git>
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Tue, 12 Dec 2017 16:23:42 +0100
+Subject: [PATCH] cpu: add CPU features and model for indirect branch
+ prediction protection
+
+CVE-2017-5715
+
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/cpu/cpu_map.xml
+            - Haswell-noTSX, Skylake-Client, Skylake-Server, and EPYC
+              models are missing in 6.9
+            - Broadwell-noTSX is missing too, but its IBRS variant was
+              added to match QEMU
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/cpu/cpu_map.xml | 54 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 54 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index de15b1f2fe..2f744b3c4e 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -188,6 +188,16 @@
+       <cpuid function='0x00000001' ecx='0x80000000'/>
+     </feature>
+ 
++    <feature name='spec-ctrl'>
++      <cpuid function='0x07' edx='0x04000000'/>
++    </feature>
++    <feature name='stibp'>
++      <cpuid function='0x07' edx='0x08000000'/>
++    </feature>
++    <feature name='arch-facilities'>
++      <cpuid function='0x07' edx='0x20000000'/>
++    </feature>
++
+     <!-- extended features, EDX -->
+     <feature name='syscall'> <!-- CPUID_EXT2_SYSCALL -->
+       <cpuid function='0x80000001' edx='0x00000800'/>
+@@ -332,6 +342,11 @@
+       <cpuid function='0x80000007' edx='0x00000100'/>
+     </feature>
+ 
++    <!-- More AMD-specific features -->
++    <feature name='ibpb'>
++      <cpuid function='0x80000008' ebx='0x00001000'/>
++    </feature>
++
+     <!-- models -->
+     <model name='486'>
+       <feature name='fpu'/>
+@@ -484,11 +499,19 @@
+       <feature name='sse4.2'/>
+       <feature name='popcnt'/>
+     </model>
++    <model name='Nehalem-IBRS'>
++      <model name='Nehalem'/>
++      <feature name='spec-ctrl'/>
++    </model>
+ 
+     <model name='Westmere'>
+       <model name='Nehalem'/>
+       <feature name='aes'/>
+     </model>
++    <model name='Westmere-IBRS'>
++      <model name='Westmere'/>
++      <feature name='spec-ctrl'/>
++    </model>
+ 
+     <model name='SandyBridge'>
+       <model name='Westmere'/>
+@@ -499,6 +522,10 @@
+       <feature name='avx'/>
+       <feature name='rdtscp'/>
+     </model>
++    <model name='SandyBridge-IBRS'>
++      <model name='SandyBridge'/>
++      <feature name='spec-ctrl'/>
++    </model>
+ 
+     <model name='Haswell'>
+       <model name='SandyBridge'/>
+@@ -515,6 +542,29 @@
+       <feature name='invpcid'/>
+       <feature name='rtm'/>
+     </model>
++    <model name='Haswell-IBRS'>
++      <model name='Haswell'/>
++      <feature name='spec-ctrl'/>
++    </model>
++
++    <model name='Broadwell-noTSX-IBRS'>
++      <model name='SandyBridge'/>
++      <feature name='fma'/>
++      <feature name='pcid'/>
++      <feature name='movbe'/>
++      <feature name='fsgsbase'/>
++      <feature name='bmi1'/>
++      <feature name='avx2'/>
++      <feature name='smep'/>
++      <feature name='bmi2'/>
++      <feature name='erms'/>
++      <feature name='invpcid'/>
++      <feature name='3dnowprefetch'/>
++      <feature name='rdseed'/>
++      <feature name='adx'/>
++      <feature name='smap'/>
++      <feature name='spec-ctrl'/>
++    </model>
+ 
+     <model name='Broadwell'>
+       <model name='Haswell'/>
+@@ -523,6 +573,10 @@
+       <feature name='adx'/>
+       <feature name='smap'/>
+     </model>
++    <model name='Broadwell-IBRS'>
++      <model name='Broadwell'/>
++      <feature name='spec-ctrl'/>
++    </model>
+ 
+     <!-- AMD CPUs -->
+     <model name='athlon'>
+-- 
+2.15.1
+

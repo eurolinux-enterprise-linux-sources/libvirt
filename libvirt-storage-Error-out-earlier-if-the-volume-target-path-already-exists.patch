@@ -1,0 +1,41 @@
+From 178e5235bc1a353f8bab4985dda778898083c71f Mon Sep 17 00:00:00 2001
+Message-Id: <178e5235bc1a353f8bab4985dda778898083c71f.1355319681.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Thu, 6 Dec 2012 01:22:40 +0800
+Subject: [PATCH] storage: Error out earlier if the volume target path already
+ exists
+
+https://bugzilla.redhat.com/show_bug.cgi?id=832302
+
+It's odd to fall through to buildVol, and the existed file is
+removed when buildVol fails. This checks if the volume target
+path already exists in createVol. The reason for not using
+error like "Volume already exists" is that there isn't volume
+maintained by libvirt for the path until a operation like
+pool-refresh, using error like that will just cause confusion.
+(cherry picked from commit d1f3d14974b4213193130d4b01d4449ad1533cbb)
+---
+ src/storage/storage_backend_fs.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index f08fd74..862e4c6 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -1001,6 +1001,13 @@ virStorageBackendFileSystemVolCreate(virConnectPtr conn ATTRIBUTE_UNUSED,
+         return -1;
+     }
+ 
++    if (virFileExists(vol->target.path)) {
++        virReportError(VIR_ERR_OPERATION_INVALID,
++                       _("volume target path '%s' already exists"),
++                       vol->target.path);
++        return -1;
++    }
++
+     VIR_FREE(vol->key);
+     vol->key = strdup(vol->target.path);
+     if (vol->key == NULL) {
+-- 
+1.8.0
+

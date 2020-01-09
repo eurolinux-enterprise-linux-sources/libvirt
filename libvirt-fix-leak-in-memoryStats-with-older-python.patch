@@ -1,0 +1,119 @@
+From b665d99e391ef03287cded9480f3ee1abb0236ad Mon Sep 17 00:00:00 2001
+Message-Id: <b665d99e391ef03287cded9480f3ee1abb0236ad@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Mon, 2 Jun 2014 06:03:19 +0200
+Subject: [PATCH] fix leak in memoryStats with older python
+
+libvirt_virDomainMemoryStats() function creates a dictionary without
+any checks whether the additions were successful, whether the python
+objects were created and, most importantly, without decrementing the
+reference count on the objects added to the dictionary.  This is
+somehow not an issue with current upstream versions, however with
+python 2.6 this exposes a leak in our bindings.  The following patch
+works on both old and new CPython versions and is already used in
+other parts of the code, so it's also most straightforward.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1099860
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit 28386e476e5a7a6c030ccdd610b9145d6040acde)
+
+Conflicts:
+	python/libvirt-override.c -- a933b7f5
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ python/libvirt-override.c | 68 ++++++++++++++++++++++++++++++-----------------
+ 1 file changed, 44 insertions(+), 24 deletions(-)
+
+diff --git a/python/libvirt-override.c b/python/libvirt-override.c
+index 2492775..4d22844 100644
+--- a/python/libvirt-override.c
++++ b/python/libvirt-override.c
+@@ -518,6 +518,7 @@ libvirt_virDomainMemoryStats(PyObject *self ATTRIBUTE_UNUSED, PyObject *args) {
+     unsigned int nr_stats, i;
+     virDomainMemoryStatStruct stats[VIR_DOMAIN_MEMORY_STAT_NR];
+     PyObject *info;
++    PyObject *key = NULL, *val = NULL;
+ 
+     if (!PyArg_ParseTuple(args, (char *)"O:virDomainMemoryStats", &pyobj_domain))
+         return NULL;
+@@ -533,31 +534,50 @@ libvirt_virDomainMemoryStats(PyObject *self ATTRIBUTE_UNUSED, PyObject *args) {
+         return VIR_PY_NONE;
+ 
+     for (i = 0; i < nr_stats; i++) {
+-        if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_SWAP_IN)
+-            PyDict_SetItem(info, libvirt_constcharPtrWrap("swap_in"),
+-                           PyLong_FromUnsignedLongLong(stats[i].val));
+-        else if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_SWAP_OUT)
+-            PyDict_SetItem(info, libvirt_constcharPtrWrap("swap_out"),
+-                           PyLong_FromUnsignedLongLong(stats[i].val));
+-        else if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_MAJOR_FAULT)
+-            PyDict_SetItem(info, libvirt_constcharPtrWrap("major_fault"),
+-                           PyLong_FromUnsignedLongLong(stats[i].val));
+-        else if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_MINOR_FAULT)
+-            PyDict_SetItem(info, libvirt_constcharPtrWrap("minor_fault"),
+-                           PyLong_FromUnsignedLongLong(stats[i].val));
+-        else if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_UNUSED)
+-            PyDict_SetItem(info, libvirt_constcharPtrWrap("unused"),
+-                           PyLong_FromUnsignedLongLong(stats[i].val));
+-        else if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_AVAILABLE)
+-            PyDict_SetItem(info, libvirt_constcharPtrWrap("available"),
+-                           PyLong_FromUnsignedLongLong(stats[i].val));
+-        else if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_ACTUAL_BALLOON)
+-            PyDict_SetItem(info, libvirt_constcharPtrWrap("actual"),
+-                           PyLong_FromUnsignedLongLong(stats[i].val));
+-        else if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_RSS)
+-            PyDict_SetItem(info, libvirt_constcharPtrWrap("rss"),
+-                           PyLong_FromUnsignedLongLong(stats[i].val));
++        switch (stats[i].tag) {
++        case VIR_DOMAIN_MEMORY_STAT_SWAP_IN:
++            key = libvirt_constcharPtrWrap("swap_in");
++            break;
++        case VIR_DOMAIN_MEMORY_STAT_SWAP_OUT:
++            key = libvirt_constcharPtrWrap("swap_out");
++            break;
++        case VIR_DOMAIN_MEMORY_STAT_MAJOR_FAULT:
++            key = libvirt_constcharPtrWrap("major_fault");
++            break;
++        case VIR_DOMAIN_MEMORY_STAT_MINOR_FAULT:
++            key = libvirt_constcharPtrWrap("minor_fault");
++            break;
++        case VIR_DOMAIN_MEMORY_STAT_UNUSED:
++            key = libvirt_constcharPtrWrap("unused");
++            break;
++        case VIR_DOMAIN_MEMORY_STAT_AVAILABLE:
++            key = libvirt_constcharPtrWrap("available");
++            break;
++        case VIR_DOMAIN_MEMORY_STAT_ACTUAL_BALLOON:
++            key = libvirt_constcharPtrWrap("actual");
++            break;
++        case VIR_DOMAIN_MEMORY_STAT_RSS:
++            key = libvirt_constcharPtrWrap("rss");
++            break;
++        default:
++            continue;
++        }
++        val = PyLong_FromUnsignedLongLong(stats[i].val);
++
++        if (!key || !val || PyDict_SetItem(info, key, val) < 0) {
++            Py_DECREF(info);
++            info = NULL;
++            goto cleanup;
++        }
++        Py_DECREF(key);
++        Py_DECREF(val);
++        key = NULL;
++        val = NULL;
+     }
++
++ cleanup:
++    Py_XDECREF(key);
++    Py_XDECREF(val);
+     return info;
+ }
+ 
+-- 
+2.0.0
+

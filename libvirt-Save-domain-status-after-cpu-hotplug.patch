@@ -1,0 +1,41 @@
+From 4eb01e63a4ce506519d6730f18d2d845009a1bde Mon Sep 17 00:00:00 2001
+Message-Id: <4eb01e63a4ce506519d6730f18d2d845009a1bde@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 23 Apr 2014 14:38:52 +0200
+Subject: [PATCH] Save domain status after cpu hotplug
+
+The live change of vcpus was not reflected in the domain status
+xml and it got lost during libvirtd restart.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1088703
+(cherry picked from commit b396e602c97ab69c86dfd84d2f9e48b4c04a48a4)
+
+Use driver->caps and driver->stateDir instead of driver->xmlopt
+and cfg->stateDir as these commits are missing:
+020a030 Stop accessing driver->caps directly in QEMU driver
+27cf98e virCaps: conf: start splitting out irrelevat data
+e84b193 maint: Rename xmlconf to xmlopt and virDomainXMLConfig to
+virDomainXMLOption
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 0b78de0..3bb4038 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -4337,6 +4337,9 @@ qemuDomainSetVcpusFlags(virDomainPtr dom, unsigned int nvcpus,
+         if (flags & VIR_DOMAIN_AFFECT_LIVE) {
+             if (qemudDomainHotplugVcpus(driver, vm, nvcpus) < 0)
+                 goto endjob;
++
++            if (virDomainSaveStatus(driver->caps, driver->stateDir, vm) < 0)
++                goto endjob;
+         }
+ 
+         if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+-- 
+1.9.2
+

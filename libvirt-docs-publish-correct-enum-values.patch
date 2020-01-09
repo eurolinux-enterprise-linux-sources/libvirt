@@ -1,0 +1,64 @@
+From 2c59ed2c10fe318f2b2ccaf919a62388724cb027 Mon Sep 17 00:00:00 2001
+Message-Id: <2c59ed2c10fe318f2b2ccaf919a62388724cb027@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Thu, 26 Jun 2014 21:17:21 -0600
+Subject: [PATCH] docs: publish correct enum values
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1113316
+
+We publish libvirt-api.xml for others to use, and in fact, the
+libvirt-python bindings use it to generate python constants that
+correspond to our enum values.  However, we had an off-by-one bug
+that any enum that relied on C's rules for implicit initialization
+of the first enum member to 0 got listed in the xml as having a
+value of 1 (and all later members of the enum were equally
+botched).
+
+The fix is simple - since we add one to the previous value when
+encountering an enum without an initializer, the previous value
+must start at -1 so that the first enum member is assigned 0.
+
+The python generator code has had the off-by-one ever since DV
+first wrote it years ago, but most of our public enums were immune
+because they had an explicit = 0 initializer.  The only affected
+enums are:
+- virDomainEventGraphicsAddressType (such as
+VIR_DOMAIN_EVENT_GRAPHICS_ADDRESS_IPV4), since commit 987e31e
+(libvirt v0.8.0)
+- virDomainCoreDumpFormat (such as VIR_DOMAIN_CORE_DUMP_FORMAT_RAW),
+since commit 9fbaff0 (libvirt v1.2.3)
+- virIPAddrType (such as VIR_IP_ADDR_TYPE_IPV4), since commit
+03e0e79 (not yet released)
+
+Thanks to Nehal J Wani for reporting the problem on IRC, and
+for helping me zero in on the culprit function.
+
+* docs/apibuild.py (CParser.parseEnumBlock): Fix implicit enum
+values.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 9b291bbe20c36c0820c6e7cd2bf6229bf41807e8)
+
+Conflicts:
+	docs/apibuild.py - context with 2a40951
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/apibuild.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/apibuild.py b/docs/apibuild.py
+index f6671ed..02a5a04 100755
+--- a/docs/apibuild.py
++++ b/docs/apibuild.py
+@@ -1310,7 +1310,7 @@ class CParser:
+         name = None
+         self.comment = None
+         comment = ""
+-        value = "0"
++        value = "-1"
+         while token != None:
+             if token[0] == "sep" and token[1] == "{":
+                 token = self.token()
+-- 
+2.0.0
+

@@ -1,0 +1,152 @@
+From 7fcb37af790962a2e92031773f5d3a643c28eab2 Mon Sep 17 00:00:00 2001
+Message-Id: <7fcb37af790962a2e92031773f5d3a643c28eab2.1350297258.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 2 Oct 2012 15:14:02 +0200
+Subject: [PATCH] conf: Add support for startupPolicy for USB devices
+
+https://bugzilla.redhat.com/show_bug.cgi?id=843560
+
+USB devices can disappear without OS being mad about it, which makes
+them ideal for startupPolicy. With this attribute, USB devices can be
+configured to be mandatory (the default), requisite (will disappear
+during migration if they cannot be found), or completely optional.
+(cherry picked from commit e658daeb58ec88deec5dd60fd3279f4feb4eac5b)
+---
+ docs/formatdomain.html.in     | 28 ++++++++++++++++++++++++----
+ docs/schemas/domaincommon.rng |  3 +++
+ src/conf/domain_conf.c        | 32 +++++++++++++++++++++++++++++++-
+ src/conf/domain_conf.h        |  1 +
+ 4 files changed, 59 insertions(+), 5 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index b8e6308..52da0fe 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -2090,7 +2090,7 @@
+   ...
+   &lt;devices&gt;
+     &lt;hostdev mode='subsystem' type='usb'&gt;
+-      &lt;source&gt;
++      &lt;source startupPolicy='optional'&gt;
+         &lt;vendor id='0x1234'/&gt;
+         &lt;product id='0xbeef'/&gt;
+       &lt;/source&gt;
+@@ -2134,9 +2134,29 @@
+       <dd>The source element describes the device as seen from the host.
+       The USB device can either be addressed by vendor / product id using the
+       <code>vendor</code> and <code>product</code> elements or by the device's
+-      address on the hosts using the <code>address</code> element.
+-      PCI devices on the other hand can only be described by their
+-      <code>address</code></dd>
++      address on the hosts using the <code>address</code> element. PCI devices
++      on the other hand can only be described by their <code>address</code>.
++
++      <span class="since">Since 0.10.3</span>, the <code>source</code> element
++      of USB devices may contain <code>startupPolicy</code> attribute which can
++      be used to define policy what to do if the specified host USB device is
++      not found. The attribute accepts the following values:
++        <table class="top_table">
++          <tr>
++            <td> mandatory </td>
++            <td> fail if missing for any reason (the default) </td>
++          </tr>
++          <tr>
++            <td> requisite </td>
++            <td> fail if missing on boot up,
++                 drop if missing on migrate/restore/revert </td>
++          </tr>
++          <tr>
++            <td> optional </td>
++            <td> drop if missing at any start attempt </td>
++          </tr>
++        </table>
++      </dd>
+       <dt><code>vendor</code>, <code>product</code></dt>
+       <dd>The <code>vendor</code> and <code>product</code> elements each have an
+       <code>id</code> attribute that specifies the USB vendor and product id.
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index b0d8059..2753f59 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -2790,6 +2790,9 @@
+       </optional>
+       <group>
+         <element name="source">
++          <optional>
++            <ref name="startupPolicy"/>
++          </optional>
+           <choice>
+             <group>
+               <ref name="usbproduct"/>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 1cae951..3b61627 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -2703,6 +2703,20 @@ virDomainHostdevSubsysUsbDefParseXML(const xmlNodePtr node,
+     int ret = -1;
+     int got_product, got_vendor;
+     xmlNodePtr cur;
++    char *startupPolicy = NULL;
++
++    if ((startupPolicy = virXMLPropString(node, "startupPolicy"))) {
++        def->startupPolicy =
++            virDomainStartupPolicyTypeFromString(startupPolicy);
++        if (def->startupPolicy <= 0) {
++            virReportError(VIR_ERR_XML_ERROR,
++                           _("Unknown startup policy '%s'"),
++                           startupPolicy);
++            VIR_FREE(startupPolicy);
++            goto out;
++        }
++        VIR_FREE(startupPolicy);
++    }
+ 
+     /* Product can validly be 0, so we need some extra help to determine
+      * if it is uninitialized*/
+@@ -2966,6 +2980,15 @@ virDomainHostdevPartsParse(xmlNodePtr node,
+                        _("Missing <source> element in hostdev device"));
+         goto error;
+     }
++
++    if (def->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB &&
++        virXPathBoolean("boolean(./source/@startupPolicy)", ctxt)) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("Setting startupPolicy is only allowed for USB"
++                         " devices"));
++        goto error;
++    }
++
+     switch (def->source.subsys.type) {
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
+         if (virDomainHostdevSubsysPciDefParseXML(sourcenode, def, flags) < 0)
+@@ -12069,7 +12092,14 @@ virDomainHostdevSourceFormat(virBufferPtr buf,
+                              unsigned int flags,
+                              bool includeTypeInAddr)
+ {
+-    virBufferAddLit(buf, "<source>\n");
++    virBufferAddLit(buf, "<source");
++    if (def->startupPolicy) {
++        const char *policy;
++        policy = virDomainStartupPolicyTypeToString(def->startupPolicy);
++        virBufferAsprintf(buf, " startupPolicy='%s'", policy);
++    }
++    virBufferAddLit(buf, ">\n");
++
+     virBufferAdjustIndent(buf, 2);
+     switch (def->source.subsys.type)
+     {
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 4533c06..1751642 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -384,6 +384,7 @@ struct _virDomainHostdevSubsys {
+ struct _virDomainHostdevDef {
+     virDomainDeviceDef parent; /* higher level Def containing this */
+     int mode; /* enum virDomainHostdevMode */
++    int startupPolicy; /* enum virDomainStartupPolicy */
+     unsigned int managed : 1;
+     union {
+         virDomainHostdevSubsys subsys;
+-- 
+1.7.12.3
+

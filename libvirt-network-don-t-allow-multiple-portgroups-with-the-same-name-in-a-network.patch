@@ -1,0 +1,79 @@
+From c45e4eb6cde3d6006c95cbef62ee54d35e677621 Mon Sep 17 00:00:00 2001
+Message-Id: <c45e4eb6cde3d6006c95cbef62ee54d35e677621@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Fri, 6 Feb 2015 13:41:55 -0500
+Subject: [PATCH] network: don't allow multiple portgroups with the same name
+ in a network
+
+This resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1115858
+
+When defining and creating networks, we have been checking to make
+sure there is only a single "default" portgroup, but haven't verified
+that no two portgroups have the same name. We *do* check for multiple
+definitions when updating the portgroups in an existing network
+though.
+
+This patch adds a check to networkValidate(), which is called when a
+network is defined or created, to disallow duplicate names. It would
+actually make sense to do this in the network XML parser (since it's
+not really "something that might make sense but isn't supported by
+this driver", but is instead "something that should never be
+allowed"), but doing that carries the danger of causing errors when
+rereading the config of existing networks when libvirtd is restarted
+after an upgrade, and that would result in networks disappearing from
+libvirt's list.
+
+(cherry picked from upstream commit 2aa7ce6334ff192eb092932aee76d933f45cc39b)
+
+conflicts:
+
+  src/network/bridge_driver.c - copyright date different, loop
+    variable name changed from ii to i upstream.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index fe371ca..7da1ca9 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -1,7 +1,7 @@
+ /*
+  * bridge_driver.c: core driver methods for managing network
+  *
+- * Copyright (C) 2006-2012 Red Hat, Inc.
++ * Copyright (C) 2006-2015 Red Hat, Inc.
+  * Copyright (C) 2006 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -2767,7 +2767,7 @@ networkValidate(struct network_driver *driver,
+                 virNetworkDefPtr def,
+                 bool check_active)
+ {
+-    int ii;
++    int ii, j;
+     bool vlanUsed, vlanAllowed, badVlanUse = false;
+     virPortGroupDefPtr defaultPortGroup = NULL;
+     virNetworkIpDefPtr ipdef;
+@@ -2896,7 +2896,15 @@ networkValidate(struct network_driver *driver,
+             }
+             defaultPortGroup = &def->portGroups[ii];
+         }
+-
++        for (j = ii + 1; j < def->nPortGroups; j++) {
++            if (STREQ(def->portGroups[ii].name, def->portGroups[j].name)) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                               _("multiple <portgroup> elements with the "
++                                 "same name (%s) in network '%s'"),
++                               def->portGroups[ii].name, def->name);
++                return -1;
++            }
++        }
+         if (def->portGroups[i].bandwidth && !bandwidthAllowed) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                            _("Unsupported <bandwidth> element in network '%s' "
+-- 
+2.3.1
+

@@ -1,0 +1,204 @@
+From 42a9fa7284ff084cd6bb748f770f7eb700403c40 Mon Sep 17 00:00:00 2001
+Message-Id: <42a9fa7284ff084cd6bb748f770f7eb700403c40@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Tue, 28 Jan 2014 19:29:18 -0500
+Subject: [PATCH] Block info query: Add check for transient domain
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1040507
+
+Currently the qemuDomainGetBlockInfo will return allocation == physical
+for most backing stores. For a qcow2 block backed device it's possible
+to return the highest lv extent allocated from qemu for an active guest.
+That is a value where allocation != physical and one would hope be less.
+However, if the guest is not running, then the code falls back to returning
+allocation == physical. This turns out to be problematic for rhev which
+monitors the size of the backing store. During a migration, before the
+VM has been started on the target and while it is deemed inactive on the
+source, there's a small window of time where the allocation is returned
+as physical triggering the code to extend the file unnecessarily.
+
+Since rhev uses transient domains and this is edge condition for a transient
+domain, rather than returning good status and allocation == physical when
+this "window of opportunity" exists, this patch will check for a transient
+(or non persistent) domain and return a failure to the caller rather than
+returning the defaults. For a persistent domain, the defaults will be
+returned. The description for the virDomainGetBlockInfo has been updated
+to describe the phenomena.
+
+(cherry picked from commit 46a0737e13cec06a6b7cb0afdcdd200c2bec317f)
+
+Conflicts:
+	src/qemu/qemu_driver.c
+
+Resolved single conflict:
+- Remove virQEMUDriverConfigPtr cfg = NULL; reference
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ include/libvirt/libvirt.h.in |  8 ++++---
+ src/libvirt.c                | 53 ++++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_driver.c       | 29 +++++++++++++++++++-----
+ 3 files changed, 82 insertions(+), 8 deletions(-)
+
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index 1b7f5a8..f0c63e2 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -1774,7 +1774,8 @@ int                     virDomainBlockResize (virDomainPtr dom,
+ 
+ /** virDomainBlockInfo:
+  *
+- * This struct provides information about the size of a block device backing store
++ * This struct provides information about the size of a block device
++ * backing store
+  *
+  * Examples:
+  *
+@@ -1787,11 +1788,12 @@ int                     virDomainBlockResize (virDomainPtr dom,
+  *
+  *  - qcow2 file in filesystem
+  *       * capacity: logical size from qcow2 header
+- *       * allocation, physical: logical size of the file / highest qcow extent (identical)
++ *       * allocation, physical: logical size of the file /
++ *                               highest qcow extent (identical)
+  *
+  *  - qcow2 file in a block device
+  *       * capacity: logical size from qcow2 header
+- *       * allocation: highest qcow extent written
++ *       * allocation: highest qcow extent written for an active domain
+  *       * physical: size of the block device container
+  */
+ typedef struct _virDomainBlockInfo virDomainBlockInfo;
+diff --git a/src/libvirt.c b/src/libvirt.c
+index ec155c6..e8ccdf8 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -7888,6 +7888,59 @@ error:
+  * can be found by calling virDomainGetXMLDesc() and inspecting
+  * elements within //domain/devices/disk.
+  *
++ * For QEMU domains, the allocation and physical virDomainBlockInfo
++ * values returned will generally be the same, except when using a
++ * non raw, block backing device, such as qcow2 for an active domain.
++ * When the persistent domain is not active, QEMU will return the
++ * default which is the same value for allocation and physical.
++ *
++ * Active QEMU domains can return an allocation value which is more
++ * representative of the currently used blocks by the device compared
++ * to the physical size of the device. Applications can use/monitor
++ * the allocation value with the understanding that if the domain
++ * becomes inactive during an attempt to get the value, the default
++ * values will be returned. Thus, the application should check
++ * after the call for the domain being inactive if the values are
++ * the same. Optionally, the application could be watching for a
++ * shutdown event and then ignore any values received afterwards.
++ * This can be an issue when a domain is being migrated and the
++ * exact timing of the domain being made inactive and check of
++ * the allocation value results the default being returned. For
++ * a transient domain in the similar situation, this call will return
++ * -1 and an error message indicating the "domain is not running".
++ *
++ * The following is some pseudo code illustrating the call sequence:
++ *
++ *   ...
++ *   virDomainPtr dom;
++ *   virDomainBlockInfo info;
++ *   char *device;
++ *   ...
++ *   // Either get a list of all domains or a specific domain
++ *   // via a virDomainLookupBy*() call.
++ *   //
++ *   // It's also required to fill in the device pointer, but that's
++ *   // specific to the implementation. For the purposes of this example
++ *   // a qcow2 backed device name string would need to be provided.
++ *   ...
++ *   // If the following call is made on a persistent domain with a
++ *   // qcow2 block backed block device, then it's possible the returned
++ *   // allocation equals the physical value. In that case, the domain
++ *   // that may have been active prior to calling has become inactive,
++ *   // such as is the case during a domain migration. Thus once we
++ *   // get data returned, check for active domain when the values are
++ *   // the same.
++ *   if (virDomainGetBlockInfo(dom, device, &info, 0) < 0)
++ *       goto failure;
++ *   if (info.allocation == info.physical) {
++ *       // If the domain is no longer active,
++ *       // then the defaults are being returned.
++ *       if (!virDomainIsActive())
++ *               goto ignore_return;
++ *   }
++ *   // Do something with the allocation and physical values
++ *   ...
++ *
+  * Returns 0 in case of success and -1 in case of failure.
+  */
+ int
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index c7f6cf6..363c9bf 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -9839,6 +9839,7 @@ static int qemuDomainGetBlockInfo(virDomainPtr dom,
+     struct stat sb;
+     int i;
+     int format;
++    int activeFail = false;
+     char *alias = NULL;
+ 
+     virCheckFlags(0, -1);
+@@ -9942,15 +9943,23 @@ static int qemuDomainGetBlockInfo(virDomainPtr dom,
+     /* Set default value .. */
+     info->allocation = info->physical;
+ 
+-    /* ..but if guest is running & not using raw
+-       disk format and on a block device, then query
+-       highest allocated extent from QEMU */
++    /* ..but if guest is not using raw disk format and on a block device,
++     * then query highest allocated extent from QEMU
++     */
+     if (disk->type == VIR_DOMAIN_DISK_TYPE_BLOCK &&
+         format != VIR_STORAGE_FILE_RAW &&
+-        S_ISBLK(sb.st_mode) &&
+-        virDomainObjIsActive(vm)) {
++        S_ISBLK(sb.st_mode)) {
+         qemuDomainObjPrivatePtr priv = vm->privateData;
+ 
++        /* If the guest is not running, then success/failure return
++         * depends on whether domain is persistent
++         */
++        if (!virDomainObjIsActive(vm)) {
++            activeFail = true;
++            ret = 0;
++            goto cleanup;
++        }
++
+         if (!(alias = strdup(disk->info.alias))) {
+             virReportOOMError();
+             goto cleanup;
+@@ -9966,6 +9975,7 @@ static int qemuDomainGetBlockInfo(virDomainPtr dom,
+                                             &info->allocation);
+             qemuDomainObjExitMonitor(driver, vm);
+         } else {
++            activeFail = true;
+             ret = 0;
+         }
+ 
+@@ -9979,6 +9989,15 @@ cleanup:
+     VIR_FREE(alias);
+     virStorageFileFreeMetadata(meta);
+     VIR_FORCE_CLOSE(fd);
++
++    /* If we failed to get data from a domain because it's inactive and
++     * it's not a persistent domain, then force failure.
++     */
++    if (activeFail && vm && !vm->persistent) {
++        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
++                       _("domain is not running"));
++        ret = -1;
++    }
+     if (vm)
+         virDomainObjUnlock(vm);
+     return ret;
+-- 
+1.9.1
+

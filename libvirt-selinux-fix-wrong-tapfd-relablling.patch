@@ -1,0 +1,48 @@
+From 4e5cf0056176fa2e072b28dc5c7b0f90a20397bf Mon Sep 17 00:00:00 2001
+Message-Id: <4e5cf0056176fa2e072b28dc5c7b0f90a20397bf.1350990680.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Mon, 22 Oct 2012 19:51:21 +0800
+Subject: [PATCH] selinux: fix wrong tapfd relablling
+
+BZ: https://bugzilla.redhat.com/show_bug.cgi?id=851981
+(cherry picked from commit 89b63f0ad448a0442f4afc5489748e2cc829e527)
+
+It should relabel tapfd of virtual network of type VIR_DOMAIN_NET_TYPE_DIRECT
+rather than VIR_DOMAIN_NET_TYPE_NETWORK and VIR_DOMAIN_NET_TYPE_BRIDGE
+(commit ae368ebfcc4923d0b32e83d4ca96a6f599625785 introduced this bug)
+
+Caution: The context of the two hunks is identical other than indentation.
+Please be extremely cautious of where the patch gets applied.
+---
+ src/qemu/qemu_command.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index ac6dcf4..0e19760 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -5452,10 +5452,6 @@ qemuBuildCommandLine(virConnectPtr conn,
+                     if (tapfd < 0)
+                         goto error;
+ 
+-                if (virSecurityManagerSetTapFDLabel(driver->securityManager,
+-                                                    def, tapfd) < 0)
+-                    goto error;
+-
+                     last_good_net = i;
+                     virCommandTransferFD(cmd, tapfd);
+ 
+@@ -5469,6 +5465,10 @@ qemuBuildCommandLine(virConnectPtr conn,
+                 if (tapfd < 0)
+                     goto error;
+ 
++                if (virSecurityManagerSetTapFDLabel(driver->securityManager,
++                                                    def, tapfd) < 0)
++                    goto error;
++
+                 last_good_net = i;
+                 virCommandTransferFD(cmd, tapfd);
+ 
+-- 
+1.7.12.4
+

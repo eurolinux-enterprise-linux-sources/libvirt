@@ -1,0 +1,35 @@
+From a9d36114d091f423e047836d6841a51f63dedc73 Mon Sep 17 00:00:00 2001
+Message-Id: <a9d36114d091f423e047836d6841a51f63dedc73.1350297259.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:27 -0600
+Subject: [PATCH] Fix handling of itanium arch name in QEMU driver
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+For historical compat we use 'itanium' as the arch name, so
+if the QEMU binary suffix is 'ia64' we need to translate it
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 3887afbb6bdfe190324ecf8bd520589b6112f051)
+---
+ src/qemu/qemu_capabilities.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index ea572da..bb42869 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1956,6 +1956,10 @@ qemuCapsPtr qemuCapsNewForBinary(const char *binary)
+     tmp = strstr(binary, QEMU_SYSTEM_PREFIX);
+     if (tmp) {
+         tmp += strlen(QEMU_SYSTEM_PREFIX);
++
++        /* For historical compat we use 'itanium' as arch name */
++        if (STREQ(tmp, "ia64"))
++            tmp = "itanium";
+     } else {
+         uname_normalize(&ut);
+         tmp = ut.machine;
+-- 
+1.7.12.3
+

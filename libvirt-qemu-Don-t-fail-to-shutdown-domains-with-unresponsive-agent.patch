@@ -1,0 +1,90 @@
+From 97c117d57ea57749402415656a9676e35af56d2d Mon Sep 17 00:00:00 2001
+Message-Id: <97c117d57ea57749402415656a9676e35af56d2d.1373271642.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 14 Jun 2013 10:25:59 +0200
+Subject: [PATCH] qemu: Don't fail to shutdown domains with unresponsive agent
+
+https://bugzilla.redhat.com/show_bug.cgi?id=889635
+
+Currently, qemuDomainShutdownFlags() chooses the agent method of
+shutdown whenever the agent is configured. However, this
+assumption is not enough as the guest agent may be unresponsive
+at the moment. So unless guest agent method has been explicitly
+requested, we should fall back to the ACPI method.
+(cherry picked from commit b8e25c35d7f80a2fadc0e51e95318e39db3d1687)
+
+Conflicts:
+	src/qemu/qemu_driver.c: Because a14768c9 is not backported yet
+---
+ src/qemu/qemu_driver.c | 30 ++++++++++++++++++++++--------
+ 1 file changed, 22 insertions(+), 8 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 4803d19..9a9fb65 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -1789,7 +1789,7 @@ static int qemuDomainShutdownFlags(virDomainPtr dom, unsigned int flags) {
+     virDomainObjPtr vm;
+     int ret = -1;
+     qemuDomainObjPrivatePtr priv;
+-    bool useAgent = false;
++    bool useAgent = false, agentRequested, acpiRequested;
+ 
+     virCheckFlags(VIR_DOMAIN_SHUTDOWN_ACPI_POWER_BTN |
+                   VIR_DOMAIN_SHUTDOWN_GUEST_AGENT, -1);
+@@ -1807,23 +1807,31 @@ static int qemuDomainShutdownFlags(virDomainPtr dom, unsigned int flags) {
+     }
+ 
+     priv = vm->privateData;
++    agentRequested = flags & VIR_DOMAIN_SHUTDOWN_GUEST_AGENT;
++    acpiRequested  = flags & VIR_DOMAIN_SHUTDOWN_ACPI_POWER_BTN;
+ 
+-    if ((flags & VIR_DOMAIN_SHUTDOWN_GUEST_AGENT) ||
+-        (!(flags & VIR_DOMAIN_SHUTDOWN_ACPI_POWER_BTN) &&
+-         priv->agent))
++    /* Prefer agent unless we were requested to not to. */
++    if (agentRequested || (!flags && priv->agent))
+         useAgent = true;
+ 
+-    if (useAgent) {
+-        if (priv->agentError) {
++    if (priv->agentError) {
++        if (agentRequested && !acpiRequested) {
+             virReportError(VIR_ERR_AGENT_UNRESPONSIVE, "%s",
+                            _("QEMU guest agent is not "
+                              "available due to an error"));
+             goto cleanup;
++        } else {
++            useAgent = false;
+         }
+-        if (!priv->agent) {
++    }
++
++    if (!priv->agent) {
++        if (agentRequested && !acpiRequested) {
+             virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
+                            _("QEMU guest agent is not configured"));
+             goto cleanup;
++        } else {
++            useAgent = false;
+         }
+     }
+ 
+@@ -1840,7 +1848,13 @@ static int qemuDomainShutdownFlags(virDomainPtr dom, unsigned int flags) {
+         qemuDomainObjEnterAgent(driver, vm);
+         ret = qemuAgentShutdown(priv->agent, QEMU_AGENT_SHUTDOWN_POWERDOWN);
+         qemuDomainObjExitAgent(driver, vm);
+-    } else {
++    }
++
++    /* If we are not enforced to use just an agent, try ACPI
++     * shutdown as well in case agent did not succeed.
++     */
++    if (!useAgent ||
++        (ret < 0 && (acpiRequested || !flags))) {
+         qemuDomainSetFakeReboot(driver, vm, false);
+ 
+         qemuDomainObjEnterMonitor(driver, vm);
+-- 
+1.8.2.1
+

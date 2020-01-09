@@ -1,0 +1,209 @@
+From bdb88a960c44e1551a2874bb32812971abac4a69 Mon Sep 17 00:00:00 2001
+Message-Id: <bdb88a960c44e1551a2874bb32812971abac4a69@dist-git>
+From: Francesco Romani <fromani@redhat.com>
+Date: Mon, 28 Apr 2014 15:02:55 +0200
+Subject: [PATCH] qemu: extract guest capabilities initialization
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1081032
+
+This patch decouples the binary and the capabilities detection
+from the guest initialization.
+
+The purpose is to make testing easier.
+
+(cherry picked from commit f35e89ffc16a2ce331e28724e7653854aaf62c54)
+
+Conflicts:
+	src/qemu/qemu_capabilities.c: Context, plenty of patches are not
+    backported yet, i.e. 50760e2a
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 69 +++++++++++++++++++++++++++-----------------
+ src/qemu/qemu_capabilities.h |  7 +++++
+ 2 files changed, 49 insertions(+), 27 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index c29c621..6f21a8c 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -613,18 +613,12 @@ qemuCapsInitGuest(virCapsPtr caps,
+                   const char *hostarch,
+                   const char *guestarch)
+ {
+-    virCapsGuestPtr guest;
+     int i;
+-    int haskvm = 0;
+-    int haskqemu = 0;
+     char *kvmbin = NULL;
+     char *binary = NULL;
+-    virCapsGuestMachinePtr *machines = NULL;
+-    size_t nmachines = 0;
+     qemuCapsPtr qemubinCaps = NULL;
+     qemuCapsPtr kvmbinCaps = NULL;
+     int ret = -1;
+-    bool hasdisksnapshot = false;
+ 
+     /* Check for existance of base emulator, or alternate base
+      * which can be used with magic cpu choice
+@@ -672,6 +666,35 @@ qemuCapsInitGuest(virCapsPtr caps,
+         }
+     }
+ 
++    ret = virQEMUCapsInitGuestFromBinary(caps,
++                                         binary, qemubinCaps,
++                                         kvmbin, kvmbinCaps,
++                                         guestarch);
++
++    VIR_FREE(binary);
++    VIR_FREE(kvmbin);
++    virObjectUnref(qemubinCaps);
++    virObjectUnref(kvmbinCaps);
++
++    return ret;
++}
++
++int
++virQEMUCapsInitGuestFromBinary(virCapsPtr caps,
++                               const char *binary,
++                               qemuCapsPtr qemubinCaps,
++                               const char *kvmbin,
++                               qemuCapsPtr kvmbinCaps,
++                               const char *guestarch)
++{
++    virCapsGuestPtr guest;
++    bool haskvm = false;
++    bool haskqemu = false;
++    virCapsGuestMachinePtr *machines = NULL;
++    size_t nmachines = 0;
++    int ret = -1;
++    bool hasdisksnapshot = false;
++
+     if (!binary)
+         return 0;
+ 
+@@ -686,7 +709,7 @@ qemuCapsInitGuest(virCapsPtr caps,
+         haskqemu = 1;
+ 
+     if (qemuCapsGetMachineTypesCaps(qemubinCaps, &nmachines, &machines) < 0)
+-        goto error;
++        goto cleanup;
+ 
+     /* We register kvm as the base emulator too, since we can
+      * just give -no-kvm to disable acceleration if required */
+@@ -698,7 +721,7 @@ qemuCapsInitGuest(virCapsPtr caps,
+                                          NULL,
+                                          nmachines,
+                                          machines)) == NULL)
+-        goto error;
++        goto cleanup;
+ 
+     machines = NULL;
+     nmachines = 0;
+@@ -707,17 +730,17 @@ qemuCapsInitGuest(virCapsPtr caps,
+         caps->host.cpu->model &&
+         qemuCapsGetCPUDefinitions(qemubinCaps, NULL) > 0 &&
+         !virCapabilitiesAddGuestFeature(guest, "cpuselection", 1, 0))
+-        goto error;
++        goto cleanup;
+ 
+     if (qemuCapsGet(qemubinCaps, QEMU_CAPS_BOOTINDEX) &&
+         !virCapabilitiesAddGuestFeature(guest, "deviceboot", 1, 0))
+-        goto error;
++        goto cleanup;
+ 
+     if (qemuCapsGet(qemubinCaps, QEMU_CAPS_DISK_SNAPSHOT))
+         hasdisksnapshot = true;
+ 
+     if (!virCapabilitiesAddGuestFeature(guest, "disksnapshot", hasdisksnapshot, 0))
+-        goto error;
++        goto cleanup;
+ 
+     if (virCapabilitiesAddGuestDomain(guest,
+                                       "qemu",
+@@ -725,7 +748,7 @@ qemuCapsInitGuest(virCapsPtr caps,
+                                       NULL,
+                                       0,
+                                       NULL) == NULL)
+-        goto error;
++        goto cleanup;
+ 
+     if (haskqemu &&
+         virCapabilitiesAddGuestDomain(guest,
+@@ -734,14 +757,14 @@ qemuCapsInitGuest(virCapsPtr caps,
+                                       NULL,
+                                       0,
+                                       NULL) == NULL)
+-        goto error;
++        goto cleanup;
+ 
+     if (haskvm) {
+         virCapsGuestDomainPtr dom;
+ 
+         if (kvmbin &&
+             qemuCapsGetMachineTypesCaps(kvmbinCaps, &nmachines, &machines) < 0)
+-            goto error;
++            goto cleanup;
+ 
+         if ((dom = virCapabilitiesAddGuestDomain(guest,
+                                                  "kvm",
+@@ -749,7 +772,7 @@ qemuCapsInitGuest(virCapsPtr caps,
+                                                  NULL,
+                                                  nmachines,
+                                                  machines)) == NULL) {
+-            goto error;
++            goto cleanup;
+         }
+ 
+         machines = NULL;
+@@ -761,27 +784,19 @@ qemuCapsInitGuest(virCapsPtr caps,
+          STREQ(guestarch, "x86_64")) &&
+         (virCapabilitiesAddGuestFeature(guest, "acpi", 1, 1) == NULL ||
+          virCapabilitiesAddGuestFeature(guest, "apic", 1, 0) == NULL))
+-        goto error;
++        goto cleanup;
+ 
+     if (STREQ(guestarch, "i686") &&
+         (virCapabilitiesAddGuestFeature(guest, "pae", 1, 0) == NULL ||
+          virCapabilitiesAddGuestFeature(guest, "nonpae", 1, 0) == NULL))
+-        goto error;
++        goto cleanup;
+ 
+     ret = 0;
+ 
+-cleanup:
+-    VIR_FREE(binary);
+-    VIR_FREE(kvmbin);
+-    virObjectUnref(qemubinCaps);
+-    virObjectUnref(kvmbinCaps);
+-
+-    return ret;
+-
+-error:
++ cleanup:
+     virCapabilitiesFreeMachines(machines, nmachines);
+ 
+-    goto cleanup;
++    return ret;
+ }
+ 
+ 
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index f8d7617..932d4f6 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -246,4 +246,11 @@ int qemuCapsParseDeviceStr(qemuCapsPtr caps, const char *str);
+ 
+ VIR_ENUM_DECL(qemuCaps);
+ 
++int virQEMUCapsInitGuestFromBinary(virCapsPtr caps,
++                                   const char *binary,
++                                   qemuCapsPtr qemubinCaps,
++                                   const char *kvmbin,
++                                   qemuCapsPtr kvmbinCaps,
++                                   const char *guestarch);
++
+ #endif /* __QEMU_CAPABILITIES_H__*/
+-- 
+1.9.2
+

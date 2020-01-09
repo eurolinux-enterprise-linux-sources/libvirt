@@ -1,0 +1,149 @@
+From 26dc23c9756704ccb827b5bc70a7b86f066ca477 Mon Sep 17 00:00:00 2001
+Message-Id: <26dc23c9756704ccb827b5bc70a7b86f066ca477.1354720508.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 4 Dec 2012 08:30:46 +0100
+Subject: [PATCH] util: Slightly refactor PCI list functions
+
+https://bugzilla.redhat.com/show_bug.cgi?id=877095
+
+In order to be able to steal PCI device by its index in the list.
+(cherry picked from commit 5eb8a7ac4d81e4cdf8194936e7da74f61046947a)
+---
+ src/libvirt_private.syms |  2 ++
+ src/util/pci.c           | 60 +++++++++++++++++++++++++++++-------------------
+ src/util/pci.h           |  4 ++++
+ 3 files changed, 42 insertions(+), 24 deletions(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 00d13a7..4999e8b 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -992,10 +992,12 @@ pciDeviceListAdd;
+ pciDeviceListCount;
+ pciDeviceListDel;
+ pciDeviceListFind;
++pciDeviceListFindIndex;
+ pciDeviceListFree;
+ pciDeviceListGet;
+ pciDeviceListNew;
+ pciDeviceListSteal;
++pciDeviceListStealIndex;
+ pciDeviceNetName;
+ pciDeviceReAttachInit;
+ pciDeviceSetManaged;
+diff --git a/src/util/pci.c b/src/util/pci.c
+index 83d86b7..c920ba8 100644
+--- a/src/util/pci.c
++++ b/src/util/pci.c
+@@ -1554,35 +1554,36 @@ pciDeviceListCount(pciDeviceList *list)
+ }
+ 
+ pciDevice *
+-pciDeviceListSteal(pciDeviceList *list,
+-                   pciDevice *dev)
++pciDeviceListStealIndex(pciDeviceList *list,
++                        int idx)
+ {
+-    pciDevice *ret = NULL;
+-    int i;
+-
+-    for (i = 0; i < list->count; i++) {
+-        if (list->devs[i]->domain   != dev->domain ||
+-            list->devs[i]->bus      != dev->bus    ||
+-            list->devs[i]->slot     != dev->slot   ||
+-            list->devs[i]->function != dev->function)
+-            continue;
++    pciDevice *ret;
+ 
+-        ret = list->devs[i];
++    if (idx < 0 || idx >= list->count)
++        return NULL;
+ 
+-        if (i != --list->count)
+-            memmove(&list->devs[i],
+-                    &list->devs[i+1],
+-                    sizeof(*list->devs) * (list->count-i));
++    ret = list->devs[idx];
+ 
+-        if (VIR_REALLOC_N(list->devs, list->count) < 0) {
+-            ; /* not fatal */
+-        }
++    if (idx != --list->count) {
++        memmove(&list->devs[idx],
++                &list->devs[idx + 1],
++                sizeof(*list->devs) * (list->count - idx));
++    }
+ 
+-        break;
++    if (VIR_REALLOC_N(list->devs, list->count) < 0) {
++        ; /* not fatal */
+     }
++
+     return ret;
+ }
+ 
++pciDevice *
++pciDeviceListSteal(pciDeviceList *list,
++                   pciDevice *dev)
++{
++    return pciDeviceListStealIndex(list, pciDeviceListFindIndex(list, dev));
++}
++
+ void
+ pciDeviceListDel(pciDeviceList *list,
+                  pciDevice *dev)
+@@ -1592,8 +1593,8 @@ pciDeviceListDel(pciDeviceList *list,
+         pciFreeDevice(ret);
+ }
+ 
+-pciDevice *
+-pciDeviceListFind(pciDeviceList *list, pciDevice *dev)
++int
++pciDeviceListFindIndex(pciDeviceList *list, pciDevice *dev)
+ {
+     int i;
+ 
+@@ -1602,8 +1603,19 @@ pciDeviceListFind(pciDeviceList *list, pciDevice *dev)
+             list->devs[i]->bus      == dev->bus    &&
+             list->devs[i]->slot     == dev->slot   &&
+             list->devs[i]->function == dev->function)
+-            return list->devs[i];
+-    return NULL;
++            return i;
++    return -1;
++}
++
++pciDevice *
++pciDeviceListFind(pciDeviceList *list, pciDevice *dev)
++{
++    int i;
++
++    if ((i = pciDeviceListFindIndex(list, dev)) >= 0)
++        return list->devs[i];
++    else
++        return NULL;
+ }
+ 
+ 
+diff --git a/src/util/pci.h b/src/util/pci.h
+index d3cc85d..814c24e 100644
+--- a/src/util/pci.h
++++ b/src/util/pci.h
+@@ -75,10 +75,14 @@ pciDevice *    pciDeviceListGet (pciDeviceList *list,
+ int            pciDeviceListCount (pciDeviceList *list);
+ pciDevice *    pciDeviceListSteal (pciDeviceList *list,
+                                    pciDevice *dev);
++pciDevice *    pciDeviceListStealIndex(pciDeviceList *list,
++                                       int idx);
+ void           pciDeviceListDel  (pciDeviceList *list,
+                                   pciDevice *dev);
+ pciDevice *    pciDeviceListFind (pciDeviceList *list,
+                                   pciDevice *dev);
++int            pciDeviceListFindIndex(pciDeviceList *list,
++                                      pciDevice *dev);
+ 
+ /*
+  * Callback that will be invoked once for each file
+-- 
+1.8.0
+

@@ -1,0 +1,40 @@
+From 54ed4b4c83d1ee60d62ffa912937f7b2617af1a0 Mon Sep 17 00:00:00 2001
+Message-Id: <54ed4b4c83d1ee60d62ffa912937f7b2617af1a0@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:55 +0100
+Subject: [PATCH] docs: Fix attribute name for virtio-rng backend
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+(cherry picked from commit 4db199fc4cfbb330b4dd1c01e471191a0d62efbb)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 4d1651b..f237a57 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -4226,7 +4226,7 @@ qemu-kvm -net nic,model=? /dev/null
+           <li>'egd' &mdash; a EGD protocol backend</li>
+         </ul>
+       </dd>
+-      <dt><code>backend type='random'</code></dt>
++      <dt><code>backend model='random'</code></dt>
+       <dd>
+         <p>
+           This backend type expects a non-blocking character device as input.
+@@ -4235,7 +4235,7 @@ qemu-kvm -net nic,model=? /dev/null
+           When no file name is specified the hypervisor default is used.
+         </p>
+       </dd>
+-      <dt><code>backend type='egd'</code></dt>
++      <dt><code>backend model='egd'</code></dt>
+       <dd>
+         <p>
+           This backend connects to a source using the EGD protocol.
+-- 
+1.9.1
+

@@ -1,0 +1,76 @@
+From 155d8f26814d24ffeb5c831a849e36e5202839ab Mon Sep 17 00:00:00 2001
+Message-Id: <155d8f26814d24ffeb5c831a849e36e5202839ab.1357740563.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Sat, 5 Jan 2013 08:59:27 +0100
+Subject: [PATCH] snapshot: conf: Make virDomainSnapshotIsExternal more
+ reusable
+
+https://bugzilla.redhat.com/show_bug.cgi?id=889407
+
+Allow to use definition objects with this predicate function.
+(cherry picked from commit 51b12b8ccaed08d7bf25384973aa14ab1e79b430)
+---
+ src/conf/snapshot_conf.c | 14 ++++++++++----
+ src/conf/snapshot_conf.h |  1 +
+ src/libvirt_private.syms |  1 +
+ 3 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index 5766031..97176dc 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -1062,17 +1062,23 @@ cleanup:
+ 
+ 
+ bool
+-virDomainSnapshotIsExternal(virDomainSnapshotObjPtr snap)
++virDomainSnapshotDefIsExternal(virDomainSnapshotDefPtr def)
+ {
+     int i;
+ 
+-    if (snap->def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL)
++    if (def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL)
+         return true;
+ 
+-    for (i = 0; i < snap->def->ndisks; i++) {
+-        if (snap->def->disks[i].snapshot == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL)
++    for (i = 0; i < def->ndisks; i++) {
++        if (def->disks[i].snapshot == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL)
+             return true;
+     }
+ 
+     return false;
+ }
++
++bool
++virDomainSnapshotIsExternal(virDomainSnapshotObjPtr snap)
++{
++    return virDomainSnapshotDefIsExternal(snap->def);
++}
+diff --git a/src/conf/snapshot_conf.h b/src/conf/snapshot_conf.h
+index b0f8760..f1d5995 100644
+--- a/src/conf/snapshot_conf.h
++++ b/src/conf/snapshot_conf.h
+@@ -166,6 +166,7 @@ int virDomainListSnapshots(virDomainSnapshotObjListPtr snapshots,
+                            virDomainSnapshotPtr **snaps,
+                            unsigned int flags);
+ 
++bool virDomainSnapshotDefIsExternal(virDomainSnapshotDefPtr def);
+ bool virDomainSnapshotIsExternal(virDomainSnapshotObjPtr snap);
+ 
+ VIR_ENUM_DECL(virDomainSnapshotLocation)
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 4999e8b..5df2931 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1087,6 +1087,7 @@ virDomainSnapshotAlignDisks;
+ virDomainSnapshotAssignDef;
+ virDomainSnapshotDefFormat;
+ virDomainSnapshotDefFree;
++virDomainSnapshotDefIsExternal;
+ virDomainSnapshotDefParseString;
+ virDomainSnapshotDropParent;
+ virDomainSnapshotFindByName;
+-- 
+1.8.1
+

@@ -1,0 +1,51 @@
+From 724504e3aa8b646f82c8b1922271a3055e54956e Mon Sep 17 00:00:00 2001
+Message-Id: <724504e3aa8b646f82c8b1922271a3055e54956e@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 10 Apr 2015 13:51:39 +0200
+Subject: [PATCH] RHEL: Avoid memory leak when virCgroupSetCpusetMemoryMigrate
+ fails
+
+RHEL-only
+
+Coverity detected a memory leak introduced by an incorrect backport of
+upstream commit 3a0e5b0.
+
+ 3. libvirt-0.10.2/src/qemu/qemu_cgroup.c:206: alloc_arg: "virCgroupForDomain" allocates memory that is stored into "cgroup".
+ 8. libvirt-0.10.2/src/util/cgroup.c:994:5: alloc_arg: "virCgroupNew" allocates memory that is stored into "*group".
+ 9. libvirt-0.10.2/src/util/cgroup.c:621:5: alloc_arg: "virAlloc" allocates memory that is stored into "*group".
+10. libvirt-0.10.2/src/util/memory.c:100:5: alloc_fn: Storage is returned from allocation function "calloc".
+11. libvirt-0.10.2/src/util/memory.c:100:5: var_assign: Assigning: "*((void **)ptrptr)" = "calloc(1UL, size)".
+18. libvirt-0.10.2/src/util/cgroup.c:631:5: noescape: Resource "*group" is not freed or pointed-to in function "virCgroupDetect".
+19. libvirt-0.10.2/src/util/cgroup.c:233:41: noescape: "virCgroupDetect(virCgroupPtr)" does not free or save its pointer parameter "group".
+55. libvirt-0.10.2/src/qemu/qemu_cgroup.c:408: noescape: Resource "cgroup" is not freed or pointed-to in "virCgroupSetCpusetMemoryMigrate".
+56. libvirt-0.10.2/src/util/cgroup.c:1415:46: noescape: "virCgroupSetCpusetMemoryMigrate(virCgroupPtr, _Bool)" does not free or save its pointer parameter "group".
+58. libvirt-0.10.2/src/qemu/qemu_cgroup.c:410: leaked_storage: Variable "cgroup" going out of scope leaks the storage it points to.
+   408|       if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_CPUSET) &&
+   409|           virCgroupSetCpusetMemoryMigrate(cgroup, true) < 0)
+   410|->         return -1;
+   411|
+   412|       if ((vm->def->numatune.memory.nodemask ||
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1198497
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_cgroup.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 173d42e..8a9c7e7 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -407,7 +407,7 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+ 
+     if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_CPUSET) &&
+         virCgroupSetCpusetMemoryMigrate(cgroup, true) < 0)
+-        return -1;
++        goto cleanup;
+ 
+     if ((vm->def->numatune.memory.nodemask ||
+          (vm->def->numatune.memory.placement_mode ==
+-- 
+2.3.5
+

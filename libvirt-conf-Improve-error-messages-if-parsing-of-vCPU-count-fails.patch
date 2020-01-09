@@ -1,0 +1,48 @@
+From 88295cbe25da42d6228005b2921589814cbe4d92 Mon Sep 17 00:00:00 2001
+Message-Id: <88295cbe25da42d6228005b2921589814cbe4d92@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:51 +0200
+Subject: [PATCH] conf: Improve error messages if parsing of vCPU count fails
+
+https://bugzilla.redhat.com/show_bug.cgi?id=902652
+
+(cherry picked from commit 23b9502bfc5d61af88a02f5811e89a47361b233a)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 3d18582..e6c8f55 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -9108,7 +9108,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+         def->maxvcpus = count;
+         if (count == 0 || (unsigned short) count != count) {
+             virReportError(VIR_ERR_XML_ERROR,
+-                           _("invalid maxvcpus %lu"), count);
++                           _("invalid maximum number of vCPUs '%lu'"), count);
+             goto error;
+         }
+     }
+@@ -9124,13 +9124,14 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+         def->vcpus = count;
+         if (count == 0 || (unsigned short) count != count) {
+             virReportError(VIR_ERR_XML_ERROR,
+-                           _("invalid current vcpus %lu"), count);
++                           _("invalid current number of vCPUs '%lu'"), count);
+             goto error;
+         }
+ 
+         if (def->maxvcpus < count) {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("maxvcpus must not be less than current vcpus (%d < %lu)"),
++                           _("maxvcpus must not be less than current vcpus "
++                             "(%d < %lu)"),
+                            def->maxvcpus, count);
+             goto error;
+         }
+-- 
+1.9.2
+

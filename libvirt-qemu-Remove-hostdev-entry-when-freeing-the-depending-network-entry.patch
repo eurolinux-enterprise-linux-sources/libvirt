@@ -1,0 +1,143 @@
+From dfb82af186d0bb18508ae9eddc0ac48f89201b8b Mon Sep 17 00:00:00 2001
+Message-Id: <dfb82af186d0bb18508ae9eddc0ac48f89201b8b.1378495586.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 29 Aug 2013 19:03:35 +0200
+Subject: [PATCH] qemu: Remove hostdev entry when freeing the depending network
+ entry
+
+When using a <interface type="network"> that points to a network with
+hostdev forwarding mode a hostdev alias is created for the network. This
+allias is inserted into the hostdev list, but is backed with a part of
+the network object that it is connected to.
+
+When a VM is being stopped qemuProcessStop() calls
+networkReleaseActualDevice() which eventually frees the memory for the
+hostdev object. Afterwards when the domain definition is being freed by
+virDomainDefFree() an invalid pointer is accessed by
+virDomainHostdevDefFree() and may cause a crash of the daemon.
+
+This patch removes the entry in the hostdev list before freeing the
+depending memory to avoid this issue.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1000973
+(cherry picked from commit 50348e6edfa10ddb61929bf95a1c4820a9614e19)
+---
+ src/conf/domain_conf.c   | 26 ++++++++++++++++++--------
+ src/conf/domain_conf.h   |  1 +
+ src/libvirt_private.syms |  1 +
+ src/qemu/qemu_hotplug.c  |  5 +++++
+ src/qemu/qemu_process.c  |  2 ++
+ 5 files changed, 27 insertions(+), 8 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 2ed0fee..0d809f6 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8195,26 +8195,36 @@ virDomainNetFindIdx(virDomainDefPtr def, virDomainNetDefPtr net)
+     return matchidx;
+ }
+ 
+-virDomainNetDefPtr
+-virDomainNetRemove(virDomainDefPtr def, size_t i)
+-{
+-    virDomainNetDefPtr net = def->nets[i];
+ 
++void
++virDomainNetRemoveHostdev(virDomainDefPtr def,
++                          virDomainNetDefPtr net)
++{
+     if (net->type == VIR_DOMAIN_NET_TYPE_HOSTDEV) {
+         /* hostdev net devices are normally also be in the hostdevs
+          * array, but might have already been removed by the time we
+          * get here.
+          */
+         virDomainHostdevDefPtr hostdev = &net->data.hostdev.def;
+-        size_t h;
++        size_t i;
+ 
+-        for (h = 0; h < def->nhostdevs; h++) {
+-            if (def->hostdevs[h] == hostdev) {
+-                virDomainHostdevRemove(def, h);
++        for (i = 0; i < def->nhostdevs; i++) {
++            if (def->hostdevs[i] == hostdev) {
++                virDomainHostdevRemove(def, i);
+                 break;
+             }
+         }
+     }
++}
++
++
++virDomainNetDefPtr
++virDomainNetRemove(virDomainDefPtr def, size_t i)
++{
++    virDomainNetDefPtr net = def->nets[i];
++
++    virDomainNetRemoveHostdev(def, net);
++
+     if (def->nnets > 1) {
+         memmove(def->nets + i,
+                 def->nets + i + 1,
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 9e95bfb..ca44f25 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2052,6 +2052,7 @@ int virDomainNetFindIdx(virDomainDefPtr def, virDomainNetDefPtr net);
+ virDomainNetDefPtr virDomainNetFind(virDomainDefPtr def, const char *device);
+ int virDomainNetInsert(virDomainDefPtr def, virDomainNetDefPtr net);
+ virDomainNetDefPtr virDomainNetRemove(virDomainDefPtr def, size_t i);
++void virDomainNetRemoveHostdev(virDomainDefPtr def, virDomainNetDefPtr net);
+ 
+ int virDomainHostdevInsert(virDomainDefPtr def, virDomainHostdevDefPtr hostdev);
+ virDomainHostdevDefPtr
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 7d15e5a..ce40425 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -469,6 +469,7 @@ virDomainNetGetActualVirtPortProfile;
+ virDomainNetGetActualVlan;
+ virDomainNetInsert;
+ virDomainNetRemove;
++virDomainNetRemoveHostdev;
+ virDomainNetTypeToString;
+ virDomainNostateReasonTypeFromString;
+ virDomainNostateReasonTypeToString;
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 6da303e..f04025c 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -868,6 +868,8 @@ cleanup:
+                                virDomainNetGetActualBridgeName(net), net->ifname));
+         }
+ 
++        virDomainNetRemoveHostdev(vm->def, net);
++
+         networkReleaseActualDevice(net);
+     }
+ 
+@@ -1661,6 +1663,9 @@ qemuDomainChangeNet(struct qemud_driver *driver,
+         /* the changes above warrant replacing olddev with newdev in
+          * the domain's nets list.
+          */
++
++        /* this function doesn't work with HOSTDEV networks yet, thus
++         * no need to change the pointer in the hostdev structure */
+         networkReleaseActualDevice(olddev);
+         virDomainNetDefFree(olddev);
+         /* move newdev into the nets list, and NULL it out from the
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 2b8806d..72acf34 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -4383,6 +4383,8 @@ void qemuProcessStop(struct qemud_driver *driver,
+                                        virDomainNetGetActualBridgeName(net),
+                                        net->ifname));
+ 
++        /* kick the device out of the hostdev list too */
++        virDomainNetRemoveHostdev(def, net);
+         networkReleaseActualDevice(net);
+     }
+ 
+-- 
+1.8.3.2
+

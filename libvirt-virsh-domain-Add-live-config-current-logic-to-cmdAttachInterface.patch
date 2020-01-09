@@ -1,0 +1,170 @@
+From 351ac8cdcae8adbd6f756acda7e4980d9204bf33 Mon Sep 17 00:00:00 2001
+Message-Id: <351ac8cdcae8adbd6f756acda7e4980d9204bf33@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 11 Dec 2015 16:04:24 +0100
+Subject: [PATCH] virsh-domain: Add --live, --config, --current logic to
+ cmdAttachInterface
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1229128
+
+Use the approach established in commit
+69ce3ffa8d431e9810607c6e00b7cfcc481b491d to improve this function too.
+
+(cherry picked from commit 33e300229cf30c6efc7411d3b5d45c2050129fc1)
+
+ Conflicts:
+	tools/virsh-domain.c - switch to C99 init of vshCmdOptDef was
+                               not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-domain.c | 53 +++++++++++++++++++++++++++++++++++++++-------------
+ tools/virsh.pod      | 34 +++++++++++++++++++--------------
+ 2 files changed, 60 insertions(+), 27 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 2ab5d9c..cefcc90 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -618,10 +618,24 @@ static const vshCmdOptDef opts_attach_interface[] = {
+     {"mac",    VSH_OT_DATA, 0, N_("MAC address")},
+     {"script", VSH_OT_DATA, 0, N_("script used to bridge network interface")},
+     {"model", VSH_OT_DATA, 0, N_("model type")},
+-    {"persistent", VSH_OT_ALIAS, 0, "config"},
+-    {"config", VSH_OT_BOOL, 0, N_("affect next boot")},
+     {"inbound", VSH_OT_DATA, VSH_OFLAG_NONE, N_("control domain's incoming traffics")},
+     {"outbound", VSH_OT_DATA, VSH_OFLAG_NONE, N_("control domain's outgoing traffics")},
++    {.name = "persistent",
++     .type = VSH_OT_BOOL,
++     .help = N_("make live change persistent")
++    },
++    {.name = "config",
++     .type = VSH_OT_BOOL,
++     .help = N_("affect next boot")
++    },
++    {.name = "live",
++     .type = VSH_OT_BOOL,
++     .help = N_("affect running domain")
++    },
++    {.name = "current",
++     .type = VSH_OT_BOOL,
++     .help = N_("affect current domain")
++    },
+     {NULL, 0, 0, NULL}
+ };
+ 
+@@ -671,12 +685,30 @@ cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
+     int typ;
+     int ret;
+     bool functionReturn = false;
+-    unsigned int flags;
+     virBuffer buf = VIR_BUFFER_INITIALIZER;
+     char *xml;
++    unsigned int flags = VIR_DOMAIN_AFFECT_CURRENT;
++    bool current = vshCommandOptBool(cmd, "current");
++    bool config = vshCommandOptBool(cmd, "config");
++    bool live = vshCommandOptBool(cmd, "live");
++    bool persistent = vshCommandOptBool(cmd, "persistent");
++
++    VSH_EXCLUSIVE_OPTIONS_VAR(persistent, current);
++
++    VSH_EXCLUSIVE_OPTIONS_VAR(current, live);
++    VSH_EXCLUSIVE_OPTIONS_VAR(current, config);
++
++    if (config || persistent)
++        flags |= VIR_DOMAIN_AFFECT_CONFIG;
++    if (live)
++        flags |= VIR_DOMAIN_AFFECT_LIVE;
+ 
+     if (!(dom = vshCommandOptDomain(ctl, cmd, NULL)))
+-        goto cleanup;
++        return false;
++
++    if (persistent &&
++        virDomainIsActive(dom) == 1)
++        flags |= VIR_DOMAIN_AFFECT_LIVE;
+ 
+     if (vshCommandOptString(cmd, "type", &type) <= 0)
+         goto cleanup;
+@@ -773,14 +805,10 @@ cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
+ 
+     xml = virBufferContentAndReset(&buf);
+ 
+-    if (vshCommandOptBool(cmd, "config")) {
+-        flags = VIR_DOMAIN_AFFECT_CONFIG;
+-        if (virDomainIsActive(dom) == 1)
+-            flags |= VIR_DOMAIN_AFFECT_LIVE;
++    if (flags)
+         ret = virDomainAttachDeviceFlags(dom, xml, flags);
+-    } else {
++    else
+         ret = virDomainAttachDevice(dom, xml);
+-    }
+ 
+     VIR_FREE(xml);
+ 
+@@ -791,9 +819,8 @@ cmdAttachInterface(vshControl *ctl, const vshCmd *cmd)
+         functionReturn = true;
+     }
+ 
+- cleanup:
+-    if (dom)
+-        virDomainFree(dom);
++cleanup:
++    virDomainFree(dom);
+     virBufferFreeAndReset(&buf);
+     return functionReturn;
+ }
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index ac17b67..75265c8 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -1816,25 +1816,31 @@ For compatibility purposes, I<--persistent> behaves like I<--config> for
+ an offline domain, and like I<--live> I<--config> for a running domain.
+ 
+ =item B<attach-interface> I<domain> I<type> I<source>
++[[[I<--live>] [I<--config>] | [I<--current>]] | [I<--persistent>]]
+ [I<--target target>] [I<--mac mac>] [I<--script script>] [I<--model model>]
+ [I<--config>] [I<--inbound average,peak,burst>] [I<--outbound average,peak,burst>]
+ 
+-Attach a new network interface to the domain.
+-I<type> can be either I<network> to indicate a physical network device or
+-I<bridge> to indicate a bridge to a device.
+-I<source> indicates the source device.
+-I<target> allows to indicate the target device in the guest. Names starting
+-with 'vnet' are considered as auto-generated an hence blanked out.
+-I<mac> allows to specify the MAC address of the network interface.
+-I<script> allows to specify a path to a script handling a bridge instead of
+-the default one.
+-I<model> allows to specify the model type.
+-I<--config> indicates the changes will affect the next boot of the domain,
+-for compatibility purposes, I<--persistent> is alias of I<--config>.
+-I<inbound> and I<outbound> control the bandwidth of the interface. I<peak>
+-and I<burst> are optional, so "average,peak", "average,,burst" and
++Attach a new network interface to the domain.  I<type> can be either I<network>
++to indicate a physical network device or I<bridge> to indicate a bridge to a
++device.  I<source> indicates the source device.  I<target> allows to indicate
++the target device in the guest. Names starting with 'vnet' are considered as
++auto-generated an hence blanked out.  I<mac> allows to specify the MAC address
++of the network interface.  I<script> allows to specify a path to a script
++handling a bridge instead of the default one.  I<model> allows to specify the
++model type.  I<inbound> and I<outbound> control the bandwidth of the interface.
++I<peak> and I<burst> are optional, so "average,peak", "average,,burst" and
+ "average" are also legal.
+ 
++If I<--live> is specified, affect a running domain.
++If I<--config> is specified, affect the next startup of a persistent domain.
++If I<--current> is specified, affect the current domain state.
++Both I<--live> and I<--config> flags may be given, but I<--current> is
++exclusive. When no flag is specified legacy API is used whose behavior depends
++on the hypervisor driver.
++
++For compatibility purposes, I<--persistent> behaves like I<--config> for
++an offline domain, and like I<--live> I<--config> for a running domain.
++
+ B<Note>: the optional target value is the name of a device to be created
+ as the back-end on the node. If not provided a device named "vnetN" or "vifN"
+ will be created automatically.
+-- 
+2.7.0
+

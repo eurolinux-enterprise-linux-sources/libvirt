@@ -1,0 +1,47 @@
+From bcf3506dd17a3276c592f9f987a4fe3e56ae493c Mon Sep 17 00:00:00 2001
+Message-Id: <bcf3506dd17a3276c592f9f987a4fe3e56ae493c@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 19 Jun 2013 15:48:55 +0200
+Subject: [PATCH] Clarify virDomainDetachDeviceFlags documentation
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit 1f71de59f67ee7dcd4957b61d35bde52211a6c29)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/libvirt.c -- context
+---
+ src/libvirt.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index ca72144..ded463b 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -9867,6 +9867,22 @@ error:
+  * block copy operation on the device being detached; in that case,
+  * use virDomainBlockJobAbort() to stop the block copy first.
+  *
++ * Beware that depending on the hypervisor and device type, detaching a device
++ * from a running domain may be asynchronous. That is, calling
++ * virDomainDetachDeviceFlags may just request device removal while the device
++ * is actually removed later (in cooperation with a guest OS). Previously,
++ * this fact was ignored and the device could have been removed from domain
++ * configuration before it was actually removed by the hypervisor causing
++ * various failures on subsequent operations. To check whether the device was
++ * successfully removed, either recheck domain configuration using
++ * virDomainGetXMLDesc() or add handler for VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED
++ * event. In case the device is already gone when virDomainDetachDeviceFlags
++ * returns, the event is delivered before this API call ends. To help existing
++ * clients work better in most cases, this API will try to transform an
++ * asynchronous device removal that finishes shortly after the request into
++ * a synchronous removal. In other words, this API may wait a bit for the
++ * removal to complete in case it was not synchronous.
++ *
+  * Be aware that hotplug changes might not persist across a domain going
+  * into S4 state (also known as hibernation) unless you also modify the
+  * persistent domain definition.
+-- 
+2.0.0
+

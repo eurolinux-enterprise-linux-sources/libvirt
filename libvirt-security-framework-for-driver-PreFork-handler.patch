@@ -1,0 +1,169 @@
+From 5fae904e09f1c5043714da980abdbab7f2b33a94 Mon Sep 17 00:00:00 2001
+Message-Id: <5fae904e09f1c5043714da980abdbab7f2b33a94.1376483448.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 23 Jul 2013 11:09:56 -0600
+Subject: [PATCH] security: framework for driver PreFork handler
+
+https://bugzilla.redhat.com/show_bug.cgi?id=964359
+
+A future patch wants the DAC security manager to be able to safely
+get the supplemental group list for a given uid, but at the time
+of a fork rather than during initialization so as to pick up on
+live changes to the system's group database.  This patch adds the
+framework, including the possibility of a pre-fork callback
+failing.
+
+For now, any driver that implements a prefork callback must be
+robust against the possibility of being part of a security stack
+where a later element in the chain fails prefork.  This means
+that drivers cannot do any action that requires a call to postfork
+for proper cleanup (no grabbing a mutex, for example).  If this
+is too prohibitive in the future, we would have to switch to a
+transactioning sequence, where each driver has (up to) 3 callbacks:
+PreForkPrepare, PreForkCommit, and PreForkAbort, to either clean
+up or commit changes made during prepare.
+
+* src/security/security_driver.h (virSecurityDriverPreFork): New
+callback.
+* src/security/security_manager.h (virSecurityManagerPreFork):
+Change signature.
+* src/security/security_manager.c (virSecurityManagerPreFork):
+Optionally call into driver, and allow returning failure.
+* src/security/security_stack.c (virSecurityDriverStack):
+Wrap the handler for the stack driver.
+* src/qemu/qemu_process.c (qemuProcessStart): Adjust caller.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit fdb3bde31ccf8ff172abf00ef5aa974b87af2794)
+
+Conflicts:
+	src/security/security_manager.c - context from previous backport differences
+---
+ src/qemu/qemu_process.c         |  3 ++-
+ src/security/security_driver.h  |  4 ++++
+ src/security/security_manager.c | 14 ++++++++++++--
+ src/security/security_manager.h |  2 +-
+ src/security/security_stack.c   | 23 +++++++++++++++++++++++
+ 5 files changed, 42 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 7dc1d42..f012779 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3904,7 +3904,8 @@ int qemuProcessStart(virConnectPtr conn,
+     virCommandDaemonize(cmd);
+     virCommandRequireHandshake(cmd);
+ 
+-    virSecurityManagerPreFork(driver->securityManager);
++    if (virSecurityManagerPreFork(driver->securityManager) < 0)
++        goto cleanup;
+     ret = virCommandRun(cmd, NULL);
+     virSecurityManagerPostFork(driver->securityManager);
+ 
+diff --git a/src/security/security_driver.h b/src/security/security_driver.h
+index d49b401..92bed3f 100644
+--- a/src/security/security_driver.h
++++ b/src/security/security_driver.h
+@@ -47,6 +47,8 @@ typedef int (*virSecurityDriverClose) (virSecurityManagerPtr mgr);
+ typedef const char *(*virSecurityDriverGetModel) (virSecurityManagerPtr mgr);
+ typedef const char *(*virSecurityDriverGetDOI) (virSecurityManagerPtr mgr);
+ 
++typedef int (*virSecurityDriverPreFork) (virSecurityManagerPtr mgr);
++
+ typedef int (*virSecurityDomainRestoreImageLabel) (virSecurityManagerPtr mgr,
+                                                    virDomainDefPtr def,
+                                                    virDomainDiskDefPtr disk);
+@@ -111,6 +113,8 @@ struct _virSecurityDriver {
+     virSecurityDriverGetModel getModel;
+     virSecurityDriverGetDOI getDOI;
+ 
++    virSecurityDriverPreFork preFork;
++
+     virSecurityDomainSecurityVerify domainSecurityVerify;
+ 
+     virSecurityDomainSetImageLabel domainSetSecurityImageLabel;
+diff --git a/src/security/security_manager.c b/src/security/security_manager.c
+index 21a74de..0132782 100644
+--- a/src/security/security_manager.c
++++ b/src/security/security_manager.c
+@@ -164,11 +164,21 @@ virSecurityManagerPtr virSecurityManagerNew(const char *name,
+ 
+ /*
+  * Must be called before fork()'ing to ensure mutex state
+- * is sane for the child to use
++ * is sane for the child to use. A negative return means the
++ * child must not be forked; a successful return must be
++ * followed by a call to virSecurityManagerPostFork() in both
++ * parent and child.
+  */
+-void virSecurityManagerPreFork(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED)
++int virSecurityManagerPreFork(virSecurityManagerPtr mgr)
+ {
++    int ret = 0;
++
+     /* XXX Grab our own mutex here instead of relying on caller's mutex */
++    if (mgr->drv->preFork) {
++        ret = mgr->drv->preFork(mgr);
++    }
++
++    return ret;
+ }
+ 
+ 
+diff --git a/src/security/security_manager.h b/src/security/security_manager.h
+index d1a5997..be8774d 100644
+--- a/src/security/security_manager.h
++++ b/src/security/security_manager.h
+@@ -46,7 +46,7 @@ virSecurityManagerPtr virSecurityManagerNewDAC(const char *virtDriver,
+                                                bool requireConfined,
+                                                bool dynamicOwnership);
+ 
+-void virSecurityManagerPreFork(virSecurityManagerPtr mgr);
++int virSecurityManagerPreFork(virSecurityManagerPtr mgr);
+ void virSecurityManagerPostFork(virSecurityManagerPtr mgr);
+ 
+ void *virSecurityManagerGetPrivateData(virSecurityManagerPtr mgr);
+diff --git a/src/security/security_stack.c b/src/security/security_stack.c
+index 91401c6..e8133c4 100644
+--- a/src/security/security_stack.c
++++ b/src/security/security_stack.c
+@@ -114,6 +114,27 @@ virSecurityStackGetDOI(virSecurityManagerPtr mgr)
+ }
+ 
+ static int
++virSecurityStackPreFork(virSecurityManagerPtr mgr)
++{
++    virSecurityStackDataPtr priv = virSecurityManagerGetPrivateData(mgr);
++    virSecurityStackItemPtr item = priv->itemsHead;
++    int rc = 0;
++
++    /* XXX For now, we rely on no driver having any state that requires
++     * rollback if a later driver in the stack fails; if this changes,
++     * we'd need to split this into transaction semantics by dividing
++     * the work into prepare/commit/abort.  */
++    for (; item; item = item->next) {
++        if (virSecurityManagerPreFork(item->securityManager) < 0) {
++            rc = -1;
++            break;
++        }
++    }
++
++    return rc;
++}
++
++static int
+ virSecurityStackVerify(virSecurityManagerPtr mgr,
+                        virDomainDefPtr def)
+ {
+@@ -500,6 +521,8 @@ virSecurityDriver virSecurityDriverStack = {
+     .getModel                           = virSecurityStackGetModel,
+     .getDOI                             = virSecurityStackGetDOI,
+ 
++    .preFork                            = virSecurityStackPreFork,
++
+     .domainSecurityVerify               = virSecurityStackVerify,
+ 
+     .domainSetSecurityImageLabel        = virSecurityStackSetSecurityImageLabel,
+-- 
+1.8.3.2
+

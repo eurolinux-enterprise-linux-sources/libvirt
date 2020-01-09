@@ -1,0 +1,37 @@
+From 14ed5c46e32baa050a0caa31f18029d6e9f848c4 Mon Sep 17 00:00:00 2001
+Message-Id: <14ed5c46e32baa050a0caa31f18029d6e9f848c4.1373271642.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 23 May 2013 13:04:19 -0600
+Subject: [PATCH] Fix F_DUPFD_CLOEXEC operation args
+
+6.5: https://bugzilla.redhat.com/show_bug.cgi?id=961034
+6.4.z: https://bugzilla.redhat.com/show_bug.cgi?id=966707
+
+The F_DUPFD_CLOEXEC operation with fcntl() expects a single
+int argument, specifying the minimum FD number for the newly
+dup'd file descriptor. We were not specifying that causing
+random stack data to be accessed as the FD number. Sometimes
+that worked, sometimes it didn't.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit d6670a64e1067f29da3c3e032739e140280b763d)
+---
+ src/rpc/virnetsocket.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/rpc/virnetsocket.c b/src/rpc/virnetsocket.c
+index a96feda..31d9524 100644
+--- a/src/rpc/virnetsocket.c
++++ b/src/rpc/virnetsocket.c
+@@ -938,7 +938,7 @@ int virNetSocketDupFD(virNetSocketPtr sock, bool cloexec)
+     int fd;
+ 
+     if (cloexec)
+-        fd = fcntl(sock->fd, F_DUPFD_CLOEXEC);
++        fd = fcntl(sock->fd, F_DUPFD_CLOEXEC, 0);
+     else
+         fd = dup(sock->fd);
+     if (fd < 0) {
+-- 
+1.8.2.1
+

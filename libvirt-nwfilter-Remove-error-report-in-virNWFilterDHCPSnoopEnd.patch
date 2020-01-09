@@ -1,0 +1,59 @@
+From 15e7eaaa61f27df5dbb6c8dd94d557fdb540a083 Mon Sep 17 00:00:00 2001
+Message-Id: <15e7eaaa61f27df5dbb6c8dd94d557fdb540a083@dist-git>
+From: Stefan Berger <stefanb@linux.vnet.ibm.com>
+Date: Thu, 17 Apr 2014 08:06:14 -0400
+Subject: [PATCH] nwfilter: Remove error report in virNWFilterDHCPSnoopEnd
+
+https://bugzilla.redhat.com/show_bug.cgi?id=903480
+
+Remove error reporting when calling the virNWFilterDHCPSnoopEnd
+function with an interface for which no thread is snooping traffic.
+
+Document the usage of this function.
+
+Signed-off-by: Stefan Berger <stefanb@linux.vnet.ibm.com>
+
+(cherry picked from commit b9c4bd0c07119d10913471e13d11d2aec43dc546)
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/nwfilter/nwfilter_dhcpsnoop.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/src/nwfilter/nwfilter_dhcpsnoop.c b/src/nwfilter/nwfilter_dhcpsnoop.c
+index 350a8ec..a08ba21 100644
+--- a/src/nwfilter/nwfilter_dhcpsnoop.c
++++ b/src/nwfilter/nwfilter_dhcpsnoop.c
+@@ -2113,6 +2113,16 @@ err_exit:
+     return -1;
+ }
+ 
++/**
++ * End a DHCP snoop thread on the given interface or end all
++ * DHCP snoop threads.
++ *
++ * @ifname: Name of an interface or NULL to stop all snoop threads
++ *
++ * It is not an error to call this function with an interface name
++ * for which no thread is snooping traffic. In this case the call will
++ * be a no-op.
++ */
+ void
+ virNWFilterDHCPSnoopEnd(const char *ifname)
+ {
+@@ -2126,11 +2136,8 @@ virNWFilterDHCPSnoopEnd(const char *ifname)
+     if (ifname) {
+         ifkey = (char *)virHashLookup(virNWFilterSnoopState.ifnameToKey,
+                                       ifname);
+-        if (!ifkey) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("ifname \"%s\" not in key map"), ifname);
++        if (!ifkey)
+             goto cleanup;
+-        }
+ 
+         ignore_value(virHashRemoveEntry(virNWFilterSnoopState.ifnameToKey,
+                                         ifname));
+-- 
+1.9.2
+

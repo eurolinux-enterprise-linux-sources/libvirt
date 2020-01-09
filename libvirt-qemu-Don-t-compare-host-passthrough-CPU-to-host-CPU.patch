@@ -1,0 +1,98 @@
+From c840ab85aed49f5841ea50ffa8500bf16e0dec91 Mon Sep 17 00:00:00 2001
+Message-Id: <c840ab85aed49f5841ea50ffa8500bf16e0dec91@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 4 Mar 2016 15:52:09 +0100
+Subject: [PATCH] qemu: Don't compare host-passthrough CPU to host CPU
+
+This is a RHEL-6 only version of how upstream handles host-passthrough
+CPUs thanks to the following commits:
+
+adf0d770  qemu: Remove CPU features functions calling for non-x86 platform
+445a09bdc qemu: Don't compare CPU against host for TCG
+adff345e1 qemu: Allow enabling/disabling features with host-passthrough
+
+In other words, upstream no longer tries to compare a host-passthrough
+guest CPU with a host CPU.
+
+Backporting all of them (or even more if we wanted cleaner backports) is
+too risky and unnecessary since RHEL-6 does not support TCG or non-x86
+architectures.
+
+This patch fixes a crash of libvirtd which may happen when restoring a
+domain with host-passthrough CPU once we started to use correct flags
+thanks to "qemu: Fix formatting flags in qemuDomainSaveImageOpen" patch.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1307094
+https://bugzilla.redhat.com/show_bug.cgi?id=1310747
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c | 48 +++++++++++++++++++++++++-----------------------
+ 1 file changed, 25 insertions(+), 23 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 3ad5c26..55196ba 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4515,33 +4515,35 @@ qemuBuildCpuArgStr(const struct qemud_driver *driver,
+             cpuUpdate(cpu, host) < 0)
+             goto cleanup;
+ 
+-        cmp = cpuGuestData(host, cpu, &data, &compare_msg);
+-        switch (cmp) {
+-        case VIR_CPU_COMPARE_INCOMPATIBLE:
+-            if (compare_msg) {
+-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                               _("guest and host CPU are not compatible: %s"),
+-                               compare_msg);
+-            } else {
+-                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+-                               _("guest CPU is not compatible with host CPU"));
++        if (cpu->mode != VIR_CPU_MODE_HOST_PASSTHROUGH) {
++            cmp = cpuGuestData(host, cpu, &data, &compare_msg);
++            switch (cmp) {
++            case VIR_CPU_COMPARE_INCOMPATIBLE:
++                if (compare_msg) {
++                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                                   _("guest and host CPU are not compatible: %s"),
++                                   compare_msg);
++                } else {
++                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                                   _("guest CPU is not compatible with host CPU"));
++                }
++                /* fall through */
++            case VIR_CPU_COMPARE_ERROR:
++                goto cleanup;
++
++            default:
++                break;
+             }
+-            /* fall through */
+-        case VIR_CPU_COMPARE_ERROR:
+-            goto cleanup;
+ 
+-        default:
+-            break;
++            /* Only 'svm' requires --enable-nesting. The nested
++             * 'vmx' patches now simply hook off the CPU features
++             */
++            hasSVM = cpuHasFeature(host->arch, data, "svm");
++            if (hasSVM < 0)
++                goto cleanup;
++            *hasHwVirt = hasSVM > 0 ? true : false;
+         }
+ 
+-        /* Only 'svm' requires --enable-nesting. The nested
+-         * 'vmx' patches now simply hook off the CPU features
+-         */
+-        hasSVM = cpuHasFeature(host->arch, data, "svm");
+-        if (hasSVM < 0)
+-            goto cleanup;
+-        *hasHwVirt = hasSVM > 0 ? true : false;
+-
+         if (cpu->mode == VIR_CPU_MODE_HOST_PASSTHROUGH) {
+             const char *mode = virCPUModeTypeToString(cpu->mode);
+             if (!qemuCapsGet(caps, QEMU_CAPS_CPU_HOST)) {
+-- 
+2.7.2
+

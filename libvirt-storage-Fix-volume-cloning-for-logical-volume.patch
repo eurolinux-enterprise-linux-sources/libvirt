@@ -1,0 +1,48 @@
+From 9581b40a1613c36a326d7dcf8f76d64752af662d Mon Sep 17 00:00:00 2001
+Message-Id: <9581b40a1613c36a326d7dcf8f76d64752af662d.1373271640.git.jdenemar@redhat.com>
+From: Atsushi Kumagai <kumagai-atsushi@mxc.nes.nec.co.jp>
+Date: Wed, 10 Apr 2013 18:10:57 +0200
+Subject: [PATCH] storage: Fix volume cloning for logical volume.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=948678
+
+When creating a logical volume with virStorageVolCreateXMLFrom,
+"qemu-img convert" is called internally if clonevol is a file volume.
+Then, vol->target.format is used as output_fmt parameter but the
+target.format of logical volumes is always 0 because logical volumes
+haven't the volume format type element.
+
+Fortunately, 0 was treated as RAW file format before commit f772b3d9,
+so there was no problem. But now, 0 is treated as the type of none,
+qemu-img fails with "Unknown file format 'none'".
+
+This patch fixes this issue by treating output block devices as RAW
+file format like for input block devices.
+
+Signed-off-by: Atsushi Kumagai <kumagai-atsushi@mxc.nes.nec.co.jp>
+(cherry picked from commit d369e50825b88251d13a489efa2a58919b18a2c2)
+---
+ src/storage/storage_backend.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/storage/storage_backend.c b/src/storage/storage_backend.c
+index a32942f..db029e1 100644
+--- a/src/storage/storage_backend.c
++++ b/src/storage/storage_backend.c
+@@ -673,7 +673,12 @@ virStorageBackendCreateQemuImg(virConnectPtr conn,
+ 
+     virCheckFlags(0, -1);
+ 
+-    const char *type = virStorageFileFormatTypeToString(vol->target.format);
++    /* Treat output block devices as 'raw' format */
++    const char *type =
++        virStorageFileFormatTypeToString(vol->type == VIR_STORAGE_VOL_BLOCK ?
++                                         VIR_STORAGE_FILE_RAW :
++                                         vol->target.format);
++
+     const char *backingType = vol->backingStore.path ?
+         virStorageFileFormatTypeToString(vol->backingStore.format) : NULL;
+ 
+-- 
+1.8.2.1
+

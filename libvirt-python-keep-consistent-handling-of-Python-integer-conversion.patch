@@ -1,0 +1,56 @@
+From 0ba2380b69fdda459d0ea49b60192e3481ef4911 Mon Sep 17 00:00:00 2001
+Message-Id: <0ba2380b69fdda459d0ea49b60192e3481ef4911.1350297261.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Fri, 12 Oct 2012 21:24:47 +0800
+Subject: [PATCH] python: keep consistent handling of Python integer
+ conversion
+
+Resolve BZ:https://bugzilla.redhat.com/show_bug.cgi?id=816609
+(cherry picked from commit 283f1c4aef8736d61c3965874a837537fea05dbc)
+
+libvirt_ulonglongUnwrap requires the integer type of python obj.
+But libvirt_longlongUnwrap still could handle python obj of
+Pyfloat_type which causes the float value to be rounded up
+to an integer.
+
+For example
+ >>> dom.setSchedulerParameters({'vcpu_quota': 0.88})
+ 0
+libvirt_longlongUnwrap treats 0.88 as a valid value 0
+
+However
+ >>> dom.setSchedulerParameters({'cpu_shares': 1000.22})
+libvirt_ulonglongUnwrap will throw out an error
+"TypeError: an integer is required"
+
+The patch make this consistent.
+---
+ python/typewrappers.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/python/typewrappers.c b/python/typewrappers.c
+index c525e59..76400a6 100644
+--- a/python/typewrappers.c
++++ b/python/typewrappers.c
+@@ -200,12 +200,16 @@ libvirt_ulongUnwrap(PyObject *obj, unsigned long *val)
+ int
+ libvirt_longlongUnwrap(PyObject *obj, long long *val)
+ {
+-    long long llong_val;
++    long long llong_val = -1;
+ 
+     /* If obj is of PyInt_Type, PyLong_AsLongLong
+      * will call PyInt_AsLong() to handle it automatically.
+      */
+-    llong_val = PyLong_AsLongLong(obj);
++    if (PyInt_Check(obj) || PyLong_Check(obj))
++        llong_val = PyLong_AsLongLong(obj);
++    else
++        PyErr_SetString(PyExc_TypeError, "an integer is required");
++
+     if ((llong_val == -1) && PyErr_Occurred())
+         return -1;
+ 
+-- 
+1.7.12.3
+

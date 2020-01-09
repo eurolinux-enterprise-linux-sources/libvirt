@@ -1,0 +1,42 @@
+From 69f95843a52d5eae3d96bda3585c31f759c54122 Mon Sep 17 00:00:00 2001
+Message-Id: <69f95843a52d5eae3d96bda3585c31f759c54122@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 23 Jun 2014 19:57:53 +0200
+Subject: [PATCH] formatdomain.html.in: Document implementation limitation of
+ QoS
+
+https://bugzilla.redhat.com/show_bug.cgi?id=980350
+
+The outbound/@peak is ignored (since QoS was introduced). This is due to
+kernel limitation of know allowing ingress filters to have peak just
+average rate. However, we should document this limitation to not confuse
+users.
+
+(cherry picked from commit d7a4a9b2ffe134eaf33c1965ab29a0fae416e166)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+
+Conflicts:
+	docs/formatdomain.html.in: Context as ec6474b2 is not backported
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index d9e0392..e1a1d44 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -3114,7 +3114,9 @@ qemu-kvm -net nic,model=? /dev/null
+       <code>peak</code> speed. Accepted values for attributes are integer
+       numbers. The units for <code>average</code> and <code>peak</code> attributes
+       are kilobytes per second, and for the <code>burst</code> just kilobytes.
+-      <span class="since">Since 0.9.4</span>
++      Note the limitation of implementation: the <code>peak</code> attribute in
++      <code>outbound</code> element is ignored (as linux ingress filters don't
++      know it yet). <span class="since">Since 0.9.4</span>
+     </p>
+ 
+     <h5><a name="elementVlanTag">Setting VLAN tag (on supported network types only)</a></h5>
+-- 
+2.0.0
+

@@ -1,0 +1,44 @@
+From 60005c622e404a91aec1fb62b352eec06dd250a5 Mon Sep 17 00:00:00 2001
+Message-Id: <60005c622e404a91aec1fb62b352eec06dd250a5@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 10 Apr 2014 18:23:10 +0200
+Subject: [PATCH] doc: Clarify usage of SELinux baselabel
+
+https://bugzilla.redhat.com/show_bug.cgi?id=954245
+
+State what fields are used when generating SELinux labels from a
+baselabel.
+
+(cherry picked from commit 278a833922a60e3cd65a05f71f1e19eead84c1d3)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 1856de7..45005fe 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -4355,8 +4355,16 @@ qemu-kvm -net nic,model=? /dev/null
+       </dd>
+       <dt><code>baselabel</code></dt>
+       <dd>If dynamic labelling is used, this can optionally be
+-        used to specify the base security label. The format
+-        of the content depends on the security driver in use.
++        used to specify the base security label that will be used to generate
++        the actual label. The format of the content depends on the security
++        driver in use.
++
++        The SELinux driver uses only the <code>type</code> field of the
++        baselabel in the generated label. Other fields are inherited from
++        the parent process when using SELinux baselabels.
++
++        (The example above demonstrates the use of <code>my_svirt_t</code>
++        as the value for the <code>type</code> field.)
+       </dd>
+       <dt><code>imagelabel</code></dt>
+       <dd>This is an output only element, which shows the
+-- 
+1.9.2
+

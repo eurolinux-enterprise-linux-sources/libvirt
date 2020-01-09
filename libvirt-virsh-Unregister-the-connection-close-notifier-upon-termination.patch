@@ -1,0 +1,66 @@
+From 83b1963fbaefb5f90f54a98fca8bef2c72962b89 Mon Sep 17 00:00:00 2001
+Message-Id: <83b1963fbaefb5f90f54a98fca8bef2c72962b89.1373271641.git.jdenemar@redhat.com>
+From: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+Date: Wed, 10 Apr 2013 16:26:04 -0600
+Subject: [PATCH] virsh: Unregister the connection close notifier upon
+ termination
+
+https://bugzilla.redhat.com/show_bug.cgi?id=911609
+
+Before closing the connection we unregister the close callback
+to prevent a reference leak.
+
+Further, the messages on virConnectClose != 0 are a bit more specific
+now.
+
+Signed-off-by: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+(cherry picked from commit e964ba2786f6736613de1f14db4d3407f6928f50)
+---
+ tools/virsh.c | 23 ++++++++++++++++++-----
+ 1 file changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/tools/virsh.c b/tools/virsh.c
+index ba1d78d..5dda015 100644
+--- a/tools/virsh.c
++++ b/tools/virsh.c
+@@ -323,9 +323,18 @@ vshReconnect(vshControl *ctl)
+ {
+     bool connected = false;
+ 
+-    if (ctl->conn != NULL) {
++    if (ctl->conn) {
++        int ret;
++
+         connected = true;
+-        virConnectClose(ctl->conn);
++
++        virConnectUnregisterCloseCallback(ctl->conn, vshCatchDisconnect);
++        ret = virConnectClose(ctl->conn);
++        if (ret < 0)
++            vshError(ctl, "%s", _("Failed to disconnect from the hypervisor"));
++        else if (ret > 0)
++            vshError(ctl, "%s", _("One or more references were leaked after "
++                                  "disconnect from the hypervisor"));
+     }
+ 
+     ctl->conn = virConnectOpenAuth(ctl->name,
+@@ -2590,9 +2599,13 @@ vshDeinit(vshControl *ctl)
+     VIR_FREE(ctl->name);
+     if (ctl->conn) {
+         int ret;
+-        if ((ret = virConnectClose(ctl->conn)) != 0) {
+-            vshError(ctl, _("Failed to disconnect from the hypervisor, %d leaked reference(s)"), ret);
+-        }
++        virConnectUnregisterCloseCallback(ctl->conn, vshCatchDisconnect);
++        ret = virConnectClose(ctl->conn);
++        if (ret < 0)
++            vshError(ctl, "%s", _("Failed to disconnect from the hypervisor"));
++        else if (ret > 0)
++            vshError(ctl, "%s", _("One or more references were leaked after "
++                                  "disconnect from the hypervisor"));
+     }
+     virResetLastError();
+ 
+-- 
+1.8.2.1
+

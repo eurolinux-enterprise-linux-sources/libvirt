@@ -1,0 +1,29 @@
+From c6b1535e67a73d7f45bd3a1bf93c4ef13bcc6bef Mon Sep 17 00:00:00 2001
+Message-Id: <c6b1535e67a73d7f45bd3a1bf93c4ef13bcc6bef.1373271640.git.jdenemar@redhat.com>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 14 Mar 2013 11:19:14 -0400
+Subject: [PATCH] storage: Need to add virCommandFree()
+
+https://bugzilla.redhat.com/show_bug.cgi?id=906299
+
+(cherry picked from commit 5e556b60c9495fb263d67bb19d09f63e252bd587)
+---
+ src/storage/storage_backend_fs.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index 862e4c6..7578a62 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -648,6 +648,8 @@ virStorageBackendExecuteMKFS(const char *device,
+                              format, device);
+         ret = -1;
+     }
++
++    virCommandFree(cmd);
+     return ret;
+ }
+ #else /* #ifdef MKFS */
+-- 
+1.8.2.1
+

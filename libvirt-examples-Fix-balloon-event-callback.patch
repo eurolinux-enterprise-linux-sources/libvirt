@@ -1,0 +1,29 @@
+From 1e5ea3d3c8e6fa1503e295f26366d6286ef6dda5 Mon Sep 17 00:00:00 2001
+Message-Id: <1e5ea3d3c8e6fa1503e295f26366d6286ef6dda5.1355319681.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 11 Dec 2012 13:48:58 +0100
+Subject: [PATCH] examples: Fix balloon event callback
+
+https://bugzilla.redhat.com/show_bug.cgi?id=884650
+
+(cherry picked from commit d648b056783bbc4cdb3b89edd270c13d20462682)
+---
+ examples/domain-events/events-python/event-test.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/examples/domain-events/events-python/event-test.py b/examples/domain-events/events-python/event-test.py
+index 786e158..a04f8b5 100644
+--- a/examples/domain-events/events-python/event-test.py
++++ b/examples/domain-events/events-python/event-test.py
+@@ -490,7 +490,7 @@ def myDomainEventPMWakeupCallback(conn, dom, reason, opaque):
+ def myDomainEventPMSuspendCallback(conn, dom, reason, opaque):
+     print "myDomainEventPMSuspendCallback: Domain %s(%s) system pmsuspend" % (
+             dom.name(), dom.ID())
+-def myDomainEventBalloonChangeCallback(conn, dom, utcoffset, actual):
++def myDomainEventBalloonChangeCallback(conn, dom, actual, opaque):
+     print "myDomainEventBalloonChangeCallback: Domain %s(%s) %d" % (dom.name(), dom.ID(), actual)
+ def myDomainEventPMSuspendDiskCallback(conn, dom, reason, opaque):
+     print "myDomainEventPMSuspendDiskCallback: Domain %s(%s) system pmsuspend_disk" % (
+-- 
+1.8.0
+

@@ -1,0 +1,36 @@
+From 3b468be4e4d6e5f3df0134d788a75ae9f8e3e796 Mon Sep 17 00:00:00 2001
+Message-Id: <3b468be4e4d6e5f3df0134d788a75ae9f8e3e796.1374158623.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 16 Jul 2013 17:25:17 +0200
+Subject: [PATCH] qemu: Fix double free of returned JSON array in
+ qemuAgentGetVCPUs()
+
+https://bugzilla.redhat.com/show_bug.cgi?id=984821
+
+A part of the returned monitor response was freed twice and caused
+crashes of the daemon when using guest agent cpu count retrieval.
+
+ # virsh vcpucount dom --guest
+
+Introduced in v1.0.6-48-gc6afcb0
+
+(cherry picked from commit dfc692350a04a70b4ca65667c30869b3bfdaf034)
+---
+ src/qemu/qemu_agent.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/qemu/qemu_agent.c b/src/qemu/qemu_agent.c
+index 46fafa1..4288d14 100644
+--- a/src/qemu/qemu_agent.c
++++ b/src/qemu/qemu_agent.c
+@@ -1522,7 +1522,6 @@ qemuAgentGetVCPUs(qemuAgentPtr mon,
+ cleanup:
+     virJSONValueFree(cmd);
+     virJSONValueFree(reply);
+-    virJSONValueFree(data);
+     return ret;
+ }
+ 
+-- 
+1.8.3.2
+

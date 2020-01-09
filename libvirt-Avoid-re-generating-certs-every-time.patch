@@ -1,0 +1,1048 @@
+From c82be0b4fa0d6cd382e14e4564a0db7cd033edb7 Mon Sep 17 00:00:00 2001
+Message-Id: <c82be0b4fa0d6cd382e14e4564a0db7cd033edb7.1376483448.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 13 Aug 2013 16:40:39 +0100
+Subject: [PATCH] Avoid re-generating certs every time
+
+For https://bugzilla.redhat.com/show_bug.cgi?id=975201
+
+Currently every test case in the TLS test suite generates the
+certs fresh. This is a waste of time, since its parameters
+don't change across test cases. Create certs once in main
+method.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 90811c5987870f348ebc545b5a6d127cc2076723)
+---
+ tests/virnettlscontexttest.c | 670 +++++++++++++++++++++++--------------------
+ tests/virnettlshelpers.c     |   9 +-
+ tests/virnettlshelpers.h     |   4 +-
+ tests/virnettlssessiontest.c | 152 +++++-----
+ 4 files changed, 445 insertions(+), 390 deletions(-)
+
+diff --git a/tests/virnettlscontexttest.c b/tests/virnettlscontexttest.c
+index 12fce13..b4797cc 100644
+--- a/tests/virnettlscontexttest.c
++++ b/tests/virnettlscontexttest.c
+@@ -62,10 +62,6 @@ static int testTLSContextInit(const void *opaque)
+     virNetTLSContextPtr ctxt = NULL;
+     int ret = -1;
+ 
+-    testTLSGenerateCert(&data->careq);
+-    data->certreq.cacrt = data->careq.crt;
+-    testTLSGenerateCert(&data->certreq);
+-
+     if (data->isServer) {
+         ctxt = virNetTLSContextNewServer(data->careq.filename,
+                                          NULL,
+@@ -103,8 +99,6 @@ static int testTLSContextInit(const void *opaque)
+ 
+ cleanup:
+     virObjectUnref(ctxt);
+-    testTLSDiscardCert(&data->careq);
+-    testTLSDiscardCert(&data->certreq);
+     return ret;
+ }
+ 
+@@ -124,38 +118,54 @@ mymain(void)
+         data.careq = _caReq;                                            \
+         data.certreq = _certReq;                                        \
+         data.expectFail = _expectFail;                                  \
+-        if (virtTestRun("TLS Context", 1, testTLSContextInit, &data) < 0) \
++        if (virtTestRun("TLS Context " #_caReq  " + " #_certReq, 1,     \
++                        testTLSContextInit, &data) < 0)                 \
+             ret = -1;                                                   \
+     } while (0)
+ 
++# define TLS_CERT_REQ(varname, cavarname,                               \
++                      co, cn, an1, an2, ia1, ia2, bce, bcc, bci,        \
++                      kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, eo)      \
++    static struct testTLSCertReq varname = {                            \
++        NULL, #varname ".pem",                                          \
++        co, cn, an1, an2, ia1, ia2, bce, bcc, bci,                      \
++        kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, eo                     \
++    };                                                                  \
++    testTLSGenerateCert(&varname, cavarname.crt)
++
++# define TLS_ROOT_REQ(varname,                                          \
++                      co, cn, an1, an2, ia1, ia2, bce, bcc, bci,        \
++                      kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, eo)      \
++    static struct testTLSCertReq varname = {                            \
++        NULL, #varname ".pem",                                          \
++        co, cn, an1, an2, ia1, ia2, bce, bcc, bci,                      \
++        kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, eo                     \
++    };                                                                  \
++    testTLSGenerateCert(&varname, NULL)
++
++
+     /* A perfect CA, perfect client & perfect server */
+ 
+     /* Basic:CA:critical */
+-    static struct testTLSCertReq cacertreq = {
+-        NULL, NULL, "cacert.pem", "UK",
+-        "libvirt CA", NULL, NULL, NULL, NULL,
+-        true, true, true,
+-        true, true, GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
+-    static struct testTLSCertReq servercertreq = {
+-        NULL, NULL, "servercert.pem", "UK",
+-        "libvirt.org", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
+-        true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
+-        0, 0,
+-    };
+-    static struct testTLSCertReq clientcertreq = {
+-        NULL, NULL, "clientcert.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
+-        true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
+-        0, 0,
+-    };
+-
++    TLS_ROOT_REQ(cacertreq,
++                 "UK", "libvirt CA", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
++
++    TLS_CERT_REQ(servercertreq, cacertreq,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
++    TLS_CERT_REQ(clientcertreq, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
++                 0, 0);
+ 
+     DO_CTX_TEST(true, cacertreq, servercertreq, false);
+     DO_CTX_TEST(false, cacertreq, clientcertreq, false);
+@@ -164,249 +174,241 @@ mymain(void)
+     /* Some other CAs which are good */
+ 
+     /* Basic:CA:critical */
+-    static struct testTLSCertReq cacert1req = {
+-        NULL, NULL, "cacert1.pem", "UK",
+-        "libvirt CA 1", NULL, NULL, NULL, NULL,
+-        true, true, true,
+-        false, false, 0,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_ROOT_REQ(cacert1req,
++                 "UK", "libvirt CA 1", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 false, false, 0,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(servercert1req, cacert1req,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
++
+     /* Basic:CA:not-critical */
+-    static struct testTLSCertReq cacert2req = {
+-        NULL, NULL, "cacert2.pem", "UK",
+-        "libvirt CA 2", NULL, NULL, NULL, NULL,
+-        true, false, true,
+-        false, false, 0,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_ROOT_REQ(cacert2req,
++                 "UK", "libvirt CA 2", NULL, NULL, NULL, NULL,
++                 true, false, true,
++                 false, false, 0,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(servercert2req, cacert2req,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
++
+     /* Key usage:cert-sign:critical */
+-    static struct testTLSCertReq cacert3req = {
+-        NULL, NULL, "cacert3.pem", "UK",
+-        "libvirt CA 3", NULL, NULL, NULL, NULL,
+-        true, true, true,
+-        true, true, GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
+-
+-    DO_CTX_TEST(true, cacert1req, servercertreq, false);
+-    DO_CTX_TEST(true, cacert2req, servercertreq, false);
+-    DO_CTX_TEST(true, cacert3req, servercertreq, false);
++    TLS_ROOT_REQ(cacert3req,
++                 "UK", "libvirt CA 3", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(servercert3req, cacert3req,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
++
++    DO_CTX_TEST(true, cacert1req, servercert1req, false);
++    DO_CTX_TEST(true, cacert2req, servercert2req, false);
++    DO_CTX_TEST(true, cacert3req, servercert3req, false);
+ 
+     /* Now some bad certs */
+ 
+     /* Key usage:dig-sig:not-critical */
+-    static struct testTLSCertReq cacert4req = {
+-        NULL, NULL, "cacert4.pem", "UK",
+-        "libvirt CA 4", NULL, NULL, NULL, NULL,
+-        true, true, true,
+-        true, false, GNUTLS_KEY_DIGITAL_SIGNATURE,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_ROOT_REQ(cacert4req,
++                 "UK", "libvirt CA 4", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, false, GNUTLS_KEY_DIGITAL_SIGNATURE,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(servercert4req, cacert4req,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
+     /* no-basic */
+-    static struct testTLSCertReq cacert5req = {
+-        NULL, NULL, "cacert5.pem", "UK",
+-        "libvirt CA 5", NULL, NULL, NULL, NULL,
+-        false, false, false,
+-        false, false, 0,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_ROOT_REQ(cacert5req,
++                 "UK", "libvirt CA 5", NULL, NULL, NULL, NULL,
++                 false, false, false,
++                 false, false, 0,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(servercert5req, cacert5req,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
+     /* Key usage:dig-sig:critical */
+-    static struct testTLSCertReq cacert6req = {
+-        NULL, NULL, "cacert6.pem", "UK",
+-        "libvirt CA 6", NULL, NULL, NULL, NULL,
+-        true, true, true,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_ROOT_REQ(cacert6req,
++                 "UK", "libvirt CA 6", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(servercert6req, cacert6req,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
+ 
+     /* Technically a CA cert with basic constraints
+      * key purpose == key signing + non-critical should
+      * be rejected. GNUTLS < 3 does not reject it and
+      * we don't anticipate them changing this behaviour
+      */
+-    DO_CTX_TEST(true, cacert4req, servercertreq, GNUTLS_VERSION_MAJOR >= 3);
+-    DO_CTX_TEST(true, cacert5req, servercertreq, true);
+-    DO_CTX_TEST(true, cacert6req, servercertreq, true);
++    DO_CTX_TEST(true, cacert4req, servercert4req, GNUTLS_VERSION_MAJOR >= 3);
++    DO_CTX_TEST(true, cacert5req, servercert5req, true);
++    DO_CTX_TEST(true, cacert6req, servercert6req, true);
+ 
+ 
+     /* Various good servers */
+     /* no usage or purpose */
+-    static struct testTLSCertReq servercert1req = {
+-        NULL, NULL, "servercert1.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercert7req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 false, false, NULL, NULL,
++                 0, 0);
+     /* usage:cert-sign+dig-sig+encipher:critical */
+-    static struct testTLSCertReq servercert2req = {
+-        NULL, NULL, "servercert2.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT | GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercert8req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT | GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
+     /* usage:cert-sign:not-critical */
+-    static struct testTLSCertReq servercert3req = {
+-        NULL, NULL, "servercert3.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, false, GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercert9req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, false, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
+     /* purpose:server:critical */
+-    static struct testTLSCertReq servercert4req = {
+-        NULL, NULL, "servercert4.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercert10req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
+     /* purpose:server:not-critical */
+-    static struct testTLSCertReq servercert5req = {
+-        NULL, NULL, "servercert5.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        true, false, GNUTLS_KP_TLS_WWW_SERVER, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercert11req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 true, false, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
+     /* purpose:client+server:critical */
+-    static struct testTLSCertReq servercert6req = {
+-        NULL, NULL, "servercert6.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        true, true, GNUTLS_KP_TLS_WWW_CLIENT, GNUTLS_KP_TLS_WWW_SERVER,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercert12req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, GNUTLS_KP_TLS_WWW_SERVER,
++                 0, 0);
+     /* purpose:client+server:not-critical */
+-    static struct testTLSCertReq servercert7req = {
+-        NULL, NULL, "servercert7.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        true, false, GNUTLS_KP_TLS_WWW_CLIENT, GNUTLS_KP_TLS_WWW_SERVER,
+-        0, 0,
+-    };
+-
+-    DO_CTX_TEST(true, cacertreq, servercert1req, false);
+-    DO_CTX_TEST(true, cacertreq, servercert2req, false);
+-    DO_CTX_TEST(true, cacertreq, servercert3req, false);
+-    DO_CTX_TEST(true, cacertreq, servercert4req, false);
+-    DO_CTX_TEST(true, cacertreq, servercert5req, false);
+-    DO_CTX_TEST(true, cacertreq, servercert6req, false);
++    TLS_CERT_REQ(servercert13req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 true, false, GNUTLS_KP_TLS_WWW_CLIENT, GNUTLS_KP_TLS_WWW_SERVER,
++                 0, 0);
++
+     DO_CTX_TEST(true, cacertreq, servercert7req, false);
++    DO_CTX_TEST(true, cacertreq, servercert8req, false);
++    DO_CTX_TEST(true, cacertreq, servercert9req, false);
++    DO_CTX_TEST(true, cacertreq, servercert10req, false);
++    DO_CTX_TEST(true, cacertreq, servercert11req, false);
++    DO_CTX_TEST(true, cacertreq, servercert12req, false);
++    DO_CTX_TEST(true, cacertreq, servercert13req, false);
+     /* Bad servers */
+ 
+     /* usage:cert-sign:critical */
+-    static struct testTLSCertReq servercert8req = {
+-        NULL, NULL, "servercert8.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercert14req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
+     /* purpose:client:critical */
+-    static struct testTLSCertReq servercert9req = {
+-        NULL, NULL, "servercert9.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercert15req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
++                 0, 0);
+     /* usage: none:critical */
+-    static struct testTLSCertReq servercert10req = {
+-        NULL, NULL, "servercert10.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, 0,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercert16req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, 0,
++                 false, false, NULL, NULL,
++                 0, 0);
+ 
+-    DO_CTX_TEST(true, cacertreq, servercert8req, true);
+-    DO_CTX_TEST(true, cacertreq, servercert9req, true);
+-    DO_CTX_TEST(true, cacertreq, servercert10req, true);
++    DO_CTX_TEST(true, cacertreq, servercert14req, true);
++    DO_CTX_TEST(true, cacertreq, servercert15req, true);
++    DO_CTX_TEST(true, cacertreq, servercert16req, true);
+ 
+ 
+ 
+     /* Various good clients */
+     /* no usage or purpose */
+-    static struct testTLSCertReq clientcert1req = {
+-        NULL, NULL, "clientcert1.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(clientcert1req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 false, false, NULL, NULL,
++                 0, 0);
+     /* usage:cert-sign+dig-sig+encipher:critical */
+-    static struct testTLSCertReq clientcert2req = {
+-        NULL, NULL, "clientcert2.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT | GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(clientcert2req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT | GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
+     /* usage:cert-sign:not-critical */
+-    static struct testTLSCertReq clientcert3req = {
+-        NULL, NULL, "clientcert3.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, false, GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(clientcert3req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, false, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
+     /* purpose:client:critical */
+-    static struct testTLSCertReq clientcert4req = {
+-        NULL, NULL, "clientcert4.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(clientcert4req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
++                 0, 0);
+     /* purpose:client:not-critical */
+-    static struct testTLSCertReq clientcert5req = {
+-        NULL, NULL, "clientcert5.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        true, false, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(clientcert5req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 true, false, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
++                 0, 0);
+     /* purpose:client+client:critical */
+-    static struct testTLSCertReq clientcert6req = {
+-        NULL, NULL, "clientcert6.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        true, true, GNUTLS_KP_TLS_WWW_CLIENT, GNUTLS_KP_TLS_WWW_SERVER,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(clientcert6req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, GNUTLS_KP_TLS_WWW_SERVER,
++                 0, 0);
+     /* purpose:client+client:not-critical */
+-    static struct testTLSCertReq clientcert7req = {
+-        NULL, NULL, "clientcert7.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        true, false, GNUTLS_KP_TLS_WWW_CLIENT, GNUTLS_KP_TLS_WWW_SERVER,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(clientcert7req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 true, false, GNUTLS_KP_TLS_WWW_CLIENT, GNUTLS_KP_TLS_WWW_SERVER,
++                 0, 0);
+ 
+     DO_CTX_TEST(false, cacertreq, clientcert1req, false);
+     DO_CTX_TEST(false, cacertreq, clientcert2req, false);
+@@ -418,32 +420,26 @@ mymain(void)
+     /* Bad clients */
+ 
+     /* usage:cert-sign:critical */
+-    static struct testTLSCertReq clientcert8req = {
+-        NULL, NULL, "clientcert8.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(clientcert8req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
+     /* purpose:client:critical */
+-    static struct testTLSCertReq clientcert9req = {
+-        NULL, NULL, "clientcert9.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        false, false, 0,
+-        true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(clientcert9req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 false, false, 0,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
+     /* usage: none:critical */
+-    static struct testTLSCertReq clientcert10req = {
+-        NULL, NULL, "clientcert10.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, 0,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(clientcert10req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, 0,
++                 false, false, NULL, NULL,
++                 0, 0);
+ 
+     DO_CTX_TEST(false, cacertreq, clientcert8req, true);
+     DO_CTX_TEST(false, cacertreq, clientcert9req, true);
+@@ -453,66 +449,114 @@ mymain(void)
+ 
+     /* Expired stuff */
+ 
+-    static struct testTLSCertReq cacertexpreq = {
+-        NULL, NULL, "cacert.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, true,
+-        true, true, GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        0, -1,
+-    };
+-    static struct testTLSCertReq servercertexpreq = {
+-        NULL, NULL, "servercert.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
+-        true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
+-        0, -1,
+-    };
+-    static struct testTLSCertReq clientcertexpreq = {
+-        NULL, NULL, "clientcert.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
+-        true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
+-        0, -1,
+-    };
+-
+-    DO_CTX_TEST(true, cacertexpreq, servercertreq, true);
+-    DO_CTX_TEST(true, cacertreq, servercertexpreq, true);
+-    DO_CTX_TEST(false, cacertreq, clientcertexpreq, true);
++    TLS_ROOT_REQ(cacertexpreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, -1);
++    TLS_CERT_REQ(servercertexpreq, cacertexpreq,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
++    TLS_CERT_REQ(servercertexp1req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, -1);
++    TLS_CERT_REQ(clientcertexp1req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
++                 0, -1);
++
++    DO_CTX_TEST(true, cacertexpreq, servercertexpreq, true);
++    DO_CTX_TEST(true, cacertreq, servercertexp1req, true);
++    DO_CTX_TEST(false, cacertreq, clientcertexp1req, true);
+ 
+ 
+     /* Not activated stuff */
+ 
+-    static struct testTLSCertReq cacertnewreq = {
+-        NULL, NULL, "cacert.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, true,
+-        true, true, GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        1, 2,
+-    };
+-    static struct testTLSCertReq servercertnewreq = {
+-        NULL, NULL, "servercert.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
+-        true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
+-        1, 2,
+-    };
+-    static struct testTLSCertReq clientcertnewreq = {
+-        NULL, NULL, "clientcert.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
+-        true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
+-        1, 2,
+-    };
+-
+-    DO_CTX_TEST(true, cacertnewreq, servercertreq, true);
+-    DO_CTX_TEST(true, cacertreq, servercertnewreq, true);
+-    DO_CTX_TEST(false, cacertreq, clientcertnewreq, true);
++    TLS_ROOT_REQ(cacertnewreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 1, 2);
++    TLS_CERT_REQ(servercertnewreq, cacertnewreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
++    TLS_CERT_REQ(servercertnew1req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 1, 2);
++    TLS_CERT_REQ(clientcertnew1req, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
++                 1, 2);
++
++    DO_CTX_TEST(true, cacertnewreq, servercertnewreq, true);
++    DO_CTX_TEST(true, cacertreq, servercertnew1req, true);
++    DO_CTX_TEST(false, cacertreq, clientcertnew1req, true);
++
++    testTLSDiscardCert(&cacertreq);
++    testTLSDiscardCert(&cacert1req);
++    testTLSDiscardCert(&cacert2req);
++    testTLSDiscardCert(&cacert3req);
++    testTLSDiscardCert(&cacert4req);
++    testTLSDiscardCert(&cacert5req);
++    testTLSDiscardCert(&cacert6req);
++
++    testTLSDiscardCert(&servercertreq);
++    testTLSDiscardCert(&servercert1req);
++    testTLSDiscardCert(&servercert2req);
++    testTLSDiscardCert(&servercert3req);
++    testTLSDiscardCert(&servercert4req);
++    testTLSDiscardCert(&servercert5req);
++    testTLSDiscardCert(&servercert6req);
++    testTLSDiscardCert(&servercert7req);
++    testTLSDiscardCert(&servercert8req);
++    testTLSDiscardCert(&servercert9req);
++    testTLSDiscardCert(&servercert10req);
++    testTLSDiscardCert(&servercert11req);
++    testTLSDiscardCert(&servercert12req);
++    testTLSDiscardCert(&servercert13req);
++    testTLSDiscardCert(&servercert14req);
++    testTLSDiscardCert(&servercert15req);
++    testTLSDiscardCert(&servercert16req);
++
++    testTLSDiscardCert(&clientcertreq);
++    testTLSDiscardCert(&clientcert1req);
++    testTLSDiscardCert(&clientcert2req);
++    testTLSDiscardCert(&clientcert3req);
++    testTLSDiscardCert(&clientcert4req);
++    testTLSDiscardCert(&clientcert5req);
++    testTLSDiscardCert(&clientcert6req);
++    testTLSDiscardCert(&clientcert7req);
++    testTLSDiscardCert(&clientcert8req);
++    testTLSDiscardCert(&clientcert9req);
++    testTLSDiscardCert(&clientcert10req);
++
++    testTLSDiscardCert(&cacertexpreq);
++    testTLSDiscardCert(&servercertexpreq);
++    testTLSDiscardCert(&servercertexp1req);
++    testTLSDiscardCert(&clientcertexp1req);
++
++    testTLSDiscardCert(&cacertnewreq);
++    testTLSDiscardCert(&servercertnewreq);
++    testTLSDiscardCert(&servercertnew1req);
++    testTLSDiscardCert(&clientcertnew1req);
+ 
+     testTLSCleanup();
+ 
+diff --git a/tests/virnettlshelpers.c b/tests/virnettlshelpers.c
+index f35ecb8..3efa9a4 100644
+--- a/tests/virnettlshelpers.c
++++ b/tests/virnettlshelpers.c
+@@ -153,7 +153,8 @@ static void testTLSDerEncode(ASN1_TYPE src,
+  * TLS certificate code
+  */
+ void
+-testTLSGenerateCert(struct testTLSCertReq *req)
++testTLSGenerateCert(struct testTLSCertReq *req,
++                    gnutls_x509_crt_t ca)
+ {
+     gnutls_x509_crt_t crt;
+     int err;
+@@ -380,10 +381,10 @@ testTLSGenerateCert(struct testTLSCertReq *req)
+ 
+ 
+     /*
+-     * If no 'cart' is set then we are self signing
+-     * the cert. This is done for CA certs
++     * If no 'ca' is set then we are self signing
++     * the cert. This is done for the root CA certs
+      */
+-    if ((err = gnutls_x509_crt_sign(crt, req->cacrt ? req->cacrt : crt, privkey) < 0)) {
++    if ((err = gnutls_x509_crt_sign(crt, ca ? ca : crt, privkey) < 0)) {
+         VIR_WARN("Failed to sign certificate %s", gnutls_strerror(err));
+         abort();
+     }
+diff --git a/tests/virnettlshelpers.h b/tests/virnettlshelpers.h
+index 3ea9978..50a4ba1 100644
+--- a/tests/virnettlshelpers.h
++++ b/tests/virnettlshelpers.h
+@@ -36,7 +36,6 @@ extern const char *keyfile;
+  */
+ struct testTLSCertReq {
+     gnutls_x509_crt_t crt;
+-    gnutls_x509_crt_t cacrt; /* If not set, then the cert will be self-signed */
+ 
+     const char *filename;
+ 
+@@ -70,7 +69,8 @@ struct testTLSCertReq {
+     int expire_offset;
+ };
+ 
+-void testTLSGenerateCert(struct testTLSCertReq *req);
++void testTLSGenerateCert(struct testTLSCertReq *req,
++                         gnutls_x509_crt_t ca);
+ void testTLSDiscardCert(struct testTLSCertReq *req);
+ 
+ void testTLSInit(void);
+diff --git a/tests/virnettlssessiontest.c b/tests/virnettlssessiontest.c
+index a2b20ab..468c193 100644
+--- a/tests/virnettlssessiontest.c
++++ b/tests/virnettlssessiontest.c
+@@ -100,20 +100,6 @@ static int testTLSSessionInit(const void *opaque)
+     ignore_value(virSetNonBlock(channel[1]));
+ 
+ 
+-    /* Generate all the certs we need for this test */
+-    testTLSGenerateCert(&data->careq);
+-    data->serverreq.cacrt = data->careq.crt;
+-    testTLSGenerateCert(&data->serverreq);
+-
+-    if (data->othercareq.filename) {
+-        testTLSGenerateCert(&data->othercareq);
+-        data->clientreq.cacrt = data->othercareq.crt;
+-    } else {
+-        data->clientreq.cacrt = data->careq.crt;
+-    }
+-    testTLSGenerateCert(&data->clientreq);
+-
+-
+     /* We skip initial sanity checks here because we
+      * want to make sure that problems are being
+      * detected at the TLS session validation stage
+@@ -243,12 +229,6 @@ cleanup:
+     virObjectUnref(serverSess);
+     virObjectUnref(clientSess);
+ 
+-    testTLSDiscardCert(&data->careq);
+-    if (data->othercareq.filename)
+-        testTLSDiscardCert(&data->othercareq);
+-    testTLSDiscardCert(&data->clientreq);
+-    testTLSDiscardCert(&data->serverreq);
+-
+     VIR_FORCE_CLOSE(channel[0]);
+     VIR_FORCE_CLOSE(channel[1]);
+     return ret;
+@@ -275,7 +255,8 @@ mymain(void)
+         data.expectClientFail = _expectClientFail;                      \
+         data.hostname = _hostname;                                      \
+         data.wildcards = _wildcards;                                    \
+-        if (virtTestRun("TLS Session", 1, testTLSSessionInit, &data) < 0) \
++        if (virtTestRun("TLS Session " #_serverReq " + " #_clientReq,   \
++                        1, testTLSSessionInit, &data) < 0)              \
+             ret = -1;                                                   \
+     } while (0)
+ 
+@@ -292,68 +273,87 @@ mymain(void)
+         data.expectClientFail = _expectClientFail;                      \
+         data.hostname = _hostname;                                      \
+         data.wildcards = _wildcards;                                    \
+-        if (virtTestRun("TLS Session", 1, testTLSSessionInit, &data) < 0) \
++        if (virtTestRun("TLS Session " #_serverReq " + " #_clientReq,   \
++                        1, testTLSSessionInit, &data) < 0)              \
+             ret = -1;                                                   \
+     } while (0)
+ 
++# define TLS_CERT_REQ(varname, cavarname,                               \
++                      co, cn, an1, an2, ia1, ia2, bce, bcc, bci,        \
++                      kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, eo)      \
++    static struct testTLSCertReq varname = {                            \
++        NULL, #varname ".pem",                                          \
++        co, cn, an1, an2, ia1, ia2, bce, bcc, bci,                      \
++        kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, so                     \
++    };                                                                  \
++    testTLSGenerateCert(&varname, cavarname.crt)
++
++# define TLS_ROOT_REQ(varname,                                          \
++                      co, cn, an1, an2, ia1, ia2, bce, bcc, bci,        \
++                      kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, eo)      \
++    static struct testTLSCertReq varname = {                            \
++        NULL, #varname ".pem",                                          \
++        co, cn, an1, an2, ia1, ia2, bce, bcc, bci,                      \
++        kue, kuc, kuv, kpe, kpc, kpo1, kpo2, so, so                     \
++    };                                                                  \
++    testTLSGenerateCert(&varname, NULL)
++
+     /* A perfect CA, perfect client & perfect server */
+ 
+     /* Basic:CA:critical */
+-    static struct testTLSCertReq cacertreq = {
+-        NULL, NULL, "cacert.pem", "UK",
+-        "libvirt CA", NULL, NULL, NULL, NULL,
+-        true, true, true,
+-        true, true, GNUTLS_KEY_KEY_CERT_SIGN,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
+-    static struct testTLSCertReq cacert1req = {
+-        NULL, NULL, "cacert1.pem", "UK",
+-        "libvirt CA 1", NULL, NULL, NULL, NULL,
+-        true, true, true,
+-        false, false, 0,
+-        false, false, NULL, NULL,
+-        0, 0,
+-    };
+-    static struct testTLSCertReq servercertreq = {
+-        NULL, NULL, "servercert.pem", "UK",
+-        "libvirt.org", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
+-        true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
+-        0, 0,
+-    };
+-    static struct testTLSCertReq clientcertreq = {
+-        NULL, NULL, "clientcert.pem", "UK",
+-        "libvirt", NULL, NULL, NULL, NULL,
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
+-        true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
+-        0, 0,
+-    };
++    TLS_ROOT_REQ(cacertreq,
++                  "UK", "libvirt CA", NULL, NULL, NULL, NULL,
++                  true, true, true,
++                  true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                  false, false, NULL, NULL,
++                  0, 0);
++
++    TLS_ROOT_REQ(altcacertreq,
++                 "UK", "libvirt CA 1", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 false, false, 0,
++                 false, false, NULL, NULL,
++                 0, 0);
++
++    TLS_CERT_REQ(servercertreq, cacertreq,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
++    TLS_CERT_REQ(clientcertreq, cacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
++                 0, 0);
++
++    TLS_CERT_REQ(clientcertaltreq, altcacertreq,
++                 "UK", "libvirt", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
++                 0, 0);
+ 
+     DO_SESS_TEST(cacertreq, servercertreq, clientcertreq, false, false, "libvirt.org", NULL);
+-    DO_SESS_TEST_EXT(cacertreq, cacert1req, servercertreq, clientcertreq, true, true, "libvirt.org", NULL);
++    DO_SESS_TEST_EXT(cacertreq, altcacertreq, servercertreq, clientcertaltreq, true, true, "libvirt.org", NULL);
++
+ 
+     /* When an altname is set, the CN is ignored, so it must be duplicated
+      * as an altname for it to match */
+-    static struct testTLSCertReq servercertalt1req = {
+-        NULL, NULL, "servercert.pem", "UK",
+-        "libvirt.org", "www.libvirt.org", "libvirt.org", "192.168.122.1", "fec0::dead:beaf",
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
+-        true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercertalt1req, cacertreq,
++                 "UK", "libvirt.org", "www.libvirt.org", "libvirt.org", "192.168.122.1", "fec0::dead:beaf",
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
+     /* This intentionally doesn't replicate */
+-    static struct testTLSCertReq servercertalt2req = {
+-        NULL, NULL, "servercert.pem", "UK",
+-        "libvirt.org", "www.libvirt.org", "wiki.libvirt.org", "192.168.122.1", "fec0::dead:beaf",
+-        true, true, false,
+-        true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
+-        true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
+-        0, 0,
+-    };
++    TLS_CERT_REQ(servercertalt2req, cacertreq,
++                 "UK", "libvirt.org", "www.libvirt.org", "wiki.libvirt.org", "192.168.122.1", "fec0::dead:beaf",
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
+ 
+     DO_SESS_TEST(cacertreq, servercertalt1req, clientcertreq, false, false, "libvirt.org", NULL);
+     DO_SESS_TEST(cacertreq, servercertalt1req, clientcertreq, false, false, "www.libvirt.org", NULL);
+@@ -396,6 +396,16 @@ mymain(void)
+     DO_SESS_TEST(cacertreq, servercertreq, clientcertreq, false, false, "libvirt.org", wildcards5);
+     DO_SESS_TEST(cacertreq, servercertreq, clientcertreq, false, false, "libvirt.org", wildcards6);
+ 
++    testTLSDiscardCert(&clientcertreq);
++    testTLSDiscardCert(&clientcertaltreq);
++
++    testTLSDiscardCert(&servercertreq);
++    testTLSDiscardCert(&servercertalt1req);
++    testTLSDiscardCert(&servercertalt2req);
++
++    testTLSDiscardCert(&cacertreq);
++    testTLSDiscardCert(&altcacertreq);
++
+     testTLSCleanup();
+ 
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+-- 
+1.8.3.2
+

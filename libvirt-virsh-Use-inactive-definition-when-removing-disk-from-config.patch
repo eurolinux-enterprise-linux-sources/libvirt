@@ -1,0 +1,42 @@
+From c10e962d84a83f3100ddc10eb0835fd123009ea3 Mon Sep 17 00:00:00 2001
+Message-Id: <c10e962d84a83f3100ddc10eb0835fd123009ea3@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 15 Jul 2014 17:33:40 +0200
+Subject: [PATCH] virsh: Use inactive definition when removing disk from config
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1117177 [6.6]
+https://bugzilla.redhat.com/show_bug.cgi?id=1049529 [7.0]
+
+The 'detach-disk' command in virsh used the active XML definition of a
+domain even when attempting to remove a disk from the config only. If
+the disk was only in the inactive definition the operation failed. Fix
+this by using the inactive XML in case that only the config is affected.
+
+(cherry picked from commit f9d06ebcef9faffc085bab68968b8bb78f49f2d0)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-domain.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index eae4d09..0eeb0a2 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -8190,7 +8190,12 @@ cmdDetachDisk(vshControl *ctl, const vshCmd *cmd)
+     if (vshCommandOptString(cmd, "target", &target) <= 0)
+         goto cleanup;
+ 
+-    if (!(doc = virDomainGetXMLDesc(dom, 0)))
++    if (flags == VIR_DOMAIN_AFFECT_CONFIG)
++        doc = virDomainGetXMLDesc(dom, VIR_DOMAIN_XML_INACTIVE);
++    else
++        doc = virDomainGetXMLDesc(dom, 0);
++
++    if (!doc)
+         goto cleanup;
+ 
+     if (persistent &&
+-- 
+2.0.0
+

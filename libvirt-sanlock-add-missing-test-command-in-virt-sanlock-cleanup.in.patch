@@ -1,0 +1,35 @@
+From 155cef2899ddf79f33c690473a9c52feb63027ec Mon Sep 17 00:00:00 2001
+Message-Id: <155cef2899ddf79f33c690473a9c52feb63027ec@dist-git>
+From: Alex Jia <ajia@redhat.com>
+Date: Wed, 28 Aug 2013 15:17:38 +0200
+Subject: [PATCH] sanlock: add missing test command in virt-sanlock-cleanup.in
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1000890
+
+Signed-off-by: Alex Jia <ajia@redhat.com>
+(cherry picked from commit c3e33e68d9785028d96be42162001d306c9b6915)
+
+Conflicts:
+	tools/virt-sanlock-cleanup.in - context, RHEL still uses
+	    uppercase @...@
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virt-sanlock-cleanup.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virt-sanlock-cleanup.in b/tools/virt-sanlock-cleanup.in
+index e143e7d..301389d 100644
+--- a/tools/virt-sanlock-cleanup.in
++++ b/tools/virt-sanlock-cleanup.in
+@@ -11,7 +11,7 @@ fi
+ LOCKSPACE="__LIBVIRT__DISKS__"
+ 
+ LOCKDIR=`augtool print '/files@SYSCONFDIR@/libvirt/qemu-sanlock.conf/disk_lease_dir'`
+-if test $? != 0 || "x$LOCKDIR" = "x" ; then
++if test $? != 0 || test "x$LOCKDIR" = "x" ; then
+   LOCKDIR="@LOCALSTATEDIR@/lib/libvirt/sanlock"
+ fi
+ 
+-- 
+1.9.2
+

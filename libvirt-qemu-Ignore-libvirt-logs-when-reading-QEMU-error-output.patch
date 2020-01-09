@@ -1,0 +1,99 @@
+From 40de5e05de4cc2afd0916dc553795b83bc629b88 Mon Sep 17 00:00:00 2001
+Message-Id: <40de5e05de4cc2afd0916dc553795b83bc629b88.1373271644.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 22 Apr 2013 18:20:21 +0200
+Subject: [PATCH] qemu: Ignore libvirt logs when reading QEMU error output
+
+https://bugzilla.redhat.com/show_bug.cgi?id=954248
+
+When QEMU fails to start, libvirt read its error output and reports it
+back in an error message. However, when libvirtd is configured to log
+debug messages, one would get the following unhelpful garbage:
+
+    virsh # start cd
+    error: Failed to start domain cd
+    error: internal error process exited while connecting to monitor: \
+      2013-04-22 14:24:54.214+0000: 2194219: debug : virFileClose:72 : \
+      Closed fd 21
+    2013-04-22 14:24:54.214+0000: 2194219: debug : virFileClose:72 : \
+      Closed fd 27
+    2013-04-22 14:24:54.215+0000: 2194219: debug : virFileClose:72 : \
+      Closed fd 3
+    2013-04-22 14:24:54.215+0000: 2194220: debug : virExec:602 : Run \
+      hook 0x7feb8f600bf0 0x7feb86ef9300
+    2013-04-22 14:24:54.215+0000: 2194220: debug : qemuProcessHook:2507 \
+      : Obtaining domain lock
+    2013-04-22 14:24:54.216+0000: 2194220: debug : \
+      virDomainLockProcessStart:170 : plugin=0x7feb780261f0 \
+      dom=0x7feb7802a360 paused=1 fd=0x7feb86ef8ec4
+    2013-04-22 14:24:54.216+0000: 2194220: debug : \
+      virDomainLockManagerNew:128 : plugin=0x7feb780261f0 \
+      dom=0x7feb7802a360 withResources=1
+    2013-04-22 14:24:54.216+0000: 2194220: debug : \
+      virLockManagerPluginGetDriver:297 : plugin=0x7feb780261f0
+    2013-04-22 14:24:54.216+0000: 2194220: debug : \
+      virLockManagerNew:321 : driver=0x7feb8ef08640 type=0 nparams=5 \
+      params=0x7feb86ef8d60 flags=0
+    2013-04-22 14:24:54.216+000
+
+instead of (the output with this patch applied):
+
+    virsh # start cd
+    error: Reconnected to the hypervisor
+    error: Failed to start domain cd
+    error: internal error process exited while connecting to monitor: \
+      char device redirected to /dev/pts/33 (label charserial0)
+    qemu-system-x86_64: -drive file=/home/vm/systemrescuecd-x86-1.2.0.\
+      iso,if=none,id=drive-ide0-1-0,readonly=on,format=raw,cache=none: \
+      could not open disk image /home/vm/systemrescuecd-x86-1.2.0.iso: \
+      Permission denied
+(cherry picked from commit 6d1b3edc6e3e86567bd88b3e5157a88e49f1b118)
+
+Conflicts:
+	src/qemu/qemu_process.c - context
+---
+ src/qemu/qemu_process.c | 19 +++----------------
+ 1 file changed, 3 insertions(+), 16 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index b7997da..c843ce9 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1697,21 +1697,6 @@ static void qemuProcessFreePtyPath(void *payload, const void *name ATTRIBUTE_UNU
+     VIR_FREE(payload);
+ }
+ 
+-static void
+-qemuProcessReadLogFD(int logfd, char *buf, int maxlen, int off)
+-{
+-    int ret;
+-    char *tmpbuf = buf + off;
+-
+-    ret = saferead(logfd, tmpbuf, maxlen - off - 1);
+-    if (ret < 0) {
+-        ret = 0;
+-    }
+-
+-    tmpbuf[ret] = '\0';
+-}
+-
+-
+ static int
+ qemuProcessWaitForMonitor(struct qemud_driver* driver,
+                           virDomainObjPtr vm,
+@@ -1766,9 +1751,11 @@ cleanup:
+     virHashFree(paths);
+ 
+     if (pos != -1 && kill(vm->pid, 0) == -1 && errno == ESRCH) {
++        int len;
+         /* VM is dead, any other error raised in the interim is probably
+          * not as important as the qemu cmdline output */
+-        qemuProcessReadLogFD(logfd, buf, buf_size, strlen(buf));
++        len = strlen(buf);
++        qemuProcessReadLog(logfd, buf + len, buf_size - len - 1, 0);
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("process exited while connecting to monitor: %s"),
+                        buf);
+-- 
+1.8.2.1
+

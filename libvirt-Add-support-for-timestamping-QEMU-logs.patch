@@ -1,0 +1,249 @@
+From f6d2d6362be4901cb641e0b8d38301164b5c6ca3 Mon Sep 17 00:00:00 2001
+Message-Id: <f6d2d6362be4901cb641e0b8d38301164b5c6ca3@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Thu, 15 May 2014 08:16:07 +0200
+Subject: [PATCH] Add support for timestamping QEMU logs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=997010
+
+QEMU commit 5e2ac51 added a boolean '-msg timestamp=[on|off]'
+option, which can enable timestamps on errors:
+$ qemu-system-x86_64 -msg timestamp=on zghhdorf
+2014-04-09T13:25:46.779484Z qemu-system-x86_64: -msg timestamp=on: could
+not open disk image zghhdorf: Could not open 'zghhdorf': No such file or
+directory
+
+Enable this timestamp if the QEMU binary supports it.
+
+Add a 'log_timestamp' option to qemu.conf for disabling this behavior.
+
+(cherry picked from commit f3be5f0c5004298bb2541b3fb27926c3cb1e5b57)
+
+Conflicts:
+	src/qemu/libvirtd_qemu.aug - missing network section
+	src/qemu/qemu.conf - missing network options
+	src/qemu/qemu_capabilities.c
+	src/qemu/qemu_capabilities.h
+	src/qemu/qemu_command.c
+	src/qemu/qemu_conf.c - downstream stores the configuration
+        directly in the qemu driver
+	src/qemu/qemu_conf.h
+	src/qemu/test_libvirtd_qemu.aug.in - missing network section
+	tests/qemucapabilitiesdata/caps_1.6.0-1.caps - not present
+    downstream
+	tests/qemucapabilitiesdata/caps_1.6.50-1.caps
+
+    tests: missing QEMU_AUDIO_DRV, pci controller,
+       initialize the option to true as virQEMUDriverConfigNew
+       sets the default upstream since commit b090aa7
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/libvirtd_qemu.aug                         |  3 +++
+ src/qemu/qemu.conf                                 |  8 ++++++
+ src/qemu/qemu_capabilities.c                       |  1 +
+ src/qemu/qemu_capabilities.h                       |  1 +
+ src/qemu/qemu_command.c                            |  4 +++
+ src/qemu/qemu_conf.c                               |  5 ++++
+ src/qemu/qemu_conf.h                               |  2 ++
+ src/qemu/test_libvirtd_qemu.aug.in                 |  1 +
+ .../qemuxml2argv-minimal-msg-timestamp.args        |  6 +++++
+ .../qemuxml2argv-minimal-msg-timestamp.xml         | 31 ++++++++++++++++++++++
+ tests/qemuxml2argvtest.c                           |  2 ++
+ 11 files changed, 64 insertions(+)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-minimal-msg-timestamp.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-minimal-msg-timestamp.xml
+
+diff --git a/src/qemu/libvirtd_qemu.aug b/src/qemu/libvirtd_qemu.aug
+index 91f5f77..ca8467d 100644
+--- a/src/qemu/libvirtd_qemu.aug
++++ b/src/qemu/libvirtd_qemu.aug
+@@ -73,6 +73,8 @@ module Libvirtd_qemu =
+                  | int_entry "keepalive_interval"
+                  | int_entry "keepalive_count"
+ 
++   let log_entry = bool_entry "log_timestamp"
++
+    (* Each enty in the config is one of the following three ... *)
+    let entry = vnc_entry
+              | spice_entry
+@@ -82,6 +84,7 @@ module Libvirtd_qemu =
+              | process_entry
+              | device_entry
+              | rpc_entry
++             | log_entry
+ 
+    let comment = [ label "#comment" . del /#[ \t]*/ "# " .  store /([^ \t\n][^\n]*)?/ . del /\n/ "\n" ]
+    let empty = [ label "#empty" . eol ]
+diff --git a/src/qemu/qemu.conf b/src/qemu/qemu.conf
+index dd853c8..bc6c58f 100644
+--- a/src/qemu/qemu.conf
++++ b/src/qemu/qemu.conf
+@@ -401,3 +401,11 @@
+ # Defaults to -1.
+ #
+ #seccomp_sandbox = 1
++
++
++
++# Timestamp QEMU's log messages (if QEMU supports it)
++#
++# Defaults to 1.
++#
++#log_timestamp = 0
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index e5b78ff..740c215 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -206,6 +206,7 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "pvpanic",
+               "spice-file-xfer-disable",
+               "host-pci-multidomain",
++              "msg-timestamp",
+     );
+ 
+ struct _qemuCaps {
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 081d3ff..9e41e3c 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -174,6 +174,7 @@ enum qemuCapsFlags {
+     QEMU_CAPS_DEVICE_PANIC,             /* -device pvpanic */
+     QEMU_CAPS_SPICE_FILE_XFER_DISABLE,  /* -spice disable-agent-file-xfer */
+     QEMU_CAPS_HOST_PCI_MULTIDOMAIN,     /* support domain > 0 in host pci address */
++    QEMU_CAPS_MSG_TIMESTAMP,            /* -msg timestamp */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index e9a1cb9..9c8e84f 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -7200,6 +7200,10 @@ qemuBuildCommandLine(virConnectPtr conn,
+         virCommandSetMaxMemLock(cmd, memKB * 1024);
+     }
+ 
++    if (qemuCapsGet(caps, QEMU_CAPS_MSG_TIMESTAMP) &&
++        driver->logTimestamp)
++        virCommandAddArgList(cmd, "-msg", "timestamp=on", NULL);
++
+     return cmd;
+ 
+  no_memory:
+diff --git a/src/qemu/qemu_conf.c b/src/qemu/qemu_conf.c
+index 2e10b17..d1bb1a9 100644
+--- a/src/qemu/qemu_conf.c
++++ b/src/qemu/qemu_conf.c
+@@ -130,6 +130,7 @@ int qemudLoadDriverConfig(struct qemud_driver *driver,
+     driver->keepAliveInterval = 5;
+     driver->keepAliveCount = 5;
+     driver->seccompSandbox = -1;
++    driver->logTimestamp = true;
+ 
+     /* Just check the file is readable before opening it, otherwise
+      * libvirt emits an error.
+@@ -575,6 +576,10 @@ int qemudLoadDriverConfig(struct qemud_driver *driver,
+     CHECK_TYPE("seccomp_sandbox", VIR_CONF_LONG);
+     if (p) driver->seccompSandbox = p->l;
+ 
++    p = virConfGetValue(conf, "log_timestamp");
++    CHECK_TYPE("log_timestamp", VIR_CONF_LONG);
++    if (p) driver->logTimestamp = p->l != 0;
++
+     virConfFree (conf);
+     return 0;
+ }
+diff --git a/src/qemu/qemu_conf.h b/src/qemu/qemu_conf.h
+index f1da2bf..6dabc95 100644
+--- a/src/qemu/qemu_conf.h
++++ b/src/qemu/qemu_conf.h
+@@ -158,6 +158,8 @@ struct qemud_driver {
+     int keepAliveInterval;
+     unsigned int keepAliveCount;
+     int seccompSandbox;
++
++    bool logTimestamp;
+ };
+ 
+ typedef struct _qemuDomainCmdlineDef qemuDomainCmdlineDef;
+diff --git a/src/qemu/test_libvirtd_qemu.aug.in b/src/qemu/test_libvirtd_qemu.aug.in
+index 2892204..1a8841b 100644
+--- a/src/qemu/test_libvirtd_qemu.aug.in
++++ b/src/qemu/test_libvirtd_qemu.aug.in
+@@ -61,3 +61,4 @@ module Test_libvirtd_qemu =
+ { "keepalive_interval" = "5" }
+ { "keepalive_count" = "5" }
+ { "seccomp_sandbox" = "1" }
++{ "log_timestamp" = "0" }
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-minimal-msg-timestamp.args b/tests/qemuxml2argvdata/qemuxml2argv-minimal-msg-timestamp.args
+new file mode 100644
+index 0000000..4484adf
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-minimal-msg-timestamp.args
+@@ -0,0 +1,6 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test \
++/usr/bin/qemu \
++-name QEMUGuest1 -S -M pc -m 214 -smp 1 -nographic -monitor \
++unix:/tmp/test-monitor,server,nowait -no-acpi -boot c \
++-usb -hda /dev/HostVG/QEMUGuest1 -net none -serial \
++none -parallel none -msg timestamp=on
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-minimal-msg-timestamp.xml b/tests/qemuxml2argvdata/qemuxml2argv-minimal-msg-timestamp.xml
+new file mode 100644
+index 0000000..26fdf0d
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-minimal-msg-timestamp.xml
+@@ -0,0 +1,31 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <title>A description of the test machine.</title>
++  <description>
++      A test of qemu&apos;s minimal configuration.
++      This test also tests the description and title elements.
++  </description>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static' cpuset='1-4,8-20,525'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='ide' index='0'/>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 9df89ab..818a3a1 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -298,6 +298,7 @@ mymain(void)
+     if ((driver.hugepage_path = strdup("/dev/hugepages/libvirt/qemu")) == NULL)
+         return EXIT_FAILURE;
+     driver.spiceTLS = 1;
++    driver.logTimestamp = true;
+     if (!(driver.spiceTLSx509certdir = strdup("/etc/pki/libvirt-spice")))
+         return EXIT_FAILURE;
+     if (!(driver.spicePassword = strdup("123456")))
+@@ -354,6 +355,7 @@ mymain(void)
+     unsetenv("SDL_AUDIODRIVER");
+ 
+     DO_TEST("minimal", QEMU_CAPS_NAME);
++    DO_TEST("minimal-msg-timestamp", QEMU_CAPS_NAME, QEMU_CAPS_MSG_TIMESTAMP);
+     DO_TEST("minimal-s390", QEMU_CAPS_NAME);
+     DO_TEST("machine-aliases1", NONE);
+     DO_TEST("machine-aliases2", QEMU_CAPS_KVM);
+-- 
+1.9.3
+

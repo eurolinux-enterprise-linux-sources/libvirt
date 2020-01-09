@@ -1,0 +1,377 @@
+From 3ba0897a2fc771cdaeb0dbd81ce498a625ddf70d Mon Sep 17 00:00:00 2001
+Message-Id: <3ba0897a2fc771cdaeb0dbd81ce498a625ddf70d.1374158624.git.jdenemar@redhat.com>
+From: Harsh Prateek Bora <harsh@linux.vnet.ibm.com>
+Date: Thu, 22 Nov 2012 23:40:38 +0530
+Subject: [PATCH] Add Gluster protocol as supported network disk backend
+
+https://bugzilla.redhat.com/show_bug.cgi?id=849796
+
+This patch introduces the RNG schema and updates necessary data strucutures
+to allow various hypervisors to make use of Gluster protocol as one of the
+supported network disk backend. Next patch will add support to make use of
+this feature in Qemu since it now supports Gluster protocol as one of the
+network based storage backend.
+
+Two new optional attributes for <host> element are introduced - 'transport'
+and 'socket'. Valid transport values are tcp, unix or rdma. If none specified,
+tcp is assumed. If transport is unix, socket specifies path to unix socket.
+
+This patch allows users to specify disks on gluster backends like this:
+
+    <disk type='network' device='disk'>
+      <driver name='qemu' type='raw'/>
+      <source protocol='gluster' name='Volume1/image'>
+        <host name='example.org' port='6000' transport='tcp'/>
+      </source>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+
+    <disk type='network' device='disk'>
+      <driver name='qemu' type='raw'/>
+      <source protocol='gluster' name='Volume2/image'>
+        <host transport='unix' socket='/path/to/sock'/>
+      </source>
+      <target dev='vdb' bus='virtio'/>
+    </disk>
+
+Signed-off-by: Harsh Prateek Bora <harsh@linux.vnet.ibm.com>
+(cherry picked from commit a2d2b80fbd29dec4da31ec4072b6b555fe93d2c0)
+---
+ docs/formatdomain.html.in     | 24 ++++++++++----
+ docs/schemas/domaincommon.rng | 33 +++++++++++++++----
+ src/conf/domain_conf.c        | 77 +++++++++++++++++++++++++++++++++++--------
+ src/conf/domain_conf.h        | 12 +++++++
+ src/libvirt_private.syms      |  2 ++
+ src/qemu/qemu_command.c       | 11 +++++++
+ 6 files changed, 133 insertions(+), 26 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index d2ef888..e20d1e2 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -1449,10 +1449,10 @@
+         to the directory to use as the disk. If the disk <code>type</code>
+         is "network", then the <code>protocol</code> attribute specifies
+         the protocol to access to the requested image; possible values
+-        are "nbd", "rbd", and "sheepdog".  If the <code>protocol</code>
+-        attribute is "rbd" or "sheepdog", an additional
+-        attribute <code>name</code> is mandatory to specify which
+-        image will be used.  When the disk <code>type</code> is
++        are "nbd", "rbd", "sheepdog" or "gluster".  If the
++        <code>protocol</code> attribute is "rbd", "sheepdog" or "gluster", an
++        additional attribute <code>name</code> is mandatory to specify which
++        volume/image will be used.  When the disk <code>type</code> is
+         "network", the <code>source</code> may have zero or
+         more <code>host</code> sub-elements used to specify the hosts
+         to connect.
+@@ -1680,9 +1680,11 @@
+         <span class='since'>Since 0.10.1</span>
+       </dd>
+       <dt><code>host</code></dt>
+-      <dd>The <code>host</code> element has two attributes "name" and "port",
+-        which specify the hostname and the port number. The meaning of this
+-        element and the number of the elements depend on the protocol attribute.
++      <dd>The <code>host</code> element supports 4 attributes, viz.  "name",
++        "port", "transport" and "socket", which specify the hostname, the port
++         number, transport type and path to socket, respectively. The meaning
++         of this element and the number of the elements depend on the protocol
++         attribute.
+         <table class="top_table">
+           <tr>
+             <th> Protocol </th>
+@@ -1704,7 +1706,15 @@
+             <td> one of the sheepdog servers (default is localhost:7000) </td>
+             <td> zero or one </td>
+           </tr>
++          <tr>
++            <td> gluster </td>
++            <td> a server running glusterd daemon </td>
++            <td> only one </td>
++          </tr>
+         </table>
++        In case of gluster, valid values for transport attribute are tcp, rdma
++        or unix. If nothing is specified, tcp is assumed. If transport is unix,
++        socket attribute specifies path to unix socket.
+       </dd>
+       <dt><code>address</code></dt>
+       <dd>If present, the <code>address</code> element ties the disk
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 6da00e2..32aa34a 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -1076,6 +1076,7 @@
+                     <value>nbd</value>
+                     <value>rbd</value>
+                     <value>sheepdog</value>
++                    <value>gluster</value>
+                   </choice>
+                 </attribute>
+                 <optional>
+@@ -1083,12 +1084,32 @@
+                 </optional>
+                 <zeroOrMore>
+                   <element name="host">
+-                    <attribute name="name">
+-                      <ref name="dnsName"/>
+-                    </attribute>
+-                    <attribute name="port">
+-                      <ref name="unsignedInt"/>
+-                    </attribute>
++                    <choice>
++                      <group>
++                        <optional>
++                          <attribute name="transport">
++                            <choice>
++                              <value>tcp</value>
++                              <value>rdma</value>
++                            </choice>
++                          </attribute>
++                        </optional>
++                        <attribute name="name">
++                          <ref name="dnsName"/>
++                        </attribute>
++                        <attribute name="port">
++                          <ref name="unsignedInt"/>
++                        </attribute>
++                      </group>
++                      <group>
++                        <attribute name="transport">
++                          <value>unix</value>
++                        </attribute>
++                        <attribute name="socket">
++                          <ref name="absFilePath"/>
++                        </attribute>
++                      </group>
++                    </choice>
+                   </element>
+                 </zeroOrMore>
+                 <empty/>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 6afd3fc..f361dff 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -225,7 +225,13 @@ VIR_ENUM_IMPL(virDomainDiskErrorPolicy, VIR_DOMAIN_DISK_ERROR_POLICY_LAST,
+ VIR_ENUM_IMPL(virDomainDiskProtocol, VIR_DOMAIN_DISK_PROTOCOL_LAST,
+               "nbd",
+               "rbd",
+-              "sheepdog")
++              "sheepdog",
++              "gluster")
++
++VIR_ENUM_IMPL(virDomainDiskProtocolTransport, VIR_DOMAIN_DISK_PROTO_TRANS_LAST,
++              "tcp",
++              "unix",
++              "rdma")
+ 
+ VIR_ENUM_IMPL(virDomainDiskSecretType, VIR_DOMAIN_DISK_SECRET_TYPE_LAST,
+               "none",
+@@ -1019,6 +1025,7 @@ void virDomainDiskHostDefFree(virDomainDiskHostDefPtr def)
+ 
+     VIR_FREE(def->name);
+     VIR_FREE(def->port);
++    VIR_FREE(def->socket);
+ }
+ 
+ void virDomainControllerDefFree(virDomainControllerDefPtr def)
+@@ -3562,6 +3569,7 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+     char *source = NULL;
+     char *target = NULL;
+     char *protocol = NULL;
++    char *protocol_transport = NULL;
+     char *trans = NULL;
+     virDomainDiskHostDefPtr hosts = NULL;
+     int nhosts = 0;
+@@ -3669,20 +3677,50 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+                             }
+                             hosts[nhosts].name = NULL;
+                             hosts[nhosts].port = NULL;
++                            hosts[nhosts].transport = VIR_DOMAIN_DISK_PROTO_TRANS_TCP;
++                            hosts[nhosts].socket = NULL;
+                             nhosts++;
+ 
+-                            hosts[nhosts - 1].name = virXMLPropString(child, "name");
+-                            if (!hosts[nhosts - 1].name) {
+-                                virReportError(VIR_ERR_INTERNAL_ERROR,
+-                                               "%s", _("missing name for host"));
++                            /* transport can be tcp (default), unix or rdma.  */
++                            protocol_transport = virXMLPropString(child, "transport");
++                            if (protocol_transport != NULL) {
++                                hosts[nhosts - 1].transport = virDomainDiskProtocolTransportTypeFromString(protocol_transport);
++                                if (hosts[nhosts - 1].transport < 0) {
++                                    virReportError(VIR_ERR_XML_ERROR,
++                                                   _("unknown protocol transport type '%s'"),
++                                                   protocol_transport);
++                                    goto error;
++                                }
++                            }
++                            hosts[nhosts - 1].socket = virXMLPropString(child, "socket");
++                            if (hosts[nhosts - 1].transport == VIR_DOMAIN_DISK_PROTO_TRANS_UNIX &&
++                                hosts[nhosts - 1].socket == NULL) {
++                                virReportError(VIR_ERR_XML_ERROR,
++                                               "%s", _("missing socket for unix transport"));
+                                 goto error;
+                             }
+-                            hosts[nhosts - 1].port = virXMLPropString(child, "port");
+-                            if (!hosts[nhosts - 1].port) {
+-                                virReportError(VIR_ERR_INTERNAL_ERROR,
+-                                               "%s", _("missing port for host"));
++                            if (hosts[nhosts - 1].transport != VIR_DOMAIN_DISK_PROTO_TRANS_UNIX &&
++                                hosts[nhosts - 1].socket != NULL) {
++                                virReportError(VIR_ERR_XML_ERROR,
++                                               _("transport %s does not support socket attribute"),
++                                               protocol_transport);
+                                 goto error;
+                             }
++                            VIR_FREE(protocol_transport);
++                            if (hosts[nhosts - 1].transport != VIR_DOMAIN_DISK_PROTO_TRANS_UNIX) {
++                                hosts[nhosts - 1].name = virXMLPropString(child, "name");
++                                if (!hosts[nhosts - 1].name) {
++                                    virReportError(VIR_ERR_XML_ERROR,
++                                                   "%s", _("missing name for host"));
++                                    goto error;
++                                }
++                                hosts[nhosts - 1].port = virXMLPropString(child, "port");
++                                if (!hosts[nhosts - 1].port) {
++                                    virReportError(VIR_ERR_XML_ERROR,
++                                                   "%s", _("missing port for host"));
++                                    goto error;
++                                }
++                            }
+                         }
+                         child = child->next;
+                     }
+@@ -4284,6 +4322,7 @@ cleanup:
+     }
+     VIR_FREE(hosts);
+     VIR_FREE(protocol);
++    VIR_FREE(protocol_transport);
+     VIR_FREE(device);
+     VIR_FREE(authUsername);
+     VIR_FREE(usageType);
+@@ -12149,10 +12188,22 @@ virDomainDiskDefFormat(virBufferPtr buf,
+ 
+                 virBufferAddLit(buf, ">\n");
+                 for (i = 0; i < def->nhosts; i++) {
+-                    virBufferEscapeString(buf, "        <host name='%s'",
+-                                          def->hosts[i].name);
+-                    virBufferEscapeString(buf, " port='%s'/>\n",
+-                                          def->hosts[i].port);
++                    virBufferAddLit(buf, "        <host");
++                    if (def->hosts[i].name) {
++                        virBufferEscapeString(buf, " name='%s'", def->hosts[i].name);
++                    }
++                    if (def->hosts[i].port) {
++                        virBufferEscapeString(buf, " port='%s'",
++                                              def->hosts[i].port);
++                    }
++                    if (def->hosts[i].transport) {
++                        virBufferAsprintf(buf, " transport='%s'",
++                                          virDomainDiskProtocolTransportTypeToString(def->hosts[i].transport));
++                    }
++                    if (def->hosts[i].socket) {
++                        virBufferEscapeString(buf, " socket='%s'", def->hosts[i].socket);
++                    }
++                    virBufferAddLit(buf, "/>\n");
+                 }
+                 virBufferAddLit(buf, "      </source>\n");
+             }
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index ed0a98e..9e95bfb 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -461,10 +461,19 @@ enum virDomainDiskProtocol {
+     VIR_DOMAIN_DISK_PROTOCOL_NBD,
+     VIR_DOMAIN_DISK_PROTOCOL_RBD,
+     VIR_DOMAIN_DISK_PROTOCOL_SHEEPDOG,
++    VIR_DOMAIN_DISK_PROTOCOL_GLUSTER,
+ 
+     VIR_DOMAIN_DISK_PROTOCOL_LAST
+ };
+ 
++enum virDomainDiskProtocolTransport {
++    VIR_DOMAIN_DISK_PROTO_TRANS_TCP,
++    VIR_DOMAIN_DISK_PROTO_TRANS_UNIX,
++    VIR_DOMAIN_DISK_PROTO_TRANS_RDMA,
++
++    VIR_DOMAIN_DISK_PROTO_TRANS_LAST
++};
++
+ enum virDomainDiskTray {
+     VIR_DOMAIN_DISK_TRAY_CLOSED,
+     VIR_DOMAIN_DISK_TRAY_OPEN,
+@@ -486,6 +495,8 @@ typedef virDomainDiskHostDef *virDomainDiskHostDefPtr;
+ struct _virDomainDiskHostDef {
+     char *name;
+     char *port;
++    int transport; /* enum virDomainDiskProtocolTransport */
++    char *socket;  /* path to unix socket */
+ };
+ 
+ enum  virDomainDiskIo {
+@@ -2227,6 +2238,7 @@ VIR_ENUM_DECL(virDomainDiskBus)
+ VIR_ENUM_DECL(virDomainDiskCache)
+ VIR_ENUM_DECL(virDomainDiskErrorPolicy)
+ VIR_ENUM_DECL(virDomainDiskProtocol)
++VIR_ENUM_DECL(virDomainDiskProtocolTransport)
+ VIR_ENUM_DECL(virDomainDiskIo)
+ VIR_ENUM_DECL(virDomainDiskSecretType)
+ VIR_ENUM_DECL(virDomainDiskSGIO)
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index c121bbd..e4dd45d 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -366,6 +366,8 @@ virDomainDiskInsertPreAlloced;
+ virDomainDiskIoTypeFromString;
+ virDomainDiskIoTypeToString;
+ virDomainDiskPathByName;
++virDomainDiskProtocolTransportTypeFromString;
++virDomainDiskProtocolTransportTypeToString;
+ virDomainDiskRemove;
+ virDomainDiskRemoveByName;
+ virDomainDiskTypeFromString;
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index da91c3b..3ef04f2 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -1987,6 +1987,10 @@ static int qemuAddRBDHost(virDomainDiskDefPtr disk, char *hostport)
+     disk->hosts[disk->nhosts-1].name = strdup(hostport);
+     if (!disk->hosts[disk->nhosts-1].name)
+         goto no_memory;
++
++    disk->hosts[disk->nhosts-1].transport = VIR_DOMAIN_DISK_PROTO_TRANS_TCP;
++    disk->hosts[disk->nhosts-1].socket = NULL;
++
+     return 0;
+ 
+ no_memory:
+@@ -7167,6 +7171,8 @@ qemuParseCommandLineDisk(virCapsPtr caps,
+                         virReportOOMError();
+                         goto error;
+                     }
++                    def->hosts->transport = VIR_DOMAIN_DISK_PROTO_TRANS_TCP;
++                    def->hosts->socket = NULL;
+ 
+                     VIR_FREE(def->src);
+                     def->src = NULL;
+@@ -7220,6 +7226,8 @@ qemuParseCommandLineDisk(virCapsPtr caps,
+                             virReportOOMError();
+                             goto error;
+                         }
++                        def->hosts->transport = VIR_DOMAIN_DISK_PROTO_TRANS_TCP;
++                        def->hosts->socket = NULL;
+                         def->src = strdup(vdi);
+                         if (!def->src) {
+                             virReportOOMError();
+@@ -8987,6 +8995,9 @@ virDomainDefPtr qemuParseCommandLine(virCapsPtr caps,
+                 VIR_FREE(hosts);
+                 goto no_memory;
+             }
++            first_rbd_disk->hosts[first_rbd_disk->nhosts].transport = VIR_DOMAIN_DISK_PROTO_TRANS_TCP;
++            first_rbd_disk->hosts[first_rbd_disk->nhosts].socket = NULL;
++
+             first_rbd_disk->nhosts++;
+             token = strtok_r(NULL, ",", &saveptr);
+         }
+-- 
+1.8.3.2
+

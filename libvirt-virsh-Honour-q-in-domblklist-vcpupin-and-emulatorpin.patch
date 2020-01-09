@@ -1,0 +1,97 @@
+From 721fbc84dbaefd550709c0b3e37649b09a6c2392 Mon Sep 17 00:00:00 2001
+Message-Id: <721fbc84dbaefd550709c0b3e37649b09a6c2392@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 22 Jan 2015 15:36:43 +0100
+Subject: [PATCH] virsh: Honour -q in domblklist, vcpupin and emulatorpin
+
+If user wants to grep some info from domain, e.g. disk paths:
+
+    # virsh -q domblklist win7 | awk '{print $2}'
+    Source
+
+    /var/lib/libvirt/images/windows.qcow2
+    /home/zippy/work/tmp/en_windows_7_professional_x64_dvd_X15-65805.iso
+
+while with my change:
+
+    # virsh -q domblklist win7 | awk '{print $2}'
+    /var/lib/libvirt/images/windows.qcow2
+    /home/zippy/work/tmp/en_windows_7_professional_x64_dvd_X15-65805.iso
+
+We don't print table header in other commands, like list.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1135171
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit e53b06246cab0fd9a77bab1320a7ef0ed3d3e387)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-domain-monitor.c | 14 +++++++-------
+ tools/virsh-domain.c         | 10 +++++-----
+ 2 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/tools/virsh-domain-monitor.c b/tools/virsh-domain-monitor.c
+index d2f85c0..4597b7f 100644
+--- a/tools/virsh-domain-monitor.c
++++ b/tools/virsh-domain-monitor.c
+@@ -444,12 +444,12 @@ cmdDomblklist(vshControl *ctl, const vshCmd *cmd)
+         goto cleanup;
+ 
+     if (details)
+-        vshPrint(ctl, "%-10s %-10s %-10s %s\n", _("Type"),
+-                 _("Device"), _("Target"), _("Source"));
++        vshPrintExtra(ctl, "%-10s %-10s %-10s %s\n", _("Type"),
++                      _("Device"), _("Target"), _("Source"));
+     else
+-        vshPrint(ctl, "%-10s %s\n", _("Target"), _("Source"));
++        vshPrintExtra(ctl, "%-10s %s\n", _("Target"), _("Source"));
+ 
+-    vshPrint(ctl, "------------------------------------------------\n");
++    vshPrintExtra(ctl, "------------------------------------------------\n");
+ 
+     for (i = 0; i < ndisks; i++) {
+         char *type;
+@@ -544,9 +544,9 @@ cmdDomiflist(vshControl *ctl, const vshCmd *cmd)
+     if (ninterfaces < 0)
+         goto cleanup;
+ 
+-    vshPrint(ctl, "%-10s %-10s %-10s %-11s %s\n", _("Interface"), _("Type"),
+-             _("Source"), _("Model"), _("MAC"));
+-    vshPrint(ctl, "-------------------------------------------------------\n");
++    vshPrintExtra(ctl, "%-10s %-10s %-10s %-11s %s\n", _("Interface"),
++                  _("Type"), _("Source"), _("Model"), _("MAC"));
++    vshPrintExtra(ctl, "-------------------------------------------------------\n");
+ 
+     for (i = 0; i < ninterfaces; i++) {
+         char *type = NULL;
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 8d83b5e..5dc8c43 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -4804,8 +4804,8 @@ cmdVcpuPin(vshControl *ctl, const vshCmd *cmd)
+         if ((ncpus = virDomainGetVcpuPinInfo(dom, info.nrVirtCpu,
+                                              cpumaps, cpumaplen, flags)) >= 0) {
+ 
+-            vshPrint(ctl, "%s %s\n", _("VCPU:"), _("CPU Affinity"));
+-            vshPrint(ctl, "----------------------------------\n");
++            vshPrintExtra(ctl, "%s %s\n", _("VCPU:"), _("CPU Affinity"));
++            vshPrintExtra(ctl, "----------------------------------\n");
+             for (i = 0; i < ncpus; i++) {
+ 
+                if (vcpu != -1 && i != vcpu)
+@@ -5001,9 +5001,9 @@ cmdEmulatorPin(vshControl *ctl, const vshCmd *cmd)
+         cpumaps = vshMalloc(ctl, cpumaplen);
+         if (virDomainGetEmulatorPinInfo(dom, cpumaps,
+                                         cpumaplen, flags) >= 0) {
+-            vshPrint(ctl, "%s %s\n", _("emulator:"), _("CPU Affinity"));
+-            vshPrint(ctl, "----------------------------------\n");
+-            vshPrint(ctl, "       *: ");
++            vshPrintExtra(ctl, "%s %s\n", _("emulator:"), _("CPU Affinity"));
++            vshPrintExtra(ctl, "----------------------------------\n");
++            vshPrintExtra(ctl, "       *: ");
+             ret = vshPrintPinInfo(cpumaps, cpumaplen, maxcpu, 0);
+             vshPrint(ctl, "\n");
+         } else {
+-- 
+2.2.2
+

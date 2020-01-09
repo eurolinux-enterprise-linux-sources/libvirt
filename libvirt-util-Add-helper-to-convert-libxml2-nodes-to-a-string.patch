@@ -1,0 +1,88 @@
+From 2f9ec0965325362d100f9bc1da6d0c22ef1860e3 Mon Sep 17 00:00:00 2001
+Message-Id: <2f9ec0965325362d100f9bc1da6d0c22ef1860e3@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 2 Jul 2014 15:49:25 +0200
+Subject: [PATCH] util: Add helper to convert libxml2 nodes to a string
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115039
+
+(cherry picked from commit be0f0c2292e3f171a031086f4d0a39b205c756a3)
+
+ Downstream changes:
+    src/util/xml.c: replace use of VIR_STRDUP
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms |  1 +
+ src/util/xml.c           | 34 ++++++++++++++++++++++++++++++++++
+ src/util/xml.h           |  2 ++
+ 3 files changed, 37 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 8405b20..0f0e43e 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1863,6 +1863,7 @@ virURIParse;
+ 
+ # xml.h
+ virXMLChildElementCount;
++virXMLNodeToString;
+ virXMLParseHelper;
+ virXMLPickShellSafeComment;
+ virXMLPropString;
+diff --git a/src/util/xml.c b/src/util/xml.c
+index 3a39c3a..de509d1 100644
+--- a/src/util/xml.c
++++ b/src/util/xml.c
+@@ -886,3 +886,37 @@ virXMLChildElementCount(xmlNodePtr node)
+     }
+     return ret;
+ }
++
++
++/**
++ * virXMLNodeToString: convert an XML node ptr to an XML string
++ *
++ * Returns the XML string of the document or NULL on error.
++ * The caller has to free the string.
++ */
++char *
++virXMLNodeToString(xmlDocPtr doc,
++                   xmlNodePtr node)
++{
++     xmlBufferPtr xmlbuf = NULL;
++     char *ret = NULL;
++
++     if (!(xmlbuf = xmlBufferCreate())) {
++         virReportOOMError();
++         return NULL;
++     }
++
++     if (xmlNodeDump(xmlbuf, doc, node, 0, 1) == 0) {
++         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                        _("failed to convert the XML node tree"));
++         goto cleanup;
++     }
++
++     if (!(ret = strdup((const char *)xmlBufferContent(xmlbuf))))
++         virReportOOMError();
++
++cleanup:
++     xmlBufferFree(xmlbuf);
++
++     return ret;
++}
+diff --git a/src/util/xml.h b/src/util/xml.h
+index c3b05df..fc61f49 100644
+--- a/src/util/xml.h
++++ b/src/util/xml.h
+@@ -145,4 +145,6 @@ int virXMLSaveFile(const char *path,
+                    const char *warnCommand,
+                    const char *xml);
+ 
++char *virXMLNodeToString(xmlDocPtr doc, xmlNodePtr node);
++
+ #endif                          /* __VIR_XML_H__ */
+-- 
+2.0.0
+

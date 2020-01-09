@@ -1,0 +1,44 @@
+From 3c4885b5e8357ad6d40b049f7d7db1905e37dddb Mon Sep 17 00:00:00 2001
+Message-Id: <3c4885b5e8357ad6d40b049f7d7db1905e37dddb.1354720508.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 4 Dec 2012 21:09:04 -0700
+Subject: [PATCH] systemd: require dbus service
+
+https://bugzilla.redhat.com/show_bug.cgi?id=830201
+
+The initscript and upstart services depend on dbus starting
+before libvirtd.  When we first wrote the systemd script, we
+tried to do the same, but we depended on dbus.target (which
+does not exist) in comparison to network.target (which does
+exist), so we removed that in commit 4c7973e.  But we still
+need dbus up and running first, especially now that we want
+to support shutdown inhibition via dbus (whereas we originally
+needed dbus only for firewall control).
+
+http://www.freedesktop.org/software/systemd/man/systemd.target.html
+explains how a target (such as network.target) is just a collection
+of common services bundled together, and why we want network.target
+but dbus.service.
+
+* daemon/libvirtd.service.in (Unit): Depend on dbus starting
+first.
+(cherry picked from commit c748037f2a71ee1e30a864b767d82dfb492e27b2)
+---
+ daemon/libvirtd.service.in | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/daemon/libvirtd.service.in b/daemon/libvirtd.service.in
+index b7afadf..98dd5a0 100644
+--- a/daemon/libvirtd.service.in
++++ b/daemon/libvirtd.service.in
+@@ -7,6 +7,7 @@
+ Description=Virtualization daemon
+ Before=libvirt-guests.service
+ After=network.target
++After=dbus.service
+ 
+ [Service]
+ EnvironmentFile=-/etc/sysconfig/libvirtd
+-- 
+1.8.0
+

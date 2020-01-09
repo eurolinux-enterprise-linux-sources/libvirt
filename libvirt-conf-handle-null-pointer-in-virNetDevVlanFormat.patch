@@ -1,0 +1,46 @@
+From 5156de8db3c5bf1671c33d510b77bc07a223bf1f Mon Sep 17 00:00:00 2001
+Message-Id: <5156de8db3c5bf1671c33d510b77bc07a223bf1f@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Wed, 14 May 2014 16:12:22 +0200
+Subject: [PATCH] conf: handle null pointer in virNetDevVlanFormat
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+Other *Format() functions (e.g. virNetDevBandwidthFormat()) return
+with no action when called with a NULL *Def pointer. This makes
+virNetDevVlanFormat() consistent with that behavior.
+
+(cherry picked from commit 79358733b090b3b15a8d18da8e8b0964c9edf5e1)
+
+Conflicts:
+	src/conf/netdev_vlan_conf.c: Some dummy conflict in copyright
+    comment
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/netdev_vlan_conf.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/netdev_vlan_conf.c b/src/conf/netdev_vlan_conf.c
+index 6a0511a..a22c959 100644
+--- a/src/conf/netdev_vlan_conf.c
++++ b/src/conf/netdev_vlan_conf.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2009-2012 Red Hat, Inc.
++ * Copyright (C) 2009-2014 Red Hat, Inc.
+  *
+  * This library is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU Lesser General Public
+@@ -113,7 +113,7 @@ virNetDevVlanFormat(virNetDevVlanPtr def, virBufferPtr buf)
+ {
+     int ii;
+ 
+-    if (def->nTags == 0)
++    if (!(def && def->nTags))
+         return 0;
+ 
+     if (!def->tag) {
+-- 
+1.9.3
+

@@ -1,0 +1,46 @@
+From c215d9c1a1c12828bcaa5dc7d61e64f30c53f3b3 Mon Sep 17 00:00:00 2001
+Message-Id: <c215d9c1a1c12828bcaa5dc7d61e64f30c53f3b3@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 5 Jan 2015 17:33:36 +0100
+Subject: [PATCH] qemu: Use "migratable" XML definition when doing external
+ checkpoints
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=834196
+
+In the original implementation of external checkpoints I've mistakenly
+used the live definition to be stored in the save image. The normal
+approach is to use the "migratable" definition. This was discovered when
+commit 07966f6a8b5ccb5bb4c716b25deb8ba2e572cc67 changed the behavior to
+use a converted XML from the user to do the compatibility check to fix
+problem when using the regular machine saving.
+
+As the previous patch added a compatibility layer, we can now change the
+type of the XML in the image.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1008340
+(cherry picked from commit 1b7bfa65e36996fc3a204452d2a844ab9f4b52b3)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 8d62869..dce2914 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -12125,7 +12125,7 @@ qemuDomainSnapshotCreateActiveExternal(virConnectPtr conn,
+                                      JOB_MASK(QEMU_JOB_SUSPEND) |
+                                      JOB_MASK(QEMU_JOB_MIGRATION_OP));
+ 
+-        if (!(xml = qemuDomainDefFormatLive(driver, vm->def, true, false)))
++        if (!(xml = qemuDomainDefFormatLive(driver, vm->def, true, true)))
+             goto endjob;
+ 
+         if ((ret = qemuDomainSaveMemory(driver, vm, snap->def->file,
+-- 
+2.2.2
+

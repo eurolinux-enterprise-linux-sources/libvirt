@@ -1,0 +1,57 @@
+From 7de5428258b9aa6c868fbbfd198e2dc8837936fd Mon Sep 17 00:00:00 2001
+Message-Id: <7de5428258b9aa6c868fbbfd198e2dc8837936fd@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Thu, 4 Sep 2014 14:33:57 +0200
+Subject: [PATCH] Don't add dhcp hosts to hostsfile twice
+
+RHEL-only
+
+Commit 23ae3fe moved the call of networkBuildDnsmasqHostsfile from
+networkDefine to networkStartDhcpDaemon, but it was already called
+a few lines above in networkBuildDnsmasqArgv.
+
+Upstream, this was included in a larger commit 2d5cd1d:
+'network: add support for DHCPv6'
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1137011
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 14 --------------
+ 1 file changed, 14 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 223adba..78e7c38 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -949,8 +949,6 @@ networkStartDhcpDaemon(struct network_driver *driver,
+     char *pidfile = NULL;
+     int ret = -1;
+     dnsmasqContext *dctx = NULL;
+-    virNetworkIpDefPtr ipdef;
+-    int i;
+ 
+     if (!virNetworkDefGetIpByIndex(network->def, AF_UNSPEC, 0)) {
+         /* no IPv6 addresses, so we don't need to run radvd */
+@@ -994,18 +992,6 @@ networkStartDhcpDaemon(struct network_driver *driver,
+     if (ret < 0)
+         goto cleanup;
+ 
+-    /* populate dnsmasq hosts file */
+-    for (i = 0; (ipdef = virNetworkDefGetIpByIndex(network->def, AF_UNSPEC, i)); i++) {
+-        if (VIR_SOCKET_ADDR_IS_FAMILY(&ipdef->address, AF_INET) &&
+-            (ipdef->nranges || ipdef->nhosts)) {
+-            if (networkBuildDnsmasqHostsfile(dctx, ipdef,
+-                                             network->def->dns) < 0)
+-                goto cleanup;
+-
+-            break;
+-        }
+-    }
+-
+     ret = dnsmasqSave(dctx);
+     if (ret < 0)
+         goto cleanup;
+-- 
+2.1.0
+

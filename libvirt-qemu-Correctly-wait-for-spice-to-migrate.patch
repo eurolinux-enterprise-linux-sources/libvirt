@@ -1,0 +1,47 @@
+From 77a007eaf3e511f0d63503b98a2e74536640ec7a Mon Sep 17 00:00:00 2001
+Message-Id: <77a007eaf3e511f0d63503b98a2e74536640ec7a.1350990677.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 18 Oct 2012 10:34:23 +0200
+Subject: [PATCH] qemu: Correctly wait for spice to migrate
+
+https://bugzilla.redhat.com/show_bug.cgi?id=867724
+
+Currently we query-spice after the main migration has completed
+before moving to next state. Qemu reports this as boolean (not
+enclosed within quotes). Therefore it is not correct to use
+virJSONValueObjectGetString but virJSONValueObjectGetBoolean instead.
+(cherry picked from commit 998dc17da33176d97b0d30112c335ecb4f645b5d)
+---
+ src/qemu/qemu_monitor_json.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index a9e0732..f03974c 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -2434,7 +2434,6 @@ qemuMonitorJSONSpiceGetMigrationStatusReply(virJSONValuePtr reply,
+                                             bool *spice_migrated)
+ {
+     virJSONValuePtr ret;
+-    const char *migrated_str;
+ 
+     if (!(ret = virJSONValueObjectGet(reply, "return"))) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+@@ -2442,13 +2441,11 @@ qemuMonitorJSONSpiceGetMigrationStatusReply(virJSONValuePtr reply,
+         return -1;
+     }
+ 
+-    if (!(migrated_str = virJSONValueObjectGetString(ret, "migrated"))) {
++    if (virJSONValueObjectGetBoolean(ret, "migrated", spice_migrated) < 0) {
+         /* Deliberately don't report error here as we are
+          * probably dealing with older qemu which doesn't
+          * report this yet. Pretend spice is migrated. */
+         *spice_migrated = true;
+-    } else {
+-        *spice_migrated = STREQ(migrated_str, "true");
+     }
+ 
+     return 0;
+-- 
+1.7.12.4
+

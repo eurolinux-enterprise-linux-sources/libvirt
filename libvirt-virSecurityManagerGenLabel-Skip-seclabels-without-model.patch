@@ -1,0 +1,36 @@
+From c8d47cfbdcf04fc1baa7fb34a3d1760fc64d571d Mon Sep 17 00:00:00 2001
+Message-Id: <c8d47cfbdcf04fc1baa7fb34a3d1760fc64d571d.1377097597.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 20 Aug 2013 11:43:46 +0200
+Subject: [PATCH] virSecurityManagerGenLabel: Skip seclabels without model
+
+https://bugzilla.redhat.com/show_bug.cgi?id=997818
+
+While generating seclabels, we check the seclabel stack if required
+driver is in the stack. If not, an error is returned. However, it is
+possible for a seclabel to not have any model set (happens with LXC
+domains that have just <seclabel type='none'>). If that's the case,
+we should just skip the iteration instead of calling STREQ(NULL, ...)
+and SIGSEGV-ing subsequently.
+(cherry picked from commit ba44dd2453d486e9eb8c6204f8d7c31d07007d8f)
+---
+ src/security/security_manager.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/security/security_manager.c b/src/security/security_manager.c
+index 0132782..3245abe 100644
+--- a/src/security/security_manager.c
++++ b/src/security/security_manager.c
+@@ -363,6 +363,9 @@ int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
+         return ret;
+ 
+     for (i = 0; i < vm->nseclabels; i++) {
++        if (!vm->seclabels[i]->model)
++            continue;
++
+         for (j = 0; sec_managers[j]; j++)
+             if (STREQ(vm->seclabels[i]->model, sec_managers[j]->drv->name))
+                 break;
+-- 
+1.8.3.2
+

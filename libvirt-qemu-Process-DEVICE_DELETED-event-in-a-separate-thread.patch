@@ -1,0 +1,181 @@
+From 3a8cdc2c7ead128083ec15ccd5655af4fb83df15 Mon Sep 17 00:00:00 2001
+Message-Id: <3a8cdc2c7ead128083ec15ccd5655af4fb83df15@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 26 May 2014 17:02:05 +0200
+Subject: [PATCH] qemu: Process DEVICE_DELETED event in a separate thread
+
+Currently, we don not acquire any job when removing a device after
+DEVICE_DELETED event was received from QEMU. This means that if there is
+another API running at the time DEVICE_DELETED is delivered and the API
+acquired a job, we may happily change the definition of the domain the
+API is working with whenever it unlocks the domain object (e.g., to talk
+with its monitor). That said, we have to acquire a job before finishing
+device removal to make things safe. However, doing so in the main event
+loop would cause a deadlock so we need to move most of the event handler
+into a separate thread.
+
+Another good reason for both acquiring a job and handling the event in a
+separate thread is that we currently remove a device backend immediately
+after removing its frontend while we should only remove the backend once
+we already received DEVICE_DELETED event. That is, we will have to talk
+to QEMU monitor from the event handler.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 47f424c2d929a820f9bde6819013457e53dbee56)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_process.c - downstream changes made by earlier
+	    patches in this series
+
+Downstream changes:
+    - no VIR_STRDUP
+    - old spelling of virQEMUDriverPtr
+    - virQEMUDriverConfigPtr was not separated from struct qemu_driver
+---
+ src/qemu/qemu_domain.h  |  2 ++
+ src/qemu/qemu_driver.c  | 46 ++++++++++++++++++++++++++++++++++++++++++++--
+ src/qemu/qemu_process.c | 27 +++++++++++++++++++++------
+ 3 files changed, 67 insertions(+), 8 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index b41fb2f..90e26ff 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -170,6 +170,7 @@ struct _qemuDomainObjPrivate {
+ typedef enum {
+     QEMU_PROCESS_EVENT_WATCHDOG = 0,
+     QEMU_PROCESS_EVENT_GUESTPANIC,
++    QEMU_PROCESS_EVENT_DEVICE_DELETED,
+ 
+     QEMU_PROCESS_EVENT_LAST
+ } qemuProcessEventType;
+@@ -178,6 +179,7 @@ struct qemuProcessEvent {
+     virDomainObjPtr vm;
+     qemuProcessEventType eventType;
+     int action;
++    void *data;
+ };
+ 
+ const char *qemuDomainAsyncJobPhaseToString(enum qemuDomainAsyncJob job,
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 42081f1..e929600 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3918,6 +3918,45 @@ cleanup:
+     ;
+ }
+ 
++
++static void
++processDeviceDeletedEvent(struct qemud_driver *driver,
++                          virDomainObjPtr vm,
++                          char *devAlias)
++{
++    virDomainDeviceDef dev;
++
++    VIR_DEBUG("Removing device %s from domain %p %s",
++              devAlias, vm, vm->def->name);
++
++    if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_MODIFY) < 0)
++        goto cleanup;
++
++    if (!virDomainObjIsActive(vm)) {
++        VIR_DEBUG("Domain is not running");
++        goto endjob;
++    }
++
++    if (virDomainDefFindDevice(vm->def, devAlias, &dev, true) < 0)
++        goto endjob;
++
++    qemuDomainRemoveDevice(driver, vm, &dev);
++
++    if (virDomainSaveStatus(driver->caps, driver->stateDir, vm) < 0)
++        VIR_WARN("unable to save domain status after removing device %s",
++                 devAlias);
++
++ endjob:
++    /* We had an extra reference to vm before starting a new job so ending the
++     * job is guaranteed not to remove the last reference.
++     */
++    ignore_value(qemuDomainObjEndJob(driver, vm));
++
++ cleanup:
++    VIR_FREE(devAlias);
++}
++
++
+ static void qemuProcessEventHandler(void *data, void *opaque)
+ {
+     struct qemuProcessEvent *processEvent = data;
+@@ -3936,8 +3975,11 @@ static void qemuProcessEventHandler(void *data, void *opaque)
+     case QEMU_PROCESS_EVENT_GUESTPANIC:
+         processGuestPanicEvent(driver, vm, processEvent->action);
+         break;
+-    default:
+-       break;
++    case QEMU_PROCESS_EVENT_DEVICE_DELETED:
++        processDeviceDeletedEvent(driver, vm, processEvent->data);
++        break;
++    case QEMU_PROCESS_EVENT_LAST:
++        break;
+     }
+ 
+     virDomainObjUnlock(vm);
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index e25600c..039340f 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1364,7 +1364,8 @@ qemuProcessHandleDeviceDeleted(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+                                const char *devAlias)
+ {
+     struct qemud_driver *driver = qemu_driver;
+-    virDomainDeviceDef dev;
++    struct qemuProcessEvent *processEvent = NULL;
++    char *data;
+ 
+     qemuDriverLock(driver);
+     virDomainObjLock(vm);
+@@ -1375,18 +1376,32 @@ qemuProcessHandleDeviceDeleted(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+     if (qemuDomainSignalDeviceRemoval(vm, devAlias))
+         goto cleanup;
+ 
+-    if (virDomainDefFindDevice(vm->def, devAlias, &dev, true) < 0)
+-        goto cleanup;
++    if (VIR_ALLOC(processEvent) < 0)
++        goto error;
+ 
+-    qemuDomainRemoveDevice(driver, vm, &dev);
++    processEvent->eventType = QEMU_PROCESS_EVENT_DEVICE_DELETED;
++    if (!(data = strdup(devAlias))) {
++        virReportOOMError();
++        goto error;
++    }
++    processEvent->data = data;
++    processEvent->vm = vm;
+ 
+-    if (virDomainSaveStatus(driver->caps, driver->stateDir, vm) < 0)
+-        VIR_WARN("unable to save domain status with balloon change");
++    virObjectRef(vm);
++    if (virThreadPoolSendJob(driver->workerPool, 0, processEvent) < 0) {
++        ignore_value(virObjectUnref(vm));
++        goto error;
++    }
+ 
+ cleanup:
+     virDomainObjUnlock(vm);
+     qemuDriverUnlock(driver);
+     return 0;
++error:
++    if (processEvent)
++        VIR_FREE(processEvent->data);
++    VIR_FREE(processEvent);
++    goto cleanup;
+ }
+ 
+ 
+-- 
+2.0.0
+

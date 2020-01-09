@@ -1,0 +1,134 @@
+From 8340bbe5d9605e51cab95d9bf3b00c5643323987 Mon Sep 17 00:00:00 2001
+Message-Id: <8340bbe5d9605e51cab95d9bf3b00c5643323987.1377097597.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Wed, 21 Aug 2013 18:16:22 +0800
+Subject: [PATCH] storage: Update pool metadata after adding/removing/resizing
+ volume
+
+https://bugzilla.redhat.com/show_bug.cgi?id=965442
+
+One has to refresh the pool to get the correct pool info after
+adding/removing/resizing a volume, this updates the pool metadata
+(allocation, available) after those operation are done.
+(cherry picked from commit e0139e304441dc0803c3834be901aa89100a5c1d)
+
+Conflicts:
+	src/storage/storage_driver.c
+  * VIR_ALLOC in 6.5 doesn't have out-of-memory error reporting
+    included yet
+  * Some coding style cleanups (indention; space(s) after ";")
+    are not backported into 6.5.
+---
+ src/storage/storage_driver.c | 45 ++++++++++++++++++++++++++++++--------------
+ 1 file changed, 31 insertions(+), 14 deletions(-)
+
+diff --git a/src/storage/storage_driver.c b/src/storage/storage_driver.c
+index ca7d8c4..ea1e436 100644
+--- a/src/storage/storage_driver.c
++++ b/src/storage/storage_driver.c
+@@ -1366,6 +1366,7 @@ storageVolumeCreateXML(virStoragePoolPtr obj,
+     virStorageBackendPtr backend;
+     virStorageVolDefPtr voldef = NULL;
+     virStorageVolPtr ret = NULL, volobj = NULL;
++    virStorageVolDefPtr buildvoldef = NULL;
+ 
+     virCheckFlags(0, NULL);
+ 
+@@ -1423,21 +1424,20 @@ storageVolumeCreateXML(virStoragePoolPtr obj,
+         goto cleanup;
+     }
+ 
+-    if (backend->buildVol) {
+-        int buildret;
+-        virStorageVolDefPtr buildvoldef = NULL;
++    if (VIR_ALLOC(buildvoldef) < 0) {
++        virReportOOMError();
++        voldef = NULL;
++        goto cleanup;
++    }
+ 
+-        if (VIR_ALLOC(buildvoldef) < 0) {
+-            virReportOOMError();
+-            voldef = NULL;
+-            goto cleanup;
+-        }
++    /* Make a shallow copy of the 'defined' volume definition, since the
++     * original allocation value will change as the user polls 'info',
++     * but we only need the initial requested values
++     */
++    memcpy(buildvoldef, voldef, sizeof(*voldef));
+ 
+-        /* Make a shallow copy of the 'defined' volume definition, since the
+-         * original allocation value will change as the user polls 'info',
+-         * but we only need the initial requested values
+-         */
+-        memcpy(buildvoldef, voldef, sizeof(*voldef));
++    if (backend->buildVol) {
++        int buildret;
+ 
+         /* Drop the pool lock during volume allocation */
+         pool->asyncjobs++;
+@@ -1454,7 +1454,6 @@ storageVolumeCreateXML(virStoragePoolPtr obj,
+         pool->asyncjobs--;
+ 
+         voldef = NULL;
+-        VIR_FREE(buildvoldef);
+ 
+         if (buildret < 0) {
+             virStoragePoolObjUnlock(pool);
+@@ -1465,6 +1464,10 @@ storageVolumeCreateXML(virStoragePoolPtr obj,
+ 
+     }
+ 
++    /* Update pool metadata */
++    pool->def->allocation += buildvoldef->allocation;
++    pool->def->available -= buildvoldef->allocation;
++
+     VIR_INFO("Creating volume '%s' in storage pool '%s'",
+              volobj->name, pool->def->name);
+     ret = volobj;
+@@ -1474,6 +1477,7 @@ storageVolumeCreateXML(virStoragePoolPtr obj,
+ cleanup:
+     virObjectUnref(volobj);
+     virStorageVolDefFree(voldef);
++    virStorageVolDefFree(buildvoldef);
+     if (pool)
+         virStoragePoolObjUnlock(pool);
+     return ret;
+@@ -1627,6 +1631,10 @@ storageVolumeCreateXMLFrom(virStoragePoolPtr obj,
+         goto cleanup;
+     }
+ 
++    /* Updating pool metadata */
++    pool->def->allocation += newvol->allocation;
++    pool->def->available -= newvol->allocation;
++
+     VIR_INFO("Creating volume '%s' in storage pool '%s'",
+              volobj->name, pool->def->name);
+     ret = volobj;
+@@ -1848,6 +1856,11 @@ storageVolumeResize(virStorageVolPtr obj,
+         goto out;
+ 
+    vol->capacity = abs_capacity;
++
++    /* Update pool metadata */
++    pool->def->allocation += (abs_capacity - vol->capacity);
++    pool->def->available -= (abs_capacity - vol->capacity);
++
+    ret = 0;
+ 
+ out:
+@@ -2185,6 +2198,10 @@ storageVolumeDelete(virStorageVolPtr obj,
+     if (backend->deleteVol(obj->conn, pool, vol, flags) < 0)
+         goto cleanup;
+ 
++    /* Update pool metadata */
++    pool->def->allocation -= vol->allocation;
++    pool->def->available += vol->allocation;
++
+     for (i = 0 ; i < pool->volumes.count ; i++) {
+         if (pool->volumes.objs[i] == vol) {
+             VIR_INFO("Deleting volume '%s' from storage pool '%s'",
+-- 
+1.8.3.2
+

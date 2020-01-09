@@ -1,0 +1,351 @@
+From e180101784cd477113f3b9ab7b88aeb18c9fcbba Mon Sep 17 00:00:00 2001
+Message-Id: <e180101784cd477113f3b9ab7b88aeb18c9fcbba.1373271641.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 11 Apr 2013 15:49:14 +0200
+Subject: [PATCH] rpc: Fix connection close callback race condition and memory
+ corruption/crash
+
+https://bugzilla.redhat.com/show_bug.cgi?id=911609
+
+The last Viktor's effort to fix the race and memory corruption unfortunately
+wasn't complete in the case the close callback was not registered in an
+connection. At that time, the trail of event's that I'll describe later could
+still happen and corrupt the memory or cause a crash of the client (including
+the daemon in case of a p2p migration).
+
+Consider the following prerequisities and trail of events:
+Let's have a remote connection to a hypervisor that doesn't have a close
+callback registered and the client is using the event loop. The crash happens in
+cooperation of 2 threads. Thread E is the event loop and thread W is the worker
+that does some stuff. R denotes the remote client.
+
+1.) W - The client finishes everything and sheds the last reference on the client
+2.) W - The virObject stuff invokes virConnectDispose that invokes doRemoteClose
+3.) W - the remote close method invokes the REMOTE_PROC_CLOSE RPC method.
+4.) W - The thread is preempted at this point.
+5.) R - The remote side receives the close and closes the socket.
+6.) E - poll() wakes up due to the closed socket and invokes the close callback
+7.) E - The event loop is preempted right before remoteClientCloseFunc is called
+8.) W - The worker now finishes, and frees the conn object.
+9.) E - The remoteClientCloseFunc accesses the now-freed conn object in the
+        attempt to retrieve pointer for the real close callback.
+10.) Kaboom, corrupted memory/segfault.
+
+This patch tries to fix this by introducing a new object that survives the
+freeing of the connection object. We can't increase the reference count on the
+connection object itself or the connection would never be closed, as the
+connection is closed only when the reference count reaches zero.
+
+The new object - virConnectCloseCallbackData - is a lockable object that keeps
+the pointers to the real user registered callback and ensures that the
+connection callback is either not called if the connection was already freed or
+that the connection isn't freed while this is being called.
+(cherry picked from commit 8ad126e695e5cef5da9d62ccfde7338317041e84)
+
+Conflicts:
+	src/datatypes.c
+	src/libvirt.c
+	src/remote/remote_driver.c All conflicts originate from virObjectLockable
+    stuff not being backported
+---
+ src/datatypes.c            | 45 +++++++++++++++++++++++++++++++++++++++---
+ src/datatypes.h            | 24 ++++++++++++++++++-----
+ src/libvirt.c              | 29 +++++++++++++++------------
+ src/remote/remote_driver.c | 49 +++++++++++++++++++++++-----------------------
+ 4 files changed, 102 insertions(+), 45 deletions(-)
+
+diff --git a/src/datatypes.c b/src/datatypes.c
+index ff7c524..c8c23ce 100644
+--- a/src/datatypes.c
++++ b/src/datatypes.c
+@@ -37,6 +37,7 @@
+ 
+ 
+ virClassPtr virConnectClass;
++virClassPtr virConnectCloseCallbackDataClass;
+ virClassPtr virDomainClass;
+ virClassPtr virDomainSnapshotClass;
+ virClassPtr virInterfaceClass;
+@@ -49,6 +50,7 @@ virClassPtr virStorageVolClass;
+ virClassPtr virStoragePoolClass;
+ 
+ static void virConnectDispose(void *obj);
++static void virConnectCloseCallbackDataDispose(void *obj);
+ static void virDomainDispose(void *obj);
+ static void virDomainSnapshotDispose(void *obj);
+ static void virInterfaceDispose(void *obj);
+@@ -70,6 +72,7 @@ virDataTypesOnceInit(void)
+         return -1;
+ 
+     DECLARE_CLASS(virConnect);
++    DECLARE_CLASS(virConnectCloseCallbackData);
+     DECLARE_CLASS(virDomain);
+     DECLARE_CLASS(virDomainSnapshot);
+     DECLARE_CLASS(virInterface);
+@@ -111,7 +114,19 @@ virGetConnect(void)
+         return NULL;
+     }
+ 
++    if (!(ret->closeCallback = virObjectNew(virConnectCloseCallbackDataClass)))
++        goto error;
++
++    if (virMutexInit(&ret->closeCallback->lock) < 0) {
++        VIR_FREE(ret->closeCallback);
++        goto error;
++    }
++
+     return ret;
++
++error:
++    virObjectUnref(ret);
++    return NULL;
+ }
+ 
+ /**
+@@ -145,19 +160,43 @@ virConnectDispose(void *obj)
+ 
+     virMutexLock(&conn->lock);
+ 
+-    if (conn->closeFreeCallback)
+-        conn->closeFreeCallback(conn->closeOpaque);
+-
+     virResetError(&conn->err);
+ 
+     virURIFree(conn->uri);
+ 
++    virMutexLock(&conn->closeCallback->lock);
++    conn->closeCallback->callback = NULL;
++    virMutexUnlock(&conn->closeCallback->lock);
++
++    virObjectUnref(conn->closeCallback);
++
+     virMutexUnlock(&conn->lock);
+     virMutexDestroy(&conn->lock);
+ }
+ 
+ 
+ /**
++ * virConnectCloseCallbackDataDispose:
++ * @obj: the close callback data to release
++ *
++ * Release resources bound to the connection close callback.
++ */
++static void
++virConnectCloseCallbackDataDispose(void *obj)
++{
++    virConnectCloseCallbackDataPtr cb = obj;
++
++    virMutexLock(&cb->lock);
++
++    if (cb->freeCallback)
++        cb->freeCallback(cb->opaque);
++
++    virMutexUnlock(&cb->lock);
++    virMutexDestroy(&cb->lock);
++}
++
++
++/**
+  * virGetDomain:
+  * @conn: the hypervisor connection
+  * @name: pointer to the domain name
+diff --git a/src/datatypes.h b/src/datatypes.h
+index e4c8262..840bdb5 100644
+--- a/src/datatypes.h
++++ b/src/datatypes.h
+@@ -93,6 +93,24 @@ extern virClassPtr virStoragePoolClass;
+ # define VIR_IS_DOMAIN_SNAPSHOT(obj) \
+     (VIR_IS_SNAPSHOT(obj) && VIR_IS_DOMAIN((obj)->domain))
+ 
++
++typedef struct _virConnectCloseCallbackData virConnectCloseCallbackData;
++typedef virConnectCloseCallbackData *virConnectCloseCallbackDataPtr;
++
++/**
++ * Internal structure holding data related to connection close callbacks.
++ */
++struct _virConnectCloseCallbackData {
++    virObject parent;
++
++    virMutex lock;
++
++    virConnectPtr conn;
++    virConnectCloseFunc callback;
++    void *opaque;
++    virFreeCallback freeCallback;
++};
++
+ /**
+  * _virConnect:
+  *
+@@ -142,11 +160,7 @@ struct _virConnect {
+     void *userData;         /* the user data */
+ 
+     /* Per-connection close callback */
+-    virConnectCloseFunc closeCallback;
+-    void *closeOpaque;
+-    virFreeCallback closeFreeCallback;
+-    bool closeDispatch;
+-    unsigned closeUnregisterCount;
++    virConnectCloseCallbackDataPtr closeCallback;
+ };
+ 
+ /**
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 188abe1..05d4cb2 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -19693,24 +19693,27 @@ int virConnectRegisterCloseCallback(virConnectPtr conn,
+     virObjectRef(conn);
+ 
+     virMutexLock(&conn->lock);
++    virMutexLock(&conn->closeCallback->lock);
+ 
+     virCheckNonNullArgGoto(cb, error);
+ 
+-    if (conn->closeCallback) {
++    if (conn->closeCallback->callback) {
+         virLibConnError(VIR_ERR_OPERATION_INVALID, "%s",
+                         _("A close callback is already registered"));
+         goto error;
+     }
+ 
+-    conn->closeCallback = cb;
+-    conn->closeOpaque = opaque;
+-    conn->closeFreeCallback = freecb;
++    conn->closeCallback->callback = cb;
++    conn->closeCallback->opaque = opaque;
++    conn->closeCallback->freeCallback = freecb;
+ 
++    virMutexUnlock(&conn->closeCallback->lock);
+     virMutexUnlock(&conn->lock);
+ 
+     return 0;
+ 
+ error:
++    virMutexUnlock(&conn->closeCallback->lock);
+     virMutexUnlock(&conn->lock);
+     virObjectUnref(conn);
+     virDispatchError(NULL);
+@@ -19744,29 +19747,29 @@ int virConnectUnregisterCloseCallback(virConnectPtr conn,
+     }
+ 
+     virMutexLock(&conn->lock);
++    virMutexLock(&conn->closeCallback->lock);
+ 
+     virCheckNonNullArgGoto(cb, error);
+ 
+-    if (conn->closeCallback != cb) {
++    if (conn->closeCallback->callback != cb) {
+         virLibConnError(VIR_ERR_OPERATION_INVALID, "%s",
+                         _("A different callback was requested"));
+         goto error;
+     }
+ 
+-    conn->closeCallback = NULL;
+-    conn->closeUnregisterCount++;
+-    if (!conn->closeDispatch && conn->closeFreeCallback)
+-        conn->closeFreeCallback(conn->closeOpaque);
+-    conn->closeFreeCallback = NULL;
+-    conn->closeOpaque = NULL;
+-
+-    virMutexUnlock(&conn->lock);
++    conn->closeCallback->callback = NULL;
++    if (conn->closeCallback->freeCallback)
++        conn->closeCallback->freeCallback(conn->closeCallback->opaque);
++    conn->closeCallback->freeCallback = NULL;
+ 
+     virObjectUnref(conn);
++    virMutexUnlock(&conn->closeCallback->lock);
++    virMutexUnlock(&conn->lock);
+ 
+     return 0;
+ 
+ error:
++    virMutexUnlock(&conn->closeCallback->lock);
+     virMutexUnlock(&conn->lock);
+     virDispatchError(NULL);
+     return -1;
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 468b24a..fedd941 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -328,31 +328,30 @@ enum virDrvOpenRemoteFlags {
+ };
+ 
+ 
+-static void remoteClientCloseFunc(virNetClientPtr client ATTRIBUTE_UNUSED,
+-                                  int reason,
+-                                  void *opaque)
++static void
++remoteClientCloseFunc(virNetClientPtr client ATTRIBUTE_UNUSED,
++                      int reason,
++                      void *opaque)
+ {
+-    virConnectPtr conn = opaque;
++    virConnectCloseCallbackDataPtr cbdata = opaque;
+ 
+-    virMutexLock(&conn->lock);
+-    if (conn->closeCallback) {
+-        virConnectCloseFunc closeCallback = conn->closeCallback;
+-        void *closeOpaque = conn->closeOpaque;
+-        virFreeCallback closeFreeCallback = conn->closeFreeCallback;
+-        unsigned closeUnregisterCount = conn->closeUnregisterCount;
++    virMutexLock(&cbdata->lock);
+ 
+-        VIR_DEBUG("Triggering connection close callback %p reason=%d",
+-                  conn->closeCallback, reason);
+-        conn->closeDispatch = true;
+-        virMutexUnlock(&conn->lock);
+-        closeCallback(conn, reason, closeOpaque);
+-        virMutexLock(&conn->lock);
+-        conn->closeDispatch = false;
+-        if (conn->closeUnregisterCount != closeUnregisterCount &&
+-            closeFreeCallback)
+-            closeFreeCallback(closeOpaque);
++    if (cbdata->callback) {
++        VIR_DEBUG("Triggering connection close callback %p reason=%d, opaque=%p",
++                  cbdata->callback, reason, cbdata->opaque);
++        cbdata->callback(cbdata->conn, reason, cbdata->opaque);
++
++        if (cbdata->freeCallback)
++            cbdata->freeCallback(cbdata->opaque);
++        cbdata->callback = NULL;
++        cbdata->freeCallback = NULL;
+     }
+-    virMutexUnlock(&conn->lock);
++    virMutexUnlock(&cbdata->lock);
++
++    /* free the connection reference that comes along with the callback
++     * registration */
++    virObjectUnref(cbdata->conn);
+ }
+ 
+ /* helper macro to ease extraction of arguments from the URI */
+@@ -746,9 +745,11 @@ doRemoteOpen(virConnectPtr conn,
+             goto failed;
+     }
+ 
++    virObjectRef(conn->closeCallback);
++
+     virNetClientSetCloseCallback(priv->client,
+                                  remoteClientCloseFunc,
+-                                 conn, NULL);
++                                 conn->closeCallback, virObjectFreeCallback);
+ 
+     if (!(priv->remoteProgram = virNetClientProgramNew(REMOTE_PROGRAM,
+                                                        REMOTE_PROTOCOL_VERSION,
+@@ -1004,8 +1005,8 @@ doRemoteClose(virConnectPtr conn, struct private_data *priv)
+     priv->tls = NULL;
+     virNetClientSetCloseCallback(priv->client,
+                                  NULL,
+-                                 NULL,
+-                                 NULL);
++                                 conn->closeCallback, virObjectFreeCallback);
++
+     virNetClientClose(priv->client);
+     virObjectUnref(priv->client);
+     priv->client = NULL;
+-- 
+1.8.2.1
+

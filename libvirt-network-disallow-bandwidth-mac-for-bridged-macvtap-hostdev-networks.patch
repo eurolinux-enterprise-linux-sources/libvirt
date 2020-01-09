@@ -1,0 +1,163 @@
+From 7fdc8630f93c364dd89bb89c4338f3bb0e6700f1 Mon Sep 17 00:00:00 2001
+Message-Id: <7fdc8630f93c364dd89bb89c4338f3bb0e6700f1@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Tue, 29 Apr 2014 13:01:42 +0200
+Subject: [PATCH] network: disallow <bandwidth>/<mac> for
+ bridged/macvtap/hostdev networks
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1057321
+
+pointed out that we weren't honoring the <bandwidth> element in
+libvirt networks using <forward mode='bridge'/>. In fact, these
+networks are just a method of giving a libvirt network name to an
+existing Linux host bridge on the system, and libvirt doesn't have
+enough information to know where to set such limits. We are working on
+a method of supporting network bandwidths for some specific cases of
+<forward mode='bridge'/>, but currently libvirt doesn't support it. So
+the proper thing to do now is just log an error when someone tries to
+put a <bandwidth> element in that type of network. (It's unclear if we
+will be able to do proper bandwidth limiting for macvtap networks, and
+most definitely we will not be able to support it for hostdev
+networks).
+
+While looking through the network XML documentation and comparing it
+to the networkValidate function, I noticed that we also ignore the
+presence of a mac address in the config in the same cases, rather than
+failing so that the user will understand that their desired action has
+not been taken.
+
+This patch updates networkValidate() (which is called any time a
+persistent network is defined, or a transient network created) to log
+an error and fail if it finds either a <bandwidth> or <mac> element
+and the network forward mode is anything except 'route'. 'nat', or
+nothing. (Yes, neither of those elements is acceptable for any macvtap
+mode, nor for a hostdev network).
+
+NB: This does *not* cause failure to start any existing network that
+contains one of those elements, so someone might have erroneously
+defined such a network in the past, and that network will continue to
+function unmodified. I considered it too disruptive to suddenly break
+working configs on the next reboot after a libvirt upgrade.
+
+(cherry picked from commit eafb53fec2436ca39949badb16b27901fe5b6ce2)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatnetwork.html.in  | 62 ++++++++++++++++++++++++++++++++-------------
+ src/network/bridge_driver.c | 19 +++++++++++++-
+ 2 files changed, 62 insertions(+), 19 deletions(-)
+
+diff --git a/docs/formatnetwork.html.in b/docs/formatnetwork.html.in
+index a176c50..3217f8a 100644
+--- a/docs/formatnetwork.html.in
++++ b/docs/formatnetwork.html.in
+@@ -388,24 +388,50 @@
+ ...</pre>
+ 
+       <p>
+-        This part of network XML provides setting quality of service. Incoming
+-        and outgoing traffic can be shaped independently. The
+-        <code>bandwidth</code> element can have at most one <code>inbound</code>
+-        and at most one <code>outbound</code> child elements. Leaving any of these
+-        children element out result in no QoS applied on that traffic direction.
+-        So, when you want to shape only network's incoming traffic, use
+-        <code>inbound</code> only, and vice versa. Each of these elements have one
+-        mandatory attribute <code>average</code>. It specifies average bit rate on
+-        interface being shaped. Then there are two optional attributes:
+-        <code>peak</code>, which specifies maximum rate at which bridge can send
+-        data, and <code>burst</code>, amount of bytes that can be burst at
+-        <code>peak</code> speed. Accepted values for attributes are integer
+-        numbers, The units for <code>average</code> and <code>peak</code> attributes
+-        are kilobytes per second, and for the <code>burst</code> just kilobytes.
+-        The rate is shared equally within domains connected to the network.
+-        Moreover, <code>bandwidth</code> element can be included in
+-        <code>portgroup</code> element.
+-        <span class="since">Since 0.9.4</span>
++        The <code>&lt;bandwidth&gt;</code> element allows setting
++        quality of service for a particular network.
++        <span class="since">Since 0.9.4</span> The limits specified
++        are applied to the aggregate of all traffic to/from all guest
++        interfaces attached to that network, <b>not</b> to each guest
++        interface individually.  Setting <code>bandwidth</code> for a
++        network is supported only for networks with
++        a <code>&lt;forward&gt;</code> mode
++        of <code>route</code>, <code>nat</code>, or no mode at all
++        (i.e. an "isolated" network). <code>bandwidth</code> setting
++        is <b>not</b> supported for forward modes
++        of <code>bridge</code>, <code>passthrough</code>, <code>private</code>,
++        or <code>hostdev</code>, and attempts to do this will lead to
++        a failure to define the network (or to create a transient
++        network).
++      </p>
++      <p>
++        Incoming and outgoing traffic can be shaped independently. The
++        <code>bandwidth</code> element can have at most
++        one <code>inbound</code> and at most one <code>outbound</code>
++        child element. Leaving either of these children elements out
++        results in no QoS applied for that traffic direction.  So,
++        when you want to shape only a network's incoming traffic, use
++        <code>inbound</code> only, and vice versa. Each of these
++        elements have one mandatory attribute - <code>average</code>,
++        which specifies the desired average bit rate for the interface
++        being shaped (in kibibytes/second). There are also two
++        optional attributes: <code>peak</code>, which specifies the
++        maximum rate at which the bridge can send data (again in
++        kibibytes/second), and <code>burst</code> - the amount of
++        bytes that can be transmitted in a single burst at
++        <code>peak</code> speed (in kibibytes). Accepted values for
++        attributes are integer numbers. The allotted bandwidth is
++        shared equally between domains connected to the network.
++      </p>
++      <p>
++        A <code>&lt;portgroup&gt;</code> element can also include
++        a <code>&lt;bandwidth&gt;</code> element. In that case, the
++        specified bandwidth will be applied individually to each guest
++        interface defined to be a member of that portgroup.
++        Any <code>&lt;bandwidth&gt;</code> element in the guest's
++        interface definition will override the setting in the
++        portgroup.
++        <span class="since">Since 1.0.1</span>
+       </p>
+ 
+     <h5><a name="elementVlanTag">Setting VLAN tag (on supported network types only)</a></h5>
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index a0db095..abe1e62 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -2729,8 +2729,17 @@ networkValidate(struct network_driver *driver,
+         virNetworkSetBridgeMacAddr(def);
+     } else {
+         /* They are also the only types that currently support setting
+-         * an IP address for the host-side device (bridge)
++         * a MAC or IP address for the host-side device (bridge), DNS
++         * configuration, or network-wide bandwidth limits.
+          */
++        if (def->mac_specified) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("Unsupported <mac> element in network %s "
++                             "with forward mode='%s'"),
++                           def->name,
++                           virNetworkForwardTypeToString(def->forwardType));
++            return -1;
++        }
+         if (virNetworkDefGetIpByIndex(def, AF_UNSPEC, 0)) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                            _("Unsupported <ip> element in network %s "
+@@ -2756,6 +2765,14 @@ networkValidate(struct network_driver *driver,
+                            virNetworkForwardTypeToString(def->forwardType));
+             return -1;
+         }
++        if (def->bandwidth) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("Unsupported network-wide <bandwidth> element "
++                             "in network %s with forward mode='%s'"),
++                           def->name,
++                           virNetworkForwardTypeToString(def->forwardType));
++            return -1;
++        }
+     }
+ 
+     /* We only support dhcp on one IPv4 address per defined network */
+-- 
+1.9.2
+

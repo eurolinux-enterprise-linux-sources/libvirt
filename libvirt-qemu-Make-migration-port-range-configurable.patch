@@ -1,0 +1,141 @@
+From 0b4011e56c2557a59fad73afb8a603c21fc50cdc Mon Sep 17 00:00:00 2001
+Message-Id: <0b4011e56c2557a59fad73afb8a603c21fc50cdc@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 May 2014 13:43:05 +0200
+Subject: [PATCH] qemu: Make migration port range configurable
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1019053
+https://bugzilla.redhat.com/show_bug.cgi?id=1018695
+
+(cherry picked from commit e3ef20d7f7fee595ac4fc6094e04b7d65ee0583a)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_conf.h -- no virQEMUDriverConfig split
+	src/qemu/qemu_conf.c -- no virQEMUDriverConfig; no convenient
+	    macros for getting configuration values
+	src/qemu/qemu.conf,
+	src/qemu/test_libvirtd_qemu.aug.in -- context; mostly missing
+	    commit 1606d89c (migration_address)
+
+Downstream changes:
+    - src/qemu/qemu_driver.c: no virQEMUDriverConfig split
+---
+ src/qemu/qemu.conf                 |  9 +++++++++
+ src/qemu/qemu_conf.c               | 31 +++++++++++++++++++++++++++++++
+ src/qemu/qemu_conf.h               |  2 ++
+ src/qemu/qemu_driver.c             |  4 ++--
+ src/qemu/test_libvirtd_qemu.aug.in |  2 ++
+ 5 files changed, 46 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu.conf b/src/qemu/qemu.conf
+index bc6c58f..4175e58 100644
+--- a/src/qemu/qemu.conf
++++ b/src/qemu/qemu.conf
+@@ -403,6 +403,15 @@
+ #seccomp_sandbox = 1
+ 
+ 
++# Override the port range used for incoming migrations.
++#
++# Minimum must be greater than 0, however when QEMU is not running as root,
++# setting the minimum to be lower than 1024 will not work.
++#
++# Maximum must not be greater than 65535.
++#
++#migration_port_min = 49152
++#migration_port_max = 49215
+ 
+ # Timestamp QEMU's log messages (if QEMU supports it)
+ #
+diff --git a/src/qemu/qemu_conf.c b/src/qemu/qemu_conf.c
+index d1bb1a9..6d17f56 100644
+--- a/src/qemu/qemu_conf.c
++++ b/src/qemu/qemu_conf.c
+@@ -109,6 +109,9 @@ int qemudLoadDriverConfig(struct qemud_driver *driver,
+         return -1;
+     }
+ 
++    driver->migrationPortMin = QEMU_MIGRATION_PORT_MIN;
++    driver->migrationPortMax = QEMU_MIGRATION_PORT_MAX;
++
+ #if defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R
+     /* For privileged driver, try and find hugepage mount automatically.
+      * Non-privileged driver requires admin to create a dir for the
+@@ -343,6 +346,34 @@ int qemudLoadDriverConfig(struct qemud_driver *driver,
+         return -1;
+     }
+ 
++    p = virConfGetValue(conf, "migration_port_min");
++    CHECK_TYPE("migration_port_min", VIR_CONF_LONG);
++    if (p) {
++        if (p->l <= 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("%s: migration_port_min: port must be greater than 0"),
++                           filename);
++            virConfFree(conf);
++            return -1;
++        }
++        driver->migrationPortMin = p->l;
++    }
++
++    p = virConfGetValue(conf, "migration_port_max");
++    CHECK_TYPE("migration_port_max", VIR_CONF_LONG);
++    if (p) {
++        if (p->l > 65535 ||
++            p->l < driver->migrationPortMin) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                            _("%s: migration_port_max: port must be between "
++                              "the minimal port %d and 65535"),
++                           filename, driver->migrationPortMin);
++            virConfFree(conf);
++            return -1;
++        }
++        driver->migrationPortMax = p->l;
++    }
++
+     p = virConfGetValue (conf, "user");
+     CHECK_TYPE ("user", VIR_CONF_STRING);
+     if (!(user = strdup(p && p->str ? p->str : QEMU_USER))) {
+diff --git a/src/qemu/qemu_conf.h b/src/qemu/qemu_conf.h
+index b6ac05e..a1dc506 100644
+--- a/src/qemu/qemu_conf.h
++++ b/src/qemu/qemu_conf.h
+@@ -164,6 +164,8 @@ struct qemud_driver {
+     int seccompSandbox;
+ 
+     bool logTimestamp;
++    int migrationPortMin;
++    int migrationPortMax;
+ };
+ 
+ typedef struct _qemuDomainCmdlineDef qemuDomainCmdlineDef;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 18bff74..8d4d808 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -785,8 +785,8 @@ qemudStartup(int privileged) {
+     }
+ 
+     if ((qemu_driver->migrationPorts =
+-         virPortAllocatorNew(QEMU_MIGRATION_PORT_MIN,
+-                             QEMU_MIGRATION_PORT_MAX)) == NULL)
++         virPortAllocatorNew(qemu_driver->migrationPortMin,
++                             qemu_driver->migrationPortMax)) == NULL)
+         goto error;
+ 
+     if (qemuSecurityInit(qemu_driver) < 0)
+diff --git a/src/qemu/test_libvirtd_qemu.aug.in b/src/qemu/test_libvirtd_qemu.aug.in
+index 1a8841b..e721338 100644
+--- a/src/qemu/test_libvirtd_qemu.aug.in
++++ b/src/qemu/test_libvirtd_qemu.aug.in
+@@ -61,4 +61,6 @@ module Test_libvirtd_qemu =
+ { "keepalive_interval" = "5" }
+ { "keepalive_count" = "5" }
+ { "seccomp_sandbox" = "1" }
++{ "migration_port_min" = "1234" }
++{ "migration_port_max" = "12345" }
+ { "log_timestamp" = "0" }
+-- 
+1.9.3
+

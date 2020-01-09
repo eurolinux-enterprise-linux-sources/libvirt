@@ -1,0 +1,80 @@
+From 9663f7e5143839d0caad57b3087a961bd3e9e492 Mon Sep 17 00:00:00 2001
+Message-Id: <9663f7e5143839d0caad57b3087a961bd3e9e492.1351526125.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 24 Oct 2012 17:44:25 +0200
+Subject: [PATCH] cpu: Add recently added cpu feature flags.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=797283
+
+Qemu has added some new feature flags. This patch adds them to libvirt.
+
+The new features are for the cpuid function 0x7 that takes an argument
+in the ecx register. Currently only 0x0 is used as the argument so I was
+lazy and I just clear the registers to 0 before calling cpuid. In future
+when there maybe will be some other possible arguments, we will need to
+improve the cpu detection code to take this into account.
+(cherry picked from commit 012f9b19ef3812884e207dc431571502de4cebce)
+---
+ src/cpu/cpu_map.xml | 12 ++++++++++++
+ src/cpu/cpu_x86.c   |  8 +++++++-
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 9a89e2e..585f11a 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -142,6 +142,9 @@
+     <feature name='pdcm'>
+       <cpuid function='0x00000001' ecx='0x00008000'/>
+     </feature>
++    <feature name='pcid'>
++      <cpuid function='0x00000001' ecx='0x00020000'/>
++    </feature>
+     <feature name='dca'> <!-- CPUID_EXT_DCA -->
+       <cpuid function='0x00000001' ecx='0x00040000'/>
+     </feature>
+@@ -261,6 +264,15 @@
+       <cpuid function='0x80000001' ecx='0x00080000'/>
+     </feature>
+ 
++    <!-- cpuid function 0x7 ecx 0x0 features -->
++    <!-- We support only ecx 0x0 now as it's done by a workaround -->
++    <feature name='smep'>
++      <cpuid function='0x00000007' ebx='0x00000080'/>
++    </feature>
++    <feature name='smap'>
++      <cpuid function='0x00000007' ebx='0x00080000'/>
++    </feature>
++
+     <!-- models -->
+     <model name='486'>
+       <feature name='fpu'/>
+diff --git a/src/cpu/cpu_x86.c b/src/cpu/cpu_x86.c
+index 7cd67b8..e691c04 100644
+--- a/src/cpu/cpu_x86.c
++++ b/src/cpu/cpu_x86.c
+@@ -1539,7 +1539,10 @@ static inline void
+ cpuidCall(struct cpuX86cpuid *cpuid)
+ {
+ # if __x86_64__
+-    asm("cpuid"
++    asm("xor %%ebx, %%ebx;" /* clear the other registers as some cpuid */
++        "xor %%ecx, %%ecx;" /* functions may use them as additional */
++        "xor %%edx, %%edx;" /* arguments */
++        "cpuid;"
+         : "=a" (cpuid->eax),
+           "=b" (cpuid->ebx),
+           "=c" (cpuid->ecx),
+@@ -1550,6 +1553,9 @@ cpuidCall(struct cpuX86cpuid *cpuid)
+      * for global offset table on i386 with -fPIC
+      */
+     asm("push %%ebx;"
++        "xor %%ebx, %%ebx;" /* clear the other registers as some cpuid */
++        "xor %%ecx, %%ecx;" /* functions may use them as additional */
++        "xor %%edx, %%edx;" /* arguments */
+         "cpuid;"
+         "mov %%ebx, %1;"
+         "pop %%ebx;"
+-- 
+1.7.12.4
+

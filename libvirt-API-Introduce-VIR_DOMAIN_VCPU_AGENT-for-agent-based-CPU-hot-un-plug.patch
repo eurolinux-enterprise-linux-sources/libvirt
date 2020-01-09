@@ -1,0 +1,224 @@
+From 7ee49192b9d5f1f8c1ed4445ad266a8c2264d5d4 Mon Sep 17 00:00:00 2001
+Message-Id: <7ee49192b9d5f1f8c1ed4445ad266a8c2264d5d4.1373885146.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 13 Jun 2013 15:52:11 +0200
+Subject: [PATCH] API: Introduce VIR_DOMAIN_VCPU_AGENT, for agent based CPU
+ hot(un)plug
+
+https://bugzilla.redhat.com/show_bug.cgi?id=924400
+
+This flag will allow to use qemu guest agent commands to disable
+(offline) and enable (online) processors in a live guest that has the
+guest agent running.
+(cherry picked from commit 29c1e913e459058c12d02b3f4b767b3dd428a498)
+
+Conflicts:
+	tools/virsh-domain.c - exclusive options handling not backported
+---
+ include/libvirt/libvirt.h.in |  1 +
+ src/libvirt.c                | 24 ++++++++++++++++++++++--
+ tools/virsh-domain.c         | 29 +++++++++++++++++++++++++++--
+ tools/virsh.pod              | 13 ++++++++++---
+ 4 files changed, 60 insertions(+), 7 deletions(-)
+
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index 8d72f41..dba12d1 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -1920,6 +1920,7 @@ typedef enum {
+ 
+     /* Additionally, these flags may be bitwise-OR'd in.  */
+     VIR_DOMAIN_VCPU_MAXIMUM = (1 << 2), /* Max rather than current count */
++    VIR_DOMAIN_VCPU_AGENT   = (1 << 3), /* Use guest-agent based cpu hotplug */
+ } virDomainVcpuFlags;
+ 
+ int                     virDomainSetVcpus       (virDomainPtr domain,
+diff --git a/src/libvirt.c b/src/libvirt.c
+index b2fde9b..1571b92 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -8668,6 +8668,12 @@ error:
+  * equal to virConnectGetMaxVcpus().  Otherwise, this call affects the
+  * current virtual CPU limit, which must be less than or equal to the
+  * maximum limit.
++ *
++ * If @flags includes VIR_DOMAIN_VCPU_AGENT, then a guest agent is used to
++ * modify the number of processors used by a domain. This flag can only be used
++ * with live guests and is incompatible with VIR_DOMAIN_VCPU_MAXIMUM as the
++ * maximum limit can't be changed using the guest agent.
++ *
+  * Not all hypervisors can support all flag combinations.
+  *
+  * Returns 0 in case of success, -1 in case of failure.
+@@ -8693,6 +8699,15 @@ virDomainSetVcpusFlags(virDomainPtr domain, unsigned int nvcpus,
+         goto error;
+     }
+ 
++    if (flags & VIR_DOMAIN_VCPU_AGENT &&
++        flags & VIR_DOMAIN_VCPU_MAXIMUM) {
++        virReportInvalidArg(flags,
++                            _("flags 'VIR_DOMAIN_VCPU_MAXIMUM' and "
++                              "'VIR_DOMAIN_VCPU_AGENT' in '%s' are mutually "
++                              "exclusive"), __FUNCTION__);
++        goto error;
++    }
++
+     virCheckNonZeroArgGoto(nvcpus, error);
+ 
+     if ((unsigned short) nvcpus != nvcpus) {
+@@ -8736,7 +8751,11 @@ error:
+  *
+  * If @flags includes VIR_DOMAIN_VCPU_MAXIMUM, then the maximum
+  * virtual CPU limit is queried.  Otherwise, this call queries the
+- * current virtual CPU limit.
++ * current virtual CPU count.
++ *
++ * If @flags includes VIR_DOMAIN_VCPU_AGENT, then a guest agent is used to
++ * modify the number of processors used by a domain. This flag is only usable on
++ * live domains.
+  *
+  * Returns 0 in case of success, -1 in case of failure.
+  */
+@@ -8760,7 +8779,8 @@ virDomainGetVcpusFlags(virDomainPtr domain, unsigned int flags)
+     if ((flags & VIR_DOMAIN_AFFECT_LIVE) &&
+         (flags & VIR_DOMAIN_AFFECT_CONFIG)) {
+         virReportInvalidArg(flags,
+-                            _("flags 'affect live' and 'affect config' in %s are mutually exclusive"),
++                            _("flags 'affect live' and 'affect config' in %s "
++                              "are mutually exclusive"),
+                             __FUNCTION__);
+         goto error;
+     }
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 0fce14a..06696fa 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -4301,6 +4301,10 @@ static const vshCmdOptDef opts_vcpucount[] = {
+     {"config", VSH_OT_BOOL, 0, N_("get value to be used on next boot")},
+     {"current", VSH_OT_BOOL, 0,
+      N_("get value according to current domain state")},
++    {.name = "agent",
++     .type = VSH_OT_BOOL,
++     .help = N_("use guest agent based hotplug")
++    },
+     {NULL, 0, 0, NULL}
+ };
+ 
+@@ -4343,6 +4347,11 @@ vshCPUCountCollect(vshControl *ctl,
+            last_error->code == VIR_ERR_INVALID_ARG))
+          goto cleanup;
+ 
++     if (flags & VIR_DOMAIN_VCPU_AGENT) {
++         vshError(ctl, "%s", _("Failed to retrieve vCPU count via guest agent"));
++         goto cleanup;
++     }
++
+      if (!(flags & (VIR_DOMAIN_AFFECT_LIVE | VIR_DOMAIN_AFFECT_CONFIG)) &&
+          virDomainIsActive(dom) == 1)
+          flags |= VIR_DOMAIN_AFFECT_LIVE;
+@@ -4398,7 +4407,8 @@ cmdVcpucount(vshControl *ctl, const vshCmd *cmd)
+     bool config = vshCommandOptBool(cmd, "config");
+     bool live = vshCommandOptBool(cmd, "live");
+     bool current = vshCommandOptBool(cmd, "current");
+-    bool all = maximum + active + current + config + live == 0;
++    bool agent = vshCommandOptBool(cmd, "agent");
++    bool all = maximum + active + current + config + live + agent == 0;
+     unsigned int flags = VIR_DOMAIN_AFFECT_CURRENT;
+ 
+     /* We want one of each pair of mutually exclusive options; that
+@@ -4447,6 +4457,8 @@ cmdVcpucount(vshControl *ctl, const vshCmd *cmd)
+         flags |= VIR_DOMAIN_AFFECT_CONFIG;
+     if (maximum)
+         flags |= VIR_DOMAIN_VCPU_MAXIMUM;
++    if (agent)
++        flags |= VIR_DOMAIN_VCPU_AGENT;
+ 
+     if (!(dom = vshCommandOptDomain(ctl, cmd, NULL)))
+         return false;
+@@ -4865,6 +4877,10 @@ static const vshCmdOptDef opts_emulatorpin[] = {
+     {"config", VSH_OT_BOOL, 0, N_("affect next boot")},
+     {"live", VSH_OT_BOOL, 0, N_("affect running domain")},
+     {"current", VSH_OT_BOOL, 0, N_("affect current domain")},
++    {.name = "agent",
++     .type = VSH_OT_BOOL,
++     .help = N_("use guest agent based hotplug")
++    },
+     {NULL, 0, 0, NULL}
+ };
+ 
+@@ -5062,6 +5078,7 @@ cmdSetvcpus(vshControl *ctl, const vshCmd *cmd)
+     bool config = vshCommandOptBool(cmd, "config");
+     bool live = vshCommandOptBool(cmd, "live");
+     bool current = vshCommandOptBool(cmd, "current");
++    bool agent = vshCommandOptBool(cmd, "agent");
+     unsigned int flags = 0;
+ 
+     if (current) {
+@@ -5076,10 +5093,18 @@ cmdSetvcpus(vshControl *ctl, const vshCmd *cmd)
+         if (live)
+             flags |= VIR_DOMAIN_AFFECT_LIVE;
+         /* neither option is specified */
+-        if (!live && !config && !maximum)
++        if (!live && !config && !maximum && !agent)
+             flags = -1;
+     }
+ 
++    if (agent && config) {
++        vshError(ctl, "%s", _("--agent and --current are exclusive"));
++        return false;
++    }
++
++    if (agent)
++        flags |= VIR_DOMAIN_VCPU_AGENT;
++
+     if (!(dom = vshCommandOptDomain(ctl, cmd, NULL)))
+         return false;
+ 
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 3e2fae0..6f56e57 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -1506,7 +1506,7 @@ exclusive. If no flag is specified, behavior is different depending
+ on hypervisor.
+ 
+ =item B<setvcpus> I<domain> I<count> [I<--maximum>] [[I<--config>]
+-[I<--live>] | [I<--current>]]
++[I<--live>] | [I<--current>]] [I<--agent>]
+ 
+ Change the number of virtual CPUs active in a guest domain.  By default,
+ this command works on active guest domains.  To change the settings for an
+@@ -1532,6 +1532,10 @@ is up to the hypervisor whether the I<--config> flag is also assumed, and
+ therefore whether the XML configuration is adjusted to make the change
+ persistent.
+ 
++If I<--agent> is specified, then guest agent commands are used to retrieve the
++count of available vCPUs from the perspective of the guest. This flag is usable
++only for live domains.
++
+ The I<--maximum> flag controls the maximum number of virtual cpus that can
+ be hot-plugged the next time the domain is booted.  As such, it must only be
+ used with the I<--config> flag, and not with the I<--live> flag.
+@@ -1654,7 +1658,7 @@ NOTE: For an inactive domain, the domain name or UUID must be used as the
+ I<domain>.
+ 
+ =item B<vcpucount> I<domain>  [{I<--maximum> | I<--active>}
+-{I<--config> | I<--live> | I<--current>}]
++{I<--config> | I<--live> | I<--current>}] [I<--agent>]
+ 
+ Print information about the virtual cpu counts of the given
+ I<domain>.  If no flags are specified, all possible counts are
+@@ -1671,7 +1675,10 @@ time the domain will be booted, I<--live> requires a running domain and
+ lists current values, and I<--current> queries according to the current
+ state of the domain (corresponding to I<--live> if running, or
+ I<--config> if inactive); these three flags are mutually exclusive.
+-Thus, this command always takes exactly zero or two flags.
++
++If I<--agent> is specified, then guest agent commands are used to retrieve the
++count of available vCPUs from the perspective of the guest. This flag is usable
++only for live domains.
+ 
+ =item B<vcpuinfo> I<domain>
+ 
+-- 
+1.8.3.2
+

@@ -1,0 +1,174 @@
+From 9ff64768ca72cec7c8ace933740dc32baf32d67d Mon Sep 17 00:00:00 2001
+Message-Id: <9ff64768ca72cec7c8ace933740dc32baf32d67d.1373271641.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 10 Apr 2013 16:26:05 -0600
+Subject: [PATCH] virsh: Move cmdConnect from virsh-host.c to virsh.c
+
+https://bugzilla.redhat.com/show_bug.cgi?id=911609
+
+The function is used to establish connection so it should be in the main
+virsh file. This movement also enables further improvements done in next
+patches.
+
+Note that the "connect" command has moved from the host section of virsh to the
+main section. It is now listed by 'virsh help virsh' instead of 'virsh help
+host'.
+(cherry picked from commit ca9e73ebb60e2efb1ea835e9a394a8b64ecb97c1)
+
+Conflicts:
+	tools/virsh-host.c - C99 struct init not backported
+	tools/virsh.c - vshCommandOptStringReq not backported
+---
+ tools/virsh-host.c | 54 ----------------------------------------------------
+ tools/virsh.c      | 56 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 56 insertions(+), 54 deletions(-)
+
+diff --git a/tools/virsh-host.c b/tools/virsh-host.c
+index ab3b6ab..25ddba0 100644
+--- a/tools/virsh-host.c
++++ b/tools/virsh-host.c
+@@ -64,58 +64,6 @@ cmdCapabilities(vshControl *ctl, const vshCmd *cmd ATTRIBUTE_UNUSED)
+ }
+ 
+ /*
+- * "connect" command
+- */
+-static const vshCmdInfo info_connect[] = {
+-    {"help", N_("(re)connect to hypervisor")},
+-    {"desc",
+-     N_("Connect to local hypervisor. This is built-in command after shell start up.")},
+-    {NULL, NULL}
+-};
+-
+-static const vshCmdOptDef opts_connect[] = {
+-    {"name",     VSH_OT_DATA, VSH_OFLAG_EMPTY_OK,
+-     N_("hypervisor connection URI")},
+-    {"readonly", VSH_OT_BOOL, 0, N_("read-only connection")},
+-    {NULL, 0, 0, NULL}
+-};
+-
+-static bool
+-cmdConnect(vshControl *ctl, const vshCmd *cmd)
+-{
+-    bool ro = vshCommandOptBool(cmd, "readonly");
+-    const char *name = NULL;
+-
+-    if (ctl->conn) {
+-        int ret;
+-        if ((ret = virConnectClose(ctl->conn)) != 0) {
+-            vshError(ctl, _("Failed to disconnect from the hypervisor, %d leaked reference(s)"), ret);
+-            return false;
+-        }
+-        ctl->conn = NULL;
+-    }
+-
+-    VIR_FREE(ctl->name);
+-    if (vshCommandOptString(cmd, "name", &name) < 0) {
+-        vshError(ctl, "%s", _("Please specify valid connection URI"));
+-        return false;
+-    }
+-    ctl->name = vshStrdup(ctl, name);
+-
+-    ctl->useGetInfo = false;
+-    ctl->useSnapshotOld = false;
+-    ctl->readonly = ro;
+-
+-    ctl->conn = virConnectOpenAuth(ctl->name, virConnectAuthPtrDefault,
+-                                   ctl->readonly ? VIR_CONNECT_RO : 0);
+-
+-    if (!ctl->conn)
+-        vshError(ctl, "%s", _("Failed to connect to the hypervisor"));
+-
+-    return !!ctl->conn;
+-}
+-
+-/*
+  * "freecell" command
+  */
+ static const vshCmdInfo info_freecell[] = {
+@@ -1016,8 +964,6 @@ error:
+ 
+ const vshCmdDef hostAndHypervisorCmds[] = {
+     {"capabilities", cmdCapabilities, NULL, info_capabilities, 0},
+-    {"connect", cmdConnect, opts_connect, info_connect,
+-     VSH_CMD_FLAG_NOCONNECT},
+     {"freecell", cmdFreecell, opts_freecell, info_freecell, 0},
+     {"hostname", cmdHostname, NULL, info_hostname, 0},
+     {"node-memory-tune", cmdNodeMemoryTune,
+diff --git a/tools/virsh.c b/tools/virsh.c
+index 5dda015..9ab1e10 100644
+--- a/tools/virsh.c
++++ b/tools/virsh.c
+@@ -354,6 +354,60 @@ vshReconnect(vshControl *ctl)
+     ctl->useSnapshotOld = false;
+ }
+ 
++
++/*
++ * "connect" command
++ */
++static const vshCmdInfo info_connect[] = {
++    {"help", N_("(re)connect to hypervisor")},
++    {"desc",
++     N_("Connect to local hypervisor. This is built-in command after shell start up.")},
++    {NULL, NULL}
++};
++
++static const vshCmdOptDef opts_connect[] = {
++    {"name",     VSH_OT_DATA, VSH_OFLAG_EMPTY_OK,
++     N_("hypervisor connection URI")},
++    {"readonly", VSH_OT_BOOL, 0, N_("read-only connection")},
++    {NULL, 0, 0, NULL}
++};
++
++static bool
++cmdConnect(vshControl *ctl, const vshCmd *cmd)
++{
++    bool ro = vshCommandOptBool(cmd, "readonly");
++    const char *name = NULL;
++
++    if (ctl->conn) {
++        int ret;
++        if ((ret = virConnectClose(ctl->conn)) != 0) {
++            vshError(ctl, _("Failed to disconnect from the hypervisor, %d leaked reference(s)"), ret);
++            return false;
++        }
++        ctl->conn = NULL;
++    }
++
++    VIR_FREE(ctl->name);
++    if (vshCommandOptString(cmd, "name", &name) < 0) {
++        vshError(ctl, "%s", _("Please specify valid connection URI"));
++        return false;
++    }
++    ctl->name = vshStrdup(ctl, name);
++
++    ctl->useGetInfo = false;
++    ctl->useSnapshotOld = false;
++    ctl->readonly = ro;
++
++    ctl->conn = virConnectOpenAuth(ctl->name, virConnectAuthPtrDefault,
++                                   ctl->readonly ? VIR_CONNECT_RO : 0);
++
++    if (!ctl->conn)
++        vshError(ctl, "%s", _("Failed to connect to the hypervisor"));
++
++    return !!ctl->conn;
++}
++
++
+ #ifndef WIN32
+ static void
+ vshPrintRaw(vshControl *ctl, ...)
+@@ -2923,6 +2977,8 @@ vshParseArgv(vshControl *ctl, int argc, char **argv)
+ 
+ static const vshCmdDef virshCmds[] = {
+     {"cd", cmdCd, opts_cd, info_cd, VSH_CMD_FLAG_NOCONNECT},
++    {"connect", cmdConnect, opts_connect, info_connect,
++     VSH_CMD_FLAG_NOCONNECT},
+     {"echo", cmdEcho, opts_echo, info_echo, VSH_CMD_FLAG_NOCONNECT},
+     {"exit", cmdQuit, NULL, info_quit, VSH_CMD_FLAG_NOCONNECT},
+     {"help", cmdHelp, opts_help, info_help, VSH_CMD_FLAG_NOCONNECT},
+-- 
+1.8.2.1
+

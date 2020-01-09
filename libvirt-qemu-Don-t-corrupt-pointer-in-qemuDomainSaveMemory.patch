@@ -1,0 +1,75 @@
+From 0048f951dae5471db6861ab3f43474ea115bd3eb Mon Sep 17 00:00:00 2001
+Message-Id: <0048f951dae5471db6861ab3f43474ea115bd3eb.1352726475.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 6 Nov 2012 15:03:15 +0100
+Subject: [PATCH] qemu: Don't corrupt pointer in qemuDomainSaveMemory()
+
+https://bugzilla.redhat.com/show_bug.cgi?id=873537
+
+The code that was split out into the qemuDomainSaveMemory expands the
+pointer containing the XML description of the domain that it gets from
+higher layers. If the pointer changes the old one is invalid and the
+upper layer function tries to free it causing an abort.
+
+This patch changes the expansion of the original string to a new
+allocation and copy of the contents.
+(cherry picked from commit fb58f8e2a4c4ab619eab3860b263110a5bd9010f)
+---
+ src/qemu/qemu_driver.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 2c22e79..d1732b4 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2751,7 +2751,7 @@ static int
+ qemuDomainSaveMemory(struct qemud_driver *driver,
+                      virDomainObjPtr vm,
+                      const char *path,
+-                     const char *xml,
++                     const char *domXML,
+                      int compressed,
+                      bool was_running,
+                      unsigned int flags,
+@@ -2768,6 +2768,7 @@ qemuDomainSaveMemory(struct qemud_driver *driver,
+     unsigned long long pad;
+     unsigned long long offset;
+     size_t len;
++    char *xml = NULL;
+ 
+     memset(&header, 0, sizeof(header));
+     memcpy(header.magic, QEMUD_SAVE_PARTIAL, sizeof(header.magic));
+@@ -2776,7 +2777,7 @@ qemuDomainSaveMemory(struct qemud_driver *driver,
+ 
+     header.compressed = compressed;
+ 
+-    len = strlen(xml) + 1;
++    len = strlen(domXML) + 1;
+     offset = sizeof(header) + len;
+ 
+     /* Due to way we append QEMU state on our header with dd,
+@@ -2790,10 +2791,12 @@ qemuDomainSaveMemory(struct qemud_driver *driver,
+     pad = 1024;
+     pad += (QEMU_MONITOR_MIGRATE_TO_FILE_BS -
+             ((offset + pad) % QEMU_MONITOR_MIGRATE_TO_FILE_BS));
+-    if (VIR_EXPAND_N(xml, len, pad) < 0) {
++    if (VIR_ALLOC_N(xml, len + pad) < 0) {
+         virReportOOMError();
+         goto cleanup;
+     }
++    strcpy(xml, domXML);
++
+     offset += pad;
+     header.xml_len = len;
+ 
+@@ -2861,6 +2864,7 @@ cleanup:
+     VIR_FORCE_CLOSE(fd);
+     virFileWrapperFdCatchError(wrapperFd);
+     virFileWrapperFdFree(wrapperFd);
++    VIR_FREE(xml);
+ 
+     if (ret != 0 && needUnlink)
+         unlink(path);
+-- 
+1.8.0
+

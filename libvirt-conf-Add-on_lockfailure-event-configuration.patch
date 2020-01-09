@@ -1,0 +1,191 @@
+From dd4994df387e0f69071bc798a520b25341c0ec5e Mon Sep 17 00:00:00 2001
+Message-Id: <dd4994df387e0f69071bc798a520b25341c0ec5e.1350297257.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 6 Sep 2012 22:17:01 +0200
+Subject: [PATCH] conf: Add on_lockfailure event configuration
+
+https://bugzilla.redhat.com/show_bug.cgi?id=832156
+
+Using this new element, one can configure an action that should be
+performed when resource locks are lost.
+(cherry picked from commit 76f5bcabe611d90cca202fe365340a753f8cd0c3)
+---
+ docs/formatdomain.html.in     | 22 ++++++++++++++++++++++
+ docs/schemas/domaincommon.rng | 22 ++++++++++++++++++++++
+ src/conf/domain_conf.c        | 19 +++++++++++++++++++
+ src/conf/domain_conf.h        | 14 ++++++++++++++
+ src/libvirt_private.syms      |  2 ++
+ 5 files changed, 79 insertions(+)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index b972d55..b8e6308 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -928,6 +928,7 @@
+   &lt;on_poweroff&gt;destroy&lt;/on_poweroff&gt;
+   &lt;on_reboot&gt;restart&lt;/on_reboot&gt;
+   &lt;on_crash&gt;restart&lt;/on_crash&gt;
++  &lt;on_lockfailure&gt;poweroff&lt;/on_lockfailure&gt;
+   ...</pre>
+ 
+     <p>
+@@ -983,6 +984,27 @@
+         domain will be restarted with the same configuration</dd>
+     </dl>
+ 
++    <p>
++      The <code>on_lockfailure</code> element (<span class="since">since
++      0.10.3</span>) may be used to configure what action should be
++      taken when a lock manager loses resource locks. The following
++      actions are recognized by libvirt, although not all of them need
++      to be supported by individual lock managers. When no action is
++      specified, each lock manager will take its default action.
++    </p>
++    <dl>
++      <dt><code>poweroff</code></dt>
++      <dd>The domain will be forcefully powered off.</dd>
++      <dt><code>restart</code></dt>
++      <dd>The domain will be powered off and started up again to
++        reacquire its locks.</dd>
++      <dt><code>pause</code></dt>
++      <dd>The domain will be paused so that it can be manually resumed
++        when lock issues are solved.</dd>
++      <dt><code>ignore</code></dt>
++      <dd>Keep the domain running as if nothing happened.</dd>
++    </dl>
++
+     <h3><a name="elementsPowerManagement">Power Management</a></h3>
+ 
+     <p>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 4e63112..b0d8059 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -2251,6 +2251,11 @@
+           <ref name="crashOptions"/>
+         </element>
+       </optional>
++      <optional>
++        <element name="on_lockfailure">
++          <ref name="lockfailureOptions"/>
++        </element>
++      </optional>
+     </interleave>
+   </define>
+   <!--
+@@ -2293,6 +2298,23 @@
+     </choice>
+   </define>
+   <!--
++      Options when resource locks are lost:
++      poweroff: power off the domain
++      restart: power off the domain and start it up again to reacquire the
++               locks
++      pause: pause the execution of the domain so that it can be manually
++             resumed when lock issues are solved
++      ignore: keep the domain running
++  -->
++  <define name="lockfailureOptions">
++    <choice>
++      <value>poweroff</value>
++      <value>restart</value>
++      <value>pause</value>
++      <value>ignore</value>
++    </choice>
++  </define>
++  <!--
+       Control ACPI sleep states (dis)allowed for the domain
+       For each of the states the following rules apply:
+       on: the state will be forcefully enabled
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 8ab9ade..1cae951 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -134,6 +134,13 @@ VIR_ENUM_IMPL(virDomainLifecycleCrash, VIR_DOMAIN_LIFECYCLE_CRASH_LAST,
+               "coredump-destroy",
+               "coredump-restart")
+ 
++VIR_ENUM_IMPL(virDomainLockFailure, VIR_DOMAIN_LOCK_FAILURE_LAST,
++              "default",
++              "poweroff",
++              "restart",
++              "pause",
++              "ignore")
++
+ VIR_ENUM_IMPL(virDomainPMState, VIR_DOMAIN_PM_STATE_LAST,
+               "default",
+               "yes",
+@@ -8969,6 +8976,13 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+                                      virDomainLifecycleCrashTypeFromString) < 0)
+         goto error;
+ 
++    if (virDomainEventActionParseXML(ctxt, "on_lockfailure",
++                                     "string(./on_lockfailure[1])",
++                                     &def->onLockFailure,
++                                     VIR_DOMAIN_LOCK_FAILURE_DEFAULT,
++                                     virDomainLockFailureTypeFromString) < 0)
++        goto error;
++
+     if (virDomainPMStateParseXML(ctxt,
+                                  "string(./pm/suspend-to-mem/@enabled)",
+                                  &def->pm.s3) < 0)
+@@ -13703,6 +13717,11 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+                                       "on_crash",
+                                       virDomainLifecycleCrashTypeToString) < 0)
+         goto cleanup;
++    if (def->onLockFailure != VIR_DOMAIN_LOCK_FAILURE_DEFAULT &&
++        virDomainEventActionDefFormat(buf, def->onLockFailure,
++                                      "on_lockfailure",
++                                      virDomainLockFailureTypeToString) < 0)
++        goto cleanup;
+ 
+     if (def->pm.s3 || def->pm.s4) {
+         virBufferAddLit(buf, "  <pm>\n");
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 1b0010b..4533c06 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1413,6 +1413,18 @@ enum virDomainLifecycleCrashAction {
+     VIR_DOMAIN_LIFECYCLE_CRASH_LAST
+ };
+ 
++typedef enum {
++    VIR_DOMAIN_LOCK_FAILURE_DEFAULT,
++    VIR_DOMAIN_LOCK_FAILURE_POWEROFF,
++    VIR_DOMAIN_LOCK_FAILURE_RESTART,
++    VIR_DOMAIN_LOCK_FAILURE_PAUSE,
++    VIR_DOMAIN_LOCK_FAILURE_IGNORE,
++
++    VIR_DOMAIN_LOCK_FAILURE_LAST
++} virDomainLockFailureAction;
++
++VIR_ENUM_DECL(virDomainLockFailure)
++
+ enum virDomainPMState {
+     VIR_DOMAIN_PM_STATE_DEFAULT = 0,
+     VIR_DOMAIN_PM_STATE_ENABLED,
+@@ -1682,6 +1694,8 @@ struct _virDomainDef {
+     int onPoweroff;
+     int onCrash;
+ 
++    int onLockFailure; /* enum virDomainLockFailureAction */
++
+     struct {
+         /* These options are actually type of enum virDomainPMState */
+         int s3;
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 7f786e3..6e029ef 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -424,6 +424,8 @@ virDomainLifecycleTypeFromString;
+ virDomainLifecycleTypeToString;
+ virDomainLiveConfigHelperMethod;
+ virDomainLoadAllConfigs;
++virDomainLockFailureTypeFromString;
++virDomainLockFailureTypeToString;
+ virDomainMemballoonModelTypeFromString;
+ virDomainMemballoonModelTypeToString;
+ virDomainMemDumpTypeFromString;
+-- 
+1.7.12.3
+

@@ -1,0 +1,80 @@
+From 84be86a5b8d0f6795827ca4ac111fa28eab8e392 Mon Sep 17 00:00:00 2001
+Message-Id: <84be86a5b8d0f6795827ca4ac111fa28eab8e392.1352118320.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Sun, 4 Nov 2012 20:47:28 +0100
+Subject: [PATCH] snapshot: improve disk align checking
+
+https://bugzilla.redhat.com/show_bug.cgi?id=638512
+
+There were not previous callers with require_match set to true.
+I originally implemented this bool with the intent of supporting
+ESX snapshot semantics, where the choice of internal vs. external
+vs. non-checkpointable must be made at domain start, but as ESX
+has not been wired up to use it yet, we might as well fix it to
+work with our next qemu patch for now, and worry about any further
+improvements (changing the bool to a flags argument) if the ESX
+driver decides to use this function in the future.
+
+* src/conf/snapshot_conf.c (virDomainSnapshotAlignDisks): Alter
+logic when require_match is true to deal with new XML.
+(cherry picked from commit f9670bf8a4b6332a15d42dd4ed1b9b28855d9ba7)
+---
+ src/conf/snapshot_conf.c | 25 +++++++++++++++----------
+ 1 file changed, 15 insertions(+), 10 deletions(-)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index d55aa6b..9e92f2a 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -372,9 +372,8 @@ disksorter(const void *a, const void *b)
+  * the domain, with a fallback to a passed in default.  Convert paths
+  * to disk targets for uniformity.  Issue an error and return -1 if
+  * any def->disks[n]->name appears more than once or does not map to
+- * dom->disks.  If require_match, also require that existing
+- * def->disks snapshot states do not override explicit def->dom
+- * settings.  */
++ * dom->disks.  If require_match, also ensure that there is no
++ * conflicting requests for both internal and external snapshots.  */
+ int
+ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
+                             int default_snapshot,
+@@ -420,7 +419,6 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
+                            _("no disk named '%s'"), disk->name);
+             goto cleanup;
+         }
+-        disk_snapshot = def->dom->disks[idx]->snapshot;
+ 
+         if (virBitmapGetBit(map, idx, &inuse) < 0 || inuse) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+@@ -430,15 +428,22 @@ virDomainSnapshotAlignDisks(virDomainSnapshotDefPtr def,
+         }
+         ignore_value(virBitmapSetBit(map, idx));
+         disk->index = idx;
+-        if (!disk_snapshot)
+-            disk_snapshot = default_snapshot;
++
++        disk_snapshot = def->dom->disks[idx]->snapshot;
+         if (!disk->snapshot) {
+-            disk->snapshot = disk_snapshot;
+-        } else if (disk_snapshot && require_match &&
+-                   disk->snapshot != disk_snapshot) {
++            if (disk_snapshot &&
++                (!require_match ||
++                 disk_snapshot == VIR_DOMAIN_SNAPSHOT_LOCATION_NONE))
++                disk->snapshot = disk_snapshot;
++            else
++                disk->snapshot = default_snapshot;
++        } else if (require_match &&
++                   disk->snapshot != default_snapshot &&
++                   !(disk->snapshot == VIR_DOMAIN_SNAPSHOT_LOCATION_NONE &&
++                     disk_snapshot == VIR_DOMAIN_SNAPSHOT_LOCATION_NONE)) {
+             const char *tmp;
+ 
+-            tmp = virDomainSnapshotLocationTypeToString(disk_snapshot);
++            tmp = virDomainSnapshotLocationTypeToString(default_snapshot);
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                            _("disk '%s' must use snapshot mode '%s'"),
+                            disk->name, tmp);
+-- 
+1.8.0
+

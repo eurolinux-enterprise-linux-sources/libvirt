@@ -1,0 +1,84 @@
+From 703b7e2c5697792f0a15a195977f8341b7085bcf Mon Sep 17 00:00:00 2001
+Message-Id: <703b7e2c5697792f0a15a195977f8341b7085bcf@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 30 Jul 2015 10:47:20 +0200
+Subject: [PATCH] qemu: event: Clean up VNC monitor handling
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1236581
+
+Get rid of spice specific stuff from the handler func and save a few
+lines by reflowing the conditions.
+
+(cherry picked from commit 15632a312efea02b9002a230c0dde1d206184eef)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_monitor_json.c | 39 ++++++++++++++++++---------------------
+ 1 file changed, 18 insertions(+), 21 deletions(-)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index ee39c36..b6d7f0b 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -704,40 +704,37 @@ qemuMonitorJSONHandleGraphicsVNC(qemuMonitorPtr mon,
+         return;
+     }
+ 
+-    authScheme = virJSONValueObjectGetString(server, "auth");
+-    if (!authScheme) {
++    if (!(authScheme = virJSONValueObjectGetString(server, "auth"))) {
+         /* not all events are required to contain auth scheme */
+-        VIR_DEBUG("missing auth scheme in graphics event");
++        VIR_DEBUG("missing auth scheme in VNC event");
+         authScheme = "";
+     }
+ 
+-    localFamily = virJSONValueObjectGetString(server, "family");
+-    if (!localFamily) {
+-        VIR_WARN("missing local address family in graphics event");
++    if (!(localFamily = virJSONValueObjectGetString(server, "family"))) {
++        VIR_WARN("missing local address family in VNC event");
+         return;
+     }
+-    localNode = virJSONValueObjectGetString(server, "host");
+-    if (!localNode) {
+-        VIR_WARN("missing local hostname in graphics event");
++    if (!(localNode = virJSONValueObjectGetString(server, "host"))) {
++        VIR_WARN("missing local hostname in VNC event");
++        return;
++    }
++    if (!(localService = virJSONValueObjectGetString(server, "service"))) {
++        VIR_WARN("missing local service in VNC event");
+         return;
+     }
+-    localService = virJSONValueObjectGetString(server, "service");
+-    if (!localService)
+-        localService = ""; /* Spice has multiple ports, so this isn't provided */
+ 
+-    remoteFamily = virJSONValueObjectGetString(client, "family");
+-    if (!remoteFamily) {
+-        VIR_WARN("missing remote address family in graphics event");
++    if (!(remoteFamily = virJSONValueObjectGetString(client, "family"))) {
++        VIR_WARN("missing remote address family in VNC event");
+         return;
+     }
+-    remoteNode = virJSONValueObjectGetString(client, "host");
+-    if (!remoteNode) {
+-        VIR_WARN("missing remote hostname in graphics event");
++    if (!(remoteNode = virJSONValueObjectGetString(client, "host"))) {
++        VIR_WARN("missing remote hostname in VNC event");
++        return;
++    }
++    if (!(remoteService = virJSONValueObjectGetString(client, "service"))) {
++        VIR_WARN("missing remote service in VNC event");
+         return;
+     }
+-    remoteService = virJSONValueObjectGetString(client, "service");
+-    if (!remoteService)
+-        remoteService = ""; /* Spice has multiple ports, so this isn't provided */
+ 
+     saslUsername = virJSONValueObjectGetString(client, "sasl_username");
+     x509dname = virJSONValueObjectGetString(client, "x509_dname");
+-- 
+2.6.2
+

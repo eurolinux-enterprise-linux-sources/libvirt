@@ -1,0 +1,48 @@
+From bb705758315e4ba66535cb41e981839fcda7d3e4 Mon Sep 17 00:00:00 2001
+Message-Id: <bb705758315e4ba66535cb41e981839fcda7d3e4.1373271642.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 7 Jun 2013 15:47:36 +0200
+Subject: [PATCH] qemuDomainMigrateGraphicsRelocate: Use then new
+ virSocketAddrIsWildcard
+
+https://bugzilla.redhat.com/show_bug.cgi?id=920441
+
+Since we have the new internal API to check for wildcard address,
+we can use it instead of parsing and formatting.
+(cherry picked from commit b72ba1da364a8f72aaba2f703dd84daf38b99dcc)
+
+Conflicts:
+	src/qemu/qemu_migration.c: Context as
+    e5fa9db17ed9363f2f07080e92ffb67b12015f65 is not backported.
+---
+ src/qemu/qemu_migration.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 4a00727..0777b1b 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1063,6 +1063,7 @@ qemuDomainMigrateGraphicsRelocate(struct qemud_driver *driver,
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     int ret;
+     char *listenAddress;
++    virSocketAddr addr;
+ 
+     if (!cookie)
+         return 0;
+@@ -1077,9 +1078,10 @@ qemuDomainMigrateGraphicsRelocate(struct qemud_driver *driver,
+         return 0;
+ 
+     listenAddress = cookie->graphics->listen;
++
+     if (!listenAddress ||
+-        STREQ(listenAddress, "0.0.0.0") ||
+-        STREQ(listenAddress, "::"))
++        (virSocketAddrParse(&addr, listenAddress, AF_UNSPEC) > 0 &&
++         virSocketAddrIsWildcard(&addr)))
+         listenAddress = cookie->remoteHostname;
+ 
+     ret = qemuDomainObjEnterMonitorAsync(driver, vm,
+-- 
+1.8.2.1
+

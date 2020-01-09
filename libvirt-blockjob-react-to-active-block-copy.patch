@@ -1,0 +1,212 @@
+From c6515e23f554aaa464915a9fdc4369ff96dc4c4c Mon Sep 17 00:00:00 2001
+Message-Id: <c6515e23f554aaa464915a9fdc4369ff96dc4c4c.1350990680.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 22 Oct 2012 21:48:45 -0600
+Subject: [PATCH] blockjob: react to active block copy
+
+https://bugzilla.redhat.com/show_bug.cgi?id=856247
+[rebase of 6.3 https://bugzilla.redhat.com/show_bug.cgi?id=638506]
+
+For now, disk migration via block copy job is not implemented in
+libvirt.  But when we do implement it, we have to deal with the
+fact that qemu does not yet provide an easy way to re-start a qemu
+process with mirroring still intact.  Paolo has proposed an idea
+for a persistent dirty bitmap that might make this possible, but
+until that design is complete, it's hard to say what changes
+libvirt would need.  Even something like 'virDomainSave' becomes
+hairy, if you realize the implications that 'virDomainRestore'
+would be stuck with recreating the same mirror layout.
+
+But if we step back and look at the bigger picture, we realize that
+the initial client of live storage migration via disk mirroring is
+oVirt, which always uses transient domains, and that if a transient
+domain is destroyed while a mirror exists, oVirt can easily restart
+the storage migration by creating a new domain that visits just the
+source storage, with no loss in data.
+
+We can make life a lot easier by being cowards for now, forbidding
+certain operations on a domain.  This patch guarantees that we
+never get in a state where we would have to restart a domain with
+a mirroring block copy, by preventing saves, snapshots, migration,
+hot unplug of a disk in use, and conversion to a persistent domain
+(thankfully, it is still relatively easy to 'virsh undefine' a
+running domain to temporarily make it transient, run tests on
+'virsh blockcopy', then 'virsh define' to restore the persistence).
+Later, if the qemu design is enhanced, we can relax our code.
+
+The change to qemudDomainDefine looks a bit odd for undoing an
+assignment, rather than probing up front to avoid the assignment,
+but this is because of how virDomainAssignDef combines both a
+lookup and assignment into a single function call.
+
+* src/conf/domain_conf.h (virDomainHasDiskMirror): New prototype.
+* src/conf/domain_conf.c (virDomainHasDiskMirror): New function.
+* src/libvirt_private.syms (domain_conf.h): Export it.
+* src/qemu/qemu_driver.c (qemuDomainSaveInternal)
+(qemuDomainSnapshotCreateXML, qemuDomainRevertToSnapshot)
+(qemuDomainBlockJobImpl, qemudDomainDefine): Prevent dangerous
+actions while block copy is already in action.
+* src/qemu/qemu_hotplug.c (qemuDomainDetachDiskDevice): Likewise.
+* src/qemu/qemu_migration.c (qemuMigrationIsAllowed): Likewise.
+(cherry picked from TBD)
+---
+ src/conf/domain_conf.c    | 12 ++++++++++++
+ src/conf/domain_conf.h    |  1 +
+ src/libvirt_private.syms  |  1 +
+ src/qemu/qemu_driver.c    | 29 +++++++++++++++++++++++++++++
+ src/qemu/qemu_hotplug.c   |  7 +++++++
+ src/qemu/qemu_migration.c |  5 +++++
+ 6 files changed, 55 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index a4a7f32..4bad367 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -7980,6 +7980,18 @@ virDomainDiskRemoveByName(virDomainDefPtr def, const char *name)
+     return virDomainDiskRemove(def, i);
+ }
+ 
++/* Return true if VM has at least one disk involved in a current block
++ * copy job (that is, with a <mirror> element in the disk xml).  */
++bool
++virDomainHasDiskMirror(virDomainObjPtr vm)
++{
++    int i;
++    for (i = 0; i < vm->def->ndisks; i++)
++        if (vm->def->disks[i]->mirror)
++            return true;
++    return false;
++}
++
+ int virDomainNetInsert(virDomainDefPtr def, virDomainNetDefPtr net)
+ {
+     if (VIR_REALLOC_N(def->nets, def->nnets + 1) < 0)
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 43663ce..2fbbfc6 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2009,6 +2009,7 @@ virDomainDiskDefPtr
+ virDomainDiskRemove(virDomainDefPtr def, size_t i);
+ virDomainDiskDefPtr
+ virDomainDiskRemoveByName(virDomainDefPtr def, const char *name);
++bool virDomainHasDiskMirror(virDomainObjPtr vm);
+ 
+ int virDomainNetIndexByMac(virDomainDefPtr def, const virMacAddrPtr mac);
+ int virDomainNetInsert(virDomainDefPtr def, virDomainNetDefPtr net);
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index bd6ba7a..8f62bf9 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -399,6 +399,7 @@ virDomainGraphicsSpiceZlibCompressionTypeFromString;
+ virDomainGraphicsSpiceZlibCompressionTypeToString;
+ virDomainGraphicsTypeFromString;
+ virDomainGraphicsTypeToString;
++virDomainHasDiskMirror;
+ virDomainHostdevDefAlloc;
+ virDomainHostdevDefClear;
+ virDomainHostdevDefFree;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 619d53c..fcbce2b 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2770,6 +2770,11 @@ qemuDomainSaveInternal(struct qemud_driver *driver, virDomainPtr dom,
+                        "%s", _("domain is marked for auto destroy"));
+         goto cleanup;
+     }
++    if (virDomainHasDiskMirror(vm)) {
++        virReportError(VIR_ERR_BLOCK_COPY_ACTIVE, "%s",
++                       _("domain has active block copy job"));
++        goto cleanup;
++    }
+ 
+     memset(&header, 0, sizeof(header));
+     memcpy(header.magic, QEMUD_SAVE_PARTIAL, sizeof(header.magic));
+@@ -5650,6 +5655,12 @@ static virDomainPtr qemudDomainDefine(virConnectPtr conn, const char *xml) {
+         }
+     }
+     def = NULL;
++    if (virDomainHasDiskMirror(vm)) {
++        virReportError(VIR_ERR_BLOCK_COPY_ACTIVE, "%s",
++                       _("domain has active block copy job"));
++        virDomainObjAssignDef(vm, NULL, false);
++        goto cleanup;
++    }
+     vm->persistent = 1;
+ 
+     if (virDomainSaveConfig(driver->configDir,
+@@ -11196,6 +11207,12 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+                        "%s", _("domain is marked for auto destroy"));
+         goto cleanup;
+     }
++    if (virDomainHasDiskMirror(vm)) {
++        virReportError(VIR_ERR_BLOCK_COPY_ACTIVE, "%s",
++                       _("domain has active block copy job"));
++        goto cleanup;
++    }
++
+     if (!vm->persistent && (flags & VIR_DOMAIN_SNAPSHOT_CREATE_HALT)) {
+         virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                        _("cannot halt after transient domain snapshot"));
+@@ -11785,6 +11802,11 @@ static int qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+                        _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
++    if (virDomainHasDiskMirror(vm)) {
++        virReportError(VIR_ERR_BLOCK_COPY_ACTIVE, "%s",
++                       _("domain has active block copy job"));
++        goto cleanup;
++    }
+ 
+     snap = virDomainSnapshotFindByName(vm->snapshots, snapshot->name);
+     if (!snap) {
+@@ -12563,6 +12585,13 @@ qemuDomainBlockJobImpl(virDomainPtr dom, const char *path, const char *base,
+         goto cleanup;
+     disk = vm->def->disks[idx];
+ 
++    if (mode == BLOCK_JOB_PULL && disk->mirror) {
++        virReportError(VIR_ERR_BLOCK_COPY_ACTIVE,
++                       _("disk '%s' already in active block copy job"),
++                       disk->dst);
++        goto cleanup;
++    }
++
+     if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0)
+         goto cleanup;
+ 
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 98bf770..91b392e 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -2049,6 +2049,13 @@ int qemuDomainDetachDiskDevice(struct qemud_driver *driver,
+ 
+     detach = vm->def->disks[i];
+ 
++    if (detach->mirror) {
++        virReportError(VIR_ERR_BLOCK_COPY_ACTIVE,
++                       _("disk '%s' is in an active block copy job"),
++                       detach->dst);
++        goto cleanup;
++    }
++
+     if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_DEVICES)) {
+         if (virCgroupForDomain(driver->cgroup, vm->def->name, &cgroup, 0) != 0) {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 487182e..4fbe605 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -817,6 +817,11 @@ qemuMigrationIsAllowed(struct qemud_driver *driver, virDomainObjPtr vm,
+                            nsnapshots);
+             return false;
+         }
++        if (virDomainHasDiskMirror(vm)) {
++            virReportError(VIR_ERR_OPERATION_INVALID, "%s",
++                           _("cannot migrate domain with active block job"));
++            return false;
++        }
+ 
+         def = vm->def;
+     }
+-- 
+1.7.12.4
+

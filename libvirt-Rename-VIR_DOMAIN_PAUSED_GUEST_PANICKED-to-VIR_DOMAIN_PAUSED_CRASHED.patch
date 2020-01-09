@@ -1,0 +1,90 @@
+From bcd5d0bb5e0bf28dd0da199edc2f1486c6af7ed5 Mon Sep 17 00:00:00 2001
+Message-Id: <bcd5d0bb5e0bf28dd0da199edc2f1486c6af7ed5.1376483447.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 29 Jul 2013 15:27:20 -0600
+Subject: [PATCH] Rename VIR_DOMAIN_PAUSED_GUEST_PANICKED to
+ VIR_DOMAIN_PAUSED_CRASHED
+
+https://bugzilla.redhat.com/show_bug.cgi?id=822306
+https://bugzilla.redhat.com/show_bug.cgi?id=826315
+
+The VIR_DOMAIN_PAUSED_GUEST_PANICKED constant is badly named,
+leaking the QEMU event name. Elsewhere in the API we use
+'CRASHED' rather than 'PANICKED', and the addition of 'GUEST'
+is redundant since all events are guest related.
+
+Thus rename it to VIR_DOMAIN_PAUSED_CRASHED, which matches
+with VIR_DOMAIN_RUNNING_CRASHED and VIR_DOMAIN_EVENT_CRASHED.
+
+It was added in commit 14e7e0ae8db9843aea80245a3d9e6cf5f2ef720d
+which post-dates v1.1.0, so is safe to rename before 1.1.1
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 63d261f395e83bb5c9b28271ff78e73ceabe83d5)
+
+Conflicts:
+	src/qemu/qemu_process.c - context, since VIR_STRDUP not backported
+---
+ include/libvirt/libvirt.h.in | 2 +-
+ src/qemu/qemu_monitor.c      | 2 +-
+ src/qemu/qemu_process.c      | 2 +-
+ tools/virsh-domain-monitor.c | 4 ++--
+ 4 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index 80a8c23..1b7f5a8 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -181,7 +181,7 @@ typedef enum {
+     VIR_DOMAIN_PAUSED_FROM_SNAPSHOT = 7, /* paused after restoring from snapshot */
+     VIR_DOMAIN_PAUSED_SHUTTING_DOWN = 8, /* paused during shutdown process */
+     VIR_DOMAIN_PAUSED_SNAPSHOT = 9,      /* paused while creating a snapshot */
+-    VIR_DOMAIN_PAUSED_GUEST_PANICKED = 10, /* paused due to a guest panicked event */
++    VIR_DOMAIN_PAUSED_CRASHED = 10,     /* paused due to a guest crash */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_PAUSED_LAST
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index e7452e9..d0f4370 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -3111,7 +3111,7 @@ int qemuMonitorVMStatusToPausedReason(const char *status)
+         return VIR_DOMAIN_PAUSED_WATCHDOG;
+ 
+     case QEMU_MONITOR_VM_STATUS_GUEST_PANICKED:
+-        return VIR_DOMAIN_PAUSED_GUEST_PANICKED;
++        return VIR_DOMAIN_PAUSED_CRASHED;
+ 
+     /* unreachable from this point on */
+     case QEMU_MONITOR_VM_STATUS_LAST:
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index b717e6e..6e62a53 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2979,7 +2979,7 @@ qemuProcessUpdateState(struct qemud_driver *driver, virDomainObjPtr vm)
+             newState = VIR_DOMAIN_SHUTDOWN;
+             newReason = VIR_DOMAIN_SHUTDOWN_UNKNOWN;
+             msg = strdup("shutdown");
+-        } else if (reason == VIR_DOMAIN_PAUSED_GUEST_PANICKED) {
++        } else if (reason == VIR_DOMAIN_PAUSED_CRASHED) {
+             newState = VIR_DOMAIN_CRASHED;
+             newReason = VIR_DOMAIN_CRASHED_PANICKED;
+             msg = strdup("crashed");
+diff --git a/tools/virsh-domain-monitor.c b/tools/virsh-domain-monitor.c
+index 967edcd..d2f85c0 100644
+--- a/tools/virsh-domain-monitor.c
++++ b/tools/virsh-domain-monitor.c
+@@ -227,8 +227,8 @@ vshDomainStateReasonToString(int state, int reason)
+             return N_("shutting down");
+         case VIR_DOMAIN_PAUSED_SNAPSHOT:
+             return N_("creating snapshot");
+-        case VIR_DOMAIN_PAUSED_GUEST_PANICKED:
+-            return N_("guest panicked");
++        case VIR_DOMAIN_PAUSED_CRASHED:
++            return N_("crashed");
+         case VIR_DOMAIN_PAUSED_UNKNOWN:
+         case VIR_DOMAIN_PAUSED_LAST:
+             ;
+-- 
+1.8.3.2
+

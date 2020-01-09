@@ -1,0 +1,33 @@
+From dba3baf5be3225ee1deda10f3b27acdac8eb1083 Mon Sep 17 00:00:00 2001
+Message-Id: <dba3baf5be3225ee1deda10f3b27acdac8eb1083.1373271636.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 7 Feb 2013 18:28:25 +0100
+Subject: [PATCH] xen: Actually fix the uninitialized variable
+
+https://bugzilla.redhat.com/show_bug.cgi?id=888503
+
+0eedb1d9bff672b24d6957dfaa0a8b42d9e851a7 fixed the wrong variable
+(cherry picked from commit 4db3fd7489542cfe2aeec4dbba40602591c0c9ec)
+---
+ src/xen/xend_internal.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/xen/xend_internal.c b/src/xen/xend_internal.c
+index fc79ea0..57ebaed 100644
+--- a/src/xen/xend_internal.c
++++ b/src/xen/xend_internal.c
+@@ -1114,9 +1114,9 @@ sexpr_to_xend_topology(const struct sexpr *root,
+     const char *nodeToCpu;
+     const char *cur;
+     virCapsHostNUMACellCPUPtr cpuInfo = NULL;
+-    int cell, cpu, nb_cpus;
++    int cell, cpu, nb_cpus = 0;
+     int n = 0;
+-    int numCpus = 0;
++    int numCpus;
+ 
+     nodeToCpu = sexpr_node(root, "node/node_to_cpu");
+     if (nodeToCpu == NULL)
+-- 
+1.8.2.1
+

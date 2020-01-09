@@ -1,0 +1,49 @@
+From 8990af22145f531f87a457ecaca1647f7e793e48 Mon Sep 17 00:00:00 2001
+Message-Id: <8990af22145f531f87a457ecaca1647f7e793e48@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 6 Jan 2016 14:02:46 +0100
+Subject: [PATCH] qemu: snapshot: Fix return value of external checkpoint with
+ no disks
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1292312
+
+When doing an external checkpoint of a VM with no disk selected we'd
+return failure but not set error code. This was a result of ret not
+being set to 0 during walking of the disk array.
+
+Rework early failure checking and set the error code to success before
+iterating the array of disks so that we return success if no disks are
+snapshotted.
+
+Fixes the following symptom (or without --diskspec for diskless VMs)
+
+ $ virsh snapshot-create-as snapshot-test  --memspec /tmp/asdf --diskspec hda,snapshot=no
+ error: An error occurred, but the cause is unknown
+
+(cherry-picked from commit cb6681ff1de3d02e8d88ce3b391ba03f8dd612f4)
+
+    Conflicts: Reimplemented differently due to code divergence. The
+               return value is fixed after last step prior to taking the
+               disk snapshot that can fail.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 8bd2898..cc4fc5d 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -12091,6 +12091,8 @@ qemuDomainSnapshotCreateDiskActive(struct qemud_driver *driver,
+     if (qemuDomainObjEnterMonitorAsync(driver, vm, asyncJob) < 0)
+         goto cleanup;
+ 
++    ret = 0;
++
+     for (i = 0; i < snap->def->ndisks; i++) {
+         virDomainDiskDefPtr persistDisk = NULL;
+ 
+-- 
+2.7.0
+

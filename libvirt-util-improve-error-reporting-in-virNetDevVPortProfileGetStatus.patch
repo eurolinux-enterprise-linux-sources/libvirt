@@ -1,0 +1,73 @@
+From 1675747a0507d19a056123971a1d82a19a33f99f Mon Sep 17 00:00:00 2001
+Message-Id: <1675747a0507d19a056123971a1d82a19a33f99f@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Feb 2016 06:59:37 -0500
+Subject: [PATCH] util: improve error reporting in
+ virNetDevVPortProfileGetStatus
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1276478
+
+The previous error message just indicated that the desired response
+couldn't be found, this patch tells what was desired, as well as
+listing out the entire table that had been in the netlink response, to
+give some kind of idea why it failed.
+(cherry picked from commit 36e244f308bde1d2fae94324d1a1668dd3f0ea6b)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdevvportprofile.c | 39 +++++++++++++++++++++++++++++++++++----
+ 1 file changed, 35 insertions(+), 4 deletions(-)
+
+diff --git a/src/util/virnetdevvportprofile.c b/src/util/virnetdevvportprofile.c
+index ac7aa5f..d19536e 100644
+--- a/src/util/virnetdevvportprofile.c
++++ b/src/util/virnetdevvportprofile.c
+@@ -544,10 +544,41 @@ virNetDevVPortProfileGetStatus(struct nlattr **tb, int32_t vf,
+             }
+ 
+             if (!found) {
+-                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-                               _("Could not find netlink response with "
+-                                 "expected parameters"));
+-                goto cleanup;
++                char instanceIdStr[VIR_UUID_STRING_BUFLEN] = "(none)";
++
++                if (instanceId)
++                   virUUIDFormat(instanceId, instanceIdStr);
++
++                virReportError(VIR_ERR_INTERNAL_ERROR,
++                               _("Could not find vf/instanceId %u/%s "
++                                 " in netlink response"),
++                               vf, instanceIdStr);
++
++                /* go through all the entries again. This seems tedious,
++                 * but experience has shown the resulting log to be
++                 * very useful.
++                 */
++                VIR_WARN("IFLA_VF_PORTS entries that were returned:");
++                nla_for_each_nested(tb_vf_ports, tb[IFLA_VF_PORTS], rem) {
++                    char uuidstr[VIR_UUID_STRING_BUFLEN] = "(none)";
++
++                    if (nla_parse_nested(tb_port, IFLA_PORT_MAX, tb_vf_ports,
++                                         ifla_port_policy)) {
++                        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                                       _("error parsing IFLA_VF_PORT "
++                                         "during error reporting"));
++                        goto cleanup;
++                    }
++                    if (tb_port[IFLA_PORT_INSTANCE_UUID]) {
++                        virUUIDFormat((unsigned char *)
++                                      RTA_DATA(tb_port[IFLA_PORT_INSTANCE_UUID]),
++                                      uuidstr);
++                    }
++                    VIR_WARN("  vf: %d uuid: %s",
++                             tb_port[IFLA_PORT_VF] ?
++                             *(uint32_t *)RTA_DATA(tb_port[IFLA_PORT_VF]) : -1,
++                             uuidstr);
++                }                goto cleanup;
+             }
+         } else {
+             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-- 
+2.7.1
+

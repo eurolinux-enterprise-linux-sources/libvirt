@@ -1,0 +1,57 @@
+From 3d099619aba045e475f98d86c97002364a6ca20c Mon Sep 17 00:00:00 2001
+Message-Id: <3d099619aba045e475f98d86c97002364a6ca20c@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 7 May 2014 13:22:18 +0200
+Subject: [PATCH] virSecuritySELinuxSetFileconHelper: Don't fail on read-only
+ NFS
+
+RHEL-6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1095135
+RHEL-7.0: https://bugzilla.redhat.com/show_bug.cgi?id=996543
+
+When starting up a domain, the SELinux labeling is done depending on
+current configuration. If the labeling fails we check for possible
+causes, as not all labeling failures are fatal. For example, if the
+labeled file is on NFS which lacks SELinux support, the file can still
+be readable to qemu process. These cases are distinguished by the errno
+code: NFS without SELinux support returns EOPNOTSUPP. However, we were
+missing one scenario. In case there's a read-only disk on a read-only
+NFS (and possibly any FS) and the labeling is just optional (not
+explicitly requested in the XML) there's no need to make the labeling
+error fatal. In other words, read-only file on read-only NFS can fail to
+be labeled, but be readable at the same time.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit d1fdecb6240cab8872fd39b0a6dd0df1ebd52b86)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/security/security_selinux.c | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index a030701..726cdc5 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -800,13 +800,14 @@ virSecuritySELinuxSetFileconHelper(const char *path, char *tcon, bool optional)
+             freecon(econ);
+         }
+ 
+-        /* if the error complaint is related to an image hosted on
+-         * an nfs mount, or a usbfs/sysfs filesystem not supporting
+-         * labelling, then just ignore it & hope for the best.
+-         * The user hopefully set one of the necessary SELinux
+-         * virt_use_{nfs,usb,pci}  boolean tunables to allow it...
++        /* If the error complaint is related to an image hosted on a (possibly
++         * read-only) NFS mount, or a usbfs/sysfs filesystem not supporting
++         * labelling, then just ignore it & hope for the best.  The user
++         * hopefully sets one of the necessary SELinux virt_use_{nfs,usb,pci}
++         * boolean tunables to allow it ...
+          */
+-        if (setfilecon_errno != EOPNOTSUPP && setfilecon_errno != ENOTSUP) {
++        if (setfilecon_errno != EOPNOTSUPP && setfilecon_errno != ENOTSUP &&
++            setfilecon_errno != EROFS) {
+             virReportSystemError(setfilecon_errno,
+                                  _("unable to set security context '%s' on '%s'"),
+                                  tcon, path);
+-- 
+1.9.3
+

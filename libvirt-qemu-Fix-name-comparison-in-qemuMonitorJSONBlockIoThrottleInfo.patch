@@ -1,0 +1,39 @@
+From e7904d0cc4d085605979092fb6135126ea69dd89 Mon Sep 17 00:00:00 2001
+Message-Id: <e7904d0cc4d085605979092fb6135126ea69dd89@dist-git>
+From: Stefan Hajnoczi <stefanha@redhat.com>
+Date: Mon, 23 Mar 2015 10:09:03 +0100
+Subject: [PATCH] qemu: Fix name comparison in
+ qemuMonitorJSONBlockIoThrottleInfo()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1203633
+
+The string comparison logic was inverted and matched the first drive
+that does *not* have the name we search for.
+
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+(cherry picked from commit 23d47b33a2f8b524c32d556d6d55a7ccb0c5903a)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_monitor_json.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index b6ee631..23d9c9a 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -3995,7 +3995,7 @@ qemuMonitorJSONBlockIoThrottleInfo(virJSONValuePtr result,
+             goto cleanup;
+         }
+ 
+-        if (STREQ(current_dev, device))
++        if (STRNEQ(current_dev, device))
+             continue;
+ 
+         found = true;
+-- 
+2.3.5
+

@@ -1,0 +1,44 @@
+From 0f83d21f1b638c6975c211a6023b0a0a52a96710 Mon Sep 17 00:00:00 2001
+Message-Id: <0f83d21f1b638c6975c211a6023b0a0a52a96710@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:50 +0200
+Subject: [PATCH] conf: Check if number of vCPUs fits in the storage variable
+
+https://bugzilla.redhat.com/show_bug.cgi?id=902652
+
+The count of vCPUs for a domain is extracted as a usingned long variable
+but is stored in a unsigned short. If the actual number was too large,
+a faulty number was stored.
+
+(cherry picked from commit c58e1f4de2e120c124fb008629c05de03f72b2ca)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index ee97b4b..3d18582 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -9106,7 +9106,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+         def->maxvcpus = 1;
+     } else {
+         def->maxvcpus = count;
+-        if (count == 0) {
++        if (count == 0 || (unsigned short) count != count) {
+             virReportError(VIR_ERR_XML_ERROR,
+                            _("invalid maxvcpus %lu"), count);
+             goto error;
+@@ -9122,7 +9122,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+         def->vcpus = def->maxvcpus;
+     } else {
+         def->vcpus = count;
+-        if (count == 0) {
++        if (count == 0 || (unsigned short) count != count) {
+             virReportError(VIR_ERR_XML_ERROR,
+                            _("invalid current vcpus %lu"), count);
+             goto error;
+-- 
+1.9.2
+

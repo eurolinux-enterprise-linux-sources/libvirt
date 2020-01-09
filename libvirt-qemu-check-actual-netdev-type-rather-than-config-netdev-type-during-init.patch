@@ -1,0 +1,110 @@
+From a10bdc2aad4927b9fc15e8cc0e791f8a3e016fe8 Mon Sep 17 00:00:00 2001
+Message-Id: <a10bdc2aad4927b9fc15e8cc0e791f8a3e016fe8@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 8 May 2014 10:27:53 -0400
+Subject: [PATCH] qemu: check actual netdev type rather than config netdev type
+ during init
+
+This resolves:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=1012834 - RHEL6
+   https://bugzilla.redhat.com/show_bug.cgi?id=1012824 - RHEL7
+
+Note that a similar problem was reported in:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=827519
+
+but the fix only worked for <interface type='hostdev'>, *not* for
+<interface type='network'> where the network itself was a pool of
+hostdevs.
+
+The symptom in both cases was this error message:
+
+   internal error: Unable to determine device index for network device
+
+In both cases the cause was lack of proper handling for netdevs
+(<interface>) of type='hostdev' when scanning the netdev list looking
+for alias names in qemuAssignDeviceNetAlias() - those that aren't
+type='hostdev' have an alias of the form "net%d", while those that are
+hostdev use "hostdev%d". This special handling was completely lacking
+prior to the fix for Bug 827519 which was:
+
+When searching for the highest alias index, libvirt looks at the alias
+for each netdev and if it is type='hostdev' it ignores the entry. If
+the type is not hostdev, then it expects the "net%d" form; if it
+doesn't find that, it fails and logs the above error message.
+
+That fix works except in the case of <interface type='network'> where
+the network uses hostdev (i.e. the network is a pool of VFs to be
+assigned to the guests via PCI passthrough). In this case, the check
+for type='hostdev' would fail because it was done as:
+
+     def->net[i]->type == VIR_DOMAIN_NET_TYPE_HOSTDEV
+
+(which compares what was written in the config) when it actually
+should have been:
+
+    virDomainNetGetActualType(def->net[i]) == VIR_DOMAIN_NET_TYPE_HOSTDEV
+
+(which compares the type of netdev that was actually allocated from
+the network at runtime).
+
+Of course the latter wouldn't be of any use if the netdevs of
+type='network' hadn't already acquired their actual network connection
+yet, but manual examination of the code showed that this is never the
+case.
+
+While looking through qemu_command.c, two other places were found to
+directly compare the net[i]->type field rather than getting actualType:
+
+* qemuAssignDeviceAliases() - in this case, the incorrect comparison
+  would cause us to create a "net%d" alias for a netdev with
+  type='network' but actualType='hostdev'. This alias would be
+  subsequently overwritten by the proper "hostdev%d" form, so
+  everything would operate properly, but a string would be
+  leaked. This patch also fixes this problem.
+
+* qemuAssignDevicePCISlots() - would defer assigning a PCI address to
+  a netdev if it was type='hostdev', but not for type='network +
+  actualType='hostdev'. In this case, the actual device usually hasn't
+  been acquired yet anyway, and even in the case that it has, there is
+  no practical difference between assigning a PCI address while
+  traversing the netdev list or while traversing the hostdev
+  list. Because changing it would be an effective NOP (but potentially
+  cause some unexpected regression), this usage was left unchanged.
+(cherry picked from commit 9881bfed2541faa428372b4513518b4b9ae1ab15)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 5a9a6ab..d1d7d11 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -621,7 +621,8 @@ qemuAssignDeviceNetAlias(virDomainDefPtr def, virDomainNetDefPtr net, int idx)
+         for (i = 0 ; i < def->nnets ; i++) {
+             int thisidx;
+ 
+-            if (def->nets[i]->type == VIR_DOMAIN_NET_TYPE_HOSTDEV) {
++            if (virDomainNetGetActualType(def->nets[i])
++                == VIR_DOMAIN_NET_TYPE_HOSTDEV) {
+                 /* type='hostdev' interfaces have a hostdev%d alias */
+                continue;
+             }
+@@ -728,8 +729,9 @@ qemuAssignDeviceAliases(virDomainDefPtr def, qemuCapsPtr caps)
+             /* type='hostdev' interfaces are also on the hostdevs list,
+              * and will have their alias assigned with other hostdevs.
+              */
+-            if ((def->nets[i]->type != VIR_DOMAIN_NET_TYPE_HOSTDEV) &&
+-                (qemuAssignDeviceNetAlias(def, def->nets[i], i) < 0)) {
++            if (virDomainNetGetActualType(def->nets[i])
++                != VIR_DOMAIN_NET_TYPE_HOSTDEV &&
++                qemuAssignDeviceNetAlias(def, def->nets[i], i) < 0) {
+                 return -1;
+             }
+         }
+-- 
+1.9.3
+

@@ -1,0 +1,86 @@
+From 7bb79be64e18196ca938c3cd2c82a106ec928df6 Mon Sep 17 00:00:00 2001
+Message-Id: <7bb79be64e18196ca938c3cd2c82a106ec928df6@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 7 Apr 2014 13:30:49 +0200
+Subject: [PATCH] schema: require target path in storage pool xml
+
+Make target path mandatory for pool types that require target,
+since we refuse to parse a target without a path.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=893273
+(cherry picked from commit a07b88ee03f350f0b4d62c3cc1481c16f7e369e3)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/schemas/storagepool.rng                                 |  8 +++-----
+ tests/Makefile.am                                            |  1 +
+ .../dir-missing-target-path-invalid.xml                      | 12 ++++++++++++
+ tests/storagepoolschematest                                  |  2 +-
+ 4 files changed, 17 insertions(+), 6 deletions(-)
+ create mode 100644 tests/storagepoolschemadata/dir-missing-target-path-invalid.xml
+
+diff --git a/docs/schemas/storagepool.rng b/docs/schemas/storagepool.rng
+index 983f664..2fb6fcf 100644
+--- a/docs/schemas/storagepool.rng
++++ b/docs/schemas/storagepool.rng
+@@ -200,11 +200,9 @@
+ 
+   <define name='target'>
+     <element name='target'>
+-      <optional>
+-        <element name='path'>
+-          <ref name='absFilePath'/>
+-        </element>
+-      </optional>
++      <element name='path'>
++        <ref name='absFilePath'/>
++      </element>
+       <ref name='permissions'/>
+     </element>
+   </define>
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index d9a58c6..f896ecf 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -70,6 +70,7 @@ EXTRA_DIST =		\
+ 	qemuxmlnsdata \
+ 	schematestutils.sh \
+ 	sexpr2xmldata \
++	storagepoolschemadata \
+ 	storagepoolschematest \
+ 	storagepoolxml2xmlin \
+ 	storagepoolxml2xmlout \
+diff --git a/tests/storagepoolschemadata/dir-missing-target-path-invalid.xml b/tests/storagepoolschemadata/dir-missing-target-path-invalid.xml
+new file mode 100644
+index 0000000..8536781
+--- /dev/null
++++ b/tests/storagepoolschemadata/dir-missing-target-path-invalid.xml
+@@ -0,0 +1,12 @@
++<pool type='dir'>
++  <name>test</name>
++  <source>
++  </source>
++  <target>
++    <permissions>
++      <mode>0700</mode>
++      <owner>-1</owner>
++      <group>-1</group>
++    </permissions>
++  </target>
++</pool>
+diff --git a/tests/storagepoolschematest b/tests/storagepoolschematest
+index 9844c76..d54b827 100755
+--- a/tests/storagepoolschematest
++++ b/tests/storagepoolschematest
+@@ -4,7 +4,7 @@
+ . $srcdir/test-lib.sh
+ . $abs_srcdir/schematestutils.sh
+ 
+-DIRS="storagepoolxml2xmlin storagepoolxml2xmlout"
++DIRS="storagepoolxml2xmlin storagepoolxml2xmlout storagepoolschemadata"
+ SCHEMA="storagepool.rng"
+ 
+ check_schema "$DIRS" "$SCHEMA"
+-- 
+1.9.1
+

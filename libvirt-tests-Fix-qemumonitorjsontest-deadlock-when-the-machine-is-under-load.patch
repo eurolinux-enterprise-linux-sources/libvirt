@@ -1,0 +1,61 @@
+From b095642e03cac43f2f88a976940a92e5012ea3a8 Mon Sep 17 00:00:00 2001
+Message-Id: <b095642e03cac43f2f88a976940a92e5012ea3a8.1373271641.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 12 Nov 2012 11:34:41 +0100
+Subject: [PATCH] tests: Fix qemumonitorjsontest deadlock when the machine is
+ under load
+
+https://bugzilla.redhat.com/show_bug.cgi?id=951227
+
+When doing the qemumonitorjsontest on a machine under heavy load the
+test tends to deadlock from time to time. This patch adds the hack to
+break the event loop that is used in virsh.
+(cherry picked from commit e25a32f3da801207a5009c12747f3d155ac4c43a)
+---
+ tests/qemumonitortestutils.c | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/tests/qemumonitortestutils.c b/tests/qemumonitortestutils.c
+index 7133c99..023c348 100644
+--- a/tests/qemumonitortestutils.c
++++ b/tests/qemumonitortestutils.c
+@@ -331,9 +331,17 @@ static void qemuMonitorTestItemFree(qemuMonitorTestItemPtr item)
+ }
+ 
+ 
++static void
++qemuMonitorTestFreeTimer(int timer ATTRIBUTE_UNUSED, void *opaque ATTRIBUTE_UNUSED)
++{
++    /* nothing to be done here */
++}
++
++
+ void qemuMonitorTestFree(qemuMonitorTestPtr test)
+ {
+     size_t i;
++    int timer = -1;
+ 
+     if (!test)
+         return;
+@@ -341,6 +349,8 @@ void qemuMonitorTestFree(qemuMonitorTestPtr test)
+     virMutexLock(&test->lock);
+     if (test->running) {
+         test->quit = true;
++        /* HACK: Add a dummy timeout to break event loop */
++        timer = virEventAddTimeout(0, qemuMonitorTestFreeTimer, NULL, NULL);
+     }
+     virMutexUnlock(&test->lock);
+ 
+@@ -361,6 +371,9 @@ void qemuMonitorTestFree(qemuMonitorTestPtr test)
+     if (test->running)
+         virThreadJoin(&test->thread);
+ 
++    if (timer != -1)
++        virEventRemoveTimeout(timer);
++
+     for (i = 0 ; i < test->nitems ; i++)
+         qemuMonitorTestItemFree(test->items[i]);
+     VIR_FREE(test->items);
+-- 
+1.8.2.1
+

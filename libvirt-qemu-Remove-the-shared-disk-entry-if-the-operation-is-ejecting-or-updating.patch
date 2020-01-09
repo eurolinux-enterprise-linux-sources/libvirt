@@ -1,0 +1,262 @@
+From e8c00cec263f3fb37bc6bd7969be097c8134f014 Mon Sep 17 00:00:00 2001
+Message-Id: <e8c00cec263f3fb37bc6bd7969be097c8134f014.1373271638.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 11 Mar 2013 15:26:08 +0800
+Subject: [PATCH] qemu: Remove the shared disk entry if the operation is
+ ejecting or updating
+
+https://bugzilla.redhat.com/show_bug.cgi?id=908073
+
+For both AttachDevice and UpdateDevice APIs, if the disk device
+is 'cdrom' or 'floppy', the operations could be ejecting, updating,
+and inserting. For either ejecting or updating, the shared disk
+entry of the original disk src has to be removed, because it's
+not useful anymore.
+
+And since the original disk def will be changed, new disk def passed
+as argument will be free'ed in qemuDomainChangeEjectableMedia, so
+we need to copy the orignal disk def before
+qemuDomainChangeEjectableMedia, to use it for qemuRemoveSharedDisk.
+(cherry picked from commit d0172d2b1b5d865aaa042070d7c2d00effb2ff8c)
+
+Conflicts:
+  * Conflicts with commit b090aa7d559 (Introduce a virQEMUDriverConfigPtr
+    object), 8cdd5faf (Pass virQEMUDriverPtr into APIs managed shared disk list),
+    and 020a0307860b4 (Stop accessing driver->caps directly in QEMU driver).
+    All of these commits won't be backported in 6.4 for risks.
+
+        src/qemu/qemu_driver.c
+	src/qemu/qemu_hotplug.c
+---
+ src/conf/domain_conf.c   | 20 ++++++++++++++
+ src/conf/domain_conf.h   |  3 +++
+ src/libvirt_private.syms |  1 +
+ src/qemu/qemu_driver.c   | 68 +++++++++++++++++++++++++++++++++++++++++++++---
+ src/qemu/qemu_hotplug.c  | 19 +-------------
+ src/qemu/qemu_hotplug.h  |  1 +
+ 6 files changed, 91 insertions(+), 21 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 705c1c6..5d05fae 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -3065,6 +3065,26 @@ virDomainDiskFindControllerModel(virDomainDefPtr def,
+     return model;
+ }
+ 
++virDomainDiskDefPtr
++virDomainDiskFindByBusAndDst(virDomainDefPtr def,
++                             int bus,
++                             char *dst)
++{
++    int i;
++
++    if (!dst)
++        return NULL;
++
++    for (i = 0 ; i < def->ndisks ; i++) {
++        if (def->disks[i]->bus == bus &&
++            STREQ(def->disks[i]->dst, dst)) {
++            return def->disks[i];
++        }
++    }
++
++    return NULL;
++}
++
+ int
+ virDomainDiskDefAssignAddress(virCapsPtr caps, virDomainDiskDefPtr def)
+ {
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index aafe569..977da9e 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1886,6 +1886,9 @@ void virDomainDiskHostDefFree(virDomainDiskHostDefPtr def);
+ int virDomainDiskFindControllerModel(virDomainDefPtr def,
+                                      virDomainDiskDefPtr disk,
+                                      int controllerType);
++virDomainDiskDefPtr virDomainDiskFindByBusAndDst(virDomainDefPtr def,
++                                                 int bus,
++                                                 char *dst);
+ void virDomainControllerDefFree(virDomainControllerDefPtr def);
+ void virDomainFSDefFree(virDomainFSDefPtr def);
+ void virDomainActualNetDefFree(virDomainActualNetDefPtr def);
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index ea4d1a8..408c31d 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -351,6 +351,7 @@ virDomainDiskDefFree;
+ virDomainDiskDeviceTypeToString;
+ virDomainDiskErrorPolicyTypeFromString;
+ virDomainDiskErrorPolicyTypeToString;
++virDomainDiskFindByBusAndDst;
+ virDomainDiskFindControllerModel;
+ virDomainDiskGeometryTransTypeFromString;
+ virDomainDiskGeometryTransTypeToString;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 2405467..51f50ca 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5923,6 +5923,9 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+                                virDomainDeviceDefPtr dev)
+ {
+     virDomainDiskDefPtr disk = dev->data.disk;
++    virDomainDiskDefPtr orig_disk = NULL;
++    virDomainDeviceDefPtr dev_copy = NULL;
++    virDomainDiskDefPtr tmp = NULL;
+     virCgroupPtr cgroup = NULL;
+     int ret = -1;
+ 
+@@ -5956,7 +5959,35 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+     switch (disk->device)  {
+     case VIR_DOMAIN_DISK_DEVICE_CDROM:
+     case VIR_DOMAIN_DISK_DEVICE_FLOPPY:
+-        ret = qemuDomainChangeEjectableMedia(driver, vm, disk, false);
++        if (!(orig_disk = virDomainDiskFindByBusAndDst(vm->def,
++                                                       disk->bus, disk->dst))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("No device with bus '%s' and target '%s'"),
++                           virDomainDiskBusTypeToString(disk->bus),
++                           disk->dst);
++            goto end;
++        }
++
++        tmp = dev->data.disk;
++        dev->data.disk = orig_disk;
++
++        if (!(dev_copy = virDomainDeviceDefCopy(driver->caps, vm->def, dev))) {
++            dev->data.disk = tmp;
++            goto end;
++        }
++        dev->data.disk = tmp;
++
++        ret = qemuDomainChangeEjectableMedia(driver, vm, disk, orig_disk, false);
++
++        /* Need to remove the shared disk entry for the original disk src
++         * if the operation is either ejecting or updating.
++         */
++        if (ret == 0 &&
++            orig_disk->src &&
++            STRNEQ_NULLABLE(orig_disk->src, disk->src))
++            ignore_value(qemuRemoveSharedDisk(driver->sharedDisks,
++                                              dev_copy->data.disk,
++                                              vm->def->name));
+         break;
+     case VIR_DOMAIN_DISK_DEVICE_DISK:
+     case VIR_DOMAIN_DISK_DEVICE_LUN:
+@@ -5996,6 +6027,7 @@ end:
+         ignore_value(qemuRemoveSharedDisk(driver->sharedDisks, disk, vm->def->name));
+     if (cgroup)
+         virCgroupFree(&cgroup);
++    virDomainDeviceDefFree(dev_copy);
+     return ret;
+ }
+ 
+@@ -6175,7 +6207,10 @@ qemuDomainChangeDiskMediaLive(virDomainObjPtr vm,
+                               bool force)
+ {
+     virDomainDiskDefPtr disk = dev->data.disk;
++    virDomainDiskDefPtr orig_disk = NULL;
++    virDomainDiskDefPtr tmp = NULL;
+     virCgroupPtr cgroup = NULL;
++    virDomainDeviceDefPtr dev_copy = NULL;
+     int ret = -1;
+ 
+     if (qemuDomainDetermineDiskChain(driver, disk, false) < 0)
+@@ -6196,9 +6231,35 @@ qemuDomainChangeDiskMediaLive(virDomainObjPtr vm,
+     switch (disk->device) {
+     case VIR_DOMAIN_DISK_DEVICE_CDROM:
+     case VIR_DOMAIN_DISK_DEVICE_FLOPPY:
+-        ret = qemuDomainChangeEjectableMedia(driver, vm, disk, force);
+-        if (ret == 0)
++        if (!(orig_disk = virDomainDiskFindByBusAndDst(vm->def,
++                                                       disk->bus, disk->dst))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("No device with bus '%s' and target '%s'"),
++                           virDomainDiskBusTypeToString(disk->bus),
++                           disk->dst);
++            goto end;
++        }
++
++        tmp = dev->data.disk;
++        dev->data.disk = orig_disk;
++
++        if (!(dev_copy = virDomainDeviceDefCopy(driver->caps, vm->def, dev))) {
++            dev->data.disk = tmp;
++            goto end;
++        }
++        dev->data.disk = tmp;
++
++        ret = qemuDomainChangeEjectableMedia(driver, vm, disk, orig_disk, force);
++        if (ret == 0) {
+             dev->data.disk = NULL;
++            /* Need to remove the shared disk entry for the original
++             * disk src if the operation is either ejecting or updating.
++             */
++            if (orig_disk->src && STRNEQ_NULLABLE(orig_disk->src, disk->src))
++                ignore_value(qemuRemoveSharedDisk(driver->sharedDisks,
++                                                  dev_copy->data.disk,
++                                                  vm->def->name));
++        }
+         break;
+     default:
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+@@ -6215,6 +6276,7 @@ qemuDomainChangeDiskMediaLive(virDomainObjPtr vm,
+ end:
+     if (cgroup)
+         virCgroupFree(&cgroup);
++    virDomainDeviceDefFree(dev_copy);
+     return ret;
+ }
+ 
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index d714eaf..d4d5a9d 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -52,30 +52,13 @@
+ int qemuDomainChangeEjectableMedia(struct qemud_driver *driver,
+                                    virDomainObjPtr vm,
+                                    virDomainDiskDefPtr disk,
++                                   virDomainDiskDefPtr origdisk,
+                                    bool force)
+ {
+-    virDomainDiskDefPtr origdisk = NULL;
+-    int i;
+     int ret;
+     char *driveAlias = NULL;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+ 
+-    for (i = 0 ; i < vm->def->ndisks ; i++) {
+-        if (vm->def->disks[i]->bus == disk->bus &&
+-            STREQ(vm->def->disks[i]->dst, disk->dst)) {
+-            origdisk = vm->def->disks[i];
+-            break;
+-        }
+-    }
+-
+-    if (!origdisk) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No device with bus '%s' and target '%s'"),
+-                       virDomainDiskBusTypeToString(disk->bus),
+-                       disk->dst);
+-        return -1;
+-    }
+-
+     if (!origdisk->info.alias) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("missing disk device alias name for %s"), origdisk->dst);
+diff --git a/src/qemu/qemu_hotplug.h b/src/qemu/qemu_hotplug.h
+index a7864c3..92dcae2 100644
+--- a/src/qemu/qemu_hotplug.h
++++ b/src/qemu/qemu_hotplug.h
+@@ -31,6 +31,7 @@
+ int qemuDomainChangeEjectableMedia(struct qemud_driver *driver,
+                                    virDomainObjPtr vm,
+                                    virDomainDiskDefPtr disk,
++                                   virDomainDiskDefPtr orig_disk,
+                                    bool force);
+ int qemuDomainCheckEjectableMedia(struct qemud_driver *driver,
+                                   virDomainObjPtr vm,
+-- 
+1.8.2.1
+

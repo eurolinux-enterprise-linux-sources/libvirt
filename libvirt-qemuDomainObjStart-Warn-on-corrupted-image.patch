@@ -1,0 +1,49 @@
+From e93727f1188acc5303109b19f63b394732381438 Mon Sep 17 00:00:00 2001
+Message-Id: <e93727f1188acc5303109b19f63b394732381438@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 14 Apr 2014 17:49:46 +0200
+Subject: [PATCH] qemuDomainObjStart: Warn on corrupted image
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1022008
+
+If the managedsave image is corrupted, e.g. the XML part is, we fail to
+parse it and throw an error, e.g.:
+
+error: Failed to start domain jms8
+error: XML error: missing security model when using multiple labels
+
+This is okay, as we can't really start the machine and avoid undefined
+qemu behaviour. On the other hand, the error message doesn't give a
+clue to users what should they do. The consensus here would be to thrown
+a warning to logs saying "Hey, you've got a corrupted file".
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit cfc28c66f9a754bb589b24e1d503eba2bdc5c840)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 03d30fe..08495e3 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -6061,10 +6061,13 @@ qemuDomainObjStart(virConnectPtr conn,
+                     vm->hasManagedSave = false;
+             }
+ 
+-            if (ret > 0)
++            if (ret > 0) {
+                 VIR_WARN("Ignoring incomplete managed state %s", managed_save);
+-            else
++            } else {
++                VIR_WARN("Unable to restore from managed state %s. "
++                         "Maybe the file is corrupted?", managed_save);
+                 goto cleanup;
++            }
+         }
+     }
+ 
+-- 
+1.9.2
+

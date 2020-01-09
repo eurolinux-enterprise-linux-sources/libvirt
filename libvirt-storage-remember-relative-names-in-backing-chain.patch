@@ -1,0 +1,115 @@
+From 1766b1b5a472eb6dafee27290630393181587a36 Mon Sep 17 00:00:00 2001
+Message-Id: <1766b1b5a472eb6dafee27290630393181587a36.1350990679.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:36 -0600
+Subject: [PATCH] storage: remember relative names in backing chain
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+In order to search for a backing file name as literally present
+in a chain, we need to remember if the chain had relative names.
+Also, searching for absolute names is easier if we only have
+to canonicalize once, rather than on every iteration.
+
+* src/util/storage_file.h (_virStorageFileMetadata): Add field.
+* src/util/storage_file.c (virStorageFileGetMetadataFromBuf):
+(virStorageFileFreeMetadata): Manage it
+(absolutePathFromBaseFile): Store absolute names in canonical form.
+(cherry picked from commit 82507838e073eb32e570a9bb2508c2863f20211e)
+---
+ src/util/storage_file.c | 28 ++++++++++++++++++++--------
+ src/util/storage_file.h |  3 ++-
+ 2 files changed, 22 insertions(+), 9 deletions(-)
+
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index 76079bb..2ff444c 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -28,6 +28,7 @@
+ #include <sys/stat.h>
+ #include <unistd.h>
+ #include <fcntl.h>
++#include <stdlib.h>
+ #ifdef __linux__
+ # if HAVE_LINUX_MAGIC_H
+ #  include <linux/magic.h>
+@@ -530,18 +531,22 @@ static char *
+ absolutePathFromBaseFile(const char *base_file, const char *path)
+ {
+     char *res;
++    char *tmp;
+     size_t d_len = dir_len (base_file);
+ 
+     /* If path is already absolute, or if dirname(base_file) is ".",
+        just return a copy of path.  */
+     if (*path == '/' || d_len == 0)
+-        return strdup(path);
++        return canonicalize_file_name(path);
+ 
+     /* Ensure that the following cast-to-int is valid.  */
+     if (d_len > INT_MAX)
+         return NULL;
+ 
+-    ignore_value(virAsprintf(&res, "%.*s/%s", (int) d_len, base_file, path));
++    if (virAsprintf(&tmp, "%.*s/%s", (int) d_len, base_file, path) < 0)
++        return NULL;
++    res = canonicalize_file_name(tmp);
++    VIR_FREE(tmp);
+     return res;
+ }
+ 
+@@ -697,17 +702,23 @@ virStorageFileGetMetadataFromBuf(int format,
+ 
+         meta->backingStoreIsFile = false;
+         if (backing != NULL) {
++            meta->backingStore = strdup(backing);
++            if (meta->backingStore == NULL) {
++                virReportOOMError();
++                VIR_FREE(backing);
++                return -1;
++            }
+             if (virBackingStoreIsFile(backing)) {
+                 meta->backingStoreIsFile = true;
++                meta->backingStoreRaw = meta->backingStore;
+                 meta->backingStore = absolutePathFromBaseFile(path, backing);
+-            } else {
+-                meta->backingStore = strdup(backing);
++                if (meta->backingStore == NULL) {
++                    virReportOOMError();
++                    VIR_FREE(backing);
++                    return -1;
++                }
+             }
+             VIR_FREE(backing);
+-            if (meta->backingStore == NULL) {
+-                virReportOOMError();
+-                return -1;
+-            }
+             meta->backingStoreFormat = backingFormat;
+         } else {
+             meta->backingStore = NULL;
+@@ -1014,6 +1025,7 @@ virStorageFileFreeMetadata(virStorageFileMetadata *meta)
+ 
+     virStorageFileFreeMetadata(meta->backingMeta);
+     VIR_FREE(meta->backingStore);
++    VIR_FREE(meta->backingStoreRaw);
+     VIR_FREE(meta);
+ }
+ 
+diff --git a/src/util/storage_file.h b/src/util/storage_file.h
+index 9a60451..685fcb8 100644
+--- a/src/util/storage_file.h
++++ b/src/util/storage_file.h
+@@ -53,7 +53,8 @@ VIR_ENUM_DECL(virStorageFileFormat);
+ typedef struct _virStorageFileMetadata virStorageFileMetadata;
+ typedef virStorageFileMetadata *virStorageFileMetadataPtr;
+ struct _virStorageFileMetadata {
+-    char *backingStore;
++    char *backingStore; /* Canonical name (absolute file, or protocol) */
++    char *backingStoreRaw; /* If file, original name, possibly relative */
+     int backingStoreFormat; /* enum virStorageFileFormat */
+     bool backingStoreIsFile;
+     virStorageFileMetadataPtr backingMeta;
+-- 
+1.7.12.4
+

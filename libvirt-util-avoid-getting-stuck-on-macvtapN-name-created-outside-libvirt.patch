@@ -1,0 +1,48 @@
+From 91d3e9bbe1de57ace09bf88c9b28283bf4a715f6 Mon Sep 17 00:00:00 2001
+Message-Id: <91d3e9bbe1de57ace09bf88c9b28283bf4a715f6@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 28 Mar 2016 15:49:23 -0400
+Subject: [PATCH] util: avoid getting stuck on macvtapN name created outside
+ libvirt
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1321637
+
+(This was a regression caused by a patch backported for Bug 1276478)
+
+After the patches that added tracking of in-use macvtap names (commit
+370608, first appearing in libvirt-1.3.2), if the function to allocate
+a new macvtap device came to a device name created outside libvirt, it
+would retry the same device name MACVLAN_MAX_ID (8191) times before
+finally giving up in failure.
+
+The problem was that virBitmapNextClearBit was always being called
+with "0" rather than the value most recently checked (which would
+increment each time through the loop), so it would always return the
+same id (since we dutifully release that id after failing to create a
+new device using it).
+
+Also Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1321546 (RHEL7)
+
+Signed-off-by: Laine Stump <laine@laine.org>
+(cherry picked from commit 5b5f12cffa86a1b4527bde620c2a86c5e96ad7c5)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdevmacvlan.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/util/virnetdevmacvlan.c b/src/util/virnetdevmacvlan.c
+index 4e5d2bb..e169120 100644
+--- a/src/util/virnetdevmacvlan.c
++++ b/src/util/virnetdevmacvlan.c
+@@ -138,7 +138,7 @@ virNetDevMacVLanReserveID(int id, unsigned int flags,
+     }
+ 
+     if ((id < 0 || nextFree) &&
+-        (id = virBitmapNextClearBit(bitmap, 0)) < 0) {
++        (id = virBitmapNextClearBit(bitmap, id)) < 0) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("no unused %s names available"),
+                        (flags & VIR_NETDEV_MACVLAN_CREATE_WITH_TAP) ?
+-- 
+2.8.0
+

@@ -1,0 +1,43 @@
+From a5403890832593553e1da3ba6ac682de9a90db8b Mon Sep 17 00:00:00 2001
+Message-Id: <a5403890832593553e1da3ba6ac682de9a90db8b@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 10 Apr 2015 13:49:26 +0200
+Subject: [PATCH] qemu: cgroup: Fix memory leak when there's no vCPU pinning
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1198096 [6.7]
+https://bugzilla.redhat.com/show_bug.cgi?id=1209891 [6.6.z]
+
+RHEL-only
+
+The reimplementation of the patch that fixes vCPU pinning introduces a
+memory leak as the cgroup is not freed if there's no vCPU pinning info
+for given vCPU.
+
+This patch rearranges the code so that the part that frees the memory is
+not skipped if the vCPU shouldn't be pinned.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_cgroup.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 8a9c7e7..127e79a 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -633,10 +633,8 @@ int qemuSetupCgroupForVcpu(struct qemud_driver *driver,
+                 }
+             }
+ 
+-            if (!cpumap)
+-                continue;
+-
+-            if (qemuSetupCgroupEmulatorPin(cgroup_vcpu, cpumap) < 0)
++            if (cpumap &&
++                qemuSetupCgroupEmulatorPin(cgroup_vcpu, cpumap) < 0)
+                 goto cleanup;
+         }
+ 
+-- 
+2.3.5
+

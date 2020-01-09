@@ -1,0 +1,48 @@
+From b1c99461d34703bb05961bd023ae757fe79f25f3 Mon Sep 17 00:00:00 2001
+Message-Id: <b1c99461d34703bb05961bd023ae757fe79f25f3@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 28 Apr 2014 11:10:28 +0200
+Subject: [PATCH] qemu: Unbreak p2p migration with complete migration URI
+
+If both port and IP address is specified in migration URI, destination
+does not need to do anything with it and so it returns NULL in uri_out.
+However, the p2p migration code in qemu driver did not properly check
+for this situation and always failed if uri_out was NULL.
+
+RHEL-only: this bug was accidentally fixed by a much larger commit
+35461438cbc8bc5ec13dba7cb33200b4378de352 (Implement extensible migration
+APIs in qemu driver), which is not suitable for backporting.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1073227
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_migration.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 8fb5435..522e7a2 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -2572,8 +2572,7 @@ static int doPeer2PeerMigrate3(struct qemud_driver *driver,
+     if (ret == -1)
+         goto cleanup;
+ 
+-    if (!(flags & VIR_MIGRATE_TUNNELLED) &&
+-        (uri_out == NULL)) {
++    if (!uri && !uri_out && !(flags & VIR_MIGRATE_TUNNELLED)) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("domainMigratePrepare3 did not set uri"));
+         cancelled = 1;
+@@ -2598,7 +2597,7 @@ static int doPeer2PeerMigrate3(struct qemud_driver *driver,
+                               &cookieout, &cookieoutlen,
+                               flags, resource, dconn);
+     else
+-        ret = doNativeMigrate(driver, vm, uri_out,
++        ret = doNativeMigrate(driver, vm, uri_out ? uri_out : uri,
+                               cookiein, cookieinlen,
+                               &cookieout, &cookieoutlen,
+                               flags, resource, dconn);
+-- 
+1.9.2
+

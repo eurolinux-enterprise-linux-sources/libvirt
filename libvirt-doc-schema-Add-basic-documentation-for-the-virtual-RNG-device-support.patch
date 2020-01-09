@@ -1,0 +1,182 @@
+From f41239c56d82b454aa2c9a68d62b02e382ccacb9 Mon Sep 17 00:00:00 2001
+Message-Id: <f41239c56d82b454aa2c9a68d62b02e382ccacb9@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:48 +0100
+Subject: [PATCH] doc: schema: Add basic documentation for the virtual RNG
+ device support
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+This patch documents XML elements used for (basic) support of virtual
+RNG devices.
+
+In the devices section in the domain XML users may specify:
+
+For the default 'random' backend:
+  <devices>
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+    </rng>
+  </devices>
+
+For the slightly more advanced EGD backend:
+  <devices>
+    <rng model='virtio'>
+      <backend model='egd' type='udp'>
+        <!-- this is a definition of a character device -->
+        <source mode='bind' service='1234'/>
+        <source mode='connect' host='1.2.3.4' service='1234'/>
+        <!-- or other valid character device configuration -->
+      </backend>
+    </rng>
+  </devices>
+
+For the planned random daemon/pool:
+  <devices>
+    <rng model='virtio'>
+      <backend model='pool' pool='poolname'>class</backend>
+    </rng>
+  </devices>
+
+to enable the RNG device for guests.
+(cherry picked from commit fa16c80f52136371dcc88649052fd9f7adff73eb)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in     | 69 +++++++++++++++++++++++++++++++++++++++++++
+ docs/schemas/domaincommon.rng | 32 ++++++++++++++++++++
+ 2 files changed, 101 insertions(+)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 868a8ff..f726091 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -4177,6 +4177,75 @@ qemu-kvm -net nic,model=? /dev/null
+         </ul>
+       </dd>
+     </dl>
++    <h4><a name="elementsRng">Random number generator device</a></h4>
++
++    <p>
++      The virtual random number generator device allows the host to pass
++      through entropy to guest operating systems.
++      <span class="since">Since 1.0.3</span>
++    </p>
++
++    <p>
++      Example: usage of the RNG device:
++    </p>
++<pre>
++  ...
++  &lt;devices&gt;
++    &lt;rng model='virtio'&gt;
++      &lt;backend model='random'&gt;/dev/random&lt;/backend&gt;
++      &lt;!-- OR --&gt;
++      &lt;backend model='egd' type='udp'&gt;
++        &lt;source mode='bind' service='1234'&gt;
++        &lt;source mode='connect' host='1.2.3.4' service='1234'&gt;
++      &lt;/backend&gt;
++    &lt;/rng&gt;
++  &lt;/devices&gt;
++  ...
++</pre>
++    <dl>
++      <dt><code>model</code></dt>
++      <dd>
++        <p>
++          The required <code>model</code> attribute specifies what type
++          of RNG device is provided. Valid values are specific to
++          the virtualization platform:
++        </p>
++        <ul>
++          <li>'virtio' &mdash; supported by qemu and virtio-rng kernel module</li>
++        </ul>
++      </dd>
++      <dt><code>backend</code></dt>
++      <dd>
++        <p>
++          The <code>backend</code> element specifies the source of entropy
++          to be used for the domain. The source model is configured using the
++          <code>model</code> attribute. Supported source models are:
++        </p>
++        <ul>
++          <li>'random' &mdash; /dev/random (default) or similar device as source</li>
++          <li>'egd' &mdash; a EGD protocol backend</li>
++        </ul>
++      </dd>
++      <dt><code>backend type='random'</code></dt>
++      <dd>
++        <p>
++          This backend type expects a non-blocking character device as input.
++          Examples of such devices are /dev/random and /dev/urandom. The file
++          name is specified as contents of the <code>backend</code> element.
++          When no file name is specified the hypervisor default is used.
++        </p>
++      </dd>
++      <dt><code>backend type='egd'</code></dt>
++      <dd>
++        <p>
++          This backend connects to a source using the EGD protocol.
++          The source is specified as a character device. Refer to
++          <a href='#elementsCharHostInterface'>character device host interface</a>
++          for more information.
++        </p>
++      </dd>
++
++    </dl>
+ 
+     <h3><a name="seclabel">Security label</a></h3>
+ 
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 32aa34a..fff8611 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -3033,6 +3033,7 @@
+             <ref name="hub"/>
+             <ref name="redirdev"/>
+             <ref name="redirfilter"/>
++            <ref name="rng"/>
+           </choice>
+         </zeroOrMore>
+         <optional>
+@@ -3415,6 +3416,37 @@
+     </element>
+   </define>
+ 
++  <define name="rng">
++    <element name="rng">
++      <attribute name="model">
++        <choice>
++          <value>virtio</value>
++        </choice>
++      </attribute>
++      <ref name="rng-backend"/>
++    </element>
++  </define>
++
++  <define name="rng-backend">
++    <element name="backend">
++      <choice>
++        <group>
++          <attribute name="model">
++            <value>random</value>
++          </attribute>
++          <ref name="filePath"/>
++        </group>
++        <group>
++          <attribute name="model">
++            <value>egd</value>
++          </attribute>
++          <ref name="qemucdevSrcType"/>
++          <ref name="qemucdevSrcDef"/>
++        </group>
++      </choice>
++    </element>
++  </define>
++
+   <define name="usbmaster">
+     <element name="master">
+       <attribute name="startport">
+-- 
+1.9.1
+

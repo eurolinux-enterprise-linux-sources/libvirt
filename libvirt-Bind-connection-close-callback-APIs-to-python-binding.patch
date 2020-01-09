@@ -1,0 +1,246 @@
+From e688489d43c9222ad3512a7901559322a52e2ddf Mon Sep 17 00:00:00 2001
+Message-Id: <e688489d43c9222ad3512a7901559322a52e2ddf@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 3 Jul 2014 16:58:42 +0200
+Subject: [PATCH] Bind connection close callback APIs to python binding
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1114619
+
+Add code in the python binding to cope with the new APIs
+virConnectRegisterCloseCallback and
+virConnectUnregisterCloseCallback. Also demonstrate their
+use in the python domain events demo
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 1465876a04798a891c1d2c20eb5d6aee9eafb1d1)
+
+Conflicts:
+	examples/domain-events/events-python/event-test.py - context
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ examples/domain-events/events-python/event-test.py |  13 ++-
+ python/generator.py                                |   5 +-
+ python/libvirt-override-virConnect.py              |  23 +++++
+ python/libvirt-override.c                          | 107 +++++++++++++++++++++
+ 4 files changed, 145 insertions(+), 3 deletions(-)
+
+diff --git a/examples/domain-events/events-python/event-test.py b/examples/domain-events/events-python/event-test.py
+index 4f3bdb0..cb462fe 100644
+--- a/examples/domain-events/events-python/event-test.py
++++ b/examples/domain-events/events-python/event-test.py
+@@ -499,6 +499,15 @@ def myDomainEventDeviceRemovedCallback(conn, dom, dev, opaque):
+     print "myDomainEventDeviceRemovedCallback: Domain %s(%s) device removed: %s" % (
+             dom.name(), dom.ID(), dev)
+ 
++run = True
++
++def myConnectionCloseCallback(conn, reason, opaque):
++    reasonStrings = (
++        "Error", "End-of-file", "Keepalive", "Client",
++        )
++    print "myConnectionCloseCallback: %s: %s" % (conn.getURI(), reasonStrings[reason])
++    run = False
++
+ def usage(out=sys.stderr):
+     print >>out, "usage: "+os.path.basename(sys.argv[0])+" [-hdl] [uri]"
+     print >>out, "   uri will default to qemu:///system"
+@@ -548,6 +557,8 @@ def main():
+         if (old_exitfunc): old_exitfunc()
+     sys.exitfunc = exit
+ 
++    vc.registerCloseCallback(myConnectionCloseCallback, None)
++
+     #Add 2 callbacks to prove this works with more than just one
+     vc.domainEventRegister(myDomainEventCallback1,None)
+     vc.domainEventRegisterAny(None, libvirt.VIR_DOMAIN_EVENT_ID_LIFECYCLE, myDomainEventCallback2, None)
+@@ -570,7 +581,7 @@ def main():
+     # of demo we'll just go to sleep. The other option is to
+     # run the event loop in your main thread if your app is
+     # totally event based.
+-    while vc.isAlive() == 1:
++    while run:
+         time.sleep(1)
+ 
+ 
+diff --git a/python/generator.py b/python/generator.py
+index 9bd64b7..ab7488b 100755
+--- a/python/generator.py
++++ b/python/generator.py
+@@ -425,8 +425,6 @@ skip_impl = (
+     'virDomainGetInterfaceParameters',
+     'virDomainGetCPUStats',
+     'virDomainGetDiskErrors',
+-    'virConnectUnregisterCloseCallback',
+-    'virConnectRegisterCloseCallback',
+     'virNodeGetMemoryParameters',
+     'virNodeSetMemoryParameters',
+ )
+@@ -475,6 +473,9 @@ skip_function = (
+     'virStreamRecv', # overridden in libvirt-override-virStream.py
+     'virStreamSend', # overridden in libvirt-override-virStream.py
+ 
++    'virConnectUnregisterCloseCallback', # overriden in virConnect.py
++    'virConnectRegisterCloseCallback', # overriden in virConnect.py
++
+     # 'Ref' functions have no use for bindings users.
+     "virConnectRef",
+     "virDomainRef",
+diff --git a/python/libvirt-override-virConnect.py b/python/libvirt-override-virConnect.py
+index 42c2f58..b799a19 100644
+--- a/python/libvirt-override-virConnect.py
++++ b/python/libvirt-override-virConnect.py
+@@ -296,3 +296,26 @@
+             retlist.append(virSecret(self, _obj=secret_ptr))
+ 
+         return retlist
++
++    def _dispatchCloseCallback(self, reason, cbData):
++        """Dispatches events to python user close callback"""
++        cb = cbData["cb"]
++        opaque = cbData["opaque"]
++
++        cb(self, reason, opaque)
++        return 0
++
++
++    def unregisterCloseCallback(self):
++        """Removes a close event callback"""
++        ret = libvirtmod.virConnectUnregisterCloseCallback(self._o)
++        if ret == -1: raise libvirtError ('virConnectUnregisterCloseCallback() failed', conn=self)
++
++    def registerCloseCallback(self, cb, opaque):
++        """Adds a close event callback, providing a notification
++         when a connection fails / closes"""
++        cbData = { "cb": cb, "conn": self, "opaque": opaque }
++        ret = libvirtmod.virConnectRegisterCloseCallback(self._o, cbData)
++        if ret == -1:
++            raise libvirtError ('virConnectRegisterCloseCallback() failed', conn=self)
++        return ret
+diff --git a/python/libvirt-override.c b/python/libvirt-override.c
+index 11827f4..6517c36 100644
+--- a/python/libvirt-override.c
++++ b/python/libvirt-override.c
+@@ -5999,6 +5999,111 @@ libvirt_virConnectDomainEventDeregisterAny(ATTRIBUTE_UNUSED PyObject * self,
+     return py_retval;
+ }
+ 
++
++static void
++libvirt_virConnectCloseCallbackDispatch(virConnectPtr conn ATTRIBUTE_UNUSED,
++                                        int reason,
++                                        void *opaque)
++{
++    PyObject *pyobj_cbData = (PyObject*)opaque;
++    PyObject *pyobj_ret;
++    PyObject *pyobj_conn;
++    PyObject *dictKey;
++
++    LIBVIRT_ENSURE_THREAD_STATE;
++
++    Py_INCREF(pyobj_cbData);
++
++    dictKey = libvirt_constcharPtrWrap("conn");
++    pyobj_conn = PyDict_GetItem(pyobj_cbData, dictKey);
++    Py_DECREF(dictKey);
++
++    /* Call the Callback Dispatcher */
++    pyobj_ret = PyObject_CallMethod(pyobj_conn,
++                                    (char*)"_dispatchCloseCallback",
++                                    (char*)"iO",
++                                    reason,
++                                    pyobj_cbData);
++
++    Py_DECREF(pyobj_cbData);
++
++    if(!pyobj_ret) {
++        DEBUG("%s - ret:%p\n", __FUNCTION__, pyobj_ret);
++        PyErr_Print();
++    } else {
++        Py_DECREF(pyobj_ret);
++    }
++
++    LIBVIRT_RELEASE_THREAD_STATE;
++}
++
++static PyObject *
++libvirt_virConnectRegisterCloseCallback(ATTRIBUTE_UNUSED PyObject * self,
++                                        PyObject * args)
++{
++    PyObject *py_retval;        /* return value */
++    PyObject *pyobj_conn;       /* virConnectPtr */
++    PyObject *pyobj_cbData;     /* hash of callback data */
++    virConnectPtr conn;
++    int ret = 0;
++
++    if (!PyArg_ParseTuple
++        (args, (char *) "OO:virConnectRegisterCloseCallback",
++         &pyobj_conn, &pyobj_cbData)) {
++        DEBUG("%s failed parsing tuple\n", __FUNCTION__);
++        return VIR_PY_INT_FAIL;
++    }
++
++    DEBUG("libvirt_virConnectRegisterCloseCallback(%p %p) called\n",
++           pyobj_conn, pyobj_cbData);
++    conn = PyvirConnect_Get(pyobj_conn);
++
++    Py_INCREF(pyobj_cbData);
++
++    LIBVIRT_BEGIN_ALLOW_THREADS;
++    ret = virConnectRegisterCloseCallback(conn,
++                                          libvirt_virConnectCloseCallbackDispatch,
++                                          pyobj_cbData,
++                                          libvirt_virConnectDomainEventFreeFunc);
++    LIBVIRT_END_ALLOW_THREADS;
++
++    if (ret < 0) {
++        Py_DECREF(pyobj_cbData);
++    }
++
++    py_retval = libvirt_intWrap(ret);
++    return py_retval;
++}
++
++static PyObject *
++libvirt_virConnectUnregisterCloseCallback(ATTRIBUTE_UNUSED PyObject * self,
++                                          PyObject * args)
++{
++    PyObject *py_retval;
++    PyObject *pyobj_conn;
++    virConnectPtr conn;
++    int ret = 0;
++
++    if (!PyArg_ParseTuple
++        (args, (char *) "O:virConnectDomainEventUnregister",
++         &pyobj_conn))
++        return NULL;
++
++    DEBUG("libvirt_virConnectDomainEventUnregister(%p) called\n",
++          pyobj_conn);
++
++    conn = PyvirConnect_Get(pyobj_conn);
++
++    LIBVIRT_BEGIN_ALLOW_THREADS;
++
++    ret = virConnectUnregisterCloseCallback(conn,
++                                            libvirt_virConnectCloseCallbackDispatch);
++
++    LIBVIRT_END_ALLOW_THREADS;
++    py_retval = libvirt_intWrap(ret);
++    return py_retval;
++}
++
+ static void
+ libvirt_virStreamEventFreeFunc(void *opaque)
+ {
+@@ -6431,6 +6536,8 @@ static PyMethodDef libvirtMethods[] = {
+     {(char *) "virConnectDomainEventDeregister", libvirt_virConnectDomainEventDeregister, METH_VARARGS, NULL},
+     {(char *) "virConnectDomainEventRegisterAny", libvirt_virConnectDomainEventRegisterAny, METH_VARARGS, NULL},
+     {(char *) "virConnectDomainEventDeregisterAny", libvirt_virConnectDomainEventDeregisterAny, METH_VARARGS, NULL},
++    {(char *) "virConnectRegisterCloseCallback", libvirt_virConnectRegisterCloseCallback, METH_VARARGS, NULL},
++    {(char *) "virConnectUnregisterCloseCallback", libvirt_virConnectUnregisterCloseCallback, METH_VARARGS, NULL},
+     {(char *) "virStreamEventAddCallback", libvirt_virStreamEventAddCallback, METH_VARARGS, NULL},
+     {(char *) "virStreamRecv", libvirt_virStreamRecv, METH_VARARGS, NULL},
+     {(char *) "virStreamSend", libvirt_virStreamSend, METH_VARARGS, NULL},
+-- 
+2.0.0
+

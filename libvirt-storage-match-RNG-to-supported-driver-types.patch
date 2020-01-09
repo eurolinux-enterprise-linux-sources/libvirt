@@ -1,0 +1,89 @@
+From f531f16f624cbeb706382bf57bee819e12fd2be1 Mon Sep 17 00:00:00 2001
+Message-Id: <f531f16f624cbeb706382bf57bee819e12fd2be1.1350990678.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:29 -0600
+Subject: [PATCH] storage: match RNG to supported driver types
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+At one point, the code passed through arbitrary strings for file
+formats, which supposedly lets qemu handle a new file type even
+before libvirt has been taught to handle it.  However, to properly
+label files, libvirt has to learn the file type anyway, so we
+might as well make our life easier by only accepting file types
+that we are prepared to handle.  This patch lets the RNG validation
+ensure that only known strings are let through.
+
+* docs/schemas/domaincommon.rng (driverFormat): Limit to list of
+supported strings.
+* docs/schemas/domainsnapshot.rng (driver): Likewise.
+(cherry picked from commit e2c41e486018ee74f6a75c1f71762234e3f4efd5)
+---
+ docs/schemas/domaincommon.rng   | 27 ++++++++++++++++++++++++---
+ docs/schemas/domainsnapshot.rng |  2 +-
+ 2 files changed, 25 insertions(+), 4 deletions(-)
+
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 865f4ca..663313f 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -1193,11 +1193,32 @@
+       <ref name="genericName"/>
+     </attribute>
+     <optional>
+-      <attribute name="type">
+-        <ref name="genericName"/>
++      <attribute name='type'>
++        <choice>
++          <ref name='diskFormat'/>
++          <value>aio</value> <!-- back-compat for 'raw' -->
++        </choice>
+       </attribute>
+     </optional>
+   </define>
++  <define name='diskFormat'>
++    <choice>
++      <value>raw</value>
++      <value>dir</value>
++      <value>bochs</value>
++      <value>cloop</value>
++      <value>cow</value>
++      <value>dmg</value>
++      <value>iso</value>
++      <value>qcow</value>
++      <value>qcow2</value>
++      <value>qed</value>
++      <value>vmdk</value>
++      <value>vpc</value>
++      <value>fat</value>
++      <value>vhd</value>
++    </choice>
++  </define>
+   <define name="driverCache">
+     <attribute name="cache">
+       <choice>
+@@ -3361,7 +3382,7 @@
+       </attribute>
+       <optional>
+         <attribute name='format'>
+-          <ref name="genericName"/>
++          <ref name='diskFormat'/>
+         </attribute>
+       </optional>
+       <optional>
+diff --git a/docs/schemas/domainsnapshot.rng b/docs/schemas/domainsnapshot.rng
+index 0ef0631..ecaafe9 100644
+--- a/docs/schemas/domainsnapshot.rng
++++ b/docs/schemas/domainsnapshot.rng
+@@ -105,7 +105,7 @@
+               <element name='driver'>
+                 <optional>
+                   <attribute name='type'>
+-                    <ref name='genericName'/>
++                    <ref name='diskFormat'/>
+                   </attribute>
+                 </optional>
+                 <empty/>
+-- 
+1.7.12.4
+

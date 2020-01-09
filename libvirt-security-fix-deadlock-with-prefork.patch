@@ -1,0 +1,44 @@
+From d3ffe33a03e9fbc2643a8c3a64daecbf91dab2b5 Mon Sep 17 00:00:00 2001
+Message-Id: <d3ffe33a03e9fbc2643a8c3a64daecbf91dab2b5.1376483448.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 23 Jul 2013 11:09:58 -0600
+Subject: [PATCH] security: fix deadlock with prefork
+
+https://bugzilla.redhat.com/show_bug.cgi?id=964359
+
+Attempts to start a domain with both SELinux and DAC security
+modules loaded will deadlock; latent problem introduced in commit
+fdb3bde and exposed in commit 29fe5d7.  Basically, when recursing
+into the security manager for other driver's prefork, we have to
+undo the asymmetric lock taken at the manager level.
+
+Reported by Jiri Denemark, with diagnosis help from Dan Berrange.
+
+* src/security/security_stack.c (virSecurityStackPreFork): Undo
+extra lock grabbed during recursion.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit bfc183c1e377b24cebf5cede4c00f3dc0d1b3486)
+---
+ src/security/security_stack.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/security/security_stack.c b/src/security/security_stack.c
+index e8133c4..38fe8b5 100644
+--- a/src/security/security_stack.c
++++ b/src/security/security_stack.c
+@@ -129,6 +129,11 @@ virSecurityStackPreFork(virSecurityManagerPtr mgr)
+             rc = -1;
+             break;
+         }
++        /* Undo the unbalanced locking left behind after recursion; if
++         * PostFork ever delegates to driver callbacks, we'd instead
++         * need to recurse to an internal method that does not regrab
++         * a lock. */
++        virSecurityManagerPostFork(item->securityManager);
+     }
+ 
+     return rc;
+-- 
+1.8.3.2
+

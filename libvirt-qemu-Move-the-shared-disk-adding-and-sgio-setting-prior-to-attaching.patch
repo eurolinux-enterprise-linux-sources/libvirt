@@ -1,0 +1,85 @@
+From 50ca9caf8e309af044419fc598c8b14358fd6d74 Mon Sep 17 00:00:00 2001
+Message-Id: <50ca9caf8e309af044419fc598c8b14358fd6d74.1373271638.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 11 Mar 2013 15:26:07 +0800
+Subject: [PATCH] qemu: Move the shared disk adding and sgio setting prior to
+ attaching
+
+https://bugzilla.redhat.com/show_bug.cgi?id=908073
+
+The disk def could be free'ed by qemuDomainChangeEjectableMedia,
+which can thus cause crash if we reference the disk pointer. On
+the other hand, we have to remove the added shared disk entry from
+the table on error codepath.
+(cherry picked from commit 0db7ff59cc419d9859925e1324f021f59e2fe260)
+
+Conflicts:
+  * Conflicts with commit 8cdd5faf (Pass virQEMUDriverPtr into APIs managed
+    shared disk list), which won't be backported to 6.4 for risks
+
+	src/qemu/qemu_driver.c
+---
+ src/qemu/qemu_driver.c | 25 +++++++++++--------------
+ 1 file changed, 11 insertions(+), 14 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index f943d1d..2405467 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5933,6 +5933,12 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+         goto end;
+     }
+ 
++    if (qemuAddSharedDisk(driver->sharedDisks, disk, vm->def->name) < 0)
++        goto end;
++
++    if (qemuSetUnprivSGIO(disk) < 0)
++        goto end;
++
+     if (qemuDomainDetermineDiskChain(driver, disk, false) < 0)
+         goto end;
+ 
+@@ -5946,6 +5952,7 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+         if (qemuSetupDiskCgroup(vm, cgroup, disk) < 0)
+             goto end;
+     }
++
+     switch (disk->device)  {
+     case VIR_DOMAIN_DISK_DEVICE_CDROM:
+     case VIR_DOMAIN_DISK_DEVICE_FLOPPY:
+@@ -5984,16 +5991,9 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+                      NULLSTR(disk->src));
+     }
+ 
+-    if (ret == 0) {
+-        if (qemuAddSharedDisk(driver->sharedDisks, disk, vm->def->name) < 0)
+-            VIR_WARN("Failed to add disk '%s' to shared disk table",
+-                     disk->src);
+-
+-        if (qemuSetUnprivSGIO(disk) < 0)
+-            VIR_WARN("Failed to set unpriv_sgio of disk '%s'", disk->src);
+-    }
+-
+ end:
++    if (ret != 0)
++        ignore_value(qemuRemoveSharedDisk(driver->sharedDisks, disk, vm->def->name));
+     if (cgroup)
+         virCgroupFree(&cgroup);
+     return ret;
+@@ -6109,11 +6109,8 @@ qemuDomainDetachDeviceDiskLive(struct qemud_driver *driver,
+         break;
+     }
+ 
+-    if (ret == 0) {
+-        if (qemuRemoveSharedDisk(driver->sharedDisks, disk, vm->def->name) < 0)
+-             VIR_WARN("Failed to remove disk '%s' from shared disk table",
+-                      disk->src);
+-    }
++    if (ret == 0)
++        ignore_value(qemuRemoveSharedDisk(driver->sharedDisks, disk, vm->def->name));
+ 
+     return ret;
+ }
+-- 
+1.8.2.1
+

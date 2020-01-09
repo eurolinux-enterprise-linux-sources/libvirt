@@ -1,0 +1,373 @@
+From 1e290de2173f4244c8f14548e27b40389ef59720 Mon Sep 17 00:00:00 2001
+Message-Id: <1e290de2173f4244c8f14548e27b40389ef59720.1374158624.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 25 Apr 2013 12:10:10 -0400
+Subject: [PATCH] util: new virCommandSetMax(MemLock|Processes|Files)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=947118
+
+This patch adds two sets of functions:
+
+1) lower level virProcessSet*() functions that will immediately set
+the RLIMIT_MEMLOCK. RLIMIT_NPROC, or RLIMIT_NOFILE of either the
+current process (using setrlimit()) or any other process (using
+prlimit()). "current process" is indicated by passing a 0 for pid.
+
+2) functions for virCommand* that will setup a virCommand object to
+set those limits at a later time just after it has forked a new
+process, but before it execs the new program.
+
+configure.ac has prlimit and setrlimit added to the list of functions
+to check for, and the low level functions log an "unsupported" error)
+on platforms that don't support those functions.
+
+(cherry picked from commit 776d49f492ed6e19f367291f2e552c30fad0571e)
+
+Conflicts:
+	configure.ac - in-line context
+	src/libvirt_private.syms - file were renamed upstream
+	src/util/command.c - context
+	src/util/command.h - context
+	src/util/virprocess.c - this is still in util.c in RHEL
+	src/util/virprocess.h - this is still in util.h in RHEL
+---
+ configure.ac             |   2 +-
+ src/libvirt_private.syms |   6 ++
+ src/util/command.c       |  53 ++++++++++++++++-
+ src/util/command.h       |   4 ++
+ src/util/util.c          | 150 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/util/util.h          |   4 ++
+ 6 files changed, 215 insertions(+), 4 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index a8f7222..22e3ade 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -173,7 +173,7 @@ dnl Availability of various common functions (non-fatal if missing),
+ dnl and various less common threadsafe functions
+ AC_CHECK_FUNCS_ONCE([cfmakeraw geteuid getgid getgrnam_r getmntent_r \
+   getpwuid_r getuid initgroups kill mmap newlocale posix_fallocate \
+-  posix_memalign regexec sched_getaffinity])
++  posix_memalign prlimit regexec sched_getaffinity setrlimit])
+ 
+ dnl Availability of pthread functions (if missing, win32 threading is
+ dnl assumed).  Because of $LIB_PTHREAD, we cannot use AC_CHECK_FUNCS_ONCE.
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 35ba878..c121bbd 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -156,6 +156,9 @@ virCommandSetErrorBuffer;
+ virCommandSetErrorFD;
+ virCommandSetInputBuffer;
+ virCommandSetInputFD;
++virCommandSetMaxFiles;
++virCommandSetMaxMemLock;
++virCommandSetMaxProcesses;
+ virCommandSetOutputBuffer;
+ virCommandSetOutputFD;
+ virCommandSetPidFile;
+@@ -1295,6 +1298,9 @@ virKillProcess;
+ virParseNumber;
+ virParseVersionString;
+ virPipeReadUntilEOF;
++virProcessSetMaxFiles;
++virProcessSetMaxMemLock;
++virProcessSetMaxProcesses;
+ virScaleInteger;
+ virSetBlocking;
+ virSetCloseExec;
+diff --git a/src/util/command.c b/src/util/command.c
+index 5d6e17b..2fc27bf 100644
+--- a/src/util/command.c
++++ b/src/util/command.c
+@@ -94,6 +94,10 @@ struct _virCommand {
+     char *pidfile;
+     bool reap;
+ 
++    unsigned long long maxMemLock;
++    unsigned int maxProcesses;
++    unsigned int maxFiles;
++
+     unsigned long long capabilities;
+ };
+ 
+@@ -399,7 +403,10 @@ virExecWithHook(const char *const*argv,
+                 virExecHook hook,
+                 void *data,
+                 char *pidfile,
+-                unsigned long long capabilities)
++                unsigned long long capabilities,
++                unsigned long long maxMemLock,
++                unsigned int maxProcesses,
++                unsigned int maxFiles)
+ {
+     pid_t pid;
+     int null = -1, i, openmax;
+@@ -612,6 +619,13 @@ virExecWithHook(const char *const*argv,
+             goto fork_error;
+         }
+ 
++        if (virProcessSetMaxMemLock(0, maxMemLock) < 0)
++            goto fork_error;
++        if (virProcessSetMaxProcesses(0, maxProcesses) < 0)
++            goto fork_error;
++        if (virProcessSetMaxFiles(0, maxFiles) < 0)
++            goto fork_error;
++
+         if ((hook)(data) != 0) {
+             VIR_DEBUG("Hook function failed.");
+             goto fork_error;
+@@ -717,7 +731,10 @@ virExecWithHook(const char *const*argv ATTRIBUTE_UNUSED,
+                 virExecHook hook ATTRIBUTE_UNUSED,
+                 void *data ATTRIBUTE_UNUSED,
+                 char *pidfile ATTRIBUTE_UNUSED,
+-                unsigned long long capabilities ATTRIBUTE_UNUSED)
++                unsigned long long capabilities ATTRIBUTE_UNUSED,
++                unsigned long long maxMemLock ATTRIBUTE_UNUSED,
++                unsigned int maxProcesses ATTRIBUTE_UNUSED,
++                unsigned int maxFiles ATTRIBUTE_UNUSED)
+ {
+     /* XXX: Some day we can implement pieces of virCommand/virExec on
+      * top of _spawn() or CreateProcess(), but we can't implement
+@@ -917,6 +934,33 @@ virCommandSetPidFile(virCommandPtr cmd, const char *pidfile)
+ }
+ 
+ 
++void
++virCommandSetMaxMemLock(virCommandPtr cmd, unsigned long long bytes)
++{
++    if (!cmd || cmd->has_error)
++        return;
++
++    cmd->maxMemLock = bytes;
++}
++
++void
++virCommandSetMaxProcesses(virCommandPtr cmd, unsigned int procs)
++{
++    if (!cmd || cmd->has_error)
++        return;
++
++    cmd->maxProcesses = procs;
++}
++
++void
++virCommandSetMaxFiles(virCommandPtr cmd, unsigned int files)
++{
++    if (!cmd || cmd->has_error)
++        return;
++
++    cmd->maxFiles = files;
++}
++
+ /**
+  * virCommandClearCaps:
+  * @cmd: the command to modify
+@@ -2221,7 +2265,10 @@ virCommandRunAsync(virCommandPtr cmd, pid_t *pid)
+                           virCommandHook,
+                           cmd,
+                           cmd->pidfile,
+-                          cmd->capabilities);
++                          cmd->capabilities,
++                          cmd->maxMemLock,
++                          cmd->maxProcesses,
++                          cmd->maxFiles);
+ 
+     VIR_DEBUG("Command result %d, with PID %d",
+               ret, (int)cmd->pid);
+diff --git a/src/util/command.h b/src/util/command.h
+index d1a1bf9..0ecbe27 100644
+--- a/src/util/command.h
++++ b/src/util/command.h
+@@ -61,6 +61,10 @@ void virCommandTransferFD(virCommandPtr cmd,
+ void virCommandSetPidFile(virCommandPtr cmd,
+                           const char *pidfile) ATTRIBUTE_NONNULL(2);
+ 
++void virCommandSetMaxMemLock(virCommandPtr cmd, unsigned long long bytes);
++void virCommandSetMaxProcesses(virCommandPtr cmd, unsigned int procs);
++void virCommandSetMaxFiles(virCommandPtr cmd, unsigned int files);
++
+ void virCommandClearCaps(virCommandPtr cmd);
+ 
+ void virCommandAllowCap(virCommandPtr cmd,
+diff --git a/src/util/util.c b/src/util/util.c
+index c49ea8c..14be2e2 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -64,6 +64,10 @@
+ #if defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R
+ # include <mntent.h>
+ #endif
++#if HAVE_SETRLIMIT
++# include <sys/time.h>
++# include <sys/resource.h>
++#endif
+ 
+ #ifdef WIN32
+ # ifdef HAVE_WINSOCK2_H
+@@ -3278,3 +3282,149 @@ cleanup:
+     VIR_FREE(buf);
+     return ret;
+ }
++
++#if HAVE_PRLIMIT
++static int
++virProcessPrLimit(pid_t pid, int resource, struct rlimit *rlim)
++{
++    return prlimit(pid, resource, rlim, NULL);
++}
++#else /* ! HAVE_PRLIMIT */
++static int
++virProcessPrLimit(pid_t pid ATTRIBUTE_UNUSED,
++                  int resource ATTRIBUTE_UNUSED,
++                  struct rlimit *rlim ATTRIBUTE_UNUSED)
++{
++    errno = ENOSYS;
++    return -1;
++}
++#endif /* ! HAVE_PRLIMIT */
++
++#if HAVE_SETRLIMIT && defined(RLIMIT_MEMLOCK)
++int
++virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes)
++{
++    struct rlimit rlim;
++
++    if (bytes == 0)
++        return 0;
++
++    rlim.rlim_cur = rlim.rlim_max = bytes;
++    if (pid == 0) {
++        if (setrlimit(RLIMIT_MEMLOCK, &rlim) < 0) {
++            virReportSystemError(errno,
++                                 _("cannot limit locked memory to %llu"),
++                                 bytes);
++            return -1;
++        }
++    } else {
++        if (virProcessPrLimit(pid, RLIMIT_MEMLOCK, &rlim) < 0) {
++            virReportSystemError(errno,
++                                 _("cannot limit locked memory "
++                                   "of process %lld to %llu"),
++                                 (long long int)pid, bytes);
++            return -1;
++        }
++    }
++    return 0;
++}
++#else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_MEMLOCK)) */
++int
++virProcessSetMaxMemLock(pid_t pid ATTRIBUTE_UNUSED, unsigned long long bytes)
++{
++    if (bytes == 0)
++        return 0;
++
++    virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
++    return -1;
++}
++#endif /* ! (HAVE_SETRLIMIT && defined(RLIMIT_MEMLOCK)) */
++
++
++#if HAVE_SETRLIMIT && defined(RLIMIT_NPROC)
++int
++virProcessSetMaxProcesses(pid_t pid, unsigned int procs)
++{
++    struct rlimit rlim;
++
++    if (procs == 0)
++        return 0;
++
++    rlim.rlim_cur = rlim.rlim_max = procs;
++    if (pid == 0) {
++        if (setrlimit(RLIMIT_NPROC, &rlim) < 0) {
++            virReportSystemError(errno,
++                                 _("cannot limit number of subprocesses to %u"),
++                                 procs);
++            return -1;
++        }
++    } else {
++        if (virProcessPrLimit(pid, RLIMIT_NPROC, &rlim) < 0) {
++            virReportSystemError(errno,
++                                 _("cannot limit number of subprocesses "
++                                   "of process %lld to %u"),
++                                 (long long int)pid, procs);
++            return -1;
++        }
++    }
++    return 0;
++}
++#else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NPROC)) */
++int
++virProcessSetMaxProcesses(pid_t pid ATTRIBUTE_UNUSED, unsigned int procs)
++{
++    if (procs == 0)
++        return 0;
++
++    virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
++    return -1;
++}
++#endif /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NPROC)) */
++
++#if HAVE_SETRLIMIT && defined(RLIMIT_NOFILE)
++int
++virProcessSetMaxFiles(pid_t pid, unsigned int files)
++{
++    struct rlimit rlim;
++
++    if (files == 0)
++        return 0;
++
++   /* Max number of opened files is one greater than actual limit. See
++    * man setrlimit.
++    *
++    * NB: That indicates to me that we would want the following code
++    * to say "files - 1", but the original of this code in
++    * qemu_process.c also had files + 1, so this preserves current
++    * behavior.
++    */
++    rlim.rlim_cur = rlim.rlim_max = files + 1;
++    if (pid == 0) {
++        if (setrlimit(RLIMIT_NOFILE, &rlim) < 0) {
++            virReportSystemError(errno,
++                                 _("cannot limit number of open files to %u"),
++                                 files);
++            return -1;
++        }
++    } else {
++        if (virProcessPrLimit(pid, RLIMIT_NOFILE, &rlim) < 0) {
++            virReportSystemError(errno,
++                                 _("cannot limit number of open files "
++                                   "of process %lld to %u"),
++                                 (long long int)pid, files);
++            return -1;
++        }
++    }
++    return 0;
++}
++#else /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NOFILE)) */
++int
++virProcessSetMaxFiles(pid_t pid ATTRIBUTE_UNUSED, unsigned int files)
++{
++    if (files == 0)
++        return 0;
++
++    virReportSystemError(ENOSYS, "%s", _("Not supported on this platform"));
++    return -1;
++}
++#endif /* ! (HAVE_SETRLIMIT && defined(RLIMIT_NOFILE)) */
+diff --git a/src/util/util.h b/src/util/util.h
+index 1a427fc..95f69a1 100644
+--- a/src/util/util.h
++++ b/src/util/util.h
+@@ -291,4 +291,8 @@ int virGetDeviceUnprivSGIO(const char *path,
+ char * virGetUnprivSGIOSysfsPath(const char *path,
+                                  const char *sysfs_dir);
+ 
++int virProcessSetMaxMemLock(pid_t pid, unsigned long long bytes);
++int virProcessSetMaxProcesses(pid_t pid, unsigned int procs);
++int virProcessSetMaxFiles(pid_t pid, unsigned int files);
++
+ #endif /* __VIR_UTIL_H__ */
+-- 
+1.8.3.2
+

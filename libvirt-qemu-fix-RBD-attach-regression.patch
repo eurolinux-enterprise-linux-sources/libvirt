@@ -1,0 +1,43 @@
+From 8850ab8edb0b0f046f4e924148067bb7897e7932 Mon Sep 17 00:00:00 2001
+Message-Id: <8850ab8edb0b0f046f4e924148067bb7897e7932.1353944810.git.jdenemar@redhat.com>
+From: Scott Sullivan <ssullivan@liquidweb.com>
+Date: Thu, 22 Nov 2012 17:42:09 +0100
+Subject: [PATCH] qemu: fix RBD attach regression
+
+https://bugzilla.redhat.com/show_bug.cgi?id=878862
+
+I have been testing libvirt v1.0.0 for deployment within my
+organization, and in the process discovered what appears to be a bug
+that breaks virsh attach-device, when attaching an RBD volume to an
+instance. First, here is the error presented, with v1.0.0 (this worked
+in v0.10.2):
+
+[root@host ~]# virsh attach-device W5APQ8  G84VV1.xml
+error: Failed to attach device from G84VV1.xml
+error: cannot open file 'dc3-1-test/G84VV1': No such file or directory
+
+Using git bisect, I narrowed the problem down to this as the first
+commit to break this setup:
+
+4d34c92947e8cf9e9bedfa227ada1d2dba92d68a is the first bad commit
+(cherry picked from commit f0e72b2f5c675f927d04545dc5095f9e5998f171)
+---
+ src/qemu/qemu_domain.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 5ee1700..654f69c 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -2012,7 +2012,7 @@ qemuDomainDetermineDiskChain(struct qemud_driver *driver,
+ {
+     bool probe = driver->allowDiskFormatProbing;
+ 
+-    if (!disk->src)
++    if (!disk->src || disk->type == VIR_DOMAIN_DISK_TYPE_NETWORK)
+         return 0;
+ 
+     if (disk->backingChain) {
+-- 
+1.8.0
+

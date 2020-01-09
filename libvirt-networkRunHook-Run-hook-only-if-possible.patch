@@ -1,0 +1,51 @@
+From e71c6beb7c8a2d7bf031f64d201d5c5f1bb6d2ac Mon Sep 17 00:00:00 2001
+Message-Id: <e71c6beb7c8a2d7bf031f64d201d5c5f1bb6d2ac@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 14 May 2014 16:12:20 +0200
+Subject: [PATCH] networkRunHook: Run hook only if possible
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+Currently, networkRunHook() is called in networkAllocateActualDevice and
+friends. These functions, however, doesn't necessarily work on networks,
+For example, if domain's interface is defined in this fashion:
+
+    <interface type='bridge'>
+      <mac address='52:54:00:0b:3b:16'/>
+      <source bridge='virbr1'/>
+      <model type='rtl8139'/>
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x09' function='0x0'/>
+    </interface>
+
+The networkAllocateActualDevice jumps directly onto 'validate' label as
+the interface is not type of 'network'. Hence, @network is left
+initialized to NULL and networkRunHook(network, ...) is called. One of
+the things that the hook function does is dereference @network. Soupir.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 83c404ff9b930e21c97ff47b8c942db17a96e94a)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index d7f0354..822a4b6 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -135,6 +135,12 @@ networkRunHook(virNetworkObjPtr network,
+     int ret = -1;
+ 
+     if (virHookPresent(VIR_HOOK_DRIVER_NETWORK)) {
++        if (!network) {
++            VIR_DEBUG("Not running hook as @network is NULL");
++            ret = 0;
++            goto cleanup;
++        }
++
+         virBufferAddLit(&buf, "<hookData>\n");
+         virBufferAdjustIndent(&buf, 2);
+         if (virNetworkDefFormatBuf(&buf, network->def, 0) < 0)
+-- 
+1.9.3
+

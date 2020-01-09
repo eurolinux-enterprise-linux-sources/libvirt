@@ -1,0 +1,38 @@
+From d7dd87f78bd1c1ed9bbeedc81294d0aac7db46f0 Mon Sep 17 00:00:00 2001
+Message-Id: <d7dd87f78bd1c1ed9bbeedc81294d0aac7db46f0.1373885147.git.jdenemar@redhat.com>
+From: John Ferlan <jferlan@redhat.com>
+Date: Tue, 9 Jul 2013 14:01:24 -0400
+Subject: [PATCH] virnetdev: Need to initialize 'pciConfigAddr'
+
+It was possible to call VIR_FREE in cleanup prior to initialization
+(cherry picked from commit ac5cb26a32300d03517692cd15a604dd0517fbd6)
+
+This is an additional fix required for:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=980339
+
+It wasn't applied with the original patch for that bug on RHEL6
+because it had been fixed upstream some time before, so wasn't called
+up in the original bug report (which was filed against RHEL7, where
+this particular patch had already been silently applied some months
+before).
+---
+ src/util/virnetdev.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/util/virnetdev.c b/src/util/virnetdev.c
+index 76db9db..286406b 100644
+--- a/src/util/virnetdev.c
++++ b/src/util/virnetdev.c
+@@ -986,7 +986,7 @@ virNetDevGetVirtualFunctions(const char *pfname,
+     int ret = -1, i;
+     char *pf_sysfs_device_link = NULL;
+     char *pci_sysfs_device_link = NULL;
+-    char *pciConfigAddr;
++    char *pciConfigAddr = NULL;
+ 
+     *virt_fns = NULL;
+     *n_vfname = 0;
+-- 
+1.8.3.2
+

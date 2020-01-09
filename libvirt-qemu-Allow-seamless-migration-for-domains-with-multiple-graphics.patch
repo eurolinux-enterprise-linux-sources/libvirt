@@ -1,0 +1,83 @@
+From 3eff4120145162e7b8aa836fb6e0011a2c68bc6e Mon Sep 17 00:00:00 2001
+Message-Id: <3eff4120145162e7b8aa836fb6e0011a2c68bc6e.1373885146.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Wed, 10 Jul 2013 17:55:51 -0600
+Subject: [PATCH] qemu: Allow seamless migration for domains with multiple
+ graphics
+
+https://bugzilla.redhat.com/show_bug.cgi?id=975751
+
+Since commit 23e8b5d8, the code is refactored in a way that supports
+domains with multiple graphics elements and commit 37b415200 allows
+starting such domains.  However none of those commits take migration
+into account.  Even though qemu doesn't support relocation for
+anything else than SPICE and for no more than one graphics, there is no
+reason to hardcode one graphics into this part of the code as well.
+(cherry picked from commit a72582cb916900d549d93eed939291f624a50071)
+
+Conflicts:
+	src/qemu/qemu_migration.c
+---
+ src/qemu/qemu_migration.c | 32 +++++++++++++++++++-------------
+ 1 file changed, 19 insertions(+), 13 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 40ba15a..fd4ac0b 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -299,19 +299,22 @@ qemuMigrationCookieAddGraphics(qemuMigrationCookiePtr mig,
+                                struct qemud_driver *driver,
+                                virDomainObjPtr dom)
+ {
++    size_t i = 0;
++
+     if (mig->flags & QEMU_MIGRATION_COOKIE_GRAPHICS) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("Migration graphics data already present"));
+         return -1;
+     }
+ 
+-    if (dom->def->ngraphics == 1 &&
+-        (dom->def->graphics[0]->type == VIR_DOMAIN_GRAPHICS_TYPE_VNC ||
+-         dom->def->graphics[0]->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE)) {
+-        if (!(mig->graphics =
+-              qemuMigrationCookieGraphicsAlloc(driver, dom->def->graphics[0])))
+-            return -1;
+-        mig->flags |= QEMU_MIGRATION_COOKIE_GRAPHICS;
++    for (i = 0; i < dom->def->ngraphics; i++) {
++       if (dom->def->graphics[i]->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE) {
++           if (!(mig->graphics =
++                 qemuMigrationCookieGraphicsAlloc(driver, dom->def->graphics[i])))
++               return -1;
++           mig->flags |= QEMU_MIGRATION_COOKIE_GRAPHICS;
++           break;
++       }
+     }
+ 
+     return 0;
+@@ -929,13 +932,16 @@ qemuMigrationUpdateJobStatus(struct qemud_driver *driver,
+     unsigned long long memProcessed;
+     unsigned long long memRemaining;
+     unsigned long long memTotal;
++    size_t i = 0;
+ 
+-    /* If guest uses SPICE and supports seamles_migration we have to hold up
+-     * migration finish until SPICE server transfers its data */
+-    if (vm->def->ngraphics == 1 &&
+-        vm->def->graphics[0]->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE &&
+-        qemuCapsGet(priv->caps, QEMU_CAPS_SEAMLESS_MIGRATION))
+-        wait_for_spice = true;
++    if (qemuCapsGet(priv->caps, QEMU_CAPS_SEAMLESS_MIGRATION)) {
++        for (i = 0; i < vm->def->ngraphics; i++) {
++            if (vm->def->graphics[i]->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE) {
++                wait_for_spice = true;
++                break;
++            }
++        }
++    }
+ 
+     ret = qemuDomainObjEnterMonitorAsync(driver, vm, asyncJob);
+     if (ret < 0) {
+-- 
+1.8.3.2
+

@@ -1,0 +1,155 @@
+From 1da44d851ea2d37baeea1c655d83abeacadf530d Mon Sep 17 00:00:00 2001
+Message-Id: <1da44d851ea2d37baeea1c655d83abeacadf530d@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 10 Feb 2014 06:59:50 -0500
+Subject: [PATCH] network: only prevent forwarding of DNS requests for
+ unqualified names
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1062708 (RHEL6.5.z)
+https://bugzilla.redhat.com/show_bug.cgi?id=1037741 (RHEL6.6)
+https://bugzilla.redhat.com/show_bug.cgi?id=928638  (RHEL6.5)
+
+In commit f386825 we began adding the options
+
+  --domain-needed
+  --local=/$mydomain/
+
+to all dnsmasq commandlines with the stated reason of preventing
+forwarding of DNS queries for names that weren't fully qualified
+domain names ("FQDN", i.e. a name that included some "."s and a domain
+name). This was later changed to
+
+  domain-needed
+  local=/$mydomain/
+
+when we moved the options from the dnsmasq commandline to a conf file.
+
+The original patch on the list, and discussion about it, is here:
+
+  https://www.redhat.com/archives/libvir-list/2012-August/msg01594.html
+
+When a domain name isn't specified (mydomain == ""), the addition of
+"domain-needed local=//" will prevent forwarding of domain-less
+requests to the virtualization host's DNS resolver, but if a domain
+*is* specified, the addition of "local=/domain/" will prevent
+forwarding of any requests for *qualified* names within that domain
+that aren't resolvable by libvirt's dnsmasq itself.
+
+An example of the problems this causes - let's say a network is
+defined with:
+
+   <domain name='example.com'/>
+   <dhcp>
+      ..
+      <host mac='52:54:00:11:22:33' ip='1.2.3.4' name='myguest'/>
+   </dhcp>
+
+This results in "local=/example.com/" being added to the dnsmasq options.
+
+If a guest requests "myguest" or "myguest.example.com", that will be
+resolved by dnsmasq. If the guest asks for "www.example.com", dnsmasq
+will not know the answer, but instead of forwarding it to the host, it
+will return NOT FOUND to the guest. In most cases that isn't the
+behavior an admin is looking for.
+
+A later patch (commit 4f595ba) attempted to remedy this by adding a
+"forwardPlainNames" attribute to the <dns> element. The idea was that
+if forwardPlainNames='yes' (default is 'no'), we would allow
+unresolved names to be forwarded. However, that patch was botched, in
+that it only removed the "domain-needed" option when
+forwardPlainNames='yes', and left the "local=/mydomain/".
+
+Really we should have been just including the option "--domain-needed
+--local=//" (note the lack of domain name) regardless of the
+configured domain of the network, so that requests for names without a
+domain would be treated as "local to dnsmasq" and not forwarded, but
+all others (including those in the network's configured domain) would
+be forwarded. We also shouldn't include *either* of those options if
+forwardPlainNames='yes'. This patch makes those corrections.
+
+This patch doesn't remedy the fact that default behavior was changed
+by the addition of this feature. That will be handled in a subsequent
+patch.
+
+(cherry-picked from upstream commit
+f69a6b987d616cf2679ec551a8b905b6a2aace6d)
+
+Conflicts:
+   src/network/bridge_driver.c
+    - upstream has switched from creating a dnsmasq commandline, to
+      setting up a dnsmasq conf file. Also some options in the context
+      don't exist on this branch.
+
+  tests/networkxml2confdata/dhcp6-network.conf
+  tests/networkxml2confdata/nat-network-dns-forwarders.conf
+    - these tests were added upstream after this branch was created.
+
+  tests/networkxml2confdata/nat-network-dns-hosts.conf
+  tests/networkxml2confdata/netboot-network.conf
+  tests/networkxml2confdata/netboot-proxy-network.conf
+    - these tests are on the branch, but use a .argv file instead of
+      .conf
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c                          | 7 +------
+ tests/networkxml2argvdata/nat-network-dns-hosts.argv | 2 +-
+ tests/networkxml2argvdata/netboot-network.argv       | 2 +-
+ tests/networkxml2argvdata/netboot-proxy-network.argv | 2 +-
+ 4 files changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 2989c00..0c493ad 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -608,13 +608,8 @@ networkBuildDnsmasqArgv(virNetworkObjPtr network,
+     if (network->def->domain)
+         virCommandAddArgPair(cmd, "--domain", network->def->domain);
+     /* need to specify local even if no domain specified */
+-    if (network->def->domain ||
+-        !(network->def->dns && network->def->dns->forwardPlainNames)) {
+-        virCommandAddArgFormat(cmd, "--local=/%s/",
+-                               network->def->domain ? network->def->domain : "");
+-    }
+     if (!(network->def->dns && network->def->dns->forwardPlainNames))
+-        virCommandAddArg(cmd, "--domain-needed");
++       virCommandAddArgList(cmd, "--local=//", "--domain-needed", NULL);
+ 
+     if (pidfile)
+         virCommandAddArgPair(cmd, "--pid-file", pidfile);
+diff --git a/tests/networkxml2argvdata/nat-network-dns-hosts.argv b/tests/networkxml2argvdata/nat-network-dns-hosts.argv
+index 431e987..ece404a 100644
+--- a/tests/networkxml2argvdata/nat-network-dns-hosts.argv
++++ b/tests/networkxml2argvdata/nat-network-dns-hosts.argv
+@@ -1,5 +1,5 @@
+ @DNSMASQ@ --strict-order --domain=example.com \
+---local=/example.com/ --domain-needed \
++--local=// --domain-needed \
+ --conf-file= \
+ --except-interface lo --bind-dynamic --interface virbr0 \
+ --expand-hosts --addn-hosts=/var/lib/libvirt/dnsmasq/default.addnhosts\
+diff --git a/tests/networkxml2argvdata/netboot-network.argv b/tests/networkxml2argvdata/netboot-network.argv
+index 0e17a71..0b3d441 100644
+--- a/tests/networkxml2argvdata/netboot-network.argv
++++ b/tests/networkxml2argvdata/netboot-network.argv
+@@ -1,5 +1,5 @@
+ @DNSMASQ@ --strict-order --domain=example.com \
+---local=/example.com/ --domain-needed --conf-file= \
++--local=// --domain-needed --conf-file= \
+ --except-interface lo --bind-interfaces --listen-address 192.168.122.1 \
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+ --dhcp-leasefile=/var/lib/libvirt/dnsmasq/netboot.leases \
+diff --git a/tests/networkxml2argvdata/netboot-proxy-network.argv b/tests/networkxml2argvdata/netboot-proxy-network.argv
+index 8764ef5..5916955 100644
+--- a/tests/networkxml2argvdata/netboot-proxy-network.argv
++++ b/tests/networkxml2argvdata/netboot-proxy-network.argv
+@@ -1,5 +1,5 @@
+ @DNSMASQ@ --strict-order --domain=example.com \
+---local=/example.com/ --domain-needed --conf-file= \
++--local=// --domain-needed --conf-file= \
+ --except-interface lo --bind-interfaces \
+ --listen-address 192.168.122.1 \
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+-- 
+1.9.1
+

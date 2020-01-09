@@ -1,0 +1,66 @@
+From b191d30468b9ef6060ab65c0704fa1ec9a6e4319 Mon Sep 17 00:00:00 2001
+Message-Id: <b191d30468b9ef6060ab65c0704fa1ec9a6e4319.1355319681.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 6 Dec 2012 01:21:23 +0800
+Subject: [PATCH] remote: Avoid the thread race condition
+
+https://bugzilla.redhat.com/show_bug.cgi?id=866524
+
+Since the virConnect object is not locked wholely when doing
+virConenctDispose, a thread can get the lock and thus might
+cause the race.
+
+Detected by valgrind:
+
+==23687== Invalid read of size 4
+==23687==    at 0x38BAA091EC: pthread_mutex_lock (pthread_mutex_lock.c:61)
+==23687==    by 0x3FBA919E36: remoteClientCloseFunc (remote_driver.c:337)
+==23687==    by 0x3FBA936BF2: virNetClientCloseLocked (virnetclient.c:688)
+==23687==    by 0x3FBA9390D8: virNetClientIncomingEvent (virnetclient.c:1859)
+==23687==    by 0x3FBA851AAE: virEventPollRunOnce (event_poll.c:485)
+==23687==    by 0x3FBA850846: virEventRunDefaultImpl (event.c:247)
+==23687==    by 0x40CD61: vshEventLoop (virsh.c:2128)
+==23687==    by 0x3FBA8626F8: virThreadHelper (threads-pthread.c:161)
+==23687==    by 0x38BAA077F0: start_thread (pthread_create.c:301)
+==23687==    by 0x33F68E570C: clone (clone.S:115)
+==23687==  Address 0x4ca94e0 is 144 bytes inside a block of size 312 free'd
+==23687==    at 0x4A0595D: free (vg_replace_malloc.c:366)
+==23687==    by 0x3FBA8588B8: virFree (memory.c:309)
+==23687==    by 0x3FBA86AAFC: virObjectUnref (virobject.c:145)
+==23687==    by 0x3FBA8EA767: virConnectClose (libvirt.c:1458)
+==23687==    by 0x40C8B8: vshDeinit (virsh.c:2584)
+==23687==    by 0x41071E: main (virsh.c:3022)
+
+The above race is caused by the eventLoop thread tries to handle
+the net client event by calling the callback set by:
+    virNetClientSetCloseCallback(priv->client,
+                                 remoteClientCloseFunc,
+                                 conn, NULL);
+
+I.E. remoteClientCloseFunc, which lock/unlock the virConnect object.
+
+This patch is to fix the bug by setting the callback to NULL when
+doRemoteClose.
+(cherry picked from commit b362938e579573017a2250f49e24dce6c837b5a6)
+---
+ src/remote/remote_driver.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 072d347..96bf0d8 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -1001,6 +1001,10 @@ doRemoteClose(virConnectPtr conn, struct private_data *priv)
+ 
+     virObjectUnref(priv->tls);
+     priv->tls = NULL;
++    virNetClientSetCloseCallback(priv->client,
++                                 NULL,
++                                 NULL,
++                                 NULL);
+     virNetClientClose(priv->client);
+     virObjectUnref(priv->client);
+     priv->client = NULL;
+-- 
+1.8.0
+

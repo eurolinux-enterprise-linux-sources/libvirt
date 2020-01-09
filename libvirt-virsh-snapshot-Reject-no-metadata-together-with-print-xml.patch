@@ -1,0 +1,42 @@
+From 7603861dd0725546ce8d1965568a70bdb14f5a75 Mon Sep 17 00:00:00 2001
+Message-Id: <7603861dd0725546ce8d1965568a70bdb14f5a75@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:45 +0200
+Subject: [PATCH] virsh-snapshot: Reject --no-metadata together with
+ --print-xml
+
+https://bugzilla.redhat.com/show_bug.cgi?id=892508
+
+Manual for "virsh snapshot-create-as" states that --no-metadata and
+--print-xml are incompatible. Honor this detail in the code.
+
+(cherry picked from commit fe69656ea9e8d77aa68759f8c1fe85f710380149)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-snapshot.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/tools/virsh-snapshot.c b/tools/virsh-snapshot.c
+index 8ec6456..87e89cc 100644
+--- a/tools/virsh-snapshot.c
++++ b/tools/virsh-snapshot.c
+@@ -327,8 +327,14 @@ cmdSnapshotCreateAs(vshControl *ctl, const vshCmd *cmd)
+     unsigned int flags = 0;
+     const vshCmdOpt *opt = NULL;
+ 
+-    if (vshCommandOptBool(cmd, "no-metadata"))
++    if (vshCommandOptBool(cmd, "no-metadata")) {
++        if (vshCommandOptBool(cmd, "print-xml")) {
++            vshError(ctl, "%s",
++                     _("--print-xml is incompatible with --no-metadata"));
++            return false;
++        }
+         flags |= VIR_DOMAIN_SNAPSHOT_CREATE_NO_METADATA;
++    }
+     if (vshCommandOptBool(cmd, "halt"))
+         flags |= VIR_DOMAIN_SNAPSHOT_CREATE_HALT;
+     if (vshCommandOptBool(cmd, "disk-only"))
+-- 
+1.9.2
+

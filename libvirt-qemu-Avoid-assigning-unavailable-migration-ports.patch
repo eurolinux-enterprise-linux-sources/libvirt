@@ -1,0 +1,257 @@
+From 51ce914658db6b536025bbba0c5b5ed5688a77f7 Mon Sep 17 00:00:00 2001
+Message-Id: <51ce914658db6b536025bbba0c5b5ed5688a77f7@dist-git>
+From: Wang Yufei <james.wangyufei@huawei.com>
+Date: Fri, 16 May 2014 13:43:04 +0200
+Subject: [PATCH] qemu: Avoid assigning unavailable migration ports
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1019053
+https://bugzilla.redhat.com/show_bug.cgi?id=1018695
+
+When we migrate vms concurrently, there's a chance that libvirtd on
+destination assigns the same port for different migrations, which will
+lead to migration failure during prepare phase on destination. So we use
+virPortAllocator here to solve the problem.
+
+Signed-off-by: Wang Yufei <james.wangyufei@huawei.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 0196845d3abd0d914cf11f7ad6c19df8b47c32ed)
+
+Conflicts:
+	src/qemu/qemu_command.h,
+	src/qemu/qemu_conf.h,
+	src/qemu/qemu_domain.h,
+	src/qemu/qemu_driver.c,
+	src/qemu/qemu_migration.c -- lots of things changed upstream
+---
+ src/qemu/qemu_command.h   |  3 +++
+ src/qemu/qemu_conf.h      |  7 +++---
+ src/qemu/qemu_domain.h    |  1 +
+ src/qemu/qemu_driver.c    |  6 ++++++
+ src/qemu/qemu_migration.c | 54 +++++++++++++++++++++++++++++++++--------------
+ 5 files changed, 52 insertions(+), 19 deletions(-)
+
+diff --git a/src/qemu/qemu_command.h b/src/qemu/qemu_command.h
+index 741f769..dd16c75 100644
+--- a/src/qemu/qemu_command.h
++++ b/src/qemu/qemu_command.h
+@@ -48,6 +48,9 @@
+ # define QEMU_REMOTE_PORT_MIN  5900
+ # define QEMU_REMOTE_PORT_MAX  65535
+ 
++# define QEMU_MIGRATION_PORT_MIN 49152
++# define QEMU_MIGRATION_PORT_MAX 49215
++
+ 
+ virCommandPtr qemuBuildCommandLine(virConnectPtr conn,
+                                    struct qemud_driver *driver,
+diff --git a/src/qemu/qemu_conf.h b/src/qemu/qemu_conf.h
+index 6dabc95..b6ac05e 100644
+--- a/src/qemu/qemu_conf.h
++++ b/src/qemu/qemu_conf.h
+@@ -44,6 +44,7 @@
+ # include "threadpool.h"
+ # include "locking/lock_manager.h"
+ # include "qemu_capabilities.h"
++# include "virportallocator.h"
+ 
+ # define QEMUD_CPUMASK_LEN CPU_SETSIZE
+ 
+@@ -144,6 +145,9 @@ struct qemud_driver {
+ 
+     virBitmapPtr reservedRemotePorts;
+ 
++    /* Immutable pointer, self-locking APIs */
++    virPortAllocatorPtr migrationPorts;
++
+     virSysinfoDefPtr hostsysinfo;
+ 
+     virLockManagerPluginPtr lockManager;
+@@ -173,9 +177,6 @@ struct _qemuDomainCmdlineDef {
+     char **env_value;
+ };
+ 
+-/* Port numbers used for KVM migration. */
+-# define QEMUD_MIGRATION_FIRST_PORT 49152
+-# define QEMUD_MIGRATION_NUM_PORTS 64
+ 
+ 
+ void qemuDriverLock(struct qemud_driver *driver);
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index b5c61ac..998f26b 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -154,6 +154,7 @@ struct _qemuDomainObjPrivate {
+ 
+     unsigned long migMaxBandwidth;
+     char *origname;
++    unsigned short migrationPort;
+ 
+     virConsolesPtr cons;
+ 
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index c946fd0..18bff74 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -784,6 +784,11 @@ qemudStartup(int privileged) {
+         goto error;
+     }
+ 
++    if ((qemu_driver->migrationPorts =
++         virPortAllocatorNew(QEMU_MIGRATION_PORT_MIN,
++                             QEMU_MIGRATION_PORT_MAX)) == NULL)
++        goto error;
++
+     if (qemuSecurityInit(qemu_driver) < 0)
+         goto error;
+ 
+@@ -1019,6 +1024,7 @@ qemudShutdown(void) {
+ 
+     virDomainObjListDeinit(&qemu_driver->domains);
+     virBitmapFree(qemu_driver->reservedRemotePorts);
++    virObjectUnref(qemu_driver->migrationPorts);
+ 
+     virSysinfoDefFree(qemu_driver->hostsysinfo);
+ 
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 7344468..f86381c 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1317,6 +1317,9 @@ qemuMigrationPrepareCleanup(struct qemud_driver *driver,
+               qemuDomainJobTypeToString(priv->job.active),
+               qemuDomainAsyncJobTypeToString(priv->job.asyncJob));
+ 
++    virPortAllocatorRelease(driver->migrationPorts, priv->migrationPort);
++    priv->migrationPort = 0;
++
+     if (!qemuMigrationJobIsActive(vm, QEMU_ASYNC_JOB_MIGRATION_IN))
+         return;
+     qemuDomainObjDiscardAsyncJob(driver, vm);
+@@ -1332,7 +1335,8 @@ qemuMigrationPrepareAny(struct qemud_driver *driver,
+                         const char *dname,
+                         const char *dom_xml,
+                         virStreamPtr st,
+-                        unsigned int port)
++                        unsigned short port,
++                        bool autoPort)
+ {
+     virDomainDefPtr def = NULL;
+     virDomainObjPtr vm = NULL;
+@@ -1542,6 +1546,8 @@ qemuMigrationPrepareAny(struct qemud_driver *driver,
+         goto cleanup;
+     }
+ 
++    if (autoPort)
++        priv->migrationPort = port;
+     ret = 0;
+ 
+ cleanup:
+@@ -1594,7 +1600,7 @@ qemuMigrationPrepareTunnel(struct qemud_driver *driver,
+ 
+     ret = qemuMigrationPrepareAny(driver, dconn, cookiein, cookieinlen,
+                                   cookieout, cookieoutlen, dname, dom_xml,
+-                                  st, 0);
++                                  st, 0, false);
+     return ret;
+ }
+ 
+@@ -1611,8 +1617,8 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+                            const char *dname,
+                            const char *dom_xml)
+ {
+-    static int port = 0;
+-    int this_port;
++    unsigned short port = 0;
++    bool autoPort = true;
+     char *hostname = NULL;
+     const char *p;
+     char *uri_str = NULL;
+@@ -1637,10 +1643,15 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+      * to be a correct hostname which refers to the target machine).
+      */
+     if (uri_in == NULL) {
+-        this_port = QEMUD_MIGRATION_FIRST_PORT + port++;
+-        if (port == QEMUD_MIGRATION_NUM_PORTS) port = 0;
++        if (virPortAllocatorAcquire(driver->migrationPorts, &port) < 0) {
++            goto cleanup;
++        } else if (!port) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("No migration port available within the "
++                             "configured range"));
++            goto cleanup;
++        }
+ 
+-        /* Get hostname */
+         if ((hostname = virGetHostname(NULL)) == NULL)
+             goto cleanup;
+ 
+@@ -1657,7 +1668,7 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+          * new targets accept both syntaxes though.
+          */
+         /* Caller frees */
+-        if (virAsprintf(uri_out, "tcp:%s:%d", hostname, this_port) < 0) {
++        if (virAsprintf(uri_out, "tcp:%s:%d", hostname, port) < 0) {
+             virReportOOMError();
+             goto cleanup;
+         }
+@@ -1697,19 +1708,24 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+         }
+ 
+         if (uri->port == 0) {
+-            /* Generate a port */
+-            this_port = QEMUD_MIGRATION_FIRST_PORT + port++;
+-            if (port == QEMUD_MIGRATION_NUM_PORTS)
+-                port = 0;
++            if (virPortAllocatorAcquire(driver->migrationPorts, &port) < 0) {
++                goto cleanup;
++            } else if (!port) {
++                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                               _("No migration port available within the "
++                                 "configured range"));
++                goto cleanup;
++            }
+ 
+             /* Caller frees */
+-            if (virAsprintf(uri_out, "%s:%d", uri_in, this_port) < 0) {
++            if (virAsprintf(uri_out, "%s:%d", uri_in, port) < 0) {
+                 virReportOOMError();
+                 goto cleanup;
+             }
+ 
+         } else {
+-            this_port = uri->port;
++            port = uri->port;
++            autoPort = false;
+         }
+     }
+ 
+@@ -1718,12 +1734,15 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+ 
+     ret = qemuMigrationPrepareAny(driver, dconn, cookiein, cookieinlen,
+                                   cookieout, cookieoutlen, dname, dom_xml,
+-                                  NULL, this_port);
++                                  NULL, port, autoPort);
+ cleanup:
+     virURIFree(uri);
+     VIR_FREE(hostname);
+-    if (ret != 0)
++    if (ret != 0) {
+         VIR_FREE(*uri_out);
++        if (autoPort)
++            virPortAllocatorRelease(driver->migrationPorts, port);
++    }
+     return ret;
+ }
+ 
+@@ -3159,6 +3178,9 @@ qemuMigrationFinish(struct qemud_driver *driver,
+             goto endjob;
+         }
+ 
++        virPortAllocatorRelease(driver->migrationPorts, priv->migrationPort);
++        priv->migrationPort = 0;
++
+         if (flags & VIR_MIGRATE_PERSIST_DEST) {
+             virDomainDefPtr vmdef;
+             if (vm->persistent)
+-- 
+1.9.3
+

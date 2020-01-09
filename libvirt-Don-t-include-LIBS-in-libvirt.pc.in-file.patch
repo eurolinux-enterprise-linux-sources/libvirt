@@ -1,0 +1,44 @@
+From 95e22084a0f73950126c7aae7a924435dbc97288 Mon Sep 17 00:00:00 2001
+Message-Id: <95e22084a0f73950126c7aae7a924435dbc97288@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 20 Jan 2015 20:59:04 -0700
+Subject: [PATCH] Don't include @LIBS@ in libvirt.pc.in file
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1134455
+
+The libvirt.pc file we install is ending up polluted with a
+load of compiler flags that should be private to the libvirt
+build. eg
+
+Libs: -L${libdir} -lvirt -ldl -O2 -g -pipe -Wall \
+      -Wp,-D_FORTIFY_SOURCE=2 -fexceptions \
+      -fstack-protector-strong --param=ssp-buffer-size=4 \
+      -grecord-gcc-switches  -m64 -mtune=generic
+
+this is caused by including @LIBS@ in the Libs: line of the
+pkgconfig.pc.in file.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 1167751fcb949b44eddf3d0bfed5473e13c7e94a)
+
+[For RHEL 6, only a spurious -ldl needed cleaning]
+Signed-off-by: Eric Blake <eblake@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ libvirt.pc.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libvirt.pc.in b/libvirt.pc.in
+index 616575d..a610ec4 100644
+--- a/libvirt.pc.in
++++ b/libvirt.pc.in
+@@ -11,5 +11,5 @@ Name: libvirt
+ Version: @VERSION@
+ Description: libvirt library
+ Requires:
+-Libs: -L${libdir} -lvirt @LIBS@
++Libs: -L${libdir} -lvirt
+ Cflags: -I${includedir}
+-- 
+2.2.2
+

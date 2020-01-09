@@ -1,0 +1,78 @@
+From 30a95a1b206ac7f3c13af276c321981b6ceb64db Mon Sep 17 00:00:00 2001
+Message-Id: <30a95a1b206ac7f3c13af276c321981b6ceb64db@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:54 +0200
+Subject: [PATCH] qemu-blockjob: Fix limit of bandwidth for block jobs to
+ supported value
+
+https://bugzilla.redhat.com/show_bug.cgi?id=927160
+
+The JSON generator is able to represent only values less than LLONG_MAX, fix the
+bandwidth limit checks when converting to value to catch overflows before they
+reach the generator.
+
+(cherry picked from commit 24ca8fae64d6088cb10a424c4bc6a7eb16ddeb26)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_monitor.c | 21 ++++++++++++---------
+ 1 file changed, 12 insertions(+), 9 deletions(-)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 85f2a89..a8fd5f1 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -2841,12 +2841,13 @@ qemuMonitorDriveMirror(qemuMonitorPtr mon,
+               "flags=%x",
+               mon, device, file, NULLSTR(format), bandwidth, flags);
+ 
+-    /* Convert bandwidth MiB to bytes */
++    /* Convert bandwidth MiB to bytes - unfortunately the JSON QMP protocol is
++     * limited to LLONG_MAX also for unsigned values */
+     speed = bandwidth;
+-    if (speed > ULLONG_MAX / 1024 / 1024) {
++    if (speed > LLONG_MAX >> 20) {
+         virReportError(VIR_ERR_OVERFLOW,
+                        _("bandwidth must be less than %llu"),
+-                       ULLONG_MAX / 1024 / 1024);
++                       LLONG_MAX >> 20);
+         return -1;
+     }
+     speed <<= 20;
+@@ -2888,12 +2889,13 @@ qemuMonitorBlockCommit(qemuMonitorPtr mon, const char *device,
+     VIR_DEBUG("mon=%p, device=%s, top=%s, base=%s, bandwidth=%ld",
+               mon, device, NULLSTR(top), NULLSTR(base), bandwidth);
+ 
+-    /* Convert bandwidth MiB to bytes */
++    /* Convert bandwidth MiB to bytes - unfortunately the JSON QMP protocol is
++     * limited to LLONG_MAX also for unsigned values */
+     speed = bandwidth;
+-    if (speed > ULLONG_MAX / 1024 / 1024) {
++    if (speed > LLONG_MAX >> 20) {
+         virReportError(VIR_ERR_OVERFLOW,
+                        _("bandwidth must be less than %llu"),
+-                       ULLONG_MAX / 1024 / 1024);
++                       LLONG_MAX >> 20);
+         return -1;
+     }
+     speed <<= 20;
+@@ -3016,12 +3018,13 @@ int qemuMonitorBlockJob(qemuMonitorPtr mon,
+               "modern=%d", mon, device, NULLSTR(base), bandwidth, info, mode,
+               modern);
+ 
+-    /* Convert bandwidth MiB to bytes */
++    /* Convert bandwidth MiB to bytes - unfortunately the JSON QMP protocol is
++     * limited to LLONG_MAX also for unsigned values */
+     speed = bandwidth;
+-    if (speed > ULLONG_MAX / 1024 / 1024) {
++    if (speed > LLONG_MAX >> 20) {
+         virReportError(VIR_ERR_OVERFLOW,
+                        _("bandwidth must be less than %llu"),
+-                       ULLONG_MAX / 1024 / 1024);
++                       LLONG_MAX >> 20);
+         return -1;
+     }
+     speed <<= 20;
+-- 
+1.9.2
+

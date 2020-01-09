@@ -1,0 +1,86 @@
+From 078faa7aa517b22c8d7d0183790e1288cd92c8b0 Mon Sep 17 00:00:00 2001
+Message-Id: <078faa7aa517b22c8d7d0183790e1288cd92c8b0@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Feb 2016 06:59:39 -0500
+Subject: [PATCH] util: eliminate bogus error log in
+ virNetDevVPortProfileGetStatus
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1276478
+
+When virNetDevVPortProfileGetStatus() was called with instanceId =
+NULL (which is the case for all DISASSOCIATE requests in 802.1Qbh) it
+would log the following error:
+
+   Could not find netlink response with expected parameters
+
+even though the disassociate had been successfully completely. Then,
+due to the fortunate coincidence of status having been initialized to
+0 and then not changed when the "failure" was encountered, it would
+still return a status of 0 (PORT_VDP_RESPONSE_SUCCESS), so the caller
+would assume a successful operation.
+
+This would result in a spurious log message though, and would fill in
+LastErrorMessage, so that the API would return that error if it
+happened during cleanup from some other error. That, in turn, would
+lead to an incorrect supposition that the response to the port profile
+disassociate was the cause of the failure.
+
+During debugging, I noticed that the VF in question usually had *no
+uuid* associated with it (big surprise)by the time the disassociate
+completed, so the solution is *not* to send the previous instanceId
+down.
+
+This patch fixes virNetDevVPortProfileGetStatus() to only check the
+VF's uuid in the status if it was given an instanceId to check against
+when originally called. Otherwise it only checks that the particular
+VF is present (it will be).
+
+This does cause a slight difference in behavior - rather than
+returning with status unchanged (and thus always 0) it will actually
+get the IFLA_PORT_RESPONSE. This could lead to revelation of error
+conditions we were previously ignoring. Or not. So far "not".
+(cherry picked from commit 21e63916dcf48ca7818f69786990afe71d6bdf87)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdevvportprofile.c | 24 ++++++++++++++++--------
+ 1 file changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/src/util/virnetdevvportprofile.c b/src/util/virnetdevvportprofile.c
+index ef3b829..b1c3d7a 100644
+--- a/src/util/virnetdevvportprofile.c
++++ b/src/util/virnetdevvportprofile.c
+@@ -530,14 +530,22 @@ virNetDevVPortProfileGetStatus(struct nlattr **tb, int32_t vf,
+                     goto cleanup;
+                 }
+ 
+-                if (instanceId &&
+-                    tb_port[IFLA_PORT_INSTANCE_UUID] &&
+-                    !memcmp(instanceId,
+-                            (unsigned char *)
+-                                   RTA_DATA(tb_port[IFLA_PORT_INSTANCE_UUID]),
+-                            VIR_UUID_BUFLEN) &&
+-                    tb_port[IFLA_PORT_VF] &&
+-                    vf == *(uint32_t *)RTA_DATA(tb_port[IFLA_PORT_VF])) {
++                /* This ensures that the given VF is present in the
++                 * IFLA_VF_PORTS list, and that its uuid matches the
++                 * instanceId (in case we've associated it). If no
++                 * instanceId is sent from the caller, that means we've
++                 * disassociated it from this instanceId, and the uuid
++                 * will either be unset (if still not associated with
++                 * anything) or will be set to a new and different uuid
++                 */
++                if ((tb_port[IFLA_PORT_VF] &&
++                     vf == *(uint32_t *)RTA_DATA(tb_port[IFLA_PORT_VF])) &&
++                    (!instanceId ||
++                     (tb_port[IFLA_PORT_INSTANCE_UUID] &&
++                      !memcmp(instanceId,
++                              (unsigned char *)
++                              RTA_DATA(tb_port[IFLA_PORT_INSTANCE_UUID]),
++                              VIR_UUID_BUFLEN)))) {
+                         found = true;
+                         break;
+                 }
+-- 
+2.7.1
+

@@ -1,0 +1,42 @@
+From 8e59207f8fcd6cdc2560d2aa432b58941e7c5e22 Mon Sep 17 00:00:00 2001
+Message-Id: <8e59207f8fcd6cdc2560d2aa432b58941e7c5e22.1353330051.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Fri, 16 Nov 2012 16:19:51 +0100
+Subject: [PATCH] virsh: fix uninitialized variable in cmdSnapshotEdit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=877303
+
+If the domain can't be looked up, name is used unitialized after the
+cleanup label.
+
+Found by coverity.
+(cherry picked from commit 689b64d666bc268d55395a92a2b9d6cd51b3ad70)
+---
+ tools/virsh-snapshot.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/virsh-snapshot.c b/tools/virsh-snapshot.c
+index 4281109..0bd9583 100644
+--- a/tools/virsh-snapshot.c
++++ b/tools/virsh-snapshot.c
+@@ -459,7 +459,7 @@ cmdSnapshotEdit(vshControl *ctl, const vshCmd *cmd)
+     virDomainPtr dom = NULL;
+     virDomainSnapshotPtr snapshot = NULL;
+     virDomainSnapshotPtr edited = NULL;
+-    const char *name;
++    const char *name = NULL;
+     const char *edited_name;
+     bool ret = false;
+     unsigned int getxml_flags = VIR_DOMAIN_XML_SECURE;
+@@ -532,7 +532,7 @@ cmdSnapshotEdit(vshControl *ctl, const vshCmd *cmd)
+     ret = true;
+ 
+ cleanup:
+-    if (!ret)
++    if (!ret && name)
+         vshError(ctl, _("Failed to update %s"), name);
+     if (edited)
+         virDomainSnapshotFree(edited);
+-- 
+1.8.0
+

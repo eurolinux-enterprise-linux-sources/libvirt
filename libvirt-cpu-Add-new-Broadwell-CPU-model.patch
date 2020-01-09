@@ -1,0 +1,37 @@
+From bcc6ef3d56029e66c0f717b5c83c4887e2d85ed0 Mon Sep 17 00:00:00 2001
+Message-Id: <bcc6ef3d56029e66c0f717b5c83c4887e2d85ed0@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 27 Jun 2014 16:44:49 +0200
+Subject: [PATCH] cpu: Add new Broadwell CPU model
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1100381
+
+(cherry picked from commit 0453376755b9b40fb74fb6cd79be2cafa6b43d3b)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/cpu/cpu_map.xml | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 29a3282..bb9e99f 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -511,6 +511,14 @@
+       <feature name='rtm'/>
+     </model>
+ 
++    <model name='Broadwell'>
++      <model name='Haswell'/>
++      <feature name='3dnowprefetch'/>
++      <feature name='rdseed'/>
++      <feature name='adx'/>
++      <feature name='smap'/>
++    </model>
++
+     <!-- AMD CPUs -->
+     <model name='athlon'>
+       <model name='pentiumpro'/>
+-- 
+2.0.0
+

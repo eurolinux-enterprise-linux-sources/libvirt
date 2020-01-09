@@ -1,0 +1,135 @@
+From 95130bae6ed865867880e217fc44e971993c441c Mon Sep 17 00:00:00 2001
+Message-Id: <95130bae6ed865867880e217fc44e971993c441c.1351526125.git.jdenemar@redhat.com>
+From: Matthias Bolte <matthias.bolte@googlemail.com>
+Date: Thu, 25 Oct 2012 15:16:07 +0200
+Subject: [PATCH] esx: Update version checks for vSphere 5.1
+
+https://bugzilla.redhat.com/show_bug.cgi?id=865670
+
+Also remove warnings for upcoming versions. There hadn't been any
+compatibility problems with new ESX version over the whole lifetime
+of the ESX driver, so I don't expect any in the future.
+
+Update documentation to mention vSphere 5.x support.
+(cherry picked from commit 1e7cd39511f023a0a1251ff5da1da262a8270be3)
+---
+ docs/drvesx.html.in |  4 ++--
+ src/esx/esx_vi.c    | 24 ++++++------------------
+ src/esx/esx_vi.h    |  9 ++++++---
+ 3 files changed, 14 insertions(+), 23 deletions(-)
+
+diff --git a/docs/drvesx.html.in b/docs/drvesx.html.in
+index 7d323b3..11df124 100644
+--- a/docs/drvesx.html.in
++++ b/docs/drvesx.html.in
+@@ -2,10 +2,10 @@
+     <h1>VMware ESX hypervisor driver</h1>
+     <ul id="toc"></ul>
+     <p>
+-        The libvirt VMware ESX driver can manage VMware ESX/ESXi 3.5/4.x and
++        The libvirt VMware ESX driver can manage VMware ESX/ESXi 3.5/4.x/5.x and
+         VMware GSX 2.0, also called VMware Server 2.0, and possibly later
+         versions. <span class="since">Since 0.8.3</span> the driver can also
+-        connect to a VMware vCenter 2.5/4.x (VPX).
++        connect to a VMware vCenter 2.5/4.x/5.x (VPX).
+     </p>
+ 
+     <h2><a name="project">Project Links</a></h2>
+diff --git a/src/esx/esx_vi.c b/src/esx/esx_vi.c
+index 275b858..92d2791 100644
+--- a/src/esx/esx_vi.c
++++ b/src/esx/esx_vi.c
+@@ -832,16 +832,12 @@ esxVI_Context_Connect(esxVI_Context *ctx, const char *url,
+             ctx->apiVersion = esxVI_APIVersion_41;
+         } else if (STRPREFIX(ctx->service->about->apiVersion, "4.")) {
+             ctx->apiVersion = esxVI_APIVersion_4x;
+-
+-            VIR_WARN("Found untested VI API major/minor version '%s'",
+-                     ctx->service->about->apiVersion);
+         } else if (STRPREFIX(ctx->service->about->apiVersion, "5.0")) {
+             ctx->apiVersion = esxVI_APIVersion_50;
++        } else if (STRPREFIX(ctx->service->about->apiVersion, "5.1")) {
++            ctx->apiVersion = esxVI_APIVersion_51;
+         } else if (STRPREFIX(ctx->service->about->apiVersion, "5.")) {
+             ctx->apiVersion = esxVI_APIVersion_5x;
+-
+-            VIR_WARN("Found untested VI API major/minor version '%s'",
+-                     ctx->service->about->apiVersion);
+         } else {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+                            _("Expecting VI API major/minor version '2.5', '4.x' or "
+@@ -868,16 +864,12 @@ esxVI_Context_Connect(esxVI_Context *ctx, const char *url,
+                 ctx->productVersion = esxVI_ProductVersion_ESX41;
+             } else if (STRPREFIX(ctx->service->about->version, "4.")) {
+                 ctx->productVersion = esxVI_ProductVersion_ESX4x;
+-
+-                VIR_WARN("Found untested ESX major/minor version '%s'",
+-                         ctx->service->about->version);
+             } else if (STRPREFIX(ctx->service->about->version, "5.0")) {
+                 ctx->productVersion = esxVI_ProductVersion_ESX50;
++            } else if (STRPREFIX(ctx->service->about->version, "5.1")) {
++                ctx->productVersion = esxVI_ProductVersion_ESX51;
+             } else if (STRPREFIX(ctx->service->about->version, "5.")) {
+                 ctx->productVersion = esxVI_ProductVersion_ESX5x;
+-
+-                VIR_WARN("Found untested ESX major/minor version '%s'",
+-                         ctx->service->about->version);
+             } else {
+                 virReportError(VIR_ERR_INTERNAL_ERROR,
+                                _("Expecting ESX major/minor version '3.5', "
+@@ -894,16 +886,12 @@ esxVI_Context_Connect(esxVI_Context *ctx, const char *url,
+                 ctx->productVersion = esxVI_ProductVersion_VPX41;
+             } else if (STRPREFIX(ctx->service->about->version, "4.")) {
+                 ctx->productVersion = esxVI_ProductVersion_VPX4x;
+-
+-                VIR_WARN("Found untested VPX major/minor version '%s'",
+-                         ctx->service->about->version);
+             } else if (STRPREFIX(ctx->service->about->version, "5.0")) {
+                 ctx->productVersion = esxVI_ProductVersion_VPX50;
++            } else if (STRPREFIX(ctx->service->about->version, "5.1")) {
++                ctx->productVersion = esxVI_ProductVersion_VPX51;
+             } else if (STRPREFIX(ctx->service->about->version, "5.")) {
+                 ctx->productVersion = esxVI_ProductVersion_VPX5x;
+-
+-                VIR_WARN("Found untested VPX major/minor version '%s'",
+-                         ctx->service->about->version);
+             } else {
+                 virReportError(VIR_ERR_INTERNAL_ERROR,
+                                _("Expecting VPX major/minor version '2.5', '4.x' "
+diff --git a/src/esx/esx_vi.h b/src/esx/esx_vi.h
+index 3471fea..a9c12c8 100644
+--- a/src/esx/esx_vi.h
++++ b/src/esx/esx_vi.h
+@@ -95,7 +95,8 @@ enum _esxVI_APIVersion {
+     esxVI_APIVersion_41,
+     esxVI_APIVersion_4x, /* > 4.1 */
+     esxVI_APIVersion_50,
+-    esxVI_APIVersion_5x  /* > 5.0 */
++    esxVI_APIVersion_51,
++    esxVI_APIVersion_5x  /* > 5.1 */
+ };
+ 
+ /*
+@@ -114,7 +115,8 @@ enum _esxVI_ProductVersion {
+     esxVI_ProductVersion_ESX41 = esxVI_ProductVersion_ESX | 3,
+     esxVI_ProductVersion_ESX4x = esxVI_ProductVersion_ESX | 4, /* > 4.1 */
+     esxVI_ProductVersion_ESX50 = esxVI_ProductVersion_ESX | 5,
+-    esxVI_ProductVersion_ESX5x = esxVI_ProductVersion_ESX | 6, /* > 5.0 */
++    esxVI_ProductVersion_ESX51 = esxVI_ProductVersion_ESX | 6,
++    esxVI_ProductVersion_ESX5x = esxVI_ProductVersion_ESX | 7, /* > 5.1 */
+ 
+     esxVI_ProductVersion_VPX   = (1 << 2) << 16,
+     esxVI_ProductVersion_VPX25 = esxVI_ProductVersion_VPX | 1,
+@@ -122,7 +124,8 @@ enum _esxVI_ProductVersion {
+     esxVI_ProductVersion_VPX41 = esxVI_ProductVersion_VPX | 3,
+     esxVI_ProductVersion_VPX4x = esxVI_ProductVersion_VPX | 4, /* > 4.1 */
+     esxVI_ProductVersion_VPX50 = esxVI_ProductVersion_VPX | 5,
+-    esxVI_ProductVersion_VPX5x = esxVI_ProductVersion_VPX | 6  /* > 5.0 */
++    esxVI_ProductVersion_VPX51 = esxVI_ProductVersion_VPX | 6,
++    esxVI_ProductVersion_VPX5x = esxVI_ProductVersion_VPX | 7  /* > 5.1 */
+ };
+ 
+ enum _esxVI_Occurrence {
+-- 
+1.7.12.4
+

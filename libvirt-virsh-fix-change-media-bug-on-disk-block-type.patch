@@ -1,0 +1,36 @@
+From 9bdd246eef514ee133134c6ec08365aaf97fc747 Mon Sep 17 00:00:00 2001
+Message-Id: <9bdd246eef514ee133134c6ec08365aaf97fc747.1376483446.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Tue, 23 Jul 2013 15:03:09 +0800
+Subject: [PATCH] virsh: fix change-media bug on disk block type
+
+Resolves:https://bugzilla.redhat.com/show_bug.cgi?id=923053
+(cherry picked from commit 7729a16814d5bf3aebd248c9af00296ae2773818)
+
+When cdrom is block type, the virsh change-media failed to insert
+source info because virsh uses "<source block='/dev/sdb'/>" while
+the correct name of the attribute for block disks is "dev".
+---
+ tools/virsh-domain.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index f94f609..8eb8d12 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -8005,8 +8005,10 @@ vshPrepareDiskXML(xmlNodePtr disk_node,
+ 
+             if (source) {
+                 new_node = xmlNewNode(NULL, BAD_CAST "source");
+-                xmlNewProp(new_node, (const xmlChar *)disk_type,
+-                           (const xmlChar *)source);
++                if (STREQ(disk_type, "block"))
++                    xmlNewProp(new_node, BAD_CAST "dev", BAD_CAST source);
++                else
++                    xmlNewProp(new_node, BAD_CAST disk_type, BAD_CAST source);
+                 xmlAddChild(disk_node, new_node);
+             } else if (type == VSH_PREPARE_DISK_XML_INSERT) {
+                 vshError(NULL, _("No source is specified for inserting media"));
+-- 
+1.8.3.2
+

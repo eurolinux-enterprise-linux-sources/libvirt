@@ -1,0 +1,55 @@
+From 7ba526b9427c67d6a7145cd99e0c85ec5fa02e78 Mon Sep 17 00:00:00 2001
+Message-Id: <7ba526b9427c67d6a7145cd99e0c85ec5fa02e78@dist-git>
+From: Guannan Ren <gren@redhat.com>
+Date: Mon, 7 Apr 2014 13:30:47 +0200
+Subject: [PATCH] util: use string libvirt to prefix error message instead of
+ libvir
+
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=911996
+
+BZ:https://bugzilla.redhat.com/show_bug.cgi?id=912021
+Without error handler set, virDefaultErrorFunc will be called, the
+error message is prefixed with "libvir:". It become a little better
+by using prefix "libvirt:" when working with upper application.
+
+For example:
+1, stop libvirtd daemon
+2, run virt-top.
+libvir: XML-RPC error : Failed to connect \
+        socket to '/var/run/libvirt/libvirt-sock-ro': \
+        No such file or directory
+libvirt: VIR_ERR_SYSTEM_ERROR: VIR_FROM_RPC: \
+        Failed to connect socket to '/var/run/libvirt/libvirt-sock-ro': \
+        No such file or directory
+
+(cherry picked from commit b95c13cd33a85606ec920df455b8606a37a18a8c)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virterror.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/util/virterror.c b/src/util/virterror.c
+index b257e25..57cad11 100644
+--- a/src/util/virterror.c
++++ b/src/util/virterror.c
+@@ -523,13 +523,13 @@ virDefaultErrorFunc(virErrorPtr err)
+     len = strlen(err->message);
+     if ((err->domain == VIR_FROM_XML) && (err->code == VIR_ERR_XML_DETAIL) &&
+         (err->int1 != 0))
+-        fprintf(stderr, "libvir: %s %s %s%s: line %d: %s",
++        fprintf(stderr, "libvirt: %s %s %s%s: line %d: %s",
+                 dom, lvl, domain, network, err->int1, err->message);
+     else if ((len == 0) || (err->message[len - 1] != '\n'))
+-        fprintf(stderr, "libvir: %s %s %s%s: %s\n",
++        fprintf(stderr, "libvirt: %s %s %s%s: %s\n",
+                 dom, lvl, domain, network, err->message);
+     else
+-        fprintf(stderr, "libvir: %s %s %s%s: %s",
++        fprintf(stderr, "libvirt: %s %s %s%s: %s",
+                 dom, lvl, domain, network, err->message);
+ }
+ 
+-- 
+1.9.1
+

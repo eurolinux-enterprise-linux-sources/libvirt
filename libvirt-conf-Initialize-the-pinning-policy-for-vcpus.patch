@@ -1,0 +1,135 @@
+From 2056170ec94c2962c675814e3a9ca9c6d2887099 Mon Sep 17 00:00:00 2001
+Message-Id: <2056170ec94c2962c675814e3a9ca9c6d2887099.1350297261.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 15 Oct 2012 12:36:11 +0800
+Subject: [PATCH] conf: Initialize the pinning policy for vcpus
+
+https://bugzilla.redhat.com/show_bug.cgi?id=855218
+
+Document for <vcpu>'s "cpuset" says:
+
+Since 0.4.4, this element can contain an optional cpuset attribute,
+which is a comma-separated list of physical CPU numbers that virtual
+CPUs can be pinned to.
+
+However, it's not the truth, libvirt actually pins the domain
+process to the specified pCPUs by "cpuset" of <vcpu>. And the
+vcpu thread are pinned to all available pCPUs if no <vcpupin>
+is specified for it.
+
+This patch is to implement the codes to inherit <vcpu>'s "cpuset" for
+vcpu that doesn't have <vcpupin> specified, and <vcpupin>
+for these vcpu will be ignored when formating. Underlying
+driver implementation will make sure the vcpu thread pinned
+to correct pCPUs.
+(cherry picked from commit 10f8a45deb0f057a70a0d49794d3a3d19d17dceb)
+---
+ src/conf/domain_conf.c | 71 +++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 70 insertions(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 7461c8c..cfc3b2d 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8822,6 +8822,41 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+     }
+     VIR_FREE(nodes);
+ 
++    /* Initialize the pinning policy for vcpus which doesn't has
++     * the policy specified explicitly as def->cpuset.
++     */
++    if (def->cpumask) {
++        if (!def->cputune.vcpupin) {
++            if (VIR_ALLOC_N(def->cputune.vcpupin, def->vcpus) < 0) {
++                virReportOOMError();
++                goto error;
++            }
++        } else {
++            if (VIR_REALLOC_N(def->cputune.vcpupin, def->vcpus) < 0) {
++                virReportOOMError();
++                goto error;
++            }
++        }
++
++        for (i = 0; i < def->vcpus; i++) {
++            if (!virDomainVcpuPinIsDuplicate(def->cputune.vcpupin,
++                                             def->cputune.nvcpupin,
++                                             i)) {
++                virDomainVcpuPinDefPtr vcpupin = NULL;
++
++                if (VIR_ALLOC(vcpupin) < 0) {
++                    virReportOOMError();
++                    goto error;
++                }
++
++                vcpupin->cpumask = virBitmapNew(VIR_DOMAIN_CPUMASK_LEN);
++                virBitmapCopy(vcpupin->cpumask, def->cpumask);
++                vcpupin->vcpuid = i;
++                def->cputune.vcpupin[def->cputune.nvcpupin++] = vcpupin;
++            }
++        }
++    }
++
+     if ((n = virXPathNodeSet("./cputune/emulatorpin", ctxt, &nodes)) < 0) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("cannot extract emulatorpin nodes"));
+@@ -13337,6 +13372,31 @@ virDomainHubDefFormat(virBufferPtr buf,
+     return 0;
+ }
+ 
++/*
++ * Return true if no <vcpupin> specified in domain XML
++ * (I.e. all vcpus inherit the cpuset from "cpuset" of
++ * <vcpu>). Or false otherwise.
++ */
++static bool
++virDomainIsAllVcpupinInherited(virDomainDefPtr def)
++{
++    int i;
++
++    if (!def->cpumask) {
++        if (!def->cputune.vcpupin)
++            return true;
++        else
++            return false;
++    } else {
++        for (i = 0; i < def->cputune.nvcpupin; i++) {
++            if (!virBitmapEqual(def->cputune.vcpupin[i]->cpumask,
++                                def->cpumask))
++                return false;
++        }
++
++        return true;
++   }
++}
+ 
+ #define DUMPXML_FLAGS                           \
+     (VIR_DOMAIN_XML_SECURE |                    \
+@@ -13515,7 +13575,8 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+         virBufferAsprintf(buf, " current='%u'", def->vcpus);
+     virBufferAsprintf(buf, ">%u</vcpu>\n", def->maxvcpus);
+ 
+-    if (def->cputune.shares || def->cputune.vcpupin ||
++    if (def->cputune.shares ||
++        (def->cputune.vcpupin && !virDomainIsAllVcpupinInherited(def)) ||
+         def->cputune.period || def->cputune.quota ||
+         def->cputune.emulatorpin ||
+         def->cputune.emulator_period || def->cputune.emulator_quota)
+@@ -13543,6 +13604,14 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+ 
+     if (def->cputune.vcpupin) {
+         for (i = 0; i < def->cputune.nvcpupin; i++) {
++            /* Ignore the vcpupin which inherit from "cpuset"
++             * of "<vcpu>."
++             */
++            if (def->cpumask &&
++                virBitmapEqual(def->cpumask,
++                               def->cputune.vcpupin[i]->cpumask))
++                continue;
++
+             virBufferAsprintf(buf, "    <vcpupin vcpu='%u' ",
+                               def->cputune.vcpupin[i]->vcpuid);
+ 
+-- 
+1.7.12.3
+

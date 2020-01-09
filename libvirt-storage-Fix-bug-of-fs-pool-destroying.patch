@@ -1,0 +1,48 @@
+From 8433b036cd5f0cc7cd0cfa6d3f862d608a867295 Mon Sep 17 00:00:00 2001
+Message-Id: <8433b036cd5f0cc7cd0cfa6d3f862d608a867295.1354720507.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Wed, 28 Nov 2012 00:06:27 +0100
+Subject: [PATCH] storage: Fix bug of fs pool destroying
+
+https://bugzilla.redhat.com/show_bug.cgi?id=878400
+
+Regression introduced by commit 258e06c85b7, "ret" could be set to 1
+or 0 by virStorageBackendFileSystemIsMounted before goto cleanup.
+This could mislead the callers (up to the public API
+virStoragePoolDestroy) to return success even the underlying umount
+command fails.
+(cherry picked from commit f4ac06569a8ffce24fb8c07a0fc01574e38de6e4)
+---
+ src/storage/storage_backend_fs.c | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index 30e203c..f08fd74 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -449,6 +449,7 @@ static int
+ virStorageBackendFileSystemUnmount(virStoragePoolObjPtr pool) {
+     virCommandPtr cmd = NULL;
+     int ret = -1;
++    int rc;
+ 
+     if (pool->def->type == VIR_STORAGE_POOL_NETFS) {
+         if (pool->def->source.nhost != 1) {
+@@ -475,12 +476,8 @@ virStorageBackendFileSystemUnmount(virStoragePoolObjPtr pool) {
+     }
+ 
+     /* Short-circuit if already unmounted */
+-    if ((ret = virStorageBackendFileSystemIsMounted(pool)) != 1) {
+-        if (ret < 0)
+-            return -1;
+-        else
+-            return 0;
+-    }
++    if ((rc = virStorageBackendFileSystemIsMounted(pool)) != 1)
++        return rc;
+ 
+     cmd = virCommandNewArgList(UMOUNT,
+                                pool->def->target.path,
+-- 
+1.8.0
+

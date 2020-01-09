@@ -1,0 +1,51 @@
+From c7f0c152f9336e8e11df598218fc886b17b4761e Mon Sep 17 00:00:00 2001
+Message-Id: <c7f0c152f9336e8e11df598218fc886b17b4761e.1350297257.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 17 Sep 2012 15:12:53 +0200
+Subject: [PATCH] locking: Add const char * parameter to avoid ugly typecasts
+
+https://bugzilla.redhat.com/show_bug.cgi?id=832156
+
+(cherry picked from commit e55ff49cbc99d50149c6daf491c1cac566150d90)
+---
+ src/locking/lock_driver.h  | 2 ++
+ src/locking/lock_manager.c | 3 +++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/src/locking/lock_driver.h b/src/locking/lock_driver.h
+index 83ef323..c33aea7 100644
+--- a/src/locking/lock_driver.h
++++ b/src/locking/lock_driver.h
+@@ -66,6 +66,7 @@ typedef enum {
+ 
+ enum {
+     VIR_LOCK_MANAGER_PARAM_TYPE_STRING,
++    VIR_LOCK_MANAGER_PARAM_TYPE_CSTRING,
+     VIR_LOCK_MANAGER_PARAM_TYPE_INT,
+     VIR_LOCK_MANAGER_PARAM_TYPE_LONG,
+     VIR_LOCK_MANAGER_PARAM_TYPE_UINT,
+@@ -84,6 +85,7 @@ struct _virLockManagerParam {
+         unsigned long long ul;
+         double d;
+         char *str;
++        const char *cstr;
+         unsigned char uuid[16];
+     } value;
+ };
+diff --git a/src/locking/lock_manager.c b/src/locking/lock_manager.c
+index f5e967f..23126c9 100644
+--- a/src/locking/lock_manager.c
++++ b/src/locking/lock_manager.c
+@@ -99,6 +99,9 @@ static void virLockManagerLogParams(size_t nparams,
+         case VIR_LOCK_MANAGER_PARAM_TYPE_STRING:
+             VIR_DEBUG("  key=%s type=string value=%s", params[i].key, params[i].value.str);
+             break;
++        case VIR_LOCK_MANAGER_PARAM_TYPE_CSTRING:
++            VIR_DEBUG("  key=%s type=cstring value=%s", params[i].key, params[i].value.cstr);
++            break;
+         case VIR_LOCK_MANAGER_PARAM_TYPE_UUID:
+             virUUIDFormat(params[i].value.uuid, uuidstr);
+             VIR_DEBUG("  key=%s type=uuid value=%s", params[i].key, uuidstr);
+-- 
+1.7.12.3
+

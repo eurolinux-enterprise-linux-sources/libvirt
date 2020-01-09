@@ -1,0 +1,76 @@
+From 2a334dbe62328e08a5fa57bb22e388ed22710c80 Mon Sep 17 00:00:00 2001
+Message-Id: <2a334dbe62328e08a5fa57bb22e388ed22710c80@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Feb 2016 06:59:42 -0500
+Subject: [PATCH] util: reset MAC address of macvtap passthrough physdev after
+ disassociate
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1276478
+
+libvirt always resets the MAC address of the physdev used for macvtap
+passthrough when the guest is finished with it. This was happening
+prior to the 802.1Qb[gh] DISASSOCIATE command, and was quite often
+failing, presumably because the driver wouldn't allow the MAC address
+to be reset while the association was still active, with a log message
+like this:
+
+virNetDevSetMAC:168 : Cannot set interface MAC to 00:00:00:00:00:00 on 'eth13': Cannot assign requested address
+
+This patch changes the order - we now do the 802.1Qb[gh] disassociate
+and delete the macvtap interface first, then and reset the MAC
+address.
+
+(cherry-pick from upstream commit
+29cc45cb792520c27ff9c55863bf4845dfcb0c97 with small conflicts due to
+downstream needing to explicitly set the linkdev offline)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdevmacvlan.c | 24 +++++++++---------------
+ 1 file changed, 9 insertions(+), 15 deletions(-)
+
+diff --git a/src/util/virnetdevmacvlan.c b/src/util/virnetdevmacvlan.c
+index 5f11cac..fd8d3f6 100644
+--- a/src/util/virnetdevmacvlan.c
++++ b/src/util/virnetdevmacvlan.c
+@@ -1012,21 +1012,6 @@ int virNetDevMacVLanDeleteWithVPortProfile(const char *ifname,
+     int ret = 0;
+     int vf = -1;
+ 
+-    if (mode == VIR_NETDEV_MACVLAN_MODE_PASSTHRU) {
+-        if (virtPortProfile &&
+-             virtPortProfile->virtPortType == VIR_NETDEV_VPORT_PROFILE_8021QBH)
+-            ignore_value(virNetDevRestoreMacAddress(linkdev, stateDir));
+-        else
+-            ignore_value(virNetDevRestoreNetConfig(linkdev, vf, stateDir));
+-
+-        /* NB: we can set the linkdev offline even for 802.1Qbh here
+-         * because that is the first thing that will happen for that
+-         * virtport type when virNetDevVPortProfileDisassociate() is
+-         * called anyway.
+-         */
+-        ignore_value(virNetDevSetOnline(linkdev, false));
+-     }
+-
+     if (ifname) {
+         if (virNetDevVPortProfileDisassociate(ifname,
+                                               virtPortProfile,
+@@ -1039,6 +1024,15 @@ int virNetDevMacVLanDeleteWithVPortProfile(const char *ifname,
+             ret = -1;
+     }
+ 
++    if (mode == VIR_NETDEV_MACVLAN_MODE_PASSTHRU) {
++        if (virtPortProfile &&
++             virtPortProfile->virtPortType == VIR_NETDEV_VPORT_PROFILE_8021QBH)
++            ignore_value(virNetDevRestoreMacAddress(linkdev, stateDir));
++        else
++            ignore_value(virNetDevRestoreNetConfig(linkdev, vf, stateDir));
++        ignore_value(virNetDevSetOnline(linkdev, false));
++    }
++
+     virNetlinkEventRemoveClient(0, macaddr, NETLINK_ROUTE);
+ 
+     return ret;
+-- 
+2.7.1
+

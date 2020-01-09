@@ -1,0 +1,170 @@
+From ca240815779f95477f2faf9bf9f8cd0e152468a4 Mon Sep 17 00:00:00 2001
+Message-Id: <ca240815779f95477f2faf9bf9f8cd0e152468a4.1349722366.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Wed, 3 Oct 2012 15:11:20 -0400
+Subject: [PATCH] network: backend for virNetworkUpdate of interface list
+
+(This is the final patch necessary to close:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=844404
+
+It is a direct cherry-pick of upstream commit
+024879e5f616ef3567b212f6a0acf92a215ae773, with no conflicts.)
+
+<interface> elements are location inside the <forward> element of a
+network. There is only one <forward> element in any network, but it
+might have many <interface> elements. This element only contains a
+single attribute, "dev", which is the name of a network device
+(e.g. "eth0").
+
+Since there is only a single attribute, the modify operation isn't
+supported for this "section", only add-first, add-last, and
+delete. Also, note that it's not permitted to delete an interface from
+the list while any guest is using it. We may later decide this is safe
+(because removing it from the list really only excludes it from
+consideration in future guest allocations of interfaces, but doesn't
+affect any guests currently connected), but for now this limitation
+seems prudent (of course when changing the persistent config, this
+limitation doesn't apply, because the persistent config doesn't
+support the concept of "in used").
+
+Another limitation - it is also possible for the interfraces in this
+list to be described by PCI address rather than netdev name. However,
+I noticed while writing this function that we currently don't support
+defining interfaces that way in config - the only method of getting
+interfaces specified as <adress type='pci' ..../> instead of
+<interface dev='xx'/> is to provide a <pf dev='yy'/> element under
+forward, and let the entries in the interface list be automatically
+populated with the virtual functions (VF) of the physical function
+device given in <pg>.
+
+As with the other virNetworkUpdate section backends, support for this
+section is completely contained within a single static function, no
+other changes were required, and only functions already called from
+elsewhere within the same file are used in the new content for this
+existing function (i.e., adding this code should not cause a new build
+problem on any platform).
+(cherry picked from commit 024879e5f616ef3567b212f6a0acf92a215ae773)
+---
+ src/conf/network_conf.c | 101 ++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 97 insertions(+), 4 deletions(-)
+
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index a2d82d4..891d48c 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -2614,14 +2614,107 @@ virNetworkDefUpdateForward(virNetworkDefPtr def,
+ 
+ static int
+ virNetworkDefUpdateForwardInterface(virNetworkDefPtr def,
+-                                    unsigned int command ATTRIBUTE_UNUSED,
++                                    unsigned int command,
+                                     int parentIndex ATTRIBUTE_UNUSED,
+-                                    xmlXPathContextPtr ctxt ATTRIBUTE_UNUSED,
++                                    xmlXPathContextPtr ctxt,
+                                     /* virNetworkUpdateFlags */
+                                     unsigned int fflags ATTRIBUTE_UNUSED)
+ {
+-    virNetworkDefUpdateNoSupport(def, "forward interface");
+-    return -1;
++    int ii, ret = -1;
++    virNetworkForwardIfDef iface;
++
++    memset(&iface, 0, sizeof(iface));
++
++    if (virNetworkDefUpdateCheckElementName(def, ctxt->node, "interface") < 0)
++        goto cleanup;
++
++    if (command == VIR_NETWORK_UPDATE_COMMAND_MODIFY) {
++        virReportError(VIR_ERR_NO_SUPPORT, "%s",
++                       _("forward interface entries cannot be modified, "
++                         "only added or deleted"));
++        goto cleanup;
++    }
++
++    /* parsing this is so simple that it doesn't have its own function */
++    iface.type = VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_NETDEV;
++    if (!(iface.device.dev = virXMLPropString(ctxt->node, "dev"))) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("missing dev attribute in <interface> element"));
++        goto cleanup;
++    }
++
++    /* check if an <interface> with same dev name already exists */
++    for (ii = 0; ii < def->nForwardIfs; ii++) {
++        if (def->forwardIfs[ii].type
++            == VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_NETDEV &&
++            STREQ(iface.device.dev, def->forwardIfs[ii].device.dev))
++            break;
++    }
++
++    if ((command == VIR_NETWORK_UPDATE_COMMAND_ADD_FIRST) ||
++        (command == VIR_NETWORK_UPDATE_COMMAND_ADD_LAST)) {
++
++        if (ii < def->nForwardIfs) {
++            virReportError(VIR_ERR_OPERATION_INVALID,
++                           _("there is an existing interface entry "
++                             "in network '%s' that matches "
++                             "\"<interface dev='%s'>\""),
++                           def->name, iface.device.dev);
++            goto cleanup;
++        }
++
++        /* add to beginning/end of list */
++        if (VIR_REALLOC_N(def->forwardIfs, def->nForwardIfs + 1) < 0) {
++            virReportOOMError();
++            goto cleanup;
++        }
++
++        if (command == VIR_NETWORK_UPDATE_COMMAND_ADD_LAST) {
++            def->forwardIfs[def->nForwardIfs] = iface;
++        } else { /* implied (command == VIR_NETWORK_UPDATE_COMMAND_ADD_FIRST) */
++            memmove(def->forwardIfs + 1, def->forwardIfs,
++                    sizeof(*def->forwardIfs) * def->nForwardIfs);
++            def->forwardIfs[0] = iface;
++        }
++        def->nForwardIfs++;
++        memset(&iface, 0, sizeof(iface));
++
++    } else if (command == VIR_NETWORK_UPDATE_COMMAND_DELETE) {
++
++        if (ii == def->nForwardIfs) {
++            virReportError(VIR_ERR_OPERATION_INVALID,
++                           _("couldn't find an interface entry "
++                             "in network '%s' matching <interface dev='%s'>"),
++                           def->name, iface.device.dev);
++            goto cleanup;
++        }
++
++        /* fail if the interface is being used */
++        if (def->forwardIfs[ii].connections > 0) {
++            virReportError(VIR_ERR_OPERATION_INVALID,
++                           _("unable to delete interface '%s' "
++                             "in network '%s'. It is currently being used "
++                             " by %d domains."),
++                           iface.device.dev, def->name,
++                           def->forwardIfs[ii].connections);
++            goto cleanup;
++        }
++
++        /* remove it */
++        virNetworkForwardIfDefClear(&def->forwardIfs[ii]);
++        memmove(def->forwardIfs + ii, def->forwardIfs + ii + 1,
++                sizeof(*def->forwardIfs) * (def->nForwardIfs - ii - 1));
++        def->nForwardIfs--;
++        ignore_value(VIR_REALLOC_N(def->forwardIfs, def->nForwardIfs));
++    } else {
++        virNetworkDefUpdateUnknownCommand(command);
++        goto cleanup;
++    }
++
++    ret = 0;
++cleanup:
++    virNetworkForwardIfDefClear(&iface);
++    return ret;
+ }
+ 
+ static int
+-- 
+1.7.12
+

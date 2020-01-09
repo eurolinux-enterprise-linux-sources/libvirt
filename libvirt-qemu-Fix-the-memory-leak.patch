@@ -1,0 +1,29 @@
+From 6959f67151717199a8c9d4ead4c8eed9435288fb Mon Sep 17 00:00:00 2001
+Message-Id: <6959f67151717199a8c9d4ead4c8eed9435288fb.1373271638.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 11 Mar 2013 15:26:09 +0800
+Subject: [PATCH] qemu: Fix the memory leak
+
+https://bugzilla.redhat.com/show_bug.cgi?id=908073
+
+Found by John Ferlan (coverity script)
+(cherry picked from commit 5c9034bf055d043672be5da8af453e5ddc3906d3)
+---
+ src/qemu/qemu_conf.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/qemu/qemu_conf.c b/src/qemu/qemu_conf.c
+index ca46648..575553c 100644
+--- a/src/qemu/qemu_conf.c
++++ b/src/qemu/qemu_conf.c
+@@ -963,6 +963,7 @@ qemuAddSharedDisk(virHashTablePtr sharedDisks,
+         if ((VIR_ALLOC(entry) < 0) ||
+             (VIR_ALLOC_N(entry->domains, 1) < 0) ||
+             !(entry->domains[0] = strdup(name))) {
++            qemuSharedDiskEntryFree(entry, NULL);
+             virReportOOMError();
+             goto cleanup;
+         }
+-- 
+1.8.2.1
+

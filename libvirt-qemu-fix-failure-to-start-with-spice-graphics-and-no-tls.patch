@@ -1,0 +1,96 @@
+From ad7fff78b595e8f4b2259b775db39cb6f714b932 Mon Sep 17 00:00:00 2001
+Message-Id: <ad7fff78b595e8f4b2259b775db39cb6f714b932@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 24 Apr 2014 17:26:56 +0200
+Subject: [PATCH] qemu: fix failure to start with spice graphics and no tls
+
+https://bugzilla.redhat.com/show_bug.cgi?id=953126
+
+Commit eca3fdf inadvertantly caused a failure to start for any domain
+with the following in its config:
+
+    <graphics type='spice' autoport='yes'/>
+
+The problem is that when tlsPort == 0 and defaultMode == "any" (which
+is the default for defaultMode), this would be flagged in the code as
+"needTLSPort", and if there was then no spice tls config, the new
+error+fail would happen.
+
+This patch checks for the case of defaultMode == "any", and in that
+case simply doesn't allocate a TLS port (since that's probably not
+what the user wanted, and it would have failed later anyway.). It does
+leave the error in place for cases when the user specifically asked to
+use tls in one way or another, though.
+
+(cherry picked from commit f6966b627703e165d2f6821d6558d8000feee294)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_process.c -- driver->cfg etc.
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c | 45 +++++++++++++++++++++++++++++++--------------
+ 1 file changed, 31 insertions(+), 14 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 846f039..cdf79d5 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3619,21 +3619,38 @@ qemuProcessSPICEAllocatePorts(struct qemud_driver* driver,
+         graphics->data.spice.port = port;
+     }
+ 
+-    if (driver->spiceTLS &&
+-        (needTLSPort || graphics->data.spice.tlsPort == -1)) {
+-        if (graphics->data.spice.port)
+-            tlsPort = qemuProcessNextFreePort(driver, graphics->data.spice.port + 1);
+-        else
+-            tlsPort = qemuProcessNextFreePort(driver, driver->remotePortMin);
+-
+-        if (tlsPort < 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-                           _("Unable to find an unused port for SPICE TLS"));
+-            qemuProcessReturnPort(driver, port);
+-            goto error;
+-        }
++    if (needTLSPort || graphics->data.spice.tlsPort == -1) {
++        if (!driver->spiceTLS) {
++            /* log an error and fail if tls was specifically
++             * requested, or simply ignore (don't allocate a port)
++             * if we're here due to "defaultMode='any'"
++             * (aka unspecified).
++             */
++            if ((graphics->data.spice.tlsPort == -1) ||
++                (graphics->data.spice.defaultMode
++                 == VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_SECURE)) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                               _("Auto allocation of spice TLS port requested "
++                                 "but spice TLS is disabled in qemu.conf"));
++                goto error;
++            }
++        } else {
++            /* driver->spiceTLS *is* in place, so it makes sense to
++             * allocate a port.
++             */
++            if (graphics->data.spice.port)
++                tlsPort = qemuProcessNextFreePort(driver, graphics->data.spice.port + 1);
++            else
++                tlsPort = qemuProcessNextFreePort(driver, driver->remotePortMin);
+ 
+-        graphics->data.spice.tlsPort = tlsPort;
++            if (tlsPort < 0) {
++                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                               _("Unable to find an unused port for SPICE TLS"));
++                qemuProcessReturnPort(driver, port);
++                goto error;
++            }
++            graphics->data.spice.tlsPort = tlsPort;
++        }
+     }
+ 
+     return 0;
+-- 
+1.9.2
+

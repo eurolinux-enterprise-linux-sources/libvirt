@@ -1,0 +1,65 @@
+From dc40bf2d41e194366c8652559c5ee0eec8f80c51 Mon Sep 17 00:00:00 2001
+Message-Id: <dc40bf2d41e194366c8652559c5ee0eec8f80c51.1373271640.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 26 Mar 2013 15:50:38 +0100
+Subject: [PATCH] rpc: Fix client crash when server drops connection
+
+https://bugzilla.redhat.com/show_bug.cgi?id=921538
+
+Despite the comment stating virNetClientIncomingEvent handler should
+never be called with either client->haveTheBuck or client->wantClose
+set, there is a sequence of events that may lead to both booleans being
+true when virNetClientIncomingEvent is called. However, when that
+happens, we must not immediately close the socket as there are other
+threads waiting for the buck and they would cause SIGSEGV once they are
+woken up after the socket was closed. Another thing is we should clear
+all remaining calls in the queue after closing the socket.
+
+The situation that can lead to the crash involves three threads, one of
+them running event loop and the other two calling libvirt APIs. The
+event loop thread detects an event on client->sock and calls
+virNetClientIncomingEvent handler. But before the handler gets a chance
+to lock client, the other two threads (T1 and T2) start calling some
+APIs. T1 gets the buck and detects EOF on client->sock while processing
+its RPC call. Since T2 is waiting for its own call, T1 passes the buck
+on to it and unlocks client. But before T2 gets the signal, the event
+loop thread wakes up, does its job and closes client->sock. The crash
+happens when T2 actually wakes up and tries to do its job using a closed
+client->sock.
+(cherry picked from commit d8d4aa01d8ef61fd26afc52a2dbef6ae7812d5cc)
+
+Conflicts:
+	src/rpc/virnetclient.c -- context, no virObjectUnlock in RHEL
+---
+ src/rpc/virnetclient.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/rpc/virnetclient.c b/src/rpc/virnetclient.c
+index 18f60c1..5af5fc8 100644
+--- a/src/rpc/virnetclient.c
++++ b/src/rpc/virnetclient.c
+@@ -1822,7 +1822,6 @@ void virNetClientIncomingEvent(virNetSocketPtr sock,
+     if (!client->sock)
+         goto done;
+ 
+-    /* This should be impossible, but it doesn't hurt to check */
+     if (client->haveTheBuck || client->wantClose)
+         goto done;
+ 
+@@ -1855,8 +1854,12 @@ void virNetClientIncomingEvent(virNetSocketPtr sock,
+     virNetClientIOUpdateCallback(client, true);
+ 
+ done:
+-    if (client->wantClose)
++    if (client->wantClose && !client->haveTheBuck) {
+         virNetClientCloseLocked(client);
++        virNetClientCallRemovePredicate(&client->waitDispatch,
++                                        virNetClientIOEventLoopRemoveAll,
++                                        NULL);
++    }
+     virNetClientUnlock(client);
+ }
+ 
+-- 
+1.8.2.1
+

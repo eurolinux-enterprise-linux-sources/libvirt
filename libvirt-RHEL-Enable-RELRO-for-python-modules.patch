@@ -1,0 +1,41 @@
+From b2017afedc3f279dd04cc743948194bd4f5a8345 Mon Sep 17 00:00:00 2001
+Message-Id: <b2017afedc3f279dd04cc743948194bd4f5a8345@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 20 Jan 2016 12:52:20 +0100
+Subject: [PATCH] RHEL: Enable RELRO for python modules
+
+RHEL-only libvirt-python is separated from libvirt upstream and doesn't
+use Makefile anymore.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1242156
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ python/Makefile.am | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/python/Makefile.am b/python/Makefile.am
+index 97f21c3..4a2fc39 100644
+--- a/python/Makefile.am
++++ b/python/Makefile.am
+@@ -59,7 +59,7 @@ nodist_libvirtmod_la_SOURCES = libvirt.c libvirt.h
+ libvirtmod_la_CFLAGS = $(WARN_CFLAGS) $(WARN_PYTHON_CFLAGS)
+ 
+ libvirtmod_la_LDFLAGS = -module -avoid-version -shared -L$(top_builddir)/src/.libs \
+-	$(CYGWIN_EXTRA_LDFLAGS)
++	$(CYGWIN_EXTRA_LDFLAGS) $(RELRO_LDFLAGS)
+ libvirtmod_la_LIBADD = $(mylibs) \
+ 	$(CYGWIN_EXTRA_LIBADD) $(CYGWIN_EXTRA_PYTHON_LIBADD)
+ 
+@@ -70,7 +70,7 @@ nodist_libvirtmod_qemu_la_SOURCES = libvirt-qemu.c libvirt-qemu.h
+ libvirtmod_qemu_la_CFLAGS = $(WARN_PYTHON_CFLAGS)
+ 
+ libvirtmod_qemu_la_LDFLAGS = -module -avoid-version -shared -L$(top_builddir)/src/.libs \
+-	$(CYGWIN_EXTRA_LDFLAGS)
++	$(CYGWIN_EXTRA_LDFLAGS) $(RELRO_LDFLAGS)
+ libvirtmod_qemu_la_LIBADD = $(myqemulibs) \
+ 	$(CYGWIN_EXTRA_LIBADD) $(CYGWIN_EXTRA_PYTHON_LIBADD)
+ 
+-- 
+2.7.0
+

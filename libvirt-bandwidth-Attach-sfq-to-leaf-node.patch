@@ -1,0 +1,42 @@
+From accafb994a706bc6a9ac48b8e5dba9c09b3a8b9e Mon Sep 17 00:00:00 2001
+Message-Id: <accafb994a706bc6a9ac48b8e5dba9c09b3a8b9e.1373271643.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 14 Jun 2013 10:26:03 +0200
+Subject: [PATCH] bandwidth: Attach sfq to leaf node
+
+https://bugzilla.redhat.com/show_bug.cgi?id=895340
+
+Stochastic Fairness Queuing (SFQ) is queuing discipline
+(qdisc) which doesn't really shape any traffic but 'just'
+re-arrange packets in sending buffer so no stream starve.
+The goal is to ensure fairness. There is basically only one
+configuration parameter (perturb) which is set to advised
+value of 10.
+(cherry picked from commit 7e5040bd200b9ca401a5beb250f95d61a0edbf74)
+---
+ src/util/virnetdevbandwidth.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/util/virnetdevbandwidth.c b/src/util/virnetdevbandwidth.c
+index bddb788..49fc425 100644
+--- a/src/util/virnetdevbandwidth.c
++++ b/src/util/virnetdevbandwidth.c
+@@ -103,6 +103,15 @@ virNetDevBandwidthSet(const char *ifname,
+ 
+         virCommandFree(cmd);
+         cmd = virCommandNew(TC);
++        virCommandAddArgList(cmd, "qdisc", "add", "dev", ifname, "parent",
++                             "1:1", "handle", "2:", "sfq", "perturb",
++                             "10", NULL);
++
++        if (virCommandRun(cmd, NULL) < 0)
++            goto cleanup;
++
++        virCommandFree(cmd);
++        cmd = virCommandNew(TC);
+         virCommandAddArgList(cmd,"filter", "add", "dev", ifname, "parent",
+                              "1:0", "protocol", "ip", "handle", "1", "fw",
+                              "flowid", "1", NULL);
+-- 
+1.8.2.1
+

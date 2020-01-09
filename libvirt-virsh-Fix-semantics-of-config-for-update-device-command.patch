@@ -1,0 +1,153 @@
+From e8d2b680abad727a653e4c3d5c4c493061968a16 Mon Sep 17 00:00:00 2001
+Message-Id: <e8d2b680abad727a653e4c3d5c4c493061968a16@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 28 Jan 2015 14:26:24 +0100
+Subject: [PATCH] virsh: Fix semantics of --config for "update-device" command
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1129112
+
+The man page states that with --config the next boot is affected. This
+can be understood as if _only_ the next boot was affected. This isn't
+true if the machine is running.
+
+This patch adds the full --live, --config, --current infrastructure and
+tweaks stuff to correctly support the obsolete --persistent flag.
+
+Note that this patch changes the the behavior of the --config flag to match the
+use of this flag in rest of libvirt. This flag was mistakenly renamed from
+--persistent that originaly had different semantics.
+
+(cherry picked from commit 69ce3ffa8d431e9810607c6e00b7cfcc481b491d)
+
+Conflicts:
+	tools/virsh-domain.c - context conflict as refactor to C99
+                               struct init and error paths was not
+                               backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-domain.c | 45 +++++++++++++++++++++++++++++++++++----------
+ tools/virsh.pod      | 24 +++++++++++++++++-------
+ 2 files changed, 52 insertions(+), 17 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 9006084..a0f3050 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -7737,9 +7737,24 @@ static const vshCmdInfo info_update_device[] = {
+ static const vshCmdOptDef opts_update_device[] = {
+     {"domain", VSH_OT_DATA, VSH_OFLAG_REQ, N_("domain name, id or uuid")},
+     {"file",   VSH_OT_DATA, VSH_OFLAG_REQ, N_("XML file")},
+-    {"persistent", VSH_OT_ALIAS, 0, "config"},
+     {"config", VSH_OT_BOOL, 0, N_("affect next boot")},
+     {"force",  VSH_OT_BOOL, 0, N_("force device update")},
++    {.name = "persistent",
++     .type = VSH_OT_BOOL,
++     .help = N_("make live change persistent")
++    },
++    {.name = "config",
++     .type = VSH_OT_BOOL,
++     .help = N_("affect next boot")
++    },
++    {.name = "live",
++     .type = VSH_OT_BOOL,
++     .help = N_("affect running domain")
++    },
++    {.name = "current",
++     .type = VSH_OT_BOOL,
++     .help = N_("affect current domain")
++    },
+     {NULL, 0, 0, NULL}
+ };
+ 
+@@ -7750,7 +7765,21 @@ cmdUpdateDevice(vshControl *ctl, const vshCmd *cmd)
+     const char *from = NULL;
+     char *buffer;
+     int ret;
+-    unsigned int flags;
++    unsigned int flags = VIR_DOMAIN_AFFECT_CURRENT;
++    bool current = vshCommandOptBool(cmd, "current");
++    bool config = vshCommandOptBool(cmd, "config");
++    bool live = vshCommandOptBool(cmd, "live");
++    bool persistent = vshCommandOptBool(cmd, "persistent");
++
++    VSH_EXCLUSIVE_OPTIONS_VAR(persistent, current);
++
++    VSH_EXCLUSIVE_OPTIONS_VAR(current, live);
++    VSH_EXCLUSIVE_OPTIONS_VAR(current, config);
++
++    if (config || persistent)
++        flags |= VIR_DOMAIN_AFFECT_CONFIG;
++    if (live)
++        flags |= VIR_DOMAIN_AFFECT_LIVE;
+ 
+     if (!(dom = vshCommandOptDomain(ctl, cmd, NULL)))
+         return false;
+@@ -7760,20 +7789,16 @@ cmdUpdateDevice(vshControl *ctl, const vshCmd *cmd)
+         return false;
+     }
+ 
++    if (persistent &&
++        virDomainIsActive(dom) == 1)
++        flags |= VIR_DOMAIN_AFFECT_LIVE;
++
+     if (virFileReadAll(from, VSH_MAX_XML_FILE, &buffer) < 0) {
+         vshReportError(ctl);
+         virDomainFree(dom);
+         return false;
+     }
+ 
+-    if (vshCommandOptBool(cmd, "config")) {
+-        flags = VIR_DOMAIN_AFFECT_CONFIG;
+-        if (virDomainIsActive(dom) == 1)
+-           flags |= VIR_DOMAIN_AFFECT_LIVE;
+-    } else {
+-        flags = VIR_DOMAIN_AFFECT_LIVE;
+-    }
+-
+     if (vshCommandOptBool(cmd, "force"))
+         flags |= VIR_DOMAIN_DEVICE_MODIFY_FORCE;
+ 
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index a7d6f58..f8a9072 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -1890,18 +1890,28 @@ If I<--config> is specified, alter persistent configuration, effect observed
+ on next boot, for compatibility purposes, I<--persistent> is alias of
+ I<--config>.
+ 
+-=item B<update-device> I<domain> I<file> [I<--config>] [I<--force>]
++=item B<update-device> I<domain> I<file> [I<--force>]
++[[[I<--live>] [I<--config>] | [I<--current>]] | [I<--persistent>]]
+ 
+ Update the characteristics of a device associated with I<domain>,
+-based on the device definition in an XML I<file>.  If the I<--config>
+-option is used, the changes will take affect the next time libvirt
+-starts the domain.  For compatibility purposes, I<--persistent> is
+-alias of I<--config>.  The I<--force> option can be used to force
+-device update, e.g., to eject a CD-ROM even if it is locked/mounted in
+-the domain. See the documentation at
++based on the device definition in an XML I<file>.  The I<--force> option
++can be used to force device update, e.g., to eject a CD-ROM even if it is
++locked/mounted in the domain. See the documentation at
+ L<http://libvirt.org/formatdomain.html#elementsDevices> to learn about
+ libvirt XML format for a device.
+ 
++If I<--live> is specified, affect a running domain.
++If I<--config> is specified, affect the next startup of a persistent domain.
++If I<--current> is specified, affect the current domain state.
++Both I<--live> and I<--config> flags may be given, but I<--current> is
++exclusive. Not specifying any flag is the same as specifying I<--current>.
++
++For compatibility purposes, I<--persistent> behaves like I<--config> for
++an offline domain, and like I<--live> I<--config> for a running domain.
++
++Note that older versions of virsh used I<--config> as an alias for
++I<--persistent>.
++
+ =item B<change-media> I<domain> I<path> [I<--eject>] [I<--insert>]
+ [I<--update>] [I<source>] [I<--force>] [[I<--live>] [I<--config>] | [I<--current>]]
+ 
+-- 
+2.2.2
+

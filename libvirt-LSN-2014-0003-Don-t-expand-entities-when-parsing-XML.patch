@@ -1,0 +1,44 @@
+From 8fe70951485e6f1a205c044e9155c8d0ca2c4525 Mon Sep 17 00:00:00 2001
+Message-Id: <8fe70951485e6f1a205c044e9155c8d0ca2c4525@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 6 May 2014 15:19:16 +0100
+Subject: [PATCH] LSN-2014-0003: Don't expand entities when parsing XML
+
+For CVE-2014-0179.
+
+If the XML_PARSE_NOENT flag is passed to libxml2, then any
+entities in the input document will be fully expanded. This
+allows the user to read arbitrary files on the host machine
+by creating an entity pointing to a local file. Removing
+the XML_PARSE_NOENT flag means that any entities are left
+unchanged by the parser, or expanded to "" by the XPath
+APIs.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit d6b27d3e4c40946efa79e91d134616b41b1666c4)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/xml.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/xml.c b/src/util/xml.c
+index dad9227..3a39c3a 100644
+--- a/src/util/xml.c
++++ b/src/util/xml.c
+@@ -739,11 +739,11 @@ virXMLParseHelper(int domcode,
+ 
+     if (filename) {
+         xml = xmlCtxtReadFile(pctxt, filename, NULL,
+-                              XML_PARSE_NOENT | XML_PARSE_NONET |
++                              XML_PARSE_NONET |
+                               XML_PARSE_NOWARNING);
+     } else {
+         xml = xmlCtxtReadDoc(pctxt, BAD_CAST xmlStr, url, NULL,
+-                             XML_PARSE_NOENT | XML_PARSE_NONET |
++                             XML_PARSE_NONET |
+                              XML_PARSE_NOWARNING);
+     }
+     if (!xml)
+-- 
+1.9.2
+

@@ -1,0 +1,39 @@
+From 67de87a5cfa30a53dec37ba175bd3c3e1b432ace Mon Sep 17 00:00:00 2001
+Message-Id: <67de87a5cfa30a53dec37ba175bd3c3e1b432ace.1380730269.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Fri, 27 Sep 2013 13:18:53 +0200
+Subject: [PATCH] libvirt-guests: status: return non-zero when stopped
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1011981
+
+Return 3 when the service is stopped, whether there
+are saved guests or not, to conform with the LSB standards:
+
+http://refspecs.linuxbase.org/LSB_3.1.1/LSB-Core-generic/LSB-Core-generic/iniscrptact.html
+(cherry picked from commit 9c51de2b4e2158b93adab4467293b35626099ff6)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/libvirt-guests.init.sh | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/tools/libvirt-guests.init.sh b/tools/libvirt-guests.init.sh
+index 99ef331..ba60910 100644
+--- a/tools/libvirt-guests.init.sh
++++ b/tools/libvirt-guests.init.sh
+@@ -547,10 +547,11 @@ rh_status() {
+     else
+         if [ -f "$VAR_SUBSYS_LIBVIRT_GUESTS" ]; then
+             gettext "started"; echo
++            RETVAL=0
+         else
+             gettext "stopped, with no saved guests"; echo
++            RETVAL=3
+         fi
+-        RETVAL=0
+     fi
+ }
+ 
+-- 
+1.8.3.2
+

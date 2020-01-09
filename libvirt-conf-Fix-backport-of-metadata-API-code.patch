@@ -1,0 +1,84 @@
+From 7705900c436f9f8391ed9517db5c54feca375789 Mon Sep 17 00:00:00 2001
+Message-Id: <7705900c436f9f8391ed9517db5c54feca375789@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 17 Jul 2014 14:50:39 +0200
+Subject: [PATCH] conf: Fix backport of metadata API code
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115039
+
+RHEL-only, problems introduced in backport
+
+The clang checker found a few issues introduced by the backports of the
+metadata code. As the code is already in dist-git this patch fixes up
+the problems pointed out by Clang:
+
+1) few possible strdup()'s of NULL argument
+2) false positive as Clang considered the def local variable in
+virDomainObjGetMetadata as uninitialized
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index b246155..e90b08c 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -16585,7 +16585,7 @@ virDomainObjGetMetadata(virDomainObjPtr vm,
+                         virCapsPtr caps,
+                         unsigned int flags)
+ {
+-    virDomainDefPtr def;
++    virDomainDefPtr def = vm->def;
+     char *ret = NULL;
+ 
+     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+@@ -16600,14 +16600,16 @@ virDomainObjGetMetadata(virDomainObjPtr vm,
+ 
+     switch ((virDomainMetadataType) type) {
+     case VIR_DOMAIN_METADATA_DESCRIPTION:
+-        if (!(ret = strdup(def->description))) {
++        if (def->description &&
++            !(ret = strdup(def->description))) {
+             virReportOOMError();
+             goto cleanup;
+         }
+         break;
+ 
+     case VIR_DOMAIN_METADATA_TITLE:
+-        if (!(ret = strdup(def->title))) {
++        if (def->title &&
++            !(ret = strdup(def->title))) {
+             virReportOOMError();
+             goto cleanup;
+         }
+@@ -16647,12 +16649,13 @@ virDomainDefSetMetadata(virDomainDefPtr def,
+     xmlDocPtr doc = NULL;
+     xmlNodePtr old;
+     xmlNodePtr new = NULL;
+-    char *tmp;
++    char *tmp = NULL;
+     int ret = -1;
+ 
+     switch ((virDomainMetadataType) type) {
+     case VIR_DOMAIN_METADATA_DESCRIPTION:
+-        if (!(tmp = strdup(metadata)))
++        if (metadata &&
++            !(tmp = strdup(metadata)))
+             goto no_memory;
+ 
+         VIR_FREE(def->description);
+@@ -16660,7 +16663,8 @@ virDomainDefSetMetadata(virDomainDefPtr def,
+         break;
+ 
+     case VIR_DOMAIN_METADATA_TITLE:
+-        if (!(tmp = strdup(metadata)))
++        if (metadata &&
++            !(tmp = strdup(metadata)))
+             goto no_memory;
+ 
+         VIR_FREE(def->title);
+-- 
+2.0.2
+

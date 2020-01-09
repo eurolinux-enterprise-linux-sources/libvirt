@@ -1,0 +1,61 @@
+From 435dd85683ac5663bac1d577ce77f696e10b91fc Mon Sep 17 00:00:00 2001
+Message-Id: <435dd85683ac5663bac1d577ce77f696e10b91fc.1373271643.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 14 Jun 2013 10:26:01 +0200
+Subject: [PATCH] qemu: Add controllers in specified order
+
+https://bugzilla.redhat.com/show_bug.cgi?id=870003
+
+qemu is sensitive to the order of arguments passed. Hence, if a
+device requires a controller, the controller cmd string must
+precede device cmd string. The same apply for controllers, when
+for instance ccid controller requires usb controller. So
+controllers create partial ordering in which they should be added
+to qemu cmd line.
+(cherry picked from commit 0f720ab35a1a836aa23b66ef4bafbc5e57290357)
+---
+ src/qemu/qemu_command.c | 18 ++++++++++++------
+ 1 file changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index f1a99a2..01d152d 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4510,6 +4510,16 @@ qemuBuildCommandLine(virConnectPtr conn,
+     int usbcontroller = 0;
+     bool usblegacy = false;
+     uname_normalize(&ut);
++    int contOrder[] = {
++        /* We don't add an explicit IDE or FD controller because the
++         * provided PIIX4 device already includes one. It isn't possible to
++         * remove the PIIX4. */
++        VIR_DOMAIN_CONTROLLER_TYPE_USB,
++        VIR_DOMAIN_CONTROLLER_TYPE_SCSI,
++        VIR_DOMAIN_CONTROLLER_TYPE_SATA,
++        VIR_DOMAIN_CONTROLLER_TYPE_VIRTIO_SERIAL,
++        VIR_DOMAIN_CONTROLLER_TYPE_CCID,
++    };
+ 
+     VIR_DEBUG("conn=%p driver=%p def=%p mon=%p json=%d "
+               "caps=%p migrateFrom=%s migrateFD=%d "
+@@ -5102,15 +5112,11 @@ qemuBuildCommandLine(virConnectPtr conn,
+     }
+ 
+     if (qemuCapsGet(caps, QEMU_CAPS_DEVICE)) {
+-        for (j = 0; j < 1; j++) {
++        for (j = 0; j < ARRAY_CARDINALITY(contOrder); j++) {
+             for (i = 0; i < def->ncontrollers; i++) {
+                 virDomainControllerDefPtr cont = def->controllers[i];
+ 
+-                /* We don't add an explicit IDE or FD controller because the
+-                 * provided PIIX4 device already includes one. It isn't possible to
+-                 * remove the PIIX4. */
+-                if (cont->type == VIR_DOMAIN_CONTROLLER_TYPE_IDE ||
+-                    cont->type == VIR_DOMAIN_CONTROLLER_TYPE_FDC)
++                if (cont->type != contOrder[j])
+                     continue;
+ 
+                 /* Also, skip USB controllers with type none.*/
+-- 
+1.8.2.1
+

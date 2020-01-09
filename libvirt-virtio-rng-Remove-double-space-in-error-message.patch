@@ -1,0 +1,31 @@
+From 21f0cc4c011cc9663dfef61e9e12f73511de49dc Mon Sep 17 00:00:00 2001
+Message-Id: <21f0cc4c011cc9663dfef61e9e12f73511de49dc@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:54:03 +0100
+Subject: [PATCH] virtio-rng: Remove double space in error message
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+(cherry picked from commit 6ebdf35cfebde47bf3d7ce9f9362731ea9a97e3e)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 4296ea3..d475ad0 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4143,7 +4143,7 @@ qemuBuildRNGBackendArgs(virCommandPtr cmd,
+         if (!qemuCapsGet(caps, QEMU_CAPS_OBJECT_RNG_RANDOM)) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                            _("this qemu doesn't support the rng-random "
+-                             " backend"));
++                             "backend"));
+             goto cleanup;
+         }
+ 
+-- 
+1.9.1
+

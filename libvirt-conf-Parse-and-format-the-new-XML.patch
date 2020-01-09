@@ -1,0 +1,232 @@
+From ba2e126d1fddbd38b8b8c7e25a70fbd75056f03b Mon Sep 17 00:00:00 2001
+Message-Id: <ba2e126d1fddbd38b8b8c7e25a70fbd75056f03b.1357740563.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Tue, 8 Jan 2013 23:49:54 +0800
+Subject: [PATCH] conf: Parse and format the new XML
+
+https://bugzilla.redhat.com/show_bug.cgi?id=878578
+
+Like "rawio", "sgio" is only allowed for block disk of device
+type "lun".
+
+It doesn't default disk->sgio to "filtered" when parsing, as
+it won't be able to distinguish explicitly requested "filtered"
+and a default "filtered" in driver then. We have to error out for
+explicit request when the kernel doesn't support the new sysfs
+knob "unpriv_sgio", however, for defaulted "filtered", we can
+just ignore it if the kernel doesn't support "unpriv_sgio".
+(cherry picked from commit 535aed56a2a898ba5d6df8a5871d8be9834e919d)
+---
+ src/conf/domain_conf.c                             | 55 +++++++++++++++++-----
+ src/conf/domain_conf.h                             | 10 ++++
+ ...qemuxml2argv-disk-scsi-lun-passthrough-sgio.xml | 32 +++++++++++++
+ tests/qemuxml2xmltest.c                            |  1 +
+ 4 files changed, 85 insertions(+), 13 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-disk-scsi-lun-passthrough-sgio.xml
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index ccc0ac6..705c1c6 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -236,6 +236,12 @@ VIR_ENUM_IMPL(virDomainDiskIo, VIR_DOMAIN_DISK_IO_LAST,
+               "default",
+               "native",
+               "threads")
++
++VIR_ENUM_IMPL(virDomainDiskSGIO, VIR_DOMAIN_DISK_SGIO_LAST,
++              "default",
++              "filtered",
++              "unfiltered")
++
+ VIR_ENUM_IMPL(virDomainIoEventFd, VIR_DOMAIN_IO_EVENT_FD_LAST,
+               "default",
+               "on",
+@@ -3523,6 +3529,7 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+     char *device = NULL;
+     char *snapshot = NULL;
+     char *rawio = NULL;
++    char *sgio = NULL;
+     char *driverName = NULL;
+     char *driverType = NULL;
+     char *source = NULL;
+@@ -3584,6 +3591,7 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+     snapshot = virXMLPropString(node, "snapshot");
+ 
+     rawio = virXMLPropString(node, "rawio");
++    sgio = virXMLPropString(node, "sgio");
+ 
+     cur = node->children;
+     while (cur != NULL) {
+@@ -3974,22 +3982,32 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+         def->snapshot = VIR_DOMAIN_SNAPSHOT_LOCATION_NONE;
+     }
+ 
++    if ((rawio || sgio) &&
++        (def->device != VIR_DOMAIN_DISK_DEVICE_LUN)) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("rawio or sgio can be used only with "
++                         "device='lun'"));
++        goto error;
++    }
++
+     if (rawio) {
+         def->rawio_specified = true;
+-        if (def->device == VIR_DOMAIN_DISK_DEVICE_LUN) {
+-            if (STREQ(rawio, "yes")) {
+-                def->rawio = 1;
+-            } else if (STREQ(rawio, "no")) {
+-                def->rawio = 0;
+-            } else {
+-                virReportError(VIR_ERR_XML_ERROR,
+-                               _("unknown disk rawio setting '%s'"),
+-                               rawio);
+-                goto error;
+-            }
++        if (STREQ(rawio, "yes")) {
++            def->rawio = 1;
++        } else if (STREQ(rawio, "no")) {
++            def->rawio = 0;
+         } else {
+-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+-                           _("rawio can be used only with device='lun'"));
++            virReportError(VIR_ERR_XML_ERROR,
++                           _("unknown disk rawio setting '%s'"),
++                           rawio);
++            goto error;
++        }
++    }
++
++    if (sgio) {
++        if ((def->sgio = virDomainDiskSGIOTypeFromString(sgio)) <= 0) {
++            virReportError(VIR_ERR_XML_ERROR,
++                           _("unknown disk sgio mode '%s'"), sgio);
+             goto error;
+         }
+     }
+@@ -4228,6 +4246,7 @@ cleanup:
+     VIR_FREE(type);
+     VIR_FREE(snapshot);
+     VIR_FREE(rawio);
++    VIR_FREE(sgio);
+     VIR_FREE(target);
+     VIR_FREE(source);
+     VIR_FREE(tray);
+@@ -11870,6 +11889,7 @@ virDomainDiskDefFormat(virBufferPtr buf,
+     const char *event_idx = virDomainVirtioEventIdxTypeToString(def->event_idx);
+     const char *copy_on_read = virDomainVirtioEventIdxTypeToString(def->copy_on_read);
+     const char *startupPolicy = virDomainStartupPolicyTypeToString(def->startupPolicy);
++    const char *sgio = virDomainDiskSGIOTypeToString(def->sgio);
+ 
+     int n;
+     char uuidstr[VIR_UUID_STRING_BUFLEN];
+@@ -11899,6 +11919,11 @@ virDomainDiskDefFormat(virBufferPtr buf,
+                        _("unexpected disk io mode %d"), def->iomode);
+         return -1;
+     }
++    if (!sgio) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("Unexpected disk sgio mode '%d'"), def->sgio);
++        return -1;
++    }
+ 
+     virBufferAsprintf(buf,
+                       "    <disk type='%s' device='%s'",
+@@ -11910,6 +11935,10 @@ virDomainDiskDefFormat(virBufferPtr buf,
+             virBufferAddLit(buf, " rawio='no'");
+         }
+     }
++
++    if (def->sgio)
++        virBufferAsprintf(buf, " sgio='%s'", sgio);
++
+     if (def->snapshot &&
+         !(def->snapshot == VIR_DOMAIN_SNAPSHOT_LOCATION_NONE && def->readonly))
+         virBufferAsprintf(buf, " snapshot='%s'",
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 50a63c3..aafe569 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -537,6 +537,14 @@ enum virDomainDiskSecretType {
+     VIR_DOMAIN_DISK_SECRET_TYPE_LAST
+ };
+ 
++enum virDomainDiskSGIO {
++    VIR_DOMAIN_DISK_SGIO_DEFAULT = 0,
++    VIR_DOMAIN_DISK_SGIO_FILTERED,
++    VIR_DOMAIN_DISK_SGIO_UNFILTERED,
++
++    VIR_DOMAIN_DISK_SGIO_LAST
++};
++
+ typedef struct _virDomainBlockIoTuneInfo virDomainBlockIoTuneInfo;
+ struct _virDomainBlockIoTuneInfo {
+     unsigned long long total_bytes_sec;
+@@ -607,6 +615,7 @@ struct _virDomainDiskDef {
+     virStorageEncryptionPtr encryption;
+     bool rawio_specified;
+     int rawio; /* no = 0, yes = 1 */
++    int sgio; /* enum virDomainDiskSGIO */
+ 
+     size_t nseclabels;
+     virSecurityDeviceLabelDefPtr *seclabels;
+@@ -2197,6 +2206,7 @@ VIR_ENUM_DECL(virDomainDiskErrorPolicy)
+ VIR_ENUM_DECL(virDomainDiskProtocol)
+ VIR_ENUM_DECL(virDomainDiskIo)
+ VIR_ENUM_DECL(virDomainDiskSecretType)
++VIR_ENUM_DECL(virDomainDiskSGIO)
+ VIR_ENUM_DECL(virDomainDiskTray)
+ VIR_ENUM_DECL(virDomainIoEventFd)
+ VIR_ENUM_DECL(virDomainVirtioEventIdx)
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-disk-scsi-lun-passthrough-sgio.xml b/tests/qemuxml2argvdata/qemuxml2argv-disk-scsi-lun-passthrough-sgio.xml
+new file mode 100644
+index 0000000..eecf609
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-disk-scsi-lun-passthrough-sgio.xml
+@@ -0,0 +1,32 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='lun' rawio='no' sgio='unfiltered'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='scsi'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <disk type='block' device='lun' sgio='filtered'>
++      <source dev='/dev/HostVG/QEMUGuest2'/>
++      <target dev='hda' bus='scsi'/>
++      <address type='drive' controller='0' bus='0' target='1' unit='1'/>
++    </disk>
++    <controller type='scsi' index='0' model='virtio-scsi'/>
++    <controller type='scsi' index='1' model='lsilogic'/>
++    <controller type='usb' index='0'/>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 1d366f1..85f44d7 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -238,6 +238,7 @@ mymain(void)
+     DO_TEST("seclabel-static");
+     DO_TEST("seclabel-none");
+     DO_TEST("numad-static-vcpu-no-numatune");
++    DO_TEST("disk-scsi-lun-passthrough-sgio");
+ 
+     /* These tests generate different XML */
+     DO_TEST_DIFFERENT("balloon-device-auto");
+-- 
+1.8.1
+

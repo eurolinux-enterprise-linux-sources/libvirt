@@ -1,0 +1,167 @@
+From 6eae14ce05f67a8b2abfb7567bbbd2e64fcf37d6 Mon Sep 17 00:00:00 2001
+Message-Id: <6eae14ce05f67a8b2abfb7567bbbd2e64fcf37d6.1374158622.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 9 Jul 2013 06:51:55 -0600
+Subject: [PATCH] conf: avoid NULL deref for pmsuspended domain state
+
+https://bugzilla.redhat.com/show_bug.cgi?id=822306
+https://bugzilla.redhat.com/show_bug.cgi?id=826315
+
+While working with a pmsuspend vs. snapshot issue, I noticed that
+the state file in /var/run/libvirt/qemu/dom.xml contained a rather
+suspicious "(null)" string, which does not round-trip well through
+a libvirtd restart.  Had I been on a platform other than glibc
+where printf("%s",NULL) crashes instead of printing (null), we might
+have noticed the problem much sooner.
+
+And in fixing that problem, I also noticed that we had several
+missing states, because we were #defining several *_LAST names
+to a value _different_ than what they were already given as enums
+in libvirt.h.  Yuck.  I got rid of default: labels in the case
+statements, because they get in the way of gcc's -Wswitch helping
+us ensure we cover all enum values.
+
+* src/conf/domain_conf.c (virDomainStateReasonToString)
+(virDomainStateReasonFromString): Fill in missing domain states;
+rewrite case statement to let compiler enforce checking.
+(VIR_DOMAIN_NOSTATE_LAST, VIR_DOMAIN_RUNNING_LAST)
+(VIR_DOMAIN_BLOCKED_LAST, VIR_DOMAIN_PAUSED_LAST)
+(VIR_DOMAIN_SHUTDOWN_LAST, VIR_DOMAIN_SHUTOFF_LAST)
+(VIR_DOMAIN_CRASHED_LAST): Drop dead defines.
+(VIR_DOMAIN_PMSUSPENDED_LAST): Drop dead define.
+(virDomainPMSuspendedReason): Add missing enum function.
+(virDomainRunningReason, virDomainPausedReason): Add missing enum
+value.
+* src/conf/domain_conf.h (virDomainPMSuspendedReason): Declare
+missing functions.
+* src/libvirt_private.syms (domain_conf.h): Export them.
+(cherry picked from commit e0642059367436c27bc031df3b03ccdc1d818350)
+---
+ src/conf/domain_conf.c   | 32 +++++++++++++++++++-------------
+ src/conf/domain_conf.h   |  1 +
+ src/libvirt_private.syms |  2 ++
+ 3 files changed, 22 insertions(+), 13 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 7cf3588..9991b5c 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -565,11 +565,9 @@ VIR_ENUM_IMPL(virDomainState, VIR_DOMAIN_LAST,
+               "crashed",
+               "pmsuspended")
+ 
+-#define VIR_DOMAIN_NOSTATE_LAST (VIR_DOMAIN_NOSTATE_UNKNOWN + 1)
+ VIR_ENUM_IMPL(virDomainNostateReason, VIR_DOMAIN_NOSTATE_LAST,
+               "unknown")
+ 
+-#define VIR_DOMAIN_RUNNING_LAST (VIR_DOMAIN_RUNNING_SAVE_CANCELED + 1)
+ VIR_ENUM_IMPL(virDomainRunningReason, VIR_DOMAIN_RUNNING_LAST,
+               "unknown",
+               "booted",
+@@ -578,13 +576,12 @@ VIR_ENUM_IMPL(virDomainRunningReason, VIR_DOMAIN_RUNNING_LAST,
+               "from snapshot",
+               "unpaused",
+               "migration canceled",
+-              "save canceled")
++              "save canceled",
++              "wakeup")
+ 
+-#define VIR_DOMAIN_BLOCKED_LAST (VIR_DOMAIN_BLOCKED_UNKNOWN + 1)
+ VIR_ENUM_IMPL(virDomainBlockedReason, VIR_DOMAIN_BLOCKED_LAST,
+               "unknown")
+ 
+-#define VIR_DOMAIN_PAUSED_LAST (VIR_DOMAIN_PAUSED_SHUTTING_DOWN + 1)
+ VIR_ENUM_IMPL(virDomainPausedReason, VIR_DOMAIN_PAUSED_LAST,
+               "unknown",
+               "user",
+@@ -594,14 +591,13 @@ VIR_ENUM_IMPL(virDomainPausedReason, VIR_DOMAIN_PAUSED_LAST,
+               "ioerror",
+               "watchdog",
+               "from snapshot",
+-              "shutdown")
++              "shutdown",
++              "snapshot")
+ 
+-#define VIR_DOMAIN_SHUTDOWN_LAST (VIR_DOMAIN_SHUTDOWN_USER + 1)
+ VIR_ENUM_IMPL(virDomainShutdownReason, VIR_DOMAIN_SHUTDOWN_LAST,
+               "unknown",
+               "user")
+ 
+-#define VIR_DOMAIN_SHUTOFF_LAST (VIR_DOMAIN_SHUTOFF_FROM_SNAPSHOT + 1)
+ VIR_ENUM_IMPL(virDomainShutoffReason, VIR_DOMAIN_SHUTOFF_LAST,
+               "unknown",
+               "shutdown",
+@@ -612,10 +608,12 @@ VIR_ENUM_IMPL(virDomainShutoffReason, VIR_DOMAIN_SHUTOFF_LAST,
+               "failed",
+               "from snapshot")
+ 
+-#define VIR_DOMAIN_CRASHED_LAST (VIR_DOMAIN_CRASHED_UNKNOWN + 1)
+ VIR_ENUM_IMPL(virDomainCrashedReason, VIR_DOMAIN_CRASHED_LAST,
+               "unknown")
+ 
++VIR_ENUM_IMPL(virDomainPMSuspendedReason, VIR_DOMAIN_PMSUSPENDED_LAST,
++              "unknown")
++
+ VIR_ENUM_IMPL(virDomainSeclabel, VIR_DOMAIN_SECLABEL_LAST,
+               "default",
+               "none",
+@@ -15181,9 +15179,13 @@ virDomainStateReasonToString(virDomainState state, int reason)
+         return virDomainShutoffReasonTypeToString(reason);
+     case VIR_DOMAIN_CRASHED:
+         return virDomainCrashedReasonTypeToString(reason);
+-    default:
+-        return NULL;
++    case VIR_DOMAIN_PMSUSPENDED:
++        return virDomainPMSuspendedReasonTypeToString(reason);
++    case VIR_DOMAIN_LAST:
++        break;
+     }
++    VIR_WARN("Unexpected domain state: %d", state);
++    return NULL;
+ }
+ 
+ 
+@@ -15205,9 +15207,13 @@ virDomainStateReasonFromString(virDomainState state, const char *reason)
+         return virDomainShutoffReasonTypeFromString(reason);
+     case VIR_DOMAIN_CRASHED:
+         return virDomainCrashedReasonTypeFromString(reason);
+-    default:
+-        return -1;
++    case VIR_DOMAIN_PMSUSPENDED:
++        return virDomainPMSuspendedReasonTypeFromString(reason);
++    case VIR_DOMAIN_LAST:
++        break;
+     }
++    VIR_WARN("Unexpected domain state: %d", state);
++    return -1;
+ }
+ 
+ 
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index f870539..06bb66b 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2291,6 +2291,7 @@ VIR_ENUM_DECL(virDomainPausedReason)
+ VIR_ENUM_DECL(virDomainShutdownReason)
+ VIR_ENUM_DECL(virDomainShutoffReason)
+ VIR_ENUM_DECL(virDomainCrashedReason)
++VIR_ENUM_DECL(virDomainPMSuspendedReason)
+ 
+ const char *virDomainStateReasonToString(virDomainState state, int reason);
+ int virDomainStateReasonFromString(virDomainState state, const char *reason);
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 81f8b5a..35ba878 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -491,6 +491,8 @@ virDomainPciRombarModeTypeFromString;
+ virDomainPciRombarModeTypeToString;
+ virDomainPMStateTypeFromString;
+ virDomainPMStateTypeToString;
++virDomainPMSuspendedReasonTypeFromString;
++virDomainPMSuspendedReasonTypeToString;
+ virDomainRedirdevBusTypeFromString;
+ virDomainRedirdevBusTypeToString;
+ virDomainRemoveInactive;
+-- 
+1.8.3.2
+

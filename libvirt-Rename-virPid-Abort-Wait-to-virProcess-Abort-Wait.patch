@@ -1,0 +1,271 @@
+From 35c4e017a55762c211f022de1100a03a2e7c819d Mon Sep 17 00:00:00 2001
+Message-Id: <35c4e017a55762c211f022de1100a03a2e7c819d.1379585483.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 12 Sep 2013 17:00:01 +0100
+Subject: [PATCH] Rename virPid{Abort, Wait} to virProcess{Abort, Wait}
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1006266
+
+Change "Pid" to "Process" to align with the virProcessKill
+API naming prefix
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 0fb58ef5cd477cf9a0efdd966a22440ef087a2af)
+
+Conflicts:
+	src/util/util.c
+---
+ daemon/libvirtd.c        |  2 +-
+ src/libvirt_private.syms |  4 ++--
+ src/lxc/lxc_container.c  |  4 ++--
+ src/lxc/lxc_controller.c |  2 +-
+ src/rpc/virnetsocket.c   |  2 +-
+ src/util/command.c       | 24 ++++++++++++------------
+ src/util/command.h       |  6 +++---
+ src/util/util.c          |  6 +++---
+ tests/testutils.c        |  4 ++--
+ 9 files changed, 27 insertions(+), 27 deletions(-)
+
+diff --git a/daemon/libvirtd.c b/daemon/libvirtd.c
+index 9036cde..4e8e3e5 100644
+--- a/daemon/libvirtd.c
++++ b/daemon/libvirtd.c
+@@ -196,7 +196,7 @@ static int daemonForkIntoBackground(const char *argv0)
+             VIR_FORCE_CLOSE(statuspipe[1]);
+ 
+             /* We wait to make sure the first child forked successfully */
+-            if (virPidWait(pid, NULL) < 0)
++            if (virProcessWait(pid, NULL) < 0)
+                 goto error;
+ 
+             /* If we get here, then the grandchild was spawned, so we
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index f66ccd9..ac5b099 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -171,8 +171,8 @@ virCommandTranslateStatus;
+ virCommandWait;
+ virCommandWriteArgLog;
+ virFork;
+-virPidAbort;
+-virPidWait;
++virProcessAbort;
++virProcessWait;
+ virRun;
+ 
+ 
+diff --git a/src/lxc/lxc_container.c b/src/lxc/lxc_container.c
+index 8d55910..0c0b208 100644
+--- a/src/lxc/lxc_container.c
++++ b/src/lxc/lxc_container.c
+@@ -163,7 +163,7 @@ int lxcContainerHasReboot(void)
+         virReportSystemError(errno, "%s",
+                              _("Unable to clone to check reboot support"));
+         return -1;
+-    } else if (virPidWait(cpid, &status) < 0) {
++    } else if (virProcessWait(cpid, &status) < 0) {
+         return -1;
+     }
+ 
+@@ -2009,7 +2009,7 @@ int lxcContainerAvailable(int features)
+         VIR_DEBUG("clone call returned %s, container support is not enabled",
+                   virStrerror(errno, ebuf, sizeof(ebuf)));
+         return -1;
+-    } else if (virPidWait(cpid, NULL) < 0) {
++    } else if (virProcessWait(cpid, NULL) < 0) {
+         return -1;
+     }
+ 
+diff --git a/src/lxc/lxc_controller.c b/src/lxc/lxc_controller.c
+index c32e741..bd8f0c8 100644
+--- a/src/lxc/lxc_controller.c
++++ b/src/lxc/lxc_controller.c
+@@ -216,7 +216,7 @@ static void virLXCControllerStopInit(virLXCControllerPtr ctrl)
+         return;
+ 
+     virLXCControllerCloseLoopDevices(ctrl, true);
+-    virPidAbort(ctrl->initpid);
++    virProcessAbort(ctrl->initpid);
+     ctrl->initpid = 0;
+ }
+ 
+diff --git a/src/rpc/virnetsocket.c b/src/rpc/virnetsocket.c
+index 31d9524..a39d6e9 100644
+--- a/src/rpc/virnetsocket.c
++++ b/src/rpc/virnetsocket.c
+@@ -914,7 +914,7 @@ void virNetSocketDispose(void *obj)
+     VIR_FORCE_CLOSE(sock->fd);
+     VIR_FORCE_CLOSE(sock->errfd);
+ 
+-    virPidAbort(sock->pid);
++    virProcessAbort(sock->pid);
+ 
+     VIR_FREE(sock->localAddrStr);
+     VIR_FREE(sock->remoteAddrStr);
+diff --git a/src/util/command.c b/src/util/command.c
+index 2fc27bf..909c435 100644
+--- a/src/util/command.c
++++ b/src/util/command.c
+@@ -1720,7 +1720,7 @@ virCommandToString(virCommandPtr cmd)
+  * @status: child exit status to translate
+  *
+  * Translate an exit status into a malloc'd string.  Generic helper
+- * for virCommandRun(), virCommandWait(), virRun(), and virPidWait()
++ * for virCommandRun(), virCommandWait(), virRun(), and virProcessWait()
+  * status argument, as well as raw waitpid().
+  */
+ char *
+@@ -2193,7 +2193,7 @@ virCommandHook(void *data)
+  * for pid.  While cmd is still in scope, you may reap the child via
+  * virCommandWait or virCommandAbort.  But after virCommandFree, if
+  * you have not yet reaped the child, then it continues to run until
+- * you call virPidWait or virPidAbort.
++ * you call virProcessWait or virProcessAbort.
+  */
+ int
+ virCommandRunAsync(virCommandPtr cmd, pid_t *pid)
+@@ -2289,7 +2289,7 @@ virCommandRunAsync(virCommandPtr cmd, pid_t *pid)
+ 
+ 
+ /**
+- * virPidWait:
++ * virProcessWait:
+  * @pid: child to wait on
+  * @exitstatus: optional status collection
+  *
+@@ -2300,7 +2300,7 @@ virCommandRunAsync(virCommandPtr cmd, pid_t *pid)
+  * child must exit with status 0 for this to succeed.
+  */
+ int
+-virPidWait(pid_t pid, int *exitstatus)
++virProcessWait(pid_t pid, int *exitstatus)
+ {
+     int ret;
+     int status;
+@@ -2370,13 +2370,13 @@ virCommandWait(virCommandPtr cmd, int *exitstatus)
+         return -1;
+     }
+ 
+-    /* If virPidWait reaps pid but then returns failure because
++    /* If virProcessWait reaps pid but then returns failure because
+      * exitstatus was NULL, then a second virCommandWait would risk
+      * calling waitpid on an unrelated process.  Besides, that error
+      * message is not as detailed as what we can provide.  So, we
+-     * guarantee that virPidWait only fails due to failure to wait,
++     * guarantee that virProcessWait only fails due to failure to wait,
+      * and repeat the exitstatus check code ourselves.  */
+-    ret = virPidWait(cmd->pid, exitstatus ? exitstatus : &status);
++    ret = virProcessWait(cmd->pid, exitstatus ? exitstatus : &status);
+     if (ret == 0) {
+         cmd->pid = -1;
+         cmd->reap = false;
+@@ -2402,7 +2402,7 @@ virCommandWait(virCommandPtr cmd, int *exitstatus)
+ 
+ #ifndef WIN32
+ /**
+- * virPidAbort:
++ * virProcessAbort:
+  * @pid: child process to kill
+  *
+  * Abort a child process if PID is positive and that child is still
+@@ -2412,7 +2412,7 @@ virCommandWait(virCommandPtr cmd, int *exitstatus)
+  * this does nothing.
+  */
+ void
+-virPidAbort(pid_t pid)
++virProcessAbort(pid_t pid)
+ {
+     int saved_errno;
+     int ret;
+@@ -2476,13 +2476,13 @@ virCommandAbort(virCommandPtr cmd)
+ {
+     if (!cmd || cmd->pid == -1)
+         return;
+-    virPidAbort(cmd->pid);
++    virProcessAbort(cmd->pid);
+     cmd->pid = -1;
+     cmd->reap = false;
+ }
+ #else /* WIN32 */
+ void
+-virPidAbort(pid_t pid)
++virProcessAbort(pid_t pid)
+ {
+     /* Not yet ported to mingw.  Any volunteers?  */
+     VIR_DEBUG("failed to reap child %lld, abandoning it", (long long)pid);
+@@ -2649,7 +2649,7 @@ int virCommandHandshakeNotify(virCommandPtr cmd)
+  *
+  * Release all resources.  The only exception is that if you called
+  * virCommandRunAsync with a non-null pid, then the asynchronous child
+- * is not reaped, and you must call virPidWait() or virPidAbort() yourself.
++ * is not reaped, and you must call virProcessWait() or virProcessAbort() yourself.
+  */
+ void
+ virCommandFree(virCommandPtr cmd)
+diff --git a/src/util/command.h b/src/util/command.h
+index 0ecbe27..5b25ab0 100644
+--- a/src/util/command.h
++++ b/src/util/command.h
+@@ -155,8 +155,8 @@ int virCommandRun(virCommandPtr cmd,
+ int virCommandRunAsync(virCommandPtr cmd,
+                        pid_t *pid) ATTRIBUTE_RETURN_CHECK;
+ 
+-int virPidWait(pid_t pid,
+-               int *exitstatus) ATTRIBUTE_RETURN_CHECK;
++int virProcessWait(pid_t pid,
++                   int *exitstatus) ATTRIBUTE_RETURN_CHECK;
+ 
+ int virCommandWait(virCommandPtr cmd,
+                    int *exitstatus) ATTRIBUTE_RETURN_CHECK;
+@@ -169,7 +169,7 @@ int virCommandHandshakeWait(virCommandPtr cmd)
+ int virCommandHandshakeNotify(virCommandPtr cmd)
+     ATTRIBUTE_RETURN_CHECK;
+ 
+-void virPidAbort(pid_t pid);
++void virProcessAbort(pid_t pid);
+ 
+ void virCommandAbort(virCommandPtr cmd);
+ 
+diff --git a/src/util/util.c b/src/util/util.c
+index e4d8f0e..0d24a05 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -741,10 +741,10 @@ virFileAccessibleAs(const char *path, int mode,
+ 
+     if (pid) { /* parent */
+         VIR_FREE(groups);
+-        if (virPidWait(pid, &status) < 0) {
+-            /* virPidWait() already
++        if (virProcessWait(pid, &status) < 0) {
++            /* virProcessWait() already
+              * reported error */
+-                return -1;
++            return -1;
+         }
+ 
+         if (!WIFEXITED(status)) {
+diff --git a/tests/testutils.c b/tests/testutils.c
+index b555e06..004731d 100644
+--- a/tests/testutils.c
++++ b/tests/testutils.c
+@@ -329,7 +329,7 @@ virtTestCaptureProgramOutput(const char *const argv[], char **buf, int maxlen)
+         VIR_FORCE_CLOSE(pipefd[1]);
+         len = virFileReadLimFD(pipefd[0], maxlen, buf);
+         VIR_FORCE_CLOSE(pipefd[0]);
+-        if (virPidWait(pid, NULL) < 0)
++        if (virProcessWait(pid, NULL) < 0)
+             return -1;
+ 
+         return len;
+@@ -699,7 +699,7 @@ int virtTestMain(int argc,
+             } else {
+                 int i, status;
+                 for (i = 0 ; i < mp ; i++) {
+-                    if (virPidWait(workers[i], NULL) < 0)
++                    if (virProcessWait(workers[i], NULL) < 0)
+                         ret = EXIT_FAILURE;
+                 }
+                 VIR_FREE(workers);
+-- 
+1.8.3.2
+

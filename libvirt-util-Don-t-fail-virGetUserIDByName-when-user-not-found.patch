@@ -1,0 +1,67 @@
+From f00f2e64077c9e18d658282e446c92b7061c884d Mon Sep 17 00:00:00 2001
+Message-Id: <f00f2e64077c9e18d658282e446c92b7061c884d.1355319681.git.jdenemar@redhat.com>
+From: Christophe Fergeau <cfergeau@redhat.com>
+Date: Tue, 11 Dec 2012 15:41:00 +0100
+Subject: [PATCH] util: Don't fail virGetUserIDByName when user not found
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=883832
+
+virGetUserIDByName is documented as returning 1 if the username
+cannot be found. getpwnam_r is documented as returning:
+« 0 or ENOENT or ESRCH or EBADF or EPERM or ...  The given name
+or uid was not found. »
+ and that:
+« The formulation given above under "RETURN VALUE" is from POSIX.1-2001.
+It  does  not  call  "not  found"  an error, hence does not specify what
+value errno might have in this situation.  But that makes it impossible to
+recognize errors.  One might argue that according to POSIX errno should be
+left unchanged if an entry is not found.  Experiments on various UNIX-like
+systems shows that lots of different values occur in this situation: 0,
+ENOENT, EBADF, ESRCH, EWOULDBLOCK, EPERM and probably others. »
+
+virGetUserIDByName returns an error when the return value of getpwnam_r
+is non-0. However on my RHEL system, getpwnam_r returns ENOENT when the
+requested user cannot be found, which then causes virGetUserID not
+to behave as documented (it returns an error instead of falling back
+to parsing the passed-in value as an uid).
+
+This commit makes virGetUserIDByName only report an error when errno
+is set to one of the values in the posix description of getpwnam_r
+(which are the same as the ones described in the manpage on my system).
+(cherry picked from commit 6c6c03dc0e66db400beacc4453efa6e10ec08260)
+---
+ src/util/util.c | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/src/util/util.c b/src/util/util.c
+index 0d10355..5386540 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -2552,9 +2552,18 @@ virGetUserIDByName(const char *name, uid_t *uid)
+     }
+ 
+     if (rc != 0) {
+-        virReportSystemError(rc, _("Failed to get user record for name '%s'"),
+-                             name);
+-        goto cleanup;
++       /* We explicitly test for the known error values returned by
++        * getpwnam_r as the manpage says:
++        * ERRORS
++        *   0 or ENOENT or ESRCH or EBADF or EPERM or ...
++        *         The given name or uid was not found.
++        */
++       if ((rc == EINTR) || (rc == EIO) || (rc == EMFILE) ||
++           (rc == ENFILE) || (rc == ENOMEM)) {
++           virReportSystemError(rc, _("Failed to get user record for name '%s'"),
++                                name);
++           goto cleanup;
++       }
+     }
+ 
+     if (!pw) {
+-- 
+1.8.0
+

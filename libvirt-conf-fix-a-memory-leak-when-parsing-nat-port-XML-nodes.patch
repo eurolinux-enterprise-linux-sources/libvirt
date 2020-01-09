@@ -1,0 +1,41 @@
+From 66d6e9aeecb36481406c8e03bbb62080ae1fd68a Mon Sep 17 00:00:00 2001
+Message-Id: <66d6e9aeecb36481406c8e03bbb62080ae1fd68a.1374158623.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Tue, 16 Jul 2013 10:56:01 +0200
+Subject: [PATCH] conf: fix a memory leak when parsing nat port XML nodes
+
+https://bugzilla.redhat.com/show_bug.cgi?id=851455
+
+ ==5306== 8 bytes in 1 blocks are definitely lost in loss record 24 of 277
+ ==5306==    at 0x4C28B2F: calloc (vg_replace_malloc.c:593)
+ ==5306==    by 0x5293CAF: virAllocN (viralloc.c:152)
+ ==5306==    by 0x52DFEAE: virXPathNodeSet (virxml.c:611)
+ ==5306==    by 0x5313DD9: virNetworkDefParseXML (network_conf.c:1408)
+ ==5306==    by 0x53170F6: virNetworkObjUpdateParseFile (network_conf.c:2031)
+ ==5306==    by 0x131DA63C: networkStartup (bridge_driver.c:279)
+ ==5306==    by 0x53481DF: virStateInitialize (libvirt.c:822)
+ ==5306==    by 0x40DF44: daemonRunStateInit (libvirtd.c:877)
+ ==5306==    by 0x52D2FF5: virThreadHelper (virthreadpthread.c:161)
+ ==5306==    by 0x5D00C52: start_thread (in /usr/lib64/libpthread-2.17.so)
+ ==5306==    by 0x6410ECC: clone (in /usr/lib64/libc-2.17.so)
+
+(cherry picked from commit 2fff380105b7890fb6a7408b3bc0b6bb8fcf9203)
+---
+ src/conf/network_conf.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index f2450c6..98bfd14 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -1318,6 +1318,7 @@ cleanup:
+     VIR_FREE(addrStart);
+     VIR_FREE(addrEnd);
+     VIR_FREE(natAddrNodes);
++    VIR_FREE(natPortNodes);
+     ctxt->node = save;
+     return ret;
+ }
+-- 
+1.8.3.2
+

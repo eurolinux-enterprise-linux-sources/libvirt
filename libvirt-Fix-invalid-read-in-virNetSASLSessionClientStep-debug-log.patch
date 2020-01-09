@@ -1,0 +1,70 @@
+From 9a4a0915be36770db8d5b5207e4c1d794ef11487 Mon Sep 17 00:00:00 2001
+Message-Id: <9a4a0915be36770db8d5b5207e4c1d794ef11487@dist-git>
+From: Christophe Fergeau <cfergeau@redhat.com>
+Date: Tue, 27 May 2014 14:25:09 -0400
+Subject: [PATCH] Fix invalid read in virNetSASLSessionClientStep debug log
+
+virNetSASLSessionClientStep logs the data that is going to be passed to
+sasl_client_step as input data. However, it tries to log it as a string,
+while there is no guarantee that this data is going to be nul-terminated.
+This leads to this valgrind log:
+
+==20938== Invalid read of size 1
+==20938==    at 0x8BDB08F: vfprintf (vfprintf.c:1635)
+==20938==    by 0x8C06DF2: vasprintf (vasprintf.c:62)
+==20938==    by 0x4CCEDF9: virVasprintfInternal (virstring.c:337)
+==20938==    by 0x4CA9516: virLogVMessage (virlog.c:842)
+==20938==    by 0x4CA939A: virLogMessage (virlog.c:778)
+==20938==    by 0x4E21E0D: virNetSASLSessionClientStep (virnetsaslcontext.c:458)
+==20938==    by 0x4DE47B8: remoteAuthSASL (remote_driver.c:4136)
+==20938==    by 0x4DE33AE: remoteAuthenticate (remote_driver.c:3635)
+==20938==    by 0x4DDBFAA: doRemoteOpen (remote_driver.c:832)
+==20938==    by 0x4DDC8BA: remoteConnectOpen (remote_driver.c:1027)
+==20938==    by 0x4D8595F: do_open (libvirt.c:1239)
+==20938==    by 0x4D863F3: virConnectOpenAuth (libvirt.c:1481)
+==20938==    by 0x12762B: vshReconnect (virsh.c:337)
+==20938==    by 0x12C9B0: vshInit (virsh.c:2470)
+==20938==    by 0x12E9A5: main (virsh.c:3338)
+==20938==  Address 0xe329ccd is 0 bytes after a block of size 141 alloc'd
+==20938==    at 0x4A081D4: calloc (in /usr/lib64/valgrind/vgpreload_memcheck-amd64-linux.so)
+==20938==    by 0x8CB91B4: xdr_array (xdr_array.c:94)
+==20938==    by 0x4E039C2: xdr_remote_auth_sasl_start_ret (remote_protocol.c:3134)
+==20938==    by 0x4E1F8AA: virNetMessageDecodePayload (virnetmessage.c:405)
+==20938==    by 0x4E119F5: virNetClientProgramCall (virnetclientprogram.c:377)
+==20938==    by 0x4DF8141: callFull (remote_driver.c:5794)
+==20938==    by 0x4DF821A: call (remote_driver.c:5816)
+==20938==    by 0x4DE46CF: remoteAuthSASL (remote_driver.c:4112)
+==20938==    by 0x4DE33AE: remoteAuthenticate (remote_driver.c:3635)
+==20938==    by 0x4DDBFAA: doRemoteOpen (remote_driver.c:832)
+==20938==    by 0x4DDC8BA: remoteConnectOpen (remote_driver.c:1027)
+==20938==    by 0x4D8595F: do_open (libvirt.c:1239)
+==20938==    by 0x4D863F3: virConnectOpenAuth (libvirt.c:1481)
+==20938==    by 0x12762B: vshReconnect (virsh.c:337)
+==20938==    by 0x12C9B0: vshInit (virsh.c:2470)
+==20938==    by 0x12E9A5: main (virsh.c:3338)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1100173
+
+(cherry-picked from 986900a5af6491d54f7779f6368f1fc41eb53690)
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/rpc/virnetsaslcontext.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/rpc/virnetsaslcontext.c b/src/rpc/virnetsaslcontext.c
+index e65ff6f..4666693 100644
+--- a/src/rpc/virnetsaslcontext.c
++++ b/src/rpc/virnetsaslcontext.c
+@@ -493,7 +493,7 @@ int virNetSASLSessionClientStep(virNetSASLSessionPtr sasl,
+     int err;
+     int ret = -1;
+ 
+-    VIR_DEBUG("sasl=%p serverin=%s serverinlen=%zu prompt_need=%p clientout=%p clientoutlen=%p",
++    VIR_DEBUG("sasl=%p serverin=%p serverinlen=%zu prompt_need=%p clientout=%p clientoutlen=%p",
+               sasl, serverin, serverinlen, prompt_need, clientout, clientoutlen);
+ 
+     virMutexLock(&sasl->lock);
+-- 
+2.0.0
+

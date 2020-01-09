@@ -1,0 +1,38 @@
+From 8db93f95d654eac7ee8e06e48f6e7dbec7919769 Mon Sep 17 00:00:00 2001
+Message-Id: <8db93f95d654eac7ee8e06e48f6e7dbec7919769.1373271642.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 5 Jun 2013 16:38:00 -0600
+Subject: [PATCH] Don't mount selinux fs in LXC if selinux is disabled
+
+https://bugzilla.redhat.com/show_bug.cgi?id=915485
+
+Before trying to mount the selinux filesystem in a container
+use is_selinux_enabled() to check if the machine actually
+has selinux support (eg not booted with selinux=0)
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 95c6cc344bec8405636d2a59fc0c34e0581001ab)
+---
+ src/lxc/lxc_container.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/lxc/lxc_container.c b/src/lxc/lxc_container.c
+index b33b0da..368029e 100644
+--- a/src/lxc/lxc_container.c
++++ b/src/lxc/lxc_container.c
+@@ -545,6 +545,12 @@ static int lxcContainerMountBasicFS(bool pivotRoot,
+             (access(srcpath, R_OK) < 0))
+             continue;
+ 
++#if WITH_SELINUX
++        if (STREQ(mnts[i].src, SELINUX_MOUNT) &&
++            !is_selinux_enabled())
++            continue;
++#endif
++
+         if (virFileMakePath(mnts[i].dst) < 0) {
+             virReportSystemError(errno,
+                                  _("Failed to mkdir %s"),
+-- 
+1.8.2.1
+

@@ -1,0 +1,27 @@
+From 4f214cbf21a96e9ab791daf8cfb5d34e682c8370 Mon Sep 17 00:00:00 2001
+Message-Id: <4f214cbf21a96e9ab791daf8cfb5d34e682c8370.1373271643.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Tue, 18 Jun 2013 13:04:33 +0200
+Subject: [PATCH] iscsi: don't leak portal string when starting a pool
+
+https://bugzilla.redhat.com/show_bug.cgi?id=975392
+(cherry picked from commit 413274f63b8f2da3b1a4adfdf1cbc0df7a0e0316)
+---
+ src/storage/storage_backend_iscsi.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/storage/storage_backend_iscsi.c b/src/storage/storage_backend_iscsi.c
+index b080250..75758e1 100644
+--- a/src/storage/storage_backend_iscsi.c
++++ b/src/storage/storage_backend_iscsi.c
+@@ -735,6 +735,7 @@ virStorageBackendISCSIStartPool(virConnectPtr conn ATTRIBUTE_UNUSED,
+     ret = 0;
+ 
+ cleanup:
++    VIR_FREE(portal);
+     VIR_FREE(session);
+     return ret;
+ }
+-- 
+1.8.2.1
+

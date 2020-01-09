@@ -1,0 +1,39 @@
+From d5be542d1ccfb072f4fbf2ba4d7e20225c59bb2e Mon Sep 17 00:00:00 2001
+Message-Id: <d5be542d1ccfb072f4fbf2ba4d7e20225c59bb2e@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 19 Jan 2016 15:43:16 +0100
+Subject: [PATCH] qemu: Refuse to create snapshot of a disk without source
+
+RHEL-only -- upstream fixed the issue by refactoring disk source
+
+Libvirtd would crash in qemuDomainSnapshotUndoSingleDiskActive while
+trying to access NULL in a disk's source.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1299411
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 672a3dd..c096727 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11929,6 +11929,13 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+         return -1;
+     }
+ 
++    if (!disk->src) {
++        virReportError(VIR_ERR_OPERATION_INVALID,
++                       _("disk '%s' has no source"),
++                       disk->dst);
++        goto cleanup;
++    }
++
+     if (virAsprintf(&device, "drive-%s", disk->info.alias) < 0 ||
+         !(source = strdup(snap->file)) ||
+         (persistDisk &&
+-- 
+2.7.0
+

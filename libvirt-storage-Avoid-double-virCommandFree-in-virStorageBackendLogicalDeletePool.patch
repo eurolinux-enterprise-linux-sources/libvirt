@@ -1,0 +1,43 @@
+From cba31f83c31cc6bab135e801f344fa00b6d975f7 Mon Sep 17 00:00:00 2001
+Message-Id: <cba31f83c31cc6bab135e801f344fa00b6d975f7.1373271643.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Mon, 24 Jun 2013 12:32:00 +0200
+Subject: [PATCH] storage: Avoid double virCommandFree in
+ virStorageBackendLogicalDeletePool
+
+https://bugzilla.redhat.com/show_bug.cgi?id=921387
+
+When logical pool has no PVs associated with itself (user-created),
+virCommandFree(cmd) is called twice with the same pointer and that
+causes a segfault in daemon.
+(cherry picked from commit 2d73f2120f2073bff9e311626f6b6febcfc1e290)
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+---
+ src/storage/storage_backend_logical.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/storage/storage_backend_logical.c b/src/storage/storage_backend_logical.c
+index 2f3f5f1..dac3af1 100644
+--- a/src/storage/storage_backend_logical.c
++++ b/src/storage/storage_backend_logical.c
+@@ -1,7 +1,7 @@
+ /*
+  * storage_backend_logical.c: storage backend for logical volume handling
+  *
+- * Copyright (C) 2007-2009, 2011 Red Hat, Inc.
++ * Copyright (C) 2007-2009, 2011, 2013 Red Hat, Inc.
+  * Copyright (C) 2007-2008 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -667,6 +667,7 @@ virStorageBackendLogicalDeletePool(virConnectPtr conn ATTRIBUTE_UNUSED,
+     if (virCommandRun(cmd, NULL) < 0)
+         goto cleanup;
+     virCommandFree(cmd);
++    cmd = NULL;
+ 
+     /* now remove the pv devices and clear them out */
+     ret = 0;
+-- 
+1.8.2.1
+

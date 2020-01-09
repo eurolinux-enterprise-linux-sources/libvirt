@@ -1,0 +1,249 @@
+From 67b3ec5b040de2a39548fe48efb565ce2f485047 Mon Sep 17 00:00:00 2001
+Message-Id: <67b3ec5b040de2a39548fe48efb565ce2f485047.1373271640.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 28 Mar 2013 23:14:46 +0100
+Subject: [PATCH] security_manager: Don't manipulate domain XML in
+ virDomainDefGetSecurityLabelDef
+
+https://bugzilla.redhat.com/show_bug.cgi?id=923946
+
+The virDomainDefGetSecurityLabelDef was modifying the domain XML.
+It tried to find a seclabel corresponding to given sec driver. If the
+label wasn't found, the function created one which is wrong. In fact
+it's security manager which should modify this part of domain XML.
+(cherry picked from commit 6c4de1161425a610797495549349d194b90fb023)
+
+Conflicts:
+	src/security/security_manager.c: 48b49a63 is not backported
+---
+ src/conf/domain_conf.c          | 56 +++++++++++------------------------------
+ src/conf/domain_conf.h          |  7 ++++--
+ src/security/security_manager.c | 40 ++++++++++++++++++++---------
+ src/security/security_selinux.c |  8 ++++--
+ 4 files changed, 53 insertions(+), 58 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index a0e308a..77c3a74 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -886,7 +886,7 @@ virDomainGraphicsListenDefClear(virDomainGraphicsListenDefPtr def)
+     return;
+ }
+ 
+-static void
++void
+ virSecurityLabelDefFree(virSecurityLabelDefPtr def)
+ {
+     if (!def)
+@@ -899,7 +899,7 @@ virSecurityLabelDefFree(virSecurityLabelDefPtr def)
+ }
+ 
+ 
+-static void
++void
+ virSecurityDeviceLabelDefFree(virSecurityDeviceLabelDefPtr def)
+ {
+     if (!def)
+@@ -15708,10 +15708,6 @@ virDomainDefGetSecurityLabelDef(virDomainDefPtr def, const char *model)
+             return def->seclabels[i];
+     }
+ 
+-    seclabel = virDomainDefAddSecurityLabelDef(def, model);
+-    if (seclabel)
+-        seclabel->implicit = true;
+-
+     return seclabel;
+ }
+ 
+@@ -15746,55 +15742,31 @@ virDomainChrDefGetSecurityLabelDef(virDomainChrDefPtr def, const char *model)
+ }
+ 
+ virSecurityLabelDefPtr
+-virDomainDefAddSecurityLabelDef(virDomainDefPtr def, const char *model)
++virDomainDefGenSecurityLabelDef(const char *model)
+ {
+     virSecurityLabelDefPtr seclabel = NULL;
+ 
+-    if (VIR_ALLOC(seclabel) < 0)
+-        goto no_memory;
+-
+-    if (model) {
+-        seclabel->model = strdup(model);
+-        if (seclabel->model == NULL)
+-            goto no_memory;
++    if (VIR_ALLOC(seclabel) < 0 ||
++        (model && !(seclabel->model = strdup(model)))) {
++        virReportOOMError();
++        virSecurityLabelDefFree(seclabel);
++        seclabel = NULL;
+     }
+ 
+-    if (VIR_EXPAND_N(def->seclabels, def->nseclabels, 1) < 0)
+-        goto no_memory;
+-
+-    def->seclabels[def->nseclabels - 1] = seclabel;
+-
+     return seclabel;
+-
+-no_memory:
+-    virReportOOMError();
+-    virSecurityLabelDefFree(seclabel);
+-    return NULL;
+ }
+ 
+ virSecurityDeviceLabelDefPtr
+-virDomainDiskDefAddSecurityLabelDef(virDomainDiskDefPtr def, const char *model)
++virDomainDiskDefGenSecurityLabelDef(const char *model)
+ {
+     virSecurityDeviceLabelDefPtr seclabel = NULL;
+ 
+-    if (VIR_ALLOC(seclabel) < 0)
+-        goto no_memory;
+-
+-    if (model) {
+-        seclabel->model = strdup(model);
+-        if (seclabel->model == NULL)
+-            goto no_memory;
++    if (VIR_ALLOC(seclabel) < 0 ||
++        (model && !(seclabel->model = strdup(model)))) {
++        virReportOOMError();
++        virSecurityDeviceLabelDefFree(seclabel);
++        seclabel = NULL;
+     }
+ 
+-    if (VIR_EXPAND_N(def->seclabels, def->nseclabels, 1) < 0)
+-        goto no_memory;
+-
+-    def->seclabels[def->nseclabels - 1] = seclabel;
+-
+     return seclabel;
+-
+-no_memory:
+-    virReportOOMError();
+-    virSecurityDeviceLabelDefFree(seclabel);
+-    return NULL;
+ }
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 06406d4..6175ae7 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2185,10 +2185,13 @@ virSecurityDeviceLabelDefPtr
+ virDomainChrDefGetSecurityLabelDef(virDomainChrDefPtr def, const char *model);
+ 
+ virSecurityLabelDefPtr
+-virDomainDefAddSecurityLabelDef(virDomainDefPtr def, const char *model);
++virDomainDefGenSecurityLabelDef(const char *model);
+ 
+ virSecurityDeviceLabelDefPtr
+-virDomainDiskDefAddSecurityLabelDef(virDomainDiskDefPtr def, const char *model);
++virDomainDiskDefGenSecurityLabelDef(const char *model);
++
++void virSecurityLabelDefFree(virSecurityLabelDefPtr def);
++void virSecurityDeviceLabelDefFree(virSecurityDeviceLabelDefPtr def);
+ 
+ typedef const char* (*virEventActionToStringFunc)(int type);
+ typedef int (*virEventActionFromStringFunc)(const char *type);
+diff --git a/src/security/security_manager.c b/src/security/security_manager.c
+index 0ebd53b..0cb961e 100644
+--- a/src/security/security_manager.c
++++ b/src/security/security_manager.c
+@@ -320,23 +320,25 @@ int virSecurityManagerRestoreSavedStateLabel(virSecurityManagerPtr mgr,
+ int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
+                                virDomainDefPtr vm)
+ {
+-    int rc = 0;
++    int ret = -1;
+     size_t i;
+     virSecurityManagerPtr* sec_managers = NULL;
+     virSecurityLabelDefPtr seclabel;
++    bool generated = false;
+ 
+     if (mgr == NULL || mgr->drv == NULL)
+-        return -1;
++        return ret;
+ 
+     if ((sec_managers = virSecurityManagerGetNested(mgr)) == NULL)
+-        return -1;
++        return ret;
+ 
+     for (i = 0; sec_managers[i]; i++) {
+-        seclabel = virDomainDefGetSecurityLabelDef(vm,
+-                                                   sec_managers[i]->drv->name);
+-        if (seclabel == NULL) {
+-            rc = -1;
+-            goto cleanup;
++        generated = false;
++        seclabel = virDomainDefGetSecurityLabelDef(vm, sec_managers[i]->drv->name);
++        if (!seclabel) {
++            if (!(seclabel = virDomainDefGenSecurityLabelDef(sec_managers[i]->drv->name)))
++                goto cleanup;
++            generated = seclabel->implicit = true;
+         }
+ 
+         if (seclabel->type == VIR_DOMAIN_SECLABEL_DEFAULT) {
+@@ -352,22 +354,36 @@ int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
+             sec_managers[i]->requireConfined) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                            _("Unconfined guests are not allowed on this host"));
+-            rc = -1;
+             goto cleanup;
+         }
+ 
+         if (!sec_managers[i]->drv->domainGenSecurityLabel) {
+             virReportError(VIR_ERR_NO_SUPPORT, __FUNCTION__);
+         } else {
+-            rc += sec_managers[i]->drv->domainGenSecurityLabel(sec_managers[i], vm);
+-            if (rc)
++            /* The seclabel must be added to @vm prior calling domainGenSecurityLabel
++             * which may require seclabel to be presented already */
++
++            if (VIR_APPEND_ELEMENT(vm->seclabels, vm->nseclabels, seclabel) < 0) {
++                virReportOOMError();
+                 goto cleanup;
++            }
++
++            if (sec_managers[i]->drv->domainGenSecurityLabel(sec_managers[i], vm) < 0) {
++                if (VIR_DELETE_ELEMENT(vm->seclabels,
++                                       vm->nseclabels -1, vm->nseclabels) < 0)
++                    vm->nseclabels--;
++                goto cleanup;
++            }
+         }
+     }
+ 
++    ret = 0;
++
+ cleanup:
++    if (generated)
++        virSecurityLabelDefFree(seclabel);
+     VIR_FREE(sec_managers);
+-    return rc;
++    return ret;
+ }
+ 
+ int virSecurityManagerReserveLabel(virSecurityManagerPtr mgr,
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index 1d6ec37..df9126d 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -1046,11 +1046,15 @@ virSecuritySELinuxSetSecurityFileLabel(virDomainDiskDefPtr disk,
+     if (ret == 1 && !disk_seclabel) {
+         /* If we failed to set a label, but virt_use_nfs let us
+          * proceed anyway, then we don't need to relabel later.  */
+-        disk_seclabel =
+-            virDomainDiskDefAddSecurityLabelDef(disk, SECURITY_SELINUX_NAME);
++        disk_seclabel = virDomainDiskDefGenSecurityLabelDef(SECURITY_SELINUX_NAME);
+         if (!disk_seclabel)
+             return -1;
+         disk_seclabel->norelabel = true;
++        if (VIR_APPEND_ELEMENT(disk->seclabels, disk->nseclabels, disk_seclabel) < 0) {
++            virReportOOMError();
++            virSecurityDeviceLabelDefFree(disk_seclabel);
++            return -1;
++        }
+         ret = 0;
+     }
+     return ret;
+-- 
+1.8.2.1
+

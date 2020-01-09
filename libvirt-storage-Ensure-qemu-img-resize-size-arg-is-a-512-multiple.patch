@@ -1,0 +1,76 @@
+From 2888de5c106dd9e10d8c386d57f2a782b530cd3f Mon Sep 17 00:00:00 2001
+Message-Id: <2888de5c106dd9e10d8c386d57f2a782b530cd3f@dist-git>
+From: Christophe Fergeau <cfergeau@redhat.com>
+Date: Tue, 13 May 2014 08:04:48 -0400
+Subject: [PATCH] storage: Ensure 'qemu-img resize' size arg is a 512 multiple
+
+qemu-img resize will fail with "The new size must be a multiple of 512"
+if libvirt doesn't round it first.
+This fixes rhbz#951495
+
+Signed-off-by: Christophe Fergeau <cfergeau@redhat.com>
+(cherry picked from commit 9a8f39d097448b2b43c4a05d0edc213eacfc9ea6)
+
+Pulled in this change since the patch for
+
+    https://bugzilla.redhat.com/show_bug.cgi?id=1002813
+
+needs at least the VIR_ROUND_UP() definition.  In reviewing what changed
+in this patch I note that one of the upstream test regarding usage of
+vol-resize is covered by this patch - so it just felt right to bring the
+whole thing in.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/internal.h                   | 3 +++
+ src/libvirt.c                    | 3 ++-
+ src/storage/storage_backend_fs.c | 4 ++++
+ 3 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/internal.h b/src/internal.h
+index 8037a4a..b8ca20a 100644
+--- a/src/internal.h
++++ b/src/internal.h
+@@ -290,6 +290,9 @@
+ /* divide value by size, rounding up */
+ # define VIR_DIV_UP(value, size) (((value) + (size) - 1) / (size))
+ 
++/* round up value to the closest multiple of size */
++# define VIR_ROUND_UP(value, size) (VIR_DIV_UP(value, size) * (size))
++
+ 
+ # if WITH_DTRACE_PROBES
+ #  ifndef LIBVIRT_PROBES_H
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 442bd32..ca72144 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -14001,7 +14001,8 @@ error:
+  * Changes the capacity of the storage volume @vol to @capacity. The
+  * operation will fail if the new capacity requires allocation that would
+  * exceed the remaining free space in the parent pool.  The contents of
+- * the new capacity will appear as all zero bytes.
++ * the new capacity will appear as all zero bytes. The capacity value will
++ * be rounded to the granularity supported by the hypervisor.
+  *
+  * Normally, the operation will attempt to affect capacity with a minimum
+  * impact on allocation (that is, the default operation favors a sparse
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index 63f7452..c7267d0 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -1233,6 +1233,10 @@ virStorageBackendFilesystemResizeQemuImg(const char *path,
+         return -1;
+     }
+ 
++    /* Round capacity as qemu-img resize errors out on sizes which are not
++     * a multiple of 512 */
++    capacity = VIR_ROUND_UP(capacity, 512);
++
+     cmd = virCommandNew(img_tool);
+     virCommandAddArgList(cmd, "resize", path, NULL);
+     virCommandAddArgFormat(cmd, "%llu", capacity);
+-- 
+1.9.3
+

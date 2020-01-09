@@ -1,0 +1,47 @@
+From e16f941263cf16ba618ad5eb5593ec9233c2b32b Mon Sep 17 00:00:00 2001
+Message-Id: <e16f941263cf16ba618ad5eb5593ec9233c2b32b.1373885147.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 4 Jul 2013 11:50:22 +0200
+Subject: [PATCH] qemu: Forbid migration of machines with I/O errors
+
+https://bugzilla.redhat.com/show_bug.cgi?id=972675
+
+Such machine can't be successuflly migrated unles the I/O error has
+recovered and might lead to data corruption. Forbid this kind of
+migration.
+(cherry picked from commit 5f719f217ebf89668ca3c404e4b8288179c26c92)
+---
+ src/qemu/qemu_migration.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index d946c27..064bba0 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -806,6 +806,7 @@ qemuMigrationIsAllowed(struct qemud_driver *driver, virDomainObjPtr vm,
+                        virDomainDefPtr def, bool remote)
+ {
+     int nsnapshots;
++    int pauseReason;
+     bool forbid;
+     int i;
+ 
+@@ -828,6 +829,15 @@ qemuMigrationIsAllowed(struct qemud_driver *driver, virDomainObjPtr vm,
+                                nsnapshots);
+                 return false;
+             }
++
++            /* cancel migration if disk I/O error is emitted while migrating */
++            if (virDomainObjGetState(vm, &pauseReason) == VIR_DOMAIN_PAUSED &&
++                pauseReason == VIR_DOMAIN_PAUSED_IOERROR) {
++                virReportError(VIR_ERR_OPERATION_INVALID, "%s",
++                               _("cannot migrate domain with I/O error"));
++                return false;
++            }
++
+         }
+ 
+         if (virDomainHasDiskMirror(vm)) {
+-- 
+1.8.3.2
+

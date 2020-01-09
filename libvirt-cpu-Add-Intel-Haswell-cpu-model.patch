@@ -1,0 +1,45 @@
+From 39f6de7f59a215de6149222184ab86e323f0098f Mon Sep 17 00:00:00 2001
+Message-Id: <39f6de7f59a215de6149222184ab86e323f0098f.1352118320.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 2 Nov 2012 21:50:34 +0100
+Subject: [PATCH] cpu: Add Intel Haswell cpu model
+
+https://bugzilla.redhat.com/show_bug.cgi?id=843087
+
+Upstream status: pending - waiting for qemu submission first
+
+Based on:
+http://post-office.corp.redhat.com/archives/rhvirt-patches/2012-October/msg00463.html
+---
+ src/cpu/cpu_map.xml | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 4095078..65792af 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -495,6 +495,21 @@
+       <feature name='rdtscp'/>
+     </model>
+ 
++    <model name='Haswell'>
++      <model name='SandyBridge'/>
++      <feature name='fma'/>
++      <feature name='movbe'/>
++      <feature name='fsgsbase'/>
++      <feature name='bmi1'/>
++      <feature name='hle'/>
++      <feature name='avx2'/>
++      <feature name='smep'/>
++      <feature name='bmi2'/>
++      <feature name='erms'/>
++      <feature name='invpcid'/>
++      <feature name='rtm'/>
++    </model>
++
+     <!-- AMD CPUs -->
+     <model name='athlon'>
+       <model name='pentiumpro'/>
+-- 
+1.8.0
+

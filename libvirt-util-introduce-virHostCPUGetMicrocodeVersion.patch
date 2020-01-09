@@ -1,0 +1,107 @@
+From 8d30fd3d2fff52a22977dd22bb88da8ecf972cd7 Mon Sep 17 00:00:00 2001
+Message-Id: <8d30fd3d2fff52a22977dd22bb88da8ecf972cd7@dist-git>
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Tue, 12 Dec 2017 16:23:41 +0100
+Subject: [PATCH] util: introduce virHostCPUGetMicrocodeVersion
+
+This new API reads host's CPU microcode version from /proc/cpuinfo.
+
+Unfortunately, there is no other way of reading microcode version which
+would be usable from both system and session daemon.
+
+CVE-2017-5715
+
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/libvirt_private.syms
+	src/util/virhostcpu.c
+	src/util/virhostcpu.h
+            - virhostcpu.[ch] content is in nodeinfo.[ch] in 6.9
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms |  1 +
+ src/nodeinfo.c           | 43 +++++++++++++++++++++++++++++++++++++++++++
+ src/nodeinfo.h           |  3 +++
+ 3 files changed, 47 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 498d570690..ff7ce38e62 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -944,6 +944,7 @@ nodeGetInfo;
+ nodeGetMemoryParameters;
+ nodeGetMemoryStats;
+ nodeSetMemoryParameters;
++virHostCPUGetMicrocodeVersion;
+ 
+ 
+ # nwfilter_conf.h
+diff --git a/src/nodeinfo.c b/src/nodeinfo.c
+index 26a78dafd4..0c6ad7ad34 100644
+--- a/src/nodeinfo.c
++++ b/src/nodeinfo.c
+@@ -1496,3 +1496,46 @@ unsigned long long nodeGetFreeMemory(virConnectPtr conn ATTRIBUTE_UNUSED)
+     return 0;
+ }
+ #endif
++
++
++#ifdef __linux__
++
++unsigned int
++virHostCPUGetMicrocodeVersion(void)
++{
++    char *outbuf = NULL;
++    char *cur;
++    unsigned int version = 0;
++
++    if (virFileReadHeaderQuiet(CPUINFO_PATH, 4096, &outbuf) < 0) {
++        char ebuf[1024];
++        VIR_DEBUG("Failed to read microcode version from %s: %s",
++                  CPUINFO_PATH, virStrerror(errno, ebuf, sizeof(ebuf)));
++        return 0;
++    }
++
++    /* Account for format 'microcode    : XXXX'*/
++    if (!(cur = strstr(outbuf, "microcode")) ||
++        !(cur = strchr(cur, ':')))
++        goto cleanup;
++    cur++;
++
++    /* Linux places the microcode revision in a 32-bit integer, so
++     * ui is fine for us too.  */
++    if (virStrToLong_ui(cur, &cur, 0, &version) < 0)
++        goto cleanup;
++
++ cleanup:
++    VIR_FREE(outbuf);
++    return version;
++}
++
++#else
++
++unsigned int
++virHostCPUGetMicrocodeVersion(void)
++{
++    return 0;
++}
++
++#endif
+diff --git a/src/nodeinfo.h b/src/nodeinfo.h
+index 2eda8460c8..8997164e94 100644
+--- a/src/nodeinfo.h
++++ b/src/nodeinfo.h
+@@ -59,4 +59,7 @@ int nodeSetMemoryParameters(virConnectPtr conn,
+                             virTypedParameterPtr params,
+                             int nparams,
+                             unsigned int flags);
++
++unsigned int virHostCPUGetMicrocodeVersion(void);
++
+ #endif /* __VIR_NODEINFO_H__*/
+-- 
+2.15.1
+

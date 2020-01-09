@@ -1,0 +1,67 @@
+From 1134ba45a36d7a536281bdb9f7f6415a6afefa12 Mon Sep 17 00:00:00 2001
+Message-Id: <1134ba45a36d7a536281bdb9f7f6415a6afefa12.1377097596.git.jdenemar@redhat.com>
+From: John Ferlan <jferlan@redhat.com>
+Date: Fri, 9 Aug 2013 07:06:34 -0400
+Subject: [PATCH] virnettlscontext: Resolve Coverity warnings (UNINIT)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=975201
+
+Coverity complained about the usage of the uninitialized cacerts in the
+event(s) that "access(certFile, R_OK)" and/or "access(cacertFile, R_OK)"
+fail the for loop used to fill in the certs will have indeterminate data
+as well as the possibility that both failures would result in the
+gnutls_x509_crt_deinit() call having a similar fate.
+
+Initializing cacerts only would resolve the issue; however, it still
+would leave the indeterminate action, so rather add a parameter to
+the virNetTLSContextLoadCACertListFromFile() to pass the max size rather
+then overloading the returned count parameter. If the the call is never
+made, then we won't go through the for loops referencing the empty
+cacerts
+
+(cherry picked from commit f905cc998449c89339d0e2894a71d9a9e45293e5)
+---
+ src/rpc/virnettlscontext.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/rpc/virnettlscontext.c b/src/rpc/virnettlscontext.c
+index 0afc1ce..ec6cbd8 100644
+--- a/src/rpc/virnettlscontext.c
++++ b/src/rpc/virnettlscontext.c
+@@ -543,12 +543,12 @@ cleanup:
+ 
+ static int virNetTLSContextLoadCACertListFromFile(const char *certFile,
+                                                   gnutls_x509_crt_t *certs,
++                                                  unsigned int certMax,
+                                                   size_t *ncerts)
+ {
+     gnutls_datum_t data;
+     char *buf = NULL;
+     int ret = -1;
+-    unsigned int certMax = *ncerts;
+ 
+     *ncerts = 0;
+     VIR_DEBUG("certFile %s", certFile);
+@@ -582,15 +582,17 @@ static int virNetTLSContextSanityCheckCredentials(bool isServer,
+ {
+     gnutls_x509_crt_t cert = NULL;
+     gnutls_x509_crt_t cacerts[MAX_CERTS];
+-    size_t ncacerts = MAX_CERTS;
++    size_t ncacerts = 0;
+     size_t i;
+     int ret = -1;
+ 
++    memset(cacerts, 0, sizeof(cacerts));
+     if ((access(certFile, R_OK) == 0) &&
+         !(cert = virNetTLSContextLoadCertFromFile(certFile, isServer)))
+         goto cleanup;
+     if ((access(cacertFile, R_OK) == 0) &&
+-        virNetTLSContextLoadCACertListFromFile(cacertFile, cacerts, &ncacerts) < 0)
++        virNetTLSContextLoadCACertListFromFile(cacertFile, cacerts,
++                                               MAX_CERTS, &ncacerts) < 0)
+         goto cleanup;
+ 
+     if (cert &&
+-- 
+1.8.3.2
+

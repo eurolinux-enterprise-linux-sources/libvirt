@@ -1,0 +1,348 @@
+From 10464b4c1869c743a4c2f9a87b74d4ca5d32a2e8 Mon Sep 17 00:00:00 2001
+Message-Id: <10464b4c1869c743a4c2f9a87b74d4ca5d32a2e8.1374158623.git.jdenemar@redhat.com>
+From: Chen Fan <chen.fan.fnst@cn.fujitsu.com>
+Date: Tue, 9 Jul 2013 06:51:59 -0600
+Subject: [PATCH] qemu: Implement 'oncrash' events when guest panicked
+
+https://bugzilla.redhat.com/show_bug.cgi?id=822306
+https://bugzilla.redhat.com/show_bug.cgi?id=826315
+
+Add monitor callback API domainGuestPanic, that implements
+'destroy', 'restart' and 'preserve' events of the 'on_crash'
+in the XML when domain crashed.
+(cherry picked from commit 9aa527dccbb65daeea2bdf5036fbf68015e2ea5d)
+
+Conflicts:
+	src/qemu/qemu_driver.c - no backport of 4738c2a7 qemud_driver refactor
+	src/qemu/qemu_process.c - likewise, also no VIR_STRDUP from c3abb5c4
+---
+ src/qemu/qemu_domain.h       |  1 +
+ src/qemu/qemu_driver.c       | 91 ++++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_monitor.c      | 14 ++++++-
+ src/qemu/qemu_monitor.h      |  4 ++
+ src/qemu/qemu_monitor_json.c |  7 ++++
+ src/qemu/qemu_process.c      | 45 +++++++++++++++++++++-
+ 6 files changed, 160 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 64a938a..7e0e27c 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -164,6 +164,7 @@ struct _qemuDomainObjPrivate {
+ 
+ typedef enum {
+     QEMU_PROCESS_EVENT_WATCHDOG = 0,
++    QEMU_PROCESS_EVENT_GUESTPANIC,
+ 
+     QEMU_PROCESS_EVENT_LAST
+ } qemuProcessEventType;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 4707892..34efd1d 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -138,6 +138,10 @@ static void processWatchdogEvent(struct qemud_driver *driver,
+                                  virDomainObjPtr vm,
+                                  int action);
+ 
++static void processGuestPanicEvent(struct qemud_driver *driver,
++                                   virDomainObjPtr vm,
++                                   int action);
++
+ static void qemuProcessEventHandler(void *data, void *opaque);
+ 
+ static int qemudShutdown(void);
+@@ -3712,12 +3716,96 @@ cleanup:
+     ;
+ }
+ 
++static void
++processGuestPanicEvent(struct qemud_driver *driver,
++                       virDomainObjPtr vm,
++                       int action)
++{
++    qemuDomainObjPrivatePtr priv = vm->privateData;
++    virDomainEventPtr event = NULL;
++
++    if (!virDomainObjIsActive(vm)) {
++        VIR_DEBUG("Ignoring GUEST_PANICKED event from inactive domain %s",
++                  vm->def->name);
++        goto cleanup;
++    }
++
++    virDomainObjSetState(vm,
++                         VIR_DOMAIN_CRASHED,
++                         VIR_DOMAIN_CRASHED_PANICKED);
++
++    event = virDomainEventNewFromObj(vm,
++                                     VIR_DOMAIN_EVENT_CRASHED,
++                                     VIR_DOMAIN_EVENT_CRASHED_PANICKED);
++
++    if (event)
++        qemuDomainEventQueue(driver, event);
++
++    if (virDomainLockProcessPause(driver->lockManager, vm, &priv->lockState) < 0)
++        VIR_WARN("Unable to release lease on %s", vm->def->name);
++    VIR_DEBUG("Preserving lock state '%s'", NULLSTR(priv->lockState));
++
++    if (virDomainSaveStatus(driver->caps, driver->stateDir, vm) < 0) {
++        VIR_WARN("Unable to save status on vm %s after state change",
++                 vm->def->name);
++     }
++
++    switch (action) {
++    case VIR_DOMAIN_LIFECYCLE_CRASH_DESTROY:
++        priv->beingDestroyed = true;
++
++        if (qemuProcessKill(driver, vm, VIR_QEMU_PROCESS_KILL_FORCE) < 0) {
++            priv->beingDestroyed = false;
++            goto cleanup;
++        }
++
++        priv->beingDestroyed = false;
++
++        if (!virDomainObjIsActive(vm)) {
++            virReportError(VIR_ERR_OPERATION_INVALID,
++                           "%s", _("domain is not running"));
++            goto cleanup;
++        }
++
++        qemuProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_CRASHED, 0);
++        event = virDomainEventNewFromObj(vm,
++                                         VIR_DOMAIN_EVENT_STOPPED,
++                                         VIR_DOMAIN_EVENT_STOPPED_CRASHED);
++
++        if (event)
++            qemuDomainEventQueue(driver, event);
++
++        virDomainAuditStop(vm, "destroyed");
++
++        if (!vm->persistent) {
++            qemuDomainRemoveInactive(driver, vm);
++        }
++        break;
++
++    case VIR_DOMAIN_LIFECYCLE_CRASH_RESTART:
++        qemuDomainSetFakeReboot(driver, vm, true);
++        qemuProcessShutdownOrReboot(driver, vm);
++        break;
++
++    case VIR_DOMAIN_LIFECYCLE_CRASH_PRESERVE:
++        break;
++
++    default:
++        break;
++    }
++
++cleanup:
++    ;
++}
++
+ static void qemuProcessEventHandler(void *data, void *opaque)
+ {
+     struct qemuProcessEvent *processEvent = data;
+     virDomainObjPtr vm = processEvent->vm;
+     struct qemud_driver *driver = opaque;
+ 
++    VIR_DEBUG("vm=%p", vm);
++
+     qemuDriverLock(driver);
+     virDomainObjLock(vm);
+ 
+@@ -3725,6 +3813,9 @@ static void qemuProcessEventHandler(void *data, void *opaque)
+     case QEMU_PROCESS_EVENT_WATCHDOG:
+         processWatchdogEvent(driver, vm, processEvent->action);
+         break;
++    case QEMU_PROCESS_EVENT_GUESTPANIC:
++        processGuestPanicEvent(driver, vm, processEvent->action);
++        break;
+     default:
+        break;
+     }
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 2836ad9..e7452e9 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -104,7 +104,7 @@ VIR_ENUM_IMPL(qemuMonitorVMStatus,
+               QEMU_MONITOR_VM_STATUS_LAST,
+               "debug", "inmigrate", "internal-error", "io-error", "paused",
+               "postmigrate", "prelaunch", "finish-migrate", "restore-vm",
+-              "running", "save-vm", "shutdown", "watchdog")
++              "running", "save-vm", "shutdown", "watchdog", "guest-panic")
+ 
+ typedef enum {
+     QEMU_MONITOR_BLOCK_IO_STATUS_OK,
+@@ -1031,6 +1031,15 @@ int qemuMonitorEmitResume(qemuMonitorPtr mon)
+ }
+ 
+ 
++int qemuMonitorEmitGuestPanic(qemuMonitorPtr mon)
++{
++    int ret = -1;
++    VIR_DEBUG("mon=%p", mon);
++    QEMU_MONITOR_CALLBACK(mon, ret, domainGuestPanic, mon->vm);
++    return ret;
++}
++
++
+ int qemuMonitorEmitRTCChange(qemuMonitorPtr mon, long long offset)
+ {
+     int ret = -1;
+@@ -3101,6 +3110,9 @@ int qemuMonitorVMStatusToPausedReason(const char *status)
+     case QEMU_MONITOR_VM_STATUS_WATCHDOG:
+         return VIR_DOMAIN_PAUSED_WATCHDOG;
+ 
++    case QEMU_MONITOR_VM_STATUS_GUEST_PANICKED:
++        return VIR_DOMAIN_PAUSED_GUEST_PANICKED;
++
+     /* unreachable from this point on */
+     case QEMU_MONITOR_VM_STATUS_LAST:
+         ;
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 3e29e6d..ced6b03 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -140,6 +140,8 @@ struct _qemuMonitorCallbacks {
+                                unsigned long long actual);
+     int (*domainPMSuspendDisk)(qemuMonitorPtr mon,
+                                virDomainObjPtr vm);
++    int (*domainGuestPanic)(qemuMonitorPtr mon,
++                            virDomainObjPtr vm);
+ };
+ 
+ char *qemuMonitorEscapeArg(const char *in);
+@@ -219,6 +221,7 @@ int qemuMonitorEmitBlockJob(qemuMonitorPtr mon,
+ int qemuMonitorEmitBalloonChange(qemuMonitorPtr mon,
+                                  unsigned long long actual);
+ int qemuMonitorEmitPMSuspendDisk(qemuMonitorPtr mon);
++int qemuMonitorEmitGuestPanic(qemuMonitorPtr mon);
+ 
+ int qemuMonitorStartCPUs(qemuMonitorPtr mon,
+                          virConnectPtr conn);
+@@ -238,6 +241,7 @@ typedef enum {
+     QEMU_MONITOR_VM_STATUS_SAVE_VM,
+     QEMU_MONITOR_VM_STATUS_SHUTDOWN,
+     QEMU_MONITOR_VM_STATUS_WATCHDOG,
++    QEMU_MONITOR_VM_STATUS_GUEST_PANICKED,
+ 
+     QEMU_MONITOR_VM_STATUS_LAST
+ } qemuMonitorVMStatus;
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index d395f44..a147b1a 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -73,6 +73,7 @@ static void qemuMonitorJSONHandleBlockJobCanceled(qemuMonitorPtr mon, virJSONVal
+ static void qemuMonitorJSONHandleBlockJobReady(qemuMonitorPtr mon, virJSONValuePtr data);
+ static void qemuMonitorJSONHandleBalloonChange(qemuMonitorPtr mon, virJSONValuePtr data);
+ static void qemuMonitorJSONHandlePMSuspendDisk(qemuMonitorPtr mon, virJSONValuePtr data);
++static void qemuMonitorJSONHandleGuestPanic(qemuMonitorPtr mon, virJSONValuePtr data);
+ 
+ typedef struct {
+     const char *type;
+@@ -86,6 +87,7 @@ static qemuEventHandler eventHandlers[] = {
+     { "BLOCK_JOB_COMPLETED", qemuMonitorJSONHandleBlockJobCompleted, },
+     { "BLOCK_JOB_READY", qemuMonitorJSONHandleBlockJobReady, },
+     { "DEVICE_TRAY_MOVED", qemuMonitorJSONHandleTrayChange, },
++    { "GUEST_PANICKED", qemuMonitorJSONHandleGuestPanic, },
+     { "POWERDOWN", qemuMonitorJSONHandlePowerdown, },
+     { "RESET", qemuMonitorJSONHandleReset, },
+     { "RESUME", qemuMonitorJSONHandleResume, },
+@@ -598,6 +600,11 @@ static void qemuMonitorJSONHandleResume(qemuMonitorPtr mon, virJSONValuePtr data
+     qemuMonitorEmitResume(mon);
+ }
+ 
++static void qemuMonitorJSONHandleGuestPanic(qemuMonitorPtr mon, virJSONValuePtr data ATTRIBUTE_UNUSED)
++{
++    qemuMonitorEmitGuestPanic(mon);
++}
++
+ static void qemuMonitorJSONHandleRTCChange(qemuMonitorPtr mon, virJSONValuePtr data)
+ {
+     long long offset = 0;
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 6b42bb6..b717e6e 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -558,6 +558,7 @@ qemuProcessFakeReboot(void *opaque)
+     virDomainObjPtr vm = opaque;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     virDomainEventPtr event = NULL;
++    virDomainRunningReason reason = VIR_DOMAIN_RUNNING_BOOTED;
+     int ret = -1;
+     VIR_DEBUG("vm=%p", vm);
+     qemuDriverLock(driver);
+@@ -584,8 +585,11 @@ qemuProcessFakeReboot(void *opaque)
+         goto endjob;
+     }
+ 
++    if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_CRASHED)
++        reason = VIR_DOMAIN_RUNNING_CRASHED;
++
+     if (qemuProcessStartCPUs(driver, vm, NULL,
+-                             VIR_DOMAIN_RUNNING_BOOTED,
++                             reason,
+                              QEMU_ASYNC_JOB_NONE) < 0) {
+         if (virGetLastError() == NULL)
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+@@ -1310,6 +1314,40 @@ qemuProcessHandlePMSuspendDisk(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+ }
+ 
+ 
++static int
++qemuProcessHandleGuestPanic(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
++                            virDomainObjPtr vm)
++{
++    struct qemud_driver *driver = qemu_driver;
++    struct qemuProcessEvent *processEvent;
++
++    virDomainObjLock(vm);
++    if (VIR_ALLOC(processEvent) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    processEvent->eventType = QEMU_PROCESS_EVENT_GUESTPANIC;
++    processEvent->action = vm->def->onCrash;
++    processEvent->vm = vm;
++    /* Hold an extra reference because we can't allow 'vm' to be
++     * deleted before handling guest panic event is finished.
++     */
++    virObjectRef(vm);
++    if (virThreadPoolSendJob(driver->workerPool, 0, processEvent) < 0) {
++        if (!virObjectUnref(vm))
++            vm = NULL;
++        VIR_FREE(processEvent);
++    }
++
++cleanup:
++    if (vm)
++       virDomainObjUnlock(vm);
++
++    return 0;
++}
++
++
+ static qemuMonitorCallbacks monitorCallbacks = {
+     .destroy = qemuProcessHandleMonitorDestroy,
+     .eofNotify = qemuProcessHandleMonitorEOF,
+@@ -1329,6 +1367,7 @@ static qemuMonitorCallbacks monitorCallbacks = {
+     .domainPMSuspend = qemuProcessHandlePMSuspend,
+     .domainBalloonChange = qemuProcessHandleBalloonChange,
+     .domainPMSuspendDisk = qemuProcessHandlePMSuspendDisk,
++    .domainGuestPanic = qemuProcessHandleGuestPanic,
+ };
+ 
+ static int
+@@ -2940,6 +2979,10 @@ qemuProcessUpdateState(struct qemud_driver *driver, virDomainObjPtr vm)
+             newState = VIR_DOMAIN_SHUTDOWN;
+             newReason = VIR_DOMAIN_SHUTDOWN_UNKNOWN;
+             msg = strdup("shutdown");
++        } else if (reason == VIR_DOMAIN_PAUSED_GUEST_PANICKED) {
++            newState = VIR_DOMAIN_CRASHED;
++            newReason = VIR_DOMAIN_CRASHED_PANICKED;
++            msg = strdup("crashed");
+         } else {
+             newState = VIR_DOMAIN_PAUSED;
+             newReason = reason;
+-- 
+1.8.3.2
+

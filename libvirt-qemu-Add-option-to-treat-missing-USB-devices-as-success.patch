@@ -1,0 +1,411 @@
+From f64740ea7e28f384cb7d7b4f744ec58ac61e8d86 Mon Sep 17 00:00:00 2001
+Message-Id: <f64740ea7e28f384cb7d7b4f744ec58ac61e8d86.1350297258.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 3 Oct 2012 16:57:28 +0200
+Subject: [PATCH] qemu: Add option to treat missing USB devices as success
+
+https://bugzilla.redhat.com/show_bug.cgi?id=843560
+
+All USB device lookup functions emit an error when they cannot find the
+requested device. With this patch, their caller can choose if a missing
+device is an error or normal condition.
+(cherry picked from commit 059aff6b9860b18634709bc76d64ea78f7e609db)
+---
+ src/conf/domain_conf.h          |  1 +
+ src/qemu/qemu_hostdev.c         | 57 ++++++++++++++++----------
+ src/qemu/qemu_hostdev.h         |  4 +-
+ src/qemu/qemu_hotplug.c         |  2 +-
+ src/security/security_dac.c     | 16 ++++++--
+ src/security/security_selinux.c | 16 ++++++--
+ src/util/hostusb.c              | 91 ++++++++++++++++++++++++++++++-----------
+ src/util/hostusb.h              | 22 ++++++----
+ 8 files changed, 145 insertions(+), 64 deletions(-)
+
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 1751642..c1c1e6d 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -386,6 +386,7 @@ struct _virDomainHostdevDef {
+     int mode; /* enum virDomainHostdevMode */
+     int startupPolicy; /* enum virDomainStartupPolicy */
+     unsigned int managed : 1;
++    unsigned int missing : 1;
+     union {
+         virDomainHostdevSubsys subsys;
+         struct {
+diff --git a/src/qemu/qemu_hostdev.c b/src/qemu/qemu_hostdev.c
+index 017f0ec..32c858b 100644
+--- a/src/qemu/qemu_hostdev.c
++++ b/src/qemu/qemu_hostdev.c
+@@ -641,42 +641,57 @@ error:
+     return -1;
+ }
+ 
+-usbDevice *
+-qemuFindHostdevUSBDevice(virDomainHostdevDefPtr hostdev)
++int
++qemuFindHostdevUSBDevice(virDomainHostdevDefPtr hostdev,
++                         bool mandatory,
++                         usbDevice **usb)
+ {
+-    usbDevice *usb = NULL;
+     unsigned vendor = hostdev->source.subsys.u.usb.vendor;
+     unsigned product = hostdev->source.subsys.u.usb.product;
+     unsigned bus = hostdev->source.subsys.u.usb.bus;
+     unsigned device = hostdev->source.subsys.u.usb.device;
++    int rc;
+ 
+-    if (vendor && bus) {
+-        usb = usbFindDevice(vendor, product, bus, device);
++    *usb = NULL;
+ 
++    if (vendor && bus) {
++        rc = usbFindDevice(vendor, product, bus, device, mandatory, usb);
++        if (rc < 0)
++            return -1;
+     } else if (vendor && !bus) {
+-        usbDeviceList *devs = usbFindDeviceByVendor(vendor, product);
+-        if (!devs)
+-            return NULL;
++        usbDeviceList *devs;
+ 
+-        if (usbDeviceListCount(devs) > 1) {
+-            virReportError(VIR_ERR_OPERATION_FAILED,
+-                           _("multiple USB devices for %x:%x, "
+-                             "use <address> to specify one"), vendor, product);
+-            usbDeviceListFree(devs);
+-            return NULL;
++        rc = usbFindDeviceByVendor(vendor, product, mandatory, &devs);
++        if (rc < 0)
++            return -1;
++
++        if (rc == 1) {
++            *usb = usbDeviceListGet(devs, 0);
++            usbDeviceListSteal(devs, *usb);
+         }
+-        usb = usbDeviceListGet(devs, 0);
+-        usbDeviceListSteal(devs, usb);
+         usbDeviceListFree(devs);
+ 
+-        hostdev->source.subsys.u.usb.bus = usbDeviceGetBus(usb);
+-        hostdev->source.subsys.u.usb.device = usbDeviceGetDevno(usb);
++        if (rc == 0) {
++            goto out;
++        } else if (rc > 1) {
++            virReportError(VIR_ERR_OPERATION_FAILED,
++                           _("multiple USB devices for %x:%x, "
++                             "use <address> to specify one"),
++                           vendor, product);
++            return -1;
++        }
+ 
++        hostdev->source.subsys.u.usb.bus = usbDeviceGetBus(*usb);
++        hostdev->source.subsys.u.usb.device = usbDeviceGetDevno(*usb);
+     } else if (!vendor && bus) {
+-        usb = usbFindDeviceByBus(bus, device);
++        if (usbFindDeviceByBus(bus, device, mandatory, usb) < 0)
++            return -1;
+     }
+ 
+-    return usb;
++out:
++    if (!*usb)
++        hostdev->missing = 1;
++    return 0;
+ }
+ 
+ static int
+@@ -708,7 +723,7 @@ qemuPrepareHostUSBDevices(struct qemud_driver *driver,
+         if (hostdev->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB)
+             continue;
+ 
+-        if (!(usb = qemuFindHostdevUSBDevice(hostdev)))
++        if (qemuFindHostdevUSBDevice(hostdev, true, &usb) < 0)
+             goto cleanup;
+ 
+         if (usbDeviceListAdd(list, usb) < 0) {
+diff --git a/src/qemu/qemu_hostdev.h b/src/qemu/qemu_hostdev.h
+index 204b2d4..74dd2ce 100644
+--- a/src/qemu/qemu_hostdev.h
++++ b/src/qemu/qemu_hostdev.h
+@@ -36,7 +36,9 @@ int qemuPrepareHostdevPCIDevices(struct qemud_driver *driver,
+                                  const unsigned char *uuid,
+                                  virDomainHostdevDefPtr *hostdevs,
+                                  int nhostdevs);
+-usbDevice *qemuFindHostdevUSBDevice(virDomainHostdevDefPtr hostdev);
++int qemuFindHostdevUSBDevice(virDomainHostdevDefPtr hostdev,
++                             bool mandatory,
++                             usbDevice **usb);
+ int qemuPrepareHostdevUSBDevices(struct qemud_driver *driver,
+                                  const char *name,
+                                  usbDeviceList *list);
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 2671764..965eeb4 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1153,7 +1153,7 @@ int qemuDomainAttachHostDevice(struct qemud_driver *driver,
+         goto cleanup;
+ 
+     if (hostdev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB) {
+-        if (!(usb = qemuFindHostdevUSBDevice(hostdev)))
++        if (qemuFindHostdevUSBDevice(hostdev, true, &usb) < 0)
+             goto cleanup;
+ 
+         if (usbDeviceListAdd(list, usb) < 0) {
+diff --git a/src/security/security_dac.c b/src/security/security_dac.c
+index 0fa66ce..5cffe93 100644
+--- a/src/security/security_dac.c
++++ b/src/security/security_dac.c
+@@ -480,9 +480,13 @@ virSecurityDACSetSecurityHostdevLabel(virSecurityManagerPtr mgr,
+ 
+     switch (dev->source.subsys.type) {
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB: {
+-        usbDevice *usb = usbGetDevice(dev->source.subsys.u.usb.bus,
+-                                      dev->source.subsys.u.usb.device);
++        usbDevice *usb;
+ 
++        if (dev->missing)
++            return 0;
++
++        usb = usbGetDevice(dev->source.subsys.u.usb.bus,
++                           dev->source.subsys.u.usb.device);
+         if (!usb)
+             goto done;
+ 
+@@ -553,9 +557,13 @@ virSecurityDACRestoreSecurityHostdevLabel(virSecurityManagerPtr mgr,
+ 
+     switch (dev->source.subsys.type) {
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB: {
+-        usbDevice *usb = usbGetDevice(dev->source.subsys.u.usb.bus,
+-                                      dev->source.subsys.u.usb.device);
++        usbDevice *usb;
++
++        if (dev->missing)
++            return 0;
+ 
++        usb = usbGetDevice(dev->source.subsys.u.usb.bus,
++                           dev->source.subsys.u.usb.device);
+         if (!usb)
+             goto done;
+ 
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index 883a82b..d55c60d 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -1101,9 +1101,13 @@ virSecuritySELinuxSetSecurityHostdevLabel(virSecurityManagerPtr mgr ATTRIBUTE_UN
+ 
+     switch (dev->source.subsys.type) {
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB: {
+-        usbDevice *usb = usbGetDevice(dev->source.subsys.u.usb.bus,
+-                                      dev->source.subsys.u.usb.device);
++        usbDevice *usb;
+ 
++        if (dev->missing)
++            return 0;
++
++        usb = usbGetDevice(dev->source.subsys.u.usb.bus,
++                           dev->source.subsys.u.usb.device);
+         if (!usb)
+             goto done;
+ 
+@@ -1174,9 +1178,13 @@ virSecuritySELinuxRestoreSecurityHostdevLabel(virSecurityManagerPtr mgr ATTRIBUT
+ 
+     switch (dev->source.subsys.type) {
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB: {
+-        usbDevice *usb = usbGetDevice(dev->source.subsys.u.usb.bus,
+-                                      dev->source.subsys.u.usb.device);
++        usbDevice *usb;
++
++        if (dev->missing)
++            return 0;
+ 
++        usb = usbGetDevice(dev->source.subsys.u.usb.bus,
++                           dev->source.subsys.u.usb.device);
+         if (!usb)
+             goto done;
+ 
+diff --git a/src/util/hostusb.c b/src/util/hostusb.c
+index f0196a8..81a9f5a 100644
+--- a/src/util/hostusb.c
++++ b/src/util/hostusb.c
+@@ -186,76 +186,117 @@ cleanup:
+     return ret;
+ }
+ 
+-usbDeviceList *
+-usbFindDeviceByVendor(unsigned int vendor, unsigned product)
++int
++usbFindDeviceByVendor(unsigned int vendor,
++                      unsigned product,
++                      bool mandatory,
++                      usbDeviceList **devices)
+ {
+-
+     usbDeviceList *list;
++    int count;
++
+     if (!(list = usbDeviceSearch(vendor, product, 0 , 0,
+                                  USB_DEVICE_FIND_BY_VENDOR)))
+-        return NULL;
++        return -1;
+ 
+     if (list->count == 0) {
++        usbDeviceListFree(list);
++        if (!mandatory) {
++            VIR_DEBUG("Did not find USB device %x:%x",
++                      vendor, product);
++            if (devices)
++                *devices = NULL;
++            return 0;
++        }
++
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("Did not find USB device %x:%x"), vendor, product);
+-        usbDeviceListFree(list);
+-        return NULL;
++        return -1;
+     }
+ 
+-    return list;
++    count = list->count;
++    if (devices)
++        *devices = list;
++    else
++        usbDeviceListFree(list);
++
++    return count;
+ }
+ 
+-usbDevice *
+-usbFindDeviceByBus(unsigned int bus, unsigned devno)
++int
++usbFindDeviceByBus(unsigned int bus,
++                   unsigned devno,
++                   bool mandatory,
++                   usbDevice **usb)
+ {
+-    usbDevice *usb;
+     usbDeviceList *list;
+ 
+     if (!(list = usbDeviceSearch(0, 0, bus, devno,
+                                  USB_DEVICE_FIND_BY_BUS)))
+-        return NULL;
++        return -1;
+ 
+     if (list->count == 0) {
++        usbDeviceListFree(list);
++        if (!mandatory) {
++            VIR_DEBUG("Did not find USB device bus:%u device:%u",
++                      bus, devno);
++            if (usb)
++                *usb = NULL;
++            return 0;
++        }
++
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("Did not find USB device bus:%u device:%u"),
+                        bus, devno);
+-        usbDeviceListFree(list);
+-        return NULL;
++        return -1;
+     }
+ 
+-    usb = usbDeviceListGet(list, 0);
+-    usbDeviceListSteal(list, usb);
++    if (usb) {
++        *usb = usbDeviceListGet(list, 0);
++        usbDeviceListSteal(list, *usb);
++    }
+     usbDeviceListFree(list);
+ 
+-    return usb;
++    return 0;
+ }
+ 
+-usbDevice *
++int
+ usbFindDevice(unsigned int vendor,
+               unsigned int product,
+               unsigned int bus,
+-              unsigned int devno)
++              unsigned int devno,
++              bool mandatory,
++              usbDevice **usb)
+ {
+-    usbDevice *usb;
+     usbDeviceList *list;
+ 
+     unsigned int flags = USB_DEVICE_FIND_BY_VENDOR|USB_DEVICE_FIND_BY_BUS;
+     if (!(list = usbDeviceSearch(vendor, product, bus, devno, flags)))
+-        return NULL;
++        return -1;
+ 
+     if (list->count == 0) {
++        usbDeviceListFree(list);
++        if (!mandatory) {
++            VIR_DEBUG("Did not find USB device %x:%x bus:%u device:%u",
++                      vendor, product, bus, devno);
++            if (usb)
++                *usb = NULL;
++            return 0;
++        }
++
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("Did not find USB device %x:%x bus:%u device:%u"),
+                        vendor, product, bus, devno);
+-        usbDeviceListFree(list);
+-        return NULL;
++        return -1;
+     }
+ 
+-    usb = usbDeviceListGet(list, 0);
+-    usbDeviceListSteal(list, usb);
++    if (usb) {
++        *usb = usbDeviceListGet(list, 0);
++        usbDeviceListSteal(list, *usb);
++    }
+     usbDeviceListFree(list);
+ 
+-    return usb;
++    return 0;
+ }
+ 
+ usbDevice *
+diff --git a/src/util/hostusb.h b/src/util/hostusb.h
+index 6f5067c..4f55fdc 100644
+--- a/src/util/hostusb.h
++++ b/src/util/hostusb.h
+@@ -31,16 +31,22 @@ typedef struct _usbDeviceList usbDeviceList;
+ usbDevice *usbGetDevice(unsigned int bus,
+                         unsigned int devno);
+ 
+-usbDevice *usbFindDeviceByBus(unsigned int bus,
+-                              unsigned int devno);
++int usbFindDeviceByBus(unsigned int bus,
++                       unsigned int devno,
++                       bool mandatory,
++                       usbDevice **usb);
+ 
+-usbDeviceList *usbFindDeviceByVendor(unsigned int vendor,
+-                                     unsigned int product);
++int usbFindDeviceByVendor(unsigned int vendor,
++                          unsigned int product,
++                          bool mandatory,
++                          usbDeviceList **devices);
+ 
+-usbDevice *usbFindDevice(unsigned int vendor,
+-                         unsigned int product,
+-                         unsigned int bus,
+-                         unsigned int devno);
++int usbFindDevice(unsigned int vendor,
++                  unsigned int product,
++                  unsigned int bus,
++                  unsigned int devno,
++                  bool mandatory,
++                  usbDevice **usb);
+ 
+ void       usbFreeDevice (usbDevice *dev);
+ void       usbDeviceSetUsedBy(usbDevice *dev, const char *name);
+-- 
+1.7.12.3
+

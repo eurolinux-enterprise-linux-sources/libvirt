@@ -1,0 +1,62 @@
+From 91245ab88e6585fbdc998c20258851314e135ab4 Mon Sep 17 00:00:00 2001
+Message-Id: <91245ab88e6585fbdc998c20258851314e135ab4@dist-git>
+From: Alex Jia <ajia@redhat.com>
+Date: Wed, 11 Sep 2013 11:47:14 +0800
+Subject: [PATCH] tools: add missing 'interface' type and update man page
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1006699
+
+Signed-off-by: Alex Jia <ajia@redhat.com>
+(cherry picked from commit 4583ccbcf72d5cfb3f078d208c3efbf9aab0d799)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virt-xml-validate.in | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/tools/virt-xml-validate.in b/tools/virt-xml-validate.in
+index 36bc6f2..1b61850 100644
+--- a/tools/virt-xml-validate.in
++++ b/tools/virt-xml-validate.in
+@@ -60,6 +60,9 @@ if [ -z "$TYPE" ]; then
+      *secret*)
+         TYPE="secret"
+         ;;
++     *interface*)
++        TYPE="interface"
++        ;;
+      *)
+        echo "$0: cannot determine schema type for $XMLFILE"
+        exit 3
+@@ -100,6 +103,10 @@ Valid schema names currently include
+ 
+ =over 4
+ 
++=item C<domainsnapshot>
++
++The schema for the XML format used by domain snapshot configuration
++
+ =item C<domain>
+ 
+ The schema for the XML format used by guest domains configuration
+@@ -124,6 +131,18 @@ The schema for the XML format used by node device descriptions
+ 
+ The schema for the XML format used to declare driver capabilities
+ 
++=item C<nwfilter>
++
++The schema for the XML format used by network traffic filters
++
++=item C<secret>
++
++The schema for the XML format used by secrets descriptions
++
++=item C<interface>
++
++The schema for the XML format used by physical host interfaces
++
+ =back
+ 
+ =head1 EXIT STATUS
+-- 
+1.9.2
+

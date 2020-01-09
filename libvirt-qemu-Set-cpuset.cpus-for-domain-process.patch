@@ -1,0 +1,149 @@
+From 298eb3db0a033777bd5091ff21bea72d5e1839cc Mon Sep 17 00:00:00 2001
+Message-Id: <298eb3db0a033777bd5091ff21bea72d5e1839cc@dist-git>
+From: Osier Yang <jyang@redhat.com>
+Date: Fri, 25 Apr 2014 13:53:23 -0400
+Subject: [PATCH] qemu: Set cpuset.cpus for domain process
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1012846
+
+When either "cpuset" of <vcpu> is specified, or the "placement" of
+<vcpu> is "auto", only setting the cpuset.mems might cause the guest
+starting to fail. E.g. ("placement" of both <vcpu> and <numatune> is
+"auto"):
+
+1) Related XMLs
+  <vcpu placement='auto'>4</vcpu>
+  <numatune>
+    <memory mode='strict' placement='auto'/>
+  </numatune>
+
+2) Host NUMA topology
+  % numactl --hardware
+  available: 8 nodes (0-7)
+  node 0 cpus: 0 4 8 12 16 20 24 28
+  node 0 size: 16374 MB
+  node 0 free: 11899 MB
+  node 1 cpus: 32 36 40 44 48 52 56 60
+  node 1 size: 16384 MB
+  node 1 free: 15318 MB
+  node 2 cpus: 2 6 10 14 18 22 26 30
+  node 2 size: 16384 MB
+  node 2 free: 15766 MB
+  node 3 cpus: 34 38 42 46 50 54 58 62
+  node 3 size: 16384 MB
+  node 3 free: 15347 MB
+  node 4 cpus: 3 7 11 15 19 23 27 31
+  node 4 size: 16384 MB
+  node 4 free: 15041 MB
+  node 5 cpus: 35 39 43 47 51 55 59 63
+  node 5 size: 16384 MB
+  node 5 free: 15202 MB
+  node 6 cpus: 1 5 9 13 17 21 25 29
+  node 6 size: 16384 MB
+  node 6 free: 15197 MB
+  node 7 cpus: 33 37 41 45 49 53 57 61
+  node 7 size: 16368 MB
+  node 7 free: 15669 MB
+
+4) cpuset.cpus will be set as: (from debug log)
+
+2013-05-09 16:50:17.296+0000: 417: debug : virCgroupSetValueStr:331 :
+Set value '/sys/fs/cgroup/cpuset/libvirt/qemu/toy/cpuset.cpus'
+to '0-63'
+
+5) The advisory nodeset got from querying numad (from debug log)
+
+2013-05-09 16:50:17.295+0000: 417: debug : qemuProcessStart:3614 :
+Nodeset returned from numad: 1
+
+6) cpuset.mems will be set as: (from debug log)
+
+2013-05-09 16:50:17.296+0000: 417: debug : virCgroupSetValueStr:331 :
+Set value '/sys/fs/cgroup/cpuset/libvirt/qemu/toy/cpuset.mems'
+to '0-7'
+
+I.E, the domain process's memory is restricted on the first NUMA node,
+however, it can use all of the CPUs, which will likely cause the domain
+process to fail to start because of the kernel fails to allocate
+memory with the the memory policy as "strict".
+
+% tail -n 20 /var/log/libvirt/qemu/toy.log
+...
+2013-05-09 05:53:32.972+0000: 7318: debug : virCommandHandshakeChild:377 :
+Handshake with parent is done
+char device redirected to /dev/pts/2 (label charserial0)
+kvm_init_vcpu failed: Cannot allocate memory
+...
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit a39f69d2bb5494d661be917956baa437d01a4d13)
+
+Conflicts:
+	src/qemu/qemu_cgroup.c
+
+* Inline the new code into qemuSetupCgroup() rather than as a separate
+  set of code in the upstream changed qemuSetupCpusetCgroup() API
+* Since commit id '020a0307' (stop accessing driver->caps directly in
+  QEMU driver) is not present, rather than call virQEMUDriverGetCapabilities()
+  like would be done for '020a0307' in other modules, just access caps
+  directly from the driver pointer.
+* I did not change the 'mask' name for memory, although I did use 'cpu_mask'
+  for the CPU code.  Having to 'inline' the VIR_FREE(cpu_mask) rather than
+  place it in cleanup.
+* Since commit id '632f78ca' (Store a virCgroupPtr instance in
+  qemuDomainObjPrivatePtr) is not present - access the cgroup directly
+  from the driver pointer.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_cgroup.c | 33 +++++++++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 498ac0f..44d4351 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -431,6 +431,39 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+             goto cleanup;
+         }
+     }
++
++    if (vm->def->cpumask ||
++        (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO)) {
++        char *cpu_mask = NULL;
++
++
++        if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO) {
++            virBitmapPtr cpumap;
++
++            cpumap = virCapabilitiesGetCpusForNodemask(driver->caps, nodemask);
++            if (!cpumap)
++                goto cleanup;
++            cpu_mask = virBitmapFormat(cpumap);
++            virBitmapFree(cpumap);
++        } else {
++            cpu_mask = virBitmapFormat(vm->def->cpumask);
++        }
++
++        if (!cpu_mask) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("failed to convert cpu mask"));
++            goto cleanup;
++        }
++
++        rc = virCgroupSetCpusetCpus(driver->cgroup, cpu_mask);
++        VIR_FREE(cpu_mask);
++        if (rc != 0) {
++            virReportSystemError(-rc,
++                                 _("Unable to set cpuset.cpus for domain %s"),
++                                 vm->def->name);
++            goto cleanup;
++        }
++    }
+ done:
+     virCgroupFree(&cgroup);
+ 
+-- 
+1.9.2
+

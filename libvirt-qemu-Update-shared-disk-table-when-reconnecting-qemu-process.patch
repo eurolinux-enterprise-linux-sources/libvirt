@@ -1,0 +1,50 @@
+From 3eff60cce3d91d1f86cedb72cfeb38c6c3d429a4 Mon Sep 17 00:00:00 2001
+Message-Id: <3eff60cce3d91d1f86cedb72cfeb38c6c3d429a4.1373271638.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 11 Mar 2013 15:26:06 +0800
+Subject: [PATCH] qemu: Update shared disk table when reconnecting qemu process
+
+https://bugzilla.redhat.com/show_bug.cgi?id=908073
+(cherry picked from commit d0e4b762042e8f71c24ee93312ee3a131dcd0335)
+
+Conflicts:
+  * Conflicts with commit b090aa7d5 (Introduce a virQEMUDriverConfigPtr
+    object) and other commits on top of it (Daniel's patch set to remove
+    the big qemu lock).
+
+	src/qemu/qemu_process.c
+---
+ src/qemu/qemu_process.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index f479d2a..d3a40ee 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3204,6 +3204,7 @@ qemuProcessReconnect(void *opaque)
+     struct qemuDomainJobObj oldjob;
+     int state;
+     int reason;
++    size_t i;
+ 
+     memcpy(&oldjob, &data->oldjob, sizeof(oldjob));
+ 
+@@ -3243,6 +3244,15 @@ qemuProcessReconnect(void *opaque)
+     if (qemuUpdateActiveUsbHostdevs(driver, obj->def) < 0)
+         goto error;
+ 
++    /* XXX: Need to change as long as lock is introduced for
++     * qemu_driver->sharedDisks.
++     */
++    for (i = 0; i < obj->def->ndisks; i++) {
++        if (qemuAddSharedDisk(driver->sharedDisks, obj->def->disks[i],
++                              obj->def->name) < 0)
++            goto error;
++    }
++
+     if (qemuProcessUpdateState(driver, obj) < 0)
+         goto error;
+ 
+-- 
+1.8.2.1
+

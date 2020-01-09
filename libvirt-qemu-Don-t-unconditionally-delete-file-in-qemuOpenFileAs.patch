@@ -1,0 +1,65 @@
+From b2cd135965a0bb76570a1115d62e63a7f5e4fb01 Mon Sep 17 00:00:00 2001
+Message-Id: <b2cd135965a0bb76570a1115d62e63a7f5e4fb01@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 29 Jan 2015 16:41:04 -0500
+Subject: [PATCH] qemu: Don't unconditionally delete file in qemuOpenFileAs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1158036 [6.7]
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1158034 [7.2]
+
+If we're expecting to create a file somewhere and that fails for some
+reason during qemuOpenFileAs, then we unlink the path we're attempting
+to create leaving no way to determine what the "existing" privileges,
+protections, or labels are that caused the failure (open, change owner
+and group, change mode, etc.).
+
+Furthermore, if we fall into the path where we'll be opening / creating
+the file using VIR_FILE_OPEN_FORK, we need to first unlink/delete the file
+we created in the first path; otherwise, the attempt by the child process
+to open as some specific user:group may fail because the file was already
+created using nfsnobody:nfsnobody. Again, if we didn't create the file we
+don't want to blindly delete what already exists. Thus, a second reason for
+the original check to set need_unlink to false when we find the file with
+CREAT set, but already existing.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 7879d031974417e767c2b6e198493289abffabdf)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 7187005..3f99795 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2793,6 +2793,9 @@ qemuOpenFileAs(uid_t fallback_uid, gid_t fallback_gid,
+             vfoflags |= VIR_FILE_OPEN_FORCE_OWNER;
+ 
+         if (stat(path, &sb) == 0) {
++            /* It already exists, we don't want to delete it on error */
++            need_unlink = false;
++
+             is_reg = !!S_ISREG(sb.st_mode);
+             /* If the path is regular file which exists
+              * already and dynamic_ownership is off, we don't
+@@ -2845,6 +2848,15 @@ qemuOpenFileAs(uid_t fallback_uid, gid_t fallback_gid,
+                     goto error;
+             }
+ 
++            /* If we created the file above, then we need to remove it;
++             * otherwise, the next attempt to create will fail. If the
++             * file had already existed before we got here, then we also
++             * don't want to delete it and allow the following to succeed
++             * or fail based on existing protections
++             */
++            if (need_unlink)
++                unlink(path);
++
+             /* Retry creating the file as qemu user */
+ 
+             if ((fd = virFileOpenAs(path, oflags,
+-- 
+2.2.2
+

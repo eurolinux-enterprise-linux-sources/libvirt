@@ -1,0 +1,51 @@
+From c0e6d3edaf6ca5948c6cec122c720b184e74c9ad Mon Sep 17 00:00:00 2001
+Message-Id: <c0e6d3edaf6ca5948c6cec122c720b184e74c9ad@dist-git>
+From: Matthias Bolte <matthias.bolte@googlemail.com>
+Date: Tue, 26 Jan 2016 13:54:14 +0100
+Subject: [PATCH] vmx: Relax virtualHW.version check
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1300574
+
+The original implementation of the VMX config parser assumed that the
+virtualHW.version would have more influence on the content of the VMX
+file than it actually seems to have. It started with accepting only
+version 4. Additonal versions were added later without any additional
+changes in the parser itself. This suggests that the influence of the
+virtualHW.version on the content and format of the VMX file is small
+or non-existent.
+
+The parser worked without any changes across several virtualHW and
+vSphere versions. So instead of adding new virtualHW.version values to
+the parser as they come along, or adding an extra flag to allow unknown
+virtualHW.version values just relax the check to require version 4 or
+later.
+
+(cherry picked from commit 0e4370eddf822fcdd2ed60d7326b2191e1fd948d)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/vmx/vmx.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/src/vmx/vmx.c b/src/vmx/vmx.c
+index 9bb03bc..ae3f360 100644
+--- a/src/vmx/vmx.c
++++ b/src/vmx/vmx.c
+@@ -1304,12 +1304,10 @@ virVMXParseConfig(virVMXContext *ctx, virCapsPtr caps, const char *vmx)
+         goto cleanup;
+     }
+ 
+-    if (virtualHW_version != 4 && virtualHW_version != 7 &&
+-        virtualHW_version != 8 && virtualHW_version != 9 &&
+-        virtualHW_version != 10) {
++    if (virtualHW_version < 4) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("Expecting VMX entry 'virtualHW.version' to be "
+-                         "4, 7, 8, 9 or 10 but found %lld"),
++                         "4 or higher but found %lld"),
+                        virtualHW_version);
+         goto cleanup;
+     }
+-- 
+2.7.1
+

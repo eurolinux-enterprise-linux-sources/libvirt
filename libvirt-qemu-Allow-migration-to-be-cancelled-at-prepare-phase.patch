@@ -1,0 +1,109 @@
+From 4bed85aa5742fe2ff852a380f8675019e61597d8 Mon Sep 17 00:00:00 2001
+Message-Id: <4bed85aa5742fe2ff852a380f8675019e61597d8.1352726475.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 12 Nov 2012 12:11:26 +0100
+Subject: [PATCH] qemu: Allow migration to be cancelled at prepare phase
+
+https://bugzilla.redhat.com/show_bug.cgi?id=873792
+
+Currently, if user calls virDomainAbortJob we just issue
+'migrate_cancel' and hope for the best. However, if user calls
+the API in wrong phase when migration hasn't been started yet
+(perform phase) the cancel request is just ignored. With this
+patch, the request is remembered and as soon as perform phase
+starts, migration is cancelled.
+(cherry picked from commit ab5e7d4977afd68b63406c82b6220c5b998e73cc)
+---
+ src/qemu/qemu_domain.c    | 12 ++++++++++++
+ src/qemu/qemu_domain.h    |  2 ++
+ src/qemu/qemu_driver.c    |  1 +
+ src/qemu/qemu_migration.c | 11 +++++++++++
+ 4 files changed, 26 insertions(+)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 6c6f841..5ee1700 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -160,6 +160,7 @@ qemuDomainObjResetAsyncJob(qemuDomainObjPrivatePtr priv)
+     job->mask = DEFAULT_JOB_MASK;
+     job->start = 0;
+     job->dump_memory_only = false;
++    job->asyncAbort = false;
+     memset(&job->info, 0, sizeof(job->info));
+ }
+ 
+@@ -960,6 +961,17 @@ qemuDomainObjEndAsyncJob(struct qemud_driver *driver, virDomainObjPtr obj)
+     return virObjectUnref(obj);
+ }
+ 
++void
++qemuDomainObjAbortAsyncJob(virDomainObjPtr obj)
++{
++    qemuDomainObjPrivatePtr priv = obj->privateData;
++
++    VIR_DEBUG("Requesting abort of async job: %s",
++              qemuDomainAsyncJobTypeToString(priv->job.asyncJob));
++
++    priv->job.asyncAbort = true;
++}
++
+ static int
+ qemuDomainObjEnterMonitorInternal(struct qemud_driver *driver,
+                                   bool driver_locked,
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 9c2f67c..a2acc0a 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -111,6 +111,7 @@ struct qemuDomainJobObj {
+     unsigned long long start;           /* When the async job started */
+     bool dump_memory_only;              /* use dump-guest-memory to do dump */
+     virDomainJobInfo info;              /* Async job progress data */
++    bool asyncAbort;                    /* abort of async job requested */
+ };
+ 
+ typedef struct _qemuDomainPCIAddressSet qemuDomainPCIAddressSet;
+@@ -204,6 +205,7 @@ bool qemuDomainObjEndJob(struct qemud_driver *driver,
+ bool qemuDomainObjEndAsyncJob(struct qemud_driver *driver,
+                               virDomainObjPtr obj)
+     ATTRIBUTE_RETURN_CHECK;
++void qemuDomainObjAbortAsyncJob(virDomainObjPtr obj);
+ void qemuDomainObjSetJobPhase(struct qemud_driver *driver,
+                               virDomainObjPtr obj,
+                               int phase);
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index a986640..554d83e 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -10383,6 +10383,7 @@ static int qemuDomainAbortJob(virDomainPtr dom) {
+     }
+ 
+     VIR_DEBUG("Cancelling job at client request");
++    qemuDomainObjAbortAsyncJob(vm);
+     qemuDomainObjEnterMonitor(driver, vm);
+     ret = qemuMonitorMigrateCancel(priv->mon);
+     qemuDomainObjExitMonitor(driver, vm);
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 4fbe605..beeea3e 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1915,6 +1915,17 @@ qemuMigrationRun(struct qemud_driver *driver,
+                                        QEMU_ASYNC_JOB_MIGRATION_OUT) < 0)
+         goto cleanup;
+ 
++    if (priv->job.asyncAbort) {
++        /* explicitly do this *after* we entered the monitor,
++         * as this is a critical section so we are guaranteed
++         * priv->job.asyncAbort will not change */
++        qemuDomainObjExitMonitorWithDriver(driver, vm);
++        virReportError(VIR_ERR_OPERATION_ABORTED, _("%s: %s"),
++                       qemuDomainAsyncJobTypeToString(priv->job.asyncJob),
++                       _("canceled by client"));
++        goto cleanup;
++    }
++
+     if (qemuMonitorSetMigrationSpeed(priv->mon, migrate_speed) < 0) {
+         qemuDomainObjExitMonitorWithDriver(driver, vm);
+         goto cleanup;
+-- 
+1.8.0
+

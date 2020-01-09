@@ -1,0 +1,39 @@
+From 65386e33fb5585c7252220a49ade4832f22107a4 Mon Sep 17 00:00:00 2001
+Message-Id: <65386e33fb5585c7252220a49ade4832f22107a4.1353944811.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 26 Nov 2012 15:56:27 +0100
+Subject: [PATCH] lxc: Avoid segfault of libvirt_lxc helper on early cleanup
+ paths
+
+https://bugzilla.redhat.com/show_bug.cgi?id=880064
+
+Early jumps to the cleanup label caused a crash of the libvirt_lxc
+container helper as the cleanup section called
+virLXCControllerDeleteInterfaces(ctrl) without checking the ctrl argument
+for NULL. The argument was de-referenced soon after.
+
+$ /usr/libexec/libvirt_lxc
+/usr/libexec/libvirt_lxc: missing --name argument for configuration
+Segmentation fault
+(cherry picked from commit 81efb13b4a33f58c28e0e65dcc9521b983592683)
+---
+ src/lxc/lxc_controller.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/lxc/lxc_controller.c b/src/lxc/lxc_controller.c
+index 3652c86..8947a4a 100644
+--- a/src/lxc/lxc_controller.c
++++ b/src/lxc/lxc_controller.c
+@@ -1647,7 +1647,8 @@ int main(int argc, char *argv[])
+ 
+ cleanup:
+     virPidFileDelete(LXC_STATE_DIR, name);
+-    virLXCControllerDeleteInterfaces(ctrl);
++    if (ctrl)
++        virLXCControllerDeleteInterfaces(ctrl);
+     for (i = 0 ; i < nttyFDs ; i++)
+         VIR_FORCE_CLOSE(ttyFDs[i]);
+     VIR_FREE(ttyFDs);
+-- 
+1.8.0
+

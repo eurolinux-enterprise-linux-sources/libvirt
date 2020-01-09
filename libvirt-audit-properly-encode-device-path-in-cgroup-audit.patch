@@ -1,0 +1,55 @@
+From 515eaab4c33fdbb9a6b50db890484873448ddbfd Mon Sep 17 00:00:00 2001
+Message-Id: <515eaab4c33fdbb9a6b50db890484873448ddbfd.1373271641.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Thu, 2 May 2013 09:36:46 -0600
+Subject: [PATCH] audit: properly encode device path in cgroup audit
+
+6.5: https://bugzilla.redhat.com/show_bug.cgi?id=922203
+6.4.z: https://bugzilla.redhat.com/show_bug.cgi?id=958839
+
+https://bugzilla.redhat.com/show_bug.cgi?id=922186
+
+Commit d04916fa introduced a regression in audit quality - even
+though the code was computing the proper escaped name for a
+path, it wasn't feeding that escaped name on to the audit message.
+As a result, /var/log/audit/audit.log would mention a pair of
+fields class=path path=/dev/hpet instead of the intended
+class=path path="/dev/hpet", which in turn caused ausearch to
+format the audit log with path=(null).
+
+* src/conf/domain_audit.c (virDomainAuditCgroupPath): Use
+constructed encoding.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 31c6bf35b9d9de04158318658f4fbf6a9e54ff28)
+---
+ src/conf/domain_audit.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/conf/domain_audit.c b/src/conf/domain_audit.c
+index 0f3924a..1965211 100644
+--- a/src/conf/domain_audit.c
++++ b/src/conf/domain_audit.c
+@@ -1,7 +1,7 @@
+ /*
+  * domain_audit.c: Domain audit management
+  *
+- * Copyright (C) 2006-2012 Red Hat, Inc.
++ * Copyright (C) 2006-2013 Red Hat, Inc.
+  * Copyright (C) 2006 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -471,8 +471,8 @@ virDomainAuditCgroupPath(virDomainObjPtr vm, virCgroupPtr cgroup,
+     rdev = virDomainAuditGetRdev(path);
+ 
+     if (!(detail = virAuditEncode("path", path)) ||
+-        virAsprintf(&extra, "path path=%s rdev=%s acl=%s",
+-                    path, VIR_AUDIT_STR(rdev), perms) < 0) {
++        virAsprintf(&extra, "path %s rdev=%s acl=%s",
++                    detail, VIR_AUDIT_STR(rdev), perms) < 0) {
+         VIR_WARN("OOM while encoding audit message");
+         goto cleanup;
+     }
+-- 
+1.8.2.1
+

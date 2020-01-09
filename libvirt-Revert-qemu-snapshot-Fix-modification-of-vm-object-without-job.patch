@@ -1,0 +1,72 @@
+From 55e25fb2e38cf05a1e1c85ec154b09bef9c93259 Mon Sep 17 00:00:00 2001
+Message-Id: <55e25fb2e38cf05a1e1c85ec154b09bef9c93259@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 22 Sep 2016 18:16:00 +0200
+Subject: [PATCH] Revert "qemu: snapshot: Fix modification of vm object without
+ job"
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1326652
+
+The patch stated it was too invasive to backport. Turns out that the fix
+was incomplete and a proper fix was indeed to backport the patch. It
+turned out to be easier than thought.
+
+This reverts commit d915305eba5a077e2c14a31a363fd51bdf976b4a.
+---
+ src/qemu/qemu_driver.c | 19 -------------------
+ 1 file changed, 19 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 7432a03..07c6e74 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -12350,7 +12350,6 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+     virDomainSnapshotObjPtr other = NULL;
+     int align_location = VIR_DOMAIN_SNAPSHOT_LOCATION_INTERNAL;
+     int align_match = true;
+-    bool redefine_job = false;
+ 
+     virCheckFlags(VIR_DOMAIN_SNAPSHOT_CREATE_REDEFINE |
+                   VIR_DOMAIN_SNAPSHOT_CREATE_CURRENT |
+@@ -12440,14 +12439,6 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+     }
+ 
+     if (flags & VIR_DOMAIN_SNAPSHOT_CREATE_REDEFINE) {
+-        /* RHEL: explicit job handling is necessary, since _REDEFINE could
+-         * access incomplete snapshot while other snapshot job is running and
+-         * in monitor */
+-        if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0)
+-            goto cleanup;
+-
+-        redefine_job = true;
+-
+         /* Prevent circular chains */
+         if (def->parent) {
+             if (STREQ(def->name, def->parent)) {
+@@ -12640,9 +12631,6 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+          * makes sense, such as checking that qemu-img recognizes the
+          * snapshot name in at least one of the domain's disks?  */
+     } else if (virDomainObjIsActive(vm)) {
+-        /* RHEL note: both functions below do their own job handling, they
+-         * unlock the domain object in the process */
+-
+         if (flags & VIR_DOMAIN_SNAPSHOT_CREATE_DISK_ONLY ||
+             snap->def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL) {
+             /* external checkpoint or disk snapshot */
+@@ -12678,13 +12666,6 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+     snapshot = virGetDomainSnapshot(domain, snap->def->name);
+ 
+ cleanup:
+-    /* RHEL: Proper job handling fix was hard to backport, thus downstream adds
+-     * explicit job for the _REDEFINE operation. The job has to be removed here.
+-     * Since the _REDEFINE operation doesn't kill the VM or enter monitor at any
+-     * point vm is always valid */
+-    if (redefine_job && qemuDomainObjEndJob(driver, vm) == 0)
+-        vm = NULL;
+-
+     if (vm) {
+         if (snapshot && !(flags & VIR_DOMAIN_SNAPSHOT_CREATE_NO_METADATA)) {
+             if (qemuDomainSnapshotWriteMetadata(vm, snap,
+-- 
+2.10.1
+

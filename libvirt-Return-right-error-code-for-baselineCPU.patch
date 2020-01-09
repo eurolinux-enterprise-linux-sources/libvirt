@@ -1,0 +1,59 @@
+From 8303c8d3a38959c75b51bd21c452b717d75bc635 Mon Sep 17 00:00:00 2001
+Message-Id: <8303c8d3a38959c75b51bd21c452b717d75bc635@dist-git>
+From: Don Dugger <donald.d.dugger@intel.com>
+Date: Fri, 16 May 2014 12:20:12 -0400
+Subject: [PATCH] Return right error code for baselineCPU
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1097969
+
+This Python interface code is returning a -1 on errors for the
+`baselineCPU' API.  Since this API is supposed to return a pointer
+the error return value should really be VIR_PY_NONE.
+
+Signed-off-by: Don Dugger <donald.d.dugger@intel.com>
+(cherry picked from commit 8dd64f07ea2c4c53b51a5170f0a3db0c53a094da)
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ python/libvirt-override.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/python/libvirt-override.c b/python/libvirt-override.c
+index fb0dced..2492775 100644
+--- a/python/libvirt-override.c
++++ b/python/libvirt-override.c
+@@ -4037,13 +4037,13 @@ libvirt_virConnectBaselineCPU(PyObject *self ATTRIBUTE_UNUSED,
+ 
+         ncpus = PyList_Size(list);
+         if (VIR_ALLOC_N(xmlcpus, ncpus) < 0)
+-            return VIR_PY_INT_FAIL;
++            return VIR_PY_NONE;
+ 
+         for (i = 0; i < ncpus; i++) {
+             xmlcpus[i] = PyString_AsString(PyList_GetItem(list, i));
+             if (xmlcpus[i] == NULL) {
+                 VIR_FREE(xmlcpus);
+-                return VIR_PY_INT_FAIL;
++                return VIR_PY_NONE;
+             }
+         }
+     }
+@@ -4055,13 +4055,13 @@ libvirt_virConnectBaselineCPU(PyObject *self ATTRIBUTE_UNUSED,
+     VIR_FREE(xmlcpus);
+ 
+     if (base_cpu == NULL)
+-        return VIR_PY_INT_FAIL;
++        return VIR_PY_NONE;
+ 
+     pybase_cpu = PyString_FromString(base_cpu);
+     VIR_FREE(base_cpu);
+ 
+     if (pybase_cpu == NULL)
+-        return VIR_PY_INT_FAIL;
++        return VIR_PY_NONE;
+ 
+     return pybase_cpu;
+ }
+-- 
+1.9.3
+

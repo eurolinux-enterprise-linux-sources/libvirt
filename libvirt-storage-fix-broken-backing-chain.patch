@@ -1,0 +1,54 @@
+From cc93398508255427c2171a9a5373d3b11b036f34 Mon Sep 17 00:00:00 2001
+Message-Id: <cc93398508255427c2171a9a5373d3b11b036f34.1353330051.git.jdenemar@redhat.com>
+From: Philipp Hahn <hahn@univention.de>
+Date: Mon, 12 Nov 2012 16:13:14 -0700
+Subject: [PATCH] storage: fix broken backing chain
+
+https://bugzilla.redhat.com/show_bug.cgi?id=874860
+
+82507838 refactored the code to keep both the raw and canonicalized form
+of the backingStore, which breaks badly when the storage pool contains a
+storage volume, which is missing its backing store file:
+ # ./daemon/libvirtd -l
+ 2012-11-07 12:43:33.279+0000: 22175: info : libvirt version: 1.0.0
+ 2012-11-07 12:43:33.279+0000: 22175: error : absolutePathFromBaseFile:542 : Can't canonicalize path '/var/lib/libvirt/images/base.qcow2': No such file or directory
+ 2012-11-07 12:43:33.280+0000: 22175: error : storageDriverAutostart:115 : Failed to autostart storage pool 'default': Can't canonicalize path '/var/lib/libvirt/images/base.qcow2': No such file or directory
+
+This is because virStorageFileGetMetadataFromBuf() aborts with -1 if the
+filename of the backingStore can not be canonicalized:
+ #0  absolutePathFromBaseFile () at util/storage_file.c:541
+ #1  virStorageFileGetMetadataFromBuf () at util/storage_file.c:728
+ #2  virStorageFileGetMetadataFromFD () at util/storage_file.c:932
+ #3  virStorageBackendProbeTarget () at storage/storage_backend_fs.c:94
+ #4  virStorageBackendFileSystemRefresh () at storage/storage_backend_fs.c:849
+ #5  storagePoolStart () at storage/storage_driver.c:700
+ #6  virStoragePoolCreate () at libvirt.c:12471
+ ...
+
+Treat files which miss their backing file as standalone files.
+
+Signed-off-by: Philipp Hahn <hahn@univention.de>
+(cherry picked from commit e0c469e58b93f852a72265919703cb6abd3779f8)
+---
+ src/util/storage_file.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index a0399ab..54b9ea0 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -727,8 +727,9 @@ virStorageFileGetMetadataFromBuf(int format,
+                 meta->backingStoreRaw = meta->backingStore;
+                 meta->backingStore = absolutePathFromBaseFile(path, backing);
+                 if (meta->backingStore == NULL) {
+-                    VIR_FREE(backing);
+-                    return -1;
++                    /* the backing file is (currently) unavailable, treat this
++                     * file as standalone */
++                    backingFormat = VIR_STORAGE_FILE_NONE;
+                 }
+             }
+             VIR_FREE(backing);
+-- 
+1.8.0
+

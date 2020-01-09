@@ -1,0 +1,33 @@
+From aa4f87dbcf8a55b0ac18221c311d6b05f978ec40 Mon Sep 17 00:00:00 2001
+Message-Id: <aa4f87dbcf8a55b0ac18221c311d6b05f978ec40.1373271641.git.jdenemar@redhat.com>
+From: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+Date: Wed, 10 Apr 2013 16:26:02 -0600
+Subject: [PATCH] remote: Don't call NULL closeFreeCallback
+
+https://bugzilla.redhat.com/show_bug.cgi?id=911609
+
+Check function pointer before calling.
+
+Signed-off-by: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+(cherry picked from commit d0cc811ed02d49e60193dfe6601e53adadebb114)
+---
+ src/remote/remote_driver.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 96bf0d8..468b24a 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -348,7 +348,8 @@ static void remoteClientCloseFunc(virNetClientPtr client ATTRIBUTE_UNUSED,
+         closeCallback(conn, reason, closeOpaque);
+         virMutexLock(&conn->lock);
+         conn->closeDispatch = false;
+-        if (conn->closeUnregisterCount != closeUnregisterCount)
++        if (conn->closeUnregisterCount != closeUnregisterCount &&
++            closeFreeCallback)
+             closeFreeCallback(closeOpaque);
+     }
+     virMutexUnlock(&conn->lock);
+-- 
+1.8.2.1
+

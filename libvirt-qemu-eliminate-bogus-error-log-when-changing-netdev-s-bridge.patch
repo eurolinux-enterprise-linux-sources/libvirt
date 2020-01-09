@@ -1,0 +1,65 @@
+From ad4b2873e5a1a87fe5b5260701e423028894a8ab Mon Sep 17 00:00:00 2001
+Message-Id: <ad4b2873e5a1a87fe5b5260701e423028894a8ab.1355319681.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 10 Dec 2012 13:43:06 -0500
+Subject: [PATCH] qemu: eliminate bogus error log when changing netdev's
+ bridge
+
+This fixes the problem detailed in:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=885838
+
+Due to a logic error in the function that gets the name of the bridge
+an interface connects to, any time a bridge was specified directly
+(type='bridge') rather than indirectly (type='network'), An error
+would be logged (although the operation would then complete
+successfully):
+
+   Network type 6 is not supported
+
+The final virReportError() in the function
+qemuDomainNetGetBridgeName() was apparently avoided in the past with a
+"goto cleanup" at the end of each case, but the case of bridge somehow
+no longer has that final goto cleanup.
+
+The proper solution is anyway to not rely on goto's, but put the error
+log inside an else {} clause, so that it's executed only if the type
+is neither bridge nor network (in reality, this function should only
+ever be called for those two types, that's why this is an internal
+error).
+
+While making this change, the error message was also tuned to be more
+correct (since it's not really the type of the network, but the type
+of the interface, and it *is* otherwise supported, it's just that the
+interface type in question doesn't *have* a bridge device associated
+with it, or at least we don't know how to get it).
+(cherry picked from commit e5577872cba7f88305e9e0b1ee26b37b4be790df)
+---
+ src/qemu/qemu_hotplug.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index fcfb4c5..d714eaf 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1268,13 +1268,13 @@ qemuDomainNetGetBridgeName(virConnectPtr conn, virDomainNetDefPtr net)
+         virNetworkFree(network);
+         virSetError(errobj);
+         virFreeError(errobj);
+-        goto cleanup;
+ 
++    } else {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("Interface type %d has no bridge name"),
++                       virDomainNetGetActualType(net));
+     }
+ 
+-    virReportError(VIR_ERR_INTERNAL_ERROR,
+-                   _("Network type %d is not supported"),
+-                   virDomainNetGetActualType(net));
+ cleanup:
+     return brname;
+ }
+-- 
+1.8.0
+

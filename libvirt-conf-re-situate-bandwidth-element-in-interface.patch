@@ -1,0 +1,67 @@
+From e5ddfab3174dfcd5233a0c28e089ca5ca3154456 Mon Sep 17 00:00:00 2001
+Message-Id: <e5ddfab3174dfcd5233a0c28e089ca5ca3154456@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Wed, 14 May 2014 16:12:24 +0200
+Subject: [PATCH] conf: re-situate <bandwidth> element in <interface>
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+This moves the call to virNetDevBandwidthFormat() in
+virDomainNetDefFormat() to be called right after the call to
+virNetDevVPortProfileFormat(), so that a single chunk of that function
+can be placed inside an if that conditionally calls
+virDomainActualNetDefContentsFormat() instead (next patch). The
+re-ordering necessitates modifying a couple of test data files.
+
+(cherry picked from commit 65487c0fc5c1866bbdc397a7fb2e5dff72dc8860)
+
+Conflicts:
+	tests/qemuhotplugtestdata/qemuhotplug-console-compat-2+console-virtio.xml:
+	tests/qemuxml2argvdata/qemuxml2argv-console-compat-2.xml:
+            These don't exist yet
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c                                | 6 +++---
+ tests/qemuxml2argvdata/qemuxml2argv-net-bandwidth.xml | 1 +
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index d9b0157..86c994d 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -13173,6 +13173,9 @@ virDomainNetDefFormat(virBufferPtr buf,
+         return -1;
+     if (virNetDevVPortProfileFormat(def->virtPortProfile, buf) < 0)
+         return -1;
++    if (virNetDevBandwidthFormat(def->bandwidth, buf) < 0)
++        return -1;
++
+     virBufferEscapeString(buf, "<script path='%s'/>\n",
+                           def->script);
+     if (def->ifname &&
+@@ -13223,9 +13226,6 @@ virDomainNetDefFormat(virBufferPtr buf,
+                           virDomainNetInterfaceLinkStateTypeToString(def->linkstate));
+     }
+ 
+-    if (virNetDevBandwidthFormat(def->bandwidth, buf) < 0)
+-        return -1;
+-
+     virBufferAdjustIndent(buf, -6);
+ 
+     if (virDomainDeviceInfoFormat(buf, &def->info,
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-net-bandwidth.xml b/tests/qemuxml2argvdata/qemuxml2argv-net-bandwidth.xml
+index bf7dde5..19d9a27 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-net-bandwidth.xml
++++ b/tests/qemuxml2argvdata/qemuxml2argv-net-bandwidth.xml
+@@ -48,6 +48,7 @@
+         <inbound average='1000' peak='4000' burst='1024'/>
+         <outbound average='128' peak='256' burst='32768'/>
+       </bandwidth>
++      <model type='rtl8139'/>
+       <address type='pci' domain='0x0000' bus='0x00' slot='0x07' function='0x0'/>
+     </interface>
+     <serial type='pty'>
+-- 
+1.9.3
+

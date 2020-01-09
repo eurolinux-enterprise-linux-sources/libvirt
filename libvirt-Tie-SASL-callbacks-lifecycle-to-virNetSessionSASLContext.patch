@@ -1,0 +1,133 @@
+From f296b48e911dab7f3c2a4f09ecd37357cf90bedc Mon Sep 17 00:00:00 2001
+Message-Id: <f296b48e911dab7f3c2a4f09ecd37357cf90bedc@dist-git>
+From: Christophe Fergeau <cfergeau@redhat.com>
+Date: Tue, 27 May 2014 14:25:10 -0400
+Subject: [PATCH] Tie SASL callbacks lifecycle to virNetSessionSASLContext
+
+The array of sasl_callback_t callbacks which is passed to sasl_client_new()
+must be kept alive as long as the created sasl_conn_t object is alive as
+cyrus-sasl uses this structure internally for things like logging, so
+the memory used for callbacks must only be freed after sasl_dispose() has
+been called.
+
+During testing of successful SASL logins with
+virsh -c qemu+tls:///system list --all
+I've been getting invalid read reports from valgrind
+
+==9237== Invalid read of size 8
+==9237==    at 0x6E93B6F: _sasl_getcallback (common.c:1745)
+==9237==    by 0x6E95430: _sasl_log (common.c:1850)
+==9237==    by 0x16593D87: digestmd5_client_mech_dispose (digestmd5.c:4580)
+==9237==    by 0x6E91653: client_dispose (client.c:332)
+==9237==    by 0x6E9476A: sasl_dispose (common.c:851)
+==9237==    by 0x4E225A1: virNetSASLSessionDispose (virnetsaslcontext.c:678)
+==9237==    by 0x4CBC551: virObjectUnref (virobject.c:262)
+==9237==    by 0x4E254D1: virNetSocketDispose (virnetsocket.c:1042)
+==9237==    by 0x4CBC551: virObjectUnref (virobject.c:262)
+==9237==    by 0x4E2701C: virNetSocketEventFree (virnetsocket.c:1794)
+==9237==    by 0x4C965D3: virEventPollCleanupHandles (vireventpoll.c:583)
+==9237==    by 0x4C96987: virEventPollRunOnce (vireventpoll.c:652)
+==9237==    by 0x4C94730: virEventRunDefaultImpl (virevent.c:274)
+==9237==    by 0x12C7BA: vshEventLoop (virsh.c:2407)
+==9237==    by 0x4CD3D04: virThreadHelper (virthreadpthread.c:161)
+==9237==    by 0x7DAEF32: start_thread (pthread_create.c:309)
+==9237==    by 0x8C86EAC: clone (clone.S:111)
+==9237==  Address 0xe2d61b0 is 0 bytes inside a block of size 168 free'd
+==9237==    at 0x4A07577: free (in /usr/lib64/valgrind/vgpreload_memcheck-amd64-linux.so)
+==9237==    by 0x4C73827: virFree (viralloc.c:580)
+==9237==    by 0x4DE4BC7: remoteAuthSASL (remote_driver.c:4219)
+==9237==    by 0x4DE33D0: remoteAuthenticate (remote_driver.c:3639)
+==9237==    by 0x4DDBFAA: doRemoteOpen (remote_driver.c:832)
+==9237==    by 0x4DDC8DC: remoteConnectOpen (remote_driver.c:1031)
+==9237==    by 0x4D8595F: do_open (libvirt.c:1239)
+==9237==    by 0x4D863F3: virConnectOpenAuth (libvirt.c:1481)
+==9237==    by 0x12762B: vshReconnect (virsh.c:337)
+==9237==    by 0x12C9B0: vshInit (virsh.c:2470)
+==9237==    by 0x12E9A5: main (virsh.c:3338)
+
+This commit changes virNetSASLSessionNewClient() to take ownership of the SASL
+callbacks. Then we can free them in virNetSASLSessionDispose() after the corresponding
+sasl_conn_t has been freed.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1100173
+
+(cherry-picked from 13fdc6d63ef64f8e231a087e1dab7d90145c3c10)
+
+Conflicts:
+	src/rpc/virnetsaslcontext.c
+
+ * No real conflicts - just need to accept difference.  Commit id
+   0b4d3fe556482bf481609ed01b825058889a24c5 made change in same place
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/remote/remote_driver.c  | 2 ++
+ src/rpc/virnetsaslcontext.c | 5 ++++-
+ src/rpc/virnetsaslcontext.h | 2 +-
+ 3 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 15d057c..b125fe1 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -3900,6 +3900,8 @@ remoteAuthSASL (virConnectPtr conn, struct private_data *priv,
+                                             virNetClientRemoteAddrString(priv->client),
+                                             saslcb)))
+         goto cleanup;
++    /* saslcb is now owned by sasl */
++    saslcb = NULL;
+ 
+     /* Initialize some connection props we care about */
+     if (priv->tls) {
+diff --git a/src/rpc/virnetsaslcontext.c b/src/rpc/virnetsaslcontext.c
+index 4666693..6b3e9cc 100644
+--- a/src/rpc/virnetsaslcontext.c
++++ b/src/rpc/virnetsaslcontext.c
+@@ -45,6 +45,7 @@ struct _virNetSASLSession {
+     virMutex lock;
+     sasl_conn_t *conn;
+     size_t maxbufsize;
++    sasl_callback_t *callbacks;
+ };
+ 
+ 
+@@ -188,7 +189,7 @@ virNetSASLSessionPtr virNetSASLSessionNewClient(virNetSASLContextPtr ctxt ATTRIB
+                                                 const char *hostname,
+                                                 const char *localAddr,
+                                                 const char *remoteAddr,
+-                                                const sasl_callback_t *cbs)
++                                                sasl_callback_t *cbs)
+ {
+     virNetSASLSessionPtr sasl = NULL;
+     int err;
+@@ -219,6 +220,7 @@ virNetSASLSessionPtr virNetSASLSessionNewClient(virNetSASLContextPtr ctxt ATTRIB
+                        err, sasl_errstring(err, NULL, NULL));
+         goto cleanup;
+     }
++    sasl->callbacks = cbs;
+ 
+     return sasl;
+ 
+@@ -714,4 +716,5 @@ void virNetSASLSessionDispose(void *obj)
+         sasl_dispose(&sasl->conn);
+ 
+     virMutexDestroy(&sasl->lock);
++    VIR_FREE(sasl->callbacks);
+ }
+diff --git a/src/rpc/virnetsaslcontext.h b/src/rpc/virnetsaslcontext.h
+index e726302..54634d5 100644
+--- a/src/rpc/virnetsaslcontext.h
++++ b/src/rpc/virnetsaslcontext.h
+@@ -49,7 +49,7 @@ virNetSASLSessionPtr virNetSASLSessionNewClient(virNetSASLContextPtr ctxt,
+                                                 const char *hostname,
+                                                 const char *localAddr,
+                                                 const char *remoteAddr,
+-                                                const sasl_callback_t *cbs);
++                                                sasl_callback_t *cbs);
+ virNetSASLSessionPtr virNetSASLSessionNewServer(virNetSASLContextPtr ctxt,
+                                                 const char *service,
+                                                 const char *localAddr,
+-- 
+2.0.0
+

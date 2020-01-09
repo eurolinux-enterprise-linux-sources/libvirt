@@ -1,0 +1,294 @@
+From 79e84e135e1581919f1e4681435d4d73d7c59990 Mon Sep 17 00:00:00 2001
+Message-Id: <79e84e135e1581919f1e4681435d4d73d7c59990.1373271637.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 25 Feb 2013 16:21:47 -0700
+Subject: [PATCH] util: add virendian.h macros
+
+https://bugzilla.redhat.com/show_bug.cgi?id=903248
+
+We have several cases where we need to read endian-dependent
+data regardless of host endianness; rather than open-coding
+these call sites, it will be nicer to funnel things through
+a macro.
+
+The virendian.h file can be expanded to add writer functions,
+and/or 16-bit access patterns, if needed.  Also, if we need
+to turn things into a function to avoid multiple evaluations
+of buf, that can be done later.  But for now, a macro worked.
+
+* src/util/virendian.h: New file.
+* src/Makefile.am (UTIL_SOURCES): Ship it.
+* tests/virendiantest.c: New test.
+* tests/Makefile.am (test_programs, virendiantest_SOURCES): Run
+the test.
+* .gitignore: Ignore built file.
+(cherry picked from commit c6f1060ca7d51e70228718ceee4bba7bfbad6a38)
+
+Conflicts:
+	src/Makefile.am - context: lots of file renames not backported
+	tests/Makefile.am - context: several new tests not backported
+	.gitignore - not present in RHEL backports
+---
+ src/Makefile.am       |   1 +
+ src/util/virendian.h  |  93 +++++++++++++++++++++++++++++++++++++++++++++
+ tests/Makefile.am     |   9 ++++-
+ tests/virendiantest.c | 102 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 203 insertions(+), 2 deletions(-)
+ create mode 100644 src/util/virendian.h
+ create mode 100644 tests/virendiantest.c
+
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 76093ac..3a43df2 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -83,6 +83,7 @@ UTIL_SOURCES =							\
+ 		util/viraudit.c util/viraudit.h			\
+ 		util/virauth.c util/virauth.h			\
+ 		util/virauthconfig.c util/virauthconfig.h	\
++		util/virendian.h				\
+ 		util/virfile.c util/virfile.h			\
+ 		util/virnodesuspend.c util/virnodesuspend.h	\
+ 		util/virobject.c util/virobject.h		\
+diff --git a/src/util/virendian.h b/src/util/virendian.h
+new file mode 100644
+index 0000000..eefe48c
+--- /dev/null
++++ b/src/util/virendian.h
+@@ -0,0 +1,93 @@
++/*
++ * virendian.h: aid for reading endian-specific data
++ *
++ * Copyright (C) 2013 Red Hat, Inc.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library.  If not, see
++ * <http://www.gnu.org/licenses/>.
++ *
++ */
++
++#ifndef __VIR_ENDIAN_H__
++# define __VIR_ENDIAN_H__
++
++# include "internal.h"
++
++/* The interfaces in this file are provided as macros for speed.  */
++
++/**
++ * virReadBufInt64BE:
++ * @buf: byte to start reading at (can be 'char*' or 'unsigned char*');
++ *       evaluating buf must not have any side effects
++ *
++ * Read 8 bytes at BUF as a big-endian 64-bit number.  Caller is
++ * responsible to avoid reading beyond array bounds.
++ */
++# define virReadBufInt64BE(buf)                          \
++    (((uint64_t)(uint8_t)((buf)[0]) << 56) |             \
++     ((uint64_t)(uint8_t)((buf)[1]) << 48) |             \
++     ((uint64_t)(uint8_t)((buf)[2]) << 40) |             \
++     ((uint64_t)(uint8_t)((buf)[3]) << 32) |             \
++     ((uint64_t)(uint8_t)((buf)[4]) << 24) |             \
++     ((uint64_t)(uint8_t)((buf)[5]) << 16) |             \
++     ((uint64_t)(uint8_t)((buf)[6]) << 8) |              \
++     (uint64_t)(uint8_t)((buf)[7]))
++
++/**
++ * virReadBufInt64LE:
++ * @buf: byte to start reading at (can be 'char*' or 'unsigned char*');
++ *       evaluating buf must not have any side effects
++ *
++ * Read 8 bytes at BUF as a little-endian 64-bit number.  Caller is
++ * responsible to avoid reading beyond array bounds.
++ */
++# define virReadBufInt64LE(buf)                          \
++    ((uint64_t)(uint8_t)((buf)[0]) |                     \
++     ((uint64_t)(uint8_t)((buf)[1]) << 8) |              \
++     ((uint64_t)(uint8_t)((buf)[2]) << 16) |             \
++     ((uint64_t)(uint8_t)((buf)[3]) << 24) |             \
++     ((uint64_t)(uint8_t)((buf)[4]) << 32) |             \
++     ((uint64_t)(uint8_t)((buf)[5]) << 40) |             \
++     ((uint64_t)(uint8_t)((buf)[6]) << 48) |             \
++     ((uint64_t)(uint8_t)((buf)[7]) << 56))
++
++/**
++ * virReadBufInt32BE:
++ * @buf: byte to start reading at (can be 'char*' or 'unsigned char*');
++ *       evaluating buf must not have any side effects
++ *
++ * Read 4 bytes at BUF as a big-endian 32-bit number.  Caller is
++ * responsible to avoid reading beyond array bounds.
++ */
++# define virReadBufInt32BE(buf)                          \
++    (((uint32_t)(uint8_t)((buf)[0]) << 24) |             \
++     ((uint32_t)(uint8_t)((buf)[1]) << 16) |             \
++     ((uint32_t)(uint8_t)((buf)[2]) << 8) |              \
++     (uint32_t)(uint8_t)((buf)[3]))
++
++/**
++ * virReadBufInt32LE:
++ * @buf: byte to start reading at (can be 'char*' or 'unsigned char*');
++ *       evaluating buf must not have any side effects
++ *
++ * Read 4 bytes at BUF as a little-endian 32-bit number.  Caller is
++ * responsible to avoid reading beyond array bounds.
++ */
++# define virReadBufInt32LE(buf)                          \
++    ((uint32_t)(uint8_t)((buf)[0]) |                     \
++     ((uint32_t)(uint8_t)((buf)[1]) << 8) |              \
++     ((uint32_t)(uint8_t)((buf)[2]) << 16) |             \
++     ((uint32_t)(uint8_t)((buf)[3]) << 24))
++
++#endif /* __VIR_ENDIAN_H__ */
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index 8dbad97..c442c98 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -1,6 +1,6 @@
+ ## Process this file with automake to produce Makefile.in
+ 
+-## Copyright (C) 2005-2012 Red Hat, Inc.
++## Copyright (C) 2005-2013 Red Hat, Inc.
+ ## See COPYING.LIB for the License of this software
+ 
+ SHELL = $(PREFERABLY_POSIX_SHELL)
+@@ -93,7 +93,8 @@ test_programs = virshtest sockettest \
+ 	utiltest virnettlscontexttest shunloadtest \
+ 	virtimetest viruritest virkeyfiletest \
+ 	virauthconfigtest \
+-	virbitmaptest
++	virbitmaptest virendiantest \
++	$(NULL)
+ 
+ if WITH_SECDRIVER_SELINUX
+ test_programs += securityselinuxtest
+@@ -594,6 +595,10 @@ virbitmaptest_SOURCES = \
+ 	virbitmaptest.c testutils.h testutils.c
+ virbitmaptest_LDADD = $(LDADDS)
+ 
++virendiantest_SOURCES = \
++	virendiantest.c testutils.h testutils.c
++virendiantest_LDADD = $(LDADDS)
++
+ jsontest_SOURCES = \
+ 	jsontest.c testutils.h testutils.c
+ jsontest_LDADD = $(LDADDS)
+diff --git a/tests/virendiantest.c b/tests/virendiantest.c
+new file mode 100644
+index 0000000..3dde897
+--- /dev/null
++++ b/tests/virendiantest.c
+@@ -0,0 +1,102 @@
++/*
++ * Copyright (C) 2013 Red Hat, Inc.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library.  If not, see
++ * <http://www.gnu.org/licenses/>.
++ *
++ */
++
++#include <config.h>
++
++#include "testutils.h"
++
++#include "virendian.h"
++
++static int
++test1(const void *data ATTRIBUTE_UNUSED)
++{
++    /* Regular char should work, even if signed, and even with
++     * unaligned access.  */
++    char array[] = { 1, 2, 3, 4, 5, 6, 7, 8,
++                     0x89, 0x8a, 0x8b, 0x8c, 0x8d };
++    int ret = -1;
++
++    if (virReadBufInt64BE(array) != 0x0102030405060708ULL)
++        goto cleanup;
++    if (virReadBufInt64BE(array + 5) != 0x060708898a8b8c8dULL)
++        goto cleanup;
++    if (virReadBufInt64LE(array) != 0x0807060504030201ULL)
++        goto cleanup;
++    if (virReadBufInt64LE(array + 5) != 0x8d8c8b8a89080706ULL)
++        goto cleanup;
++
++    if (virReadBufInt32BE(array) != 0x01020304U)
++        goto cleanup;
++    if (virReadBufInt32BE(array + 9) != 0x8a8b8c8dU)
++        goto cleanup;
++    if (virReadBufInt32LE(array) != 0x04030201U)
++        goto cleanup;
++    if (virReadBufInt32LE(array + 9) != 0x8d8c8b8aU)
++        goto cleanup;
++
++    ret = 0;
++cleanup:
++    return ret;
++}
++
++static int
++test2(const void *data ATTRIBUTE_UNUSED)
++{
++    /* Unsigned char should work without cast, even if unaligned access.  */
++    unsigned char array[] = { 1, 2, 3, 4, 5, 6, 7, 8,
++                              0x89, 0x8a, 0x8b, 0x8c, 0x8d };
++    int ret = -1;
++
++    if (virReadBufInt64BE(array) != 0x0102030405060708ULL)
++        goto cleanup;
++    if (virReadBufInt64BE(array + 5) != 0x060708898a8b8c8dULL)
++        goto cleanup;
++    if (virReadBufInt64LE(array) != 0x0807060504030201ULL)
++        goto cleanup;
++    if (virReadBufInt64LE(array + 5) != 0x8d8c8b8a89080706ULL)
++        goto cleanup;
++
++    if (virReadBufInt32BE(array) != 0x01020304U)
++        goto cleanup;
++    if (virReadBufInt32BE(array + 9) != 0x8a8b8c8dU)
++        goto cleanup;
++    if (virReadBufInt32LE(array) != 0x04030201U)
++        goto cleanup;
++    if (virReadBufInt32LE(array + 9) != 0x8d8c8b8aU)
++        goto cleanup;
++
++    ret = 0;
++cleanup:
++    return ret;
++}
++
++static int
++mymain(void)
++{
++    int ret = 0;
++
++    if (virtTestRun("test1", 1, test1, NULL) < 0)
++        ret = -1;
++    if (virtTestRun("test2", 1, test2, NULL) < 0)
++        ret = -1;
++
++    return ret;
++}
++
++VIRT_TEST_MAIN(mymain)
+-- 
+1.8.2.1
+

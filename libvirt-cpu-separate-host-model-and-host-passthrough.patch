@@ -1,0 +1,69 @@
+From 49a9b4b03d93138a6915b45980263dbc0336aa0f Mon Sep 17 00:00:00 2001
+Message-Id: <49a9b4b03d93138a6915b45980263dbc0336aa0f@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 8 Sep 2014 15:48:30 +0200
+Subject: [PATCH] cpu: separate host-model and host-passthrough
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1138222
+
+Partial backport of:
+cpu: Allow fine tuning of "host-model" cpu
+without the feature to ease the backporting of the next patch.
+
+(cherry picked from commit 3c8be55c04eb2647fd5c9d51efae78f7afdcec85)
+
+Conflicts:
+  src/conf/cpu_conf.c - conflicts were only in the parser. I chose
+    not to backport the feature.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/cpu/cpu_x86.c | 24 ++++++++++++++++++++----
+ 1 file changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/src/cpu/cpu_x86.c b/src/cpu/cpu_x86.c
+index 40aadeb..cadefb5 100644
+--- a/src/cpu/cpu_x86.c
++++ b/src/cpu/cpu_x86.c
+@@ -1769,6 +1769,23 @@ cleanup:
+     return ret;
+ }
+ 
++
++static int
++x86UpdateHostModel(virCPUDefPtr guest,
++                   const virCPUDefPtr host)
++{
++    size_t i;
++
++    guest->match = VIR_CPU_MATCH_EXACT;
++
++    virCPUDefFreeModel(guest);
++    if (virCPUDefCopyModel(guest, host, true) < 0)
++        return -1;
++
++    return 0;
++}
++
++
+ static int
+ x86Update(virCPUDefPtr guest,
+           const virCPUDefPtr host)
+@@ -1778,11 +1795,10 @@ x86Update(virCPUDefPtr guest,
+         return x86UpdateCustom(guest, host);
+ 
+     case VIR_CPU_MODE_HOST_MODEL:
++        return x86UpdateHostModel(guest, host);
++
+     case VIR_CPU_MODE_HOST_PASSTHROUGH:
+-        if (guest->mode == VIR_CPU_MODE_HOST_MODEL)
+-            guest->match = VIR_CPU_MATCH_EXACT;
+-        else
+-            guest->match = VIR_CPU_MATCH_MINIMUM;
++        guest->match = VIR_CPU_MATCH_MINIMUM;
+         virCPUDefFreeModel(guest);
+         return virCPUDefCopyModel(guest, host, true);
+ 
+-- 
+2.1.0
+

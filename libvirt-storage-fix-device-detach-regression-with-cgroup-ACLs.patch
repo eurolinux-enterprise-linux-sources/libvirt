@@ -1,0 +1,46 @@
+From fa672b6f38d4eb8fc21bcd0d7310014018326002 Mon Sep 17 00:00:00 2001
+Message-Id: <fa672b6f38d4eb8fc21bcd0d7310014018326002.1354720507.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 27 Nov 2012 09:16:42 -0700
+Subject: [PATCH] storage: fix device detach regression with cgroup ACLs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=876828
+
+Commit 38c4a9cc introduced a regression in hot unplugging of disks
+from qemu, where cgroup device ACLs were no longer being revoked
+(thankfully not a security hole: cgroup ACLs only prevent open()
+of the disk; so reverting the ACL prevents future abuse but doesn't
+stop abuse from an fd that was already opened before the ACL change).
+
+The actual regression is due to a latent bug.  The hot unplug code
+was computing the set of files needing cgroup ACL revocation based
+on the XML passed in by the user, rather than based on the domain's
+details on which disk was being deleted.  As long as the revoke
+path was always recomputing the backing chain, this didn't really
+matter; but now that we want to compute the chain exactly once and
+remember that computation, we need to hang on to the backing chain
+until after the revoke has happened.
+
+* src/qemu/qemu_hotplug.c (qemuDomainDetachPciDiskDevice):
+Transfer backing chain before deletion.
+(cherry picked from commit 1b2ebf950289de6b112e1e279df11030cb1d7ba2)
+---
+ src/qemu/qemu_hotplug.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index ab1a6e2..1568edd 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1999,6 +1999,8 @@ int qemuDomainDetachPciDiskDevice(struct qemud_driver *driver,
+ 
+     virDomainDiskRemove(vm->def, i);
+ 
++    dev->data.disk->backingChain = detach->backingChain;
++    detach->backingChain = NULL;
+     virDomainDiskDefFree(detach);
+ 
+     if (virSecurityManagerRestoreImageLabel(driver->securityManager,
+-- 
+1.8.0
+

@@ -1,0 +1,59 @@
+From 21a92baf463752ed6f694cbf91a2c4a3e7b34e3f Mon Sep 17 00:00:00 2001
+Message-Id: <21a92baf463752ed6f694cbf91a2c4a3e7b34e3f.1373271642.git.jdenemar@redhat.com>
+From: Jim Fehlig <jfehlig@suse.com>
+Date: Thu, 20 Jun 2013 12:55:00 -0600
+Subject: [PATCH] build: Fix build with -Werror
+
+https://bugzilla.redhat.com/show_bug.cgi?id=976401
+
+Commit 752596b5 broke the build with -Werror
+
+qemu/qemu_hotplug.c: In function 'qemuDomainChangeGraphics':
+qemu/qemu_hotplug.c:1980:39: error: declaration of 'listen' shadows a
+  global declaration [-Werror=shadow]
+
+Fix with s/listen/newlisten/
+(cherry picked from commit 24d0e67aba6b9d62cfee95582f211b4d850373d3)
+---
+ src/qemu/qemu_hotplug.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index dadea1b..6da303e 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1736,18 +1736,18 @@ qemuDomainChangeGraphics(struct qemud_driver *driver,
+     }
+ 
+     for (i = 0; i < dev->nListens; i++) {
+-        virDomainGraphicsListenDefPtr listen = &dev->listens[i];
++        virDomainGraphicsListenDefPtr newlisten = &dev->listens[i];
+         virDomainGraphicsListenDefPtr oldlisten = &olddev->listens[i];
+ 
+-        if (listen->type != oldlisten->type) {
++        if (newlisten->type != oldlisten->type) {
+             virReportError(VIR_ERR_INVALID_ARG, "%s",
+                            _("cannot change the type of listen address"));
+             return -1;
+         }
+ 
+-        switch ((enum virDomainGraphicsListenType) listen->type) {
++        switch ((enum virDomainGraphicsListenType) newlisten->type) {
+         case VIR_DOMAIN_GRAPHICS_LISTEN_TYPE_ADDRESS:
+-            if (STRNEQ_NULLABLE(listen->address, oldlisten->address)) {
++            if (STRNEQ_NULLABLE(newlisten->address, oldlisten->address)) {
+                 virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                                dev->type == VIR_DOMAIN_GRAPHICS_TYPE_VNC ?
+                                _("cannot change listen address setting on vnc graphics") :
+@@ -1757,7 +1757,7 @@ qemuDomainChangeGraphics(struct qemud_driver *driver,
+             break;
+ 
+         case VIR_DOMAIN_GRAPHICS_LISTEN_TYPE_NETWORK:
+-            if (STRNEQ_NULLABLE(listen->network, oldlisten->network)) {
++            if (STRNEQ_NULLABLE(newlisten->network, oldlisten->network)) {
+                 virReportError(VIR_ERR_INVALID_ARG, "%s",
+                                dev->type == VIR_DOMAIN_GRAPHICS_TYPE_VNC ?
+                            _("cannot change listen network setting on vnc graphics") :
+-- 
+1.8.2.1
+

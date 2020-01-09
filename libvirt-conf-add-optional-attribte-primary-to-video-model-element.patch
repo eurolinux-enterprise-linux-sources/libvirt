@@ -1,0 +1,150 @@
+From db747e51ba19dee96356dee6416cae355985b9d8 Mon Sep 17 00:00:00 2001
+Message-Id: <db747e51ba19dee96356dee6416cae355985b9d8.1373271639.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Wed, 6 Mar 2013 15:03:53 -0700
+Subject: [PATCH] conf: add optional attribte primary to video <model> element
+
+https://bugzilla.redhat.com/show_bug.cgi?id=896604
+
+If there are multiple video devices
+primary = 'yes' marks this video device as the primary one.
+The rest are secondary video devices. No more than one could be
+mark as primary. If none of them has primary attribute, the first
+one will be the primary by default like what it was.
+The reason of this changing is that for qemu, only one primary video
+device is permitted which can be of any type. For secondary video
+devices, only qxl is allowd. Primary attribute removes the restriction
+that the first have to be the primary one.
+
+We always put the primary video device into the first position of
+video device structure array after parsing.
+(cherry picked from commit 09938bb3b0f2b2735f30b515d3d6819095612e73)
+---
+ docs/formatdomain.html.in     |  6 +++++-
+ docs/schemas/domaincommon.rng |  8 ++++++++
+ src/conf/domain_conf.c        | 27 ++++++++++++++++++++++++++-
+ src/conf/domain_conf.h        |  1 +
+ 4 files changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index ab1f6d2..775d605 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -3472,7 +3472,11 @@ qemu-kvm -net nic,model=? /dev/null
+         will add a default <code>video</code> according to the guest type.
+         For a guest of type "kvm", the default <code>video</code> for it is:
+         <code>type</code> with value "cirrus", <code>vram</code> with value
+-        "9216", and <code>heads</code> with value "1".
++        "9216", and <code>heads</code> with value "1". By default, the first
++        video device in domain xml is the primary one, but the optional
++        attribute <code>primary</code> (<span class="since">since 1.0.2</span>)
++        with value 'yes' can be used to mark the primary in cases of mutiple
++        video device. The non-primary must be type of "qxl".
+       </dd>
+ 
+       <dt><code>model</code></dt>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 1330fde..1b4f432 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -2248,6 +2248,14 @@
+             </attribute>
+           </optional>
+           <optional>
++            <attribute name="primary">
++              <choice>
++                <value>yes</value>
++                <value>no</value>
++              </choice>
++            </attribute>
++          </optional>
++          <optional>
+             <element name="acceleration">
+               <optional>
+                 <attribute name="accel3d">
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 547cd60..996233d 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -7237,6 +7237,7 @@ virDomainVideoDefParseXML(const xmlNodePtr node,
+     char *type = NULL;
+     char *heads = NULL;
+     char *vram = NULL;
++    char *primary = NULL;
+ 
+     if (VIR_ALLOC(def) < 0) {
+         virReportOOMError();
+@@ -7251,6 +7252,11 @@ virDomainVideoDefParseXML(const xmlNodePtr node,
+                 type = virXMLPropString(cur, "type");
+                 vram = virXMLPropString(cur, "vram");
+                 heads = virXMLPropString(cur, "heads");
++
++                if ((primary = virXMLPropString(cur, "primary")) != NULL)
++                    if (STREQ(primary, "yes"))
++                        def->primary = 1;
++
+                 def->accel = virDomainVideoAccelDefParseXML(cur);
+             }
+         }
+@@ -8633,6 +8639,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+     xmlNodePtr cur;
+     bool usb_none = false;
+     bool usb_other = false;
++    bool primaryVideo = false;
+ 
+     if (VIR_ALLOC(def) < 0) {
+         virReportOOMError();
+@@ -9924,12 +9931,28 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+     if (n && VIR_ALLOC_N(def->videos, n) < 0)
+         goto no_memory;
+     for (i = 0 ; i < n ; i++) {
++        size_t ii = def->nvideos;
+         virDomainVideoDefPtr video = virDomainVideoDefParseXML(nodes[i],
+                                                                def,
+                                                                flags);
+         if (!video)
+             goto error;
+-        def->videos[def->nvideos++] = video;
++
++        if (video->primary) {
++            if (primaryVideo) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                               _("Only one primary video device is supported"));
++                goto error;
++            }
++
++            ii = 0;
++            primaryVideo = true;
++        }
++        if (VIR_INSERT_ELEMENT_INPLACE(def->videos,
++                                       ii,
++                                       def->nvideos,
++                                       video) < 0)
++            goto error;
+     }
+     VIR_FREE(nodes);
+ 
+@@ -13072,6 +13095,8 @@ virDomainVideoDefFormat(virBufferPtr buf,
+         virBufferAsprintf(buf, " vram='%u'", def->vram);
+     if (def->heads)
+         virBufferAsprintf(buf, " heads='%u'", def->heads);
++    if (def->primary)
++        virBufferAddLit(buf, " primary='yes'");
+     if (def->accel) {
+         virBufferAddLit(buf, ">\n");
+         virDomainVideoAccelDefFormat(buf, def->accel);
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 8595df5..f227230 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1116,6 +1116,7 @@ struct _virDomainVideoDef {
+     int type;
+     unsigned int vram;
+     unsigned int heads;
++    bool primary;
+     virDomainVideoAccelDefPtr accel;
+     virDomainDeviceInfo info;
+ };
+-- 
+1.8.2.1
+

@@ -1,0 +1,40 @@
+From e4ffc97478cf3ba3dfc59cbb12eb0ffa10ad807f Mon Sep 17 00:00:00 2001
+Message-Id: <e4ffc97478cf3ba3dfc59cbb12eb0ffa10ad807f.1350990678.git.jdenemar@redhat.com>
+From: =?UTF-8?q?Guido=20G=C3=BCnther?= <agx@sigxcpu.org>
+Date: Fri, 19 Oct 2012 12:16:29 +0200
+Subject: [PATCH] qemu: Don't fail without emulatorpin or cpumask
+
+https://bugzilla.redhat.com/show_bug.cgi?id=867372
+
+This unbreaks qemu:///session that got broken by
+ba63d8f7d843461f77a8206c1ef9da38388713e5.
+(cherry picked from commit a605594f8e2feaa77474008212a31a8dd21b03b7)
+---
+ src/qemu/qemu_process.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index fc67fd9..c4013fa 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2037,12 +2037,14 @@ qemuProcessSetEmulatorAffinites(virConnectPtr conn,
+     if (virNodeGetInfo(conn, &nodeinfo) != 0)
+         return -1;
+ 
+-    if (def->cputune.emulatorpin)
++    if (def->cputune.emulatorpin) {
+         cpumask = def->cputune.emulatorpin->cpumask;
+-    else if (def->cpumask)
++    } else if (def->cpumask) {
+         cpumask = def->cpumask;
+-    else
++    } else {
++        ret = 0;
+         goto cleanup;
++    }
+ 
+     ret = virProcessInfoSetAffinity(vm->pid, cpumask);
+ cleanup:
+-- 
+1.7.12.4
+

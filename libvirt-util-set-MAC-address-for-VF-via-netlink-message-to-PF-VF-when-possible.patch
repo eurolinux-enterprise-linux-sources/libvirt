@@ -1,0 +1,321 @@
+From a7b3e01342a26d796e75c72673044c5165e7747c Mon Sep 17 00:00:00 2001
+Message-Id: <a7b3e01342a26d796e75c72673044c5165e7747c@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Tue, 21 Apr 2015 14:13:36 -0400
+Subject: [PATCH] util: set MAC address for VF via netlink message to PF+VF#
+ when possible
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1113474
+
+When we set the MAC address of a network device as a part of setting
+up macvtap "passthrough" mode (where the domain has an emulated netdev
+connected to a host macvtap device that has exclusive use of the
+physical device, and sets the device MAC address to match its own,
+i.e. "<interface type='direct'> <source mode='passthrough' .../>"), we
+use ioctl(SIOCSIFHWADDR) giving it the name of that device. This is
+true even if it is an SRIOV Virtual Function (VF).
+
+But, when we are setting the MAC address / vlan ID of a VF in
+preparation for "hostdev network" passthrough (this is where we set
+the MAC address and vlan id of the VF after detaching the host net
+driver and before assigning the device to the domain with PCI
+passthrough, i.e. "<interface type='hostdev'>", we do the setting via
+a netlink RTM_SETLINK message for that VF's Physical Function (PF),
+telling it the VF# we want to change. This sets an "administratively
+changed MAC" flag for that VF in the PF's driver, and from that point
+on (until the PF driver is reloaded, *not* merely the VF driver) that
+VF's MAC address can't be changed using ioctl(SIOCSIFHWADDR) - the
+only way to change it is via the PF with RTM_SETLINK.
+
+This means that if a VF is used for hostdev passthrough, it will have
+the admin flag set, and future attempts to use that VF for macvtap
+passthrough will fail.
+
+The solution to this problem is to check if the device being used for
+macvtap passthrough is actually a VF; if so, we use the netlink
+RTM_SETLINK message to the PF to set the VF's mac address instead of
+ioctl(SIOCSIFHWADDR) directly to the VF; if not, behavior does not
+change from previously.
+
+There are three pieces to making this work:
+
+1) virNetDevMacVLan(Create|Delete)WithVPortProfile() now call
+   virNetDev(Replace|Restore)NetConfig() rather than
+   virNetDev(Replace|Restore)MacAddress() (simply passing -1 for VF#
+   and vlanid).
+
+2) virNetDev(Replace|Restore)NetConfig() check to see if the device is
+   a VF. If so, they find the PF's name and VF#, allowing them to call
+   virNetDev(Replace|Restore)VfConfig().
+
+3) To prevent mixups when detaching a macvtap passthrough device that
+   had been attached while running an older version of libvirt,
+   virNetDevRestoreVfConfig() is potentially given the preserved name
+   of the VF, and if the proper statefile for a VF can't be found in
+   the stateDir (${stateDir}/${pfname}_vf${vfid}),
+   virNetDevRestoreMacAddress() is called instead (which will look in
+   the file named ${stateDir}/${vfname}).
+
+This problem has existed in every version of libvirt that has both
+macvtap passthrough and interface type='hostdev'. Fortunately people
+seem to use one or the other though, so it hasn't caused any real
+world problem reports.
+
+cherry-picked from upstream commit
+cb3fe38c74bd1fb4ef76c64c045cf48467a9d259
+
+Conflicts:
+
+    * extraneous braces removed in context upstream.
+
+    * virNetDev(Replace|Restore)NetConfig() had their prototypes
+      const-ified upstream in patch
+      b4bbaeef41061fdaba21e00246b679ed7e371ca8, which also modified
+      other files that don't exist downstream, and was incomplete to
+      boot, so I've just updated thos two function prototypes as a
+      part of this patch rather than backporting that other patch (and
+      its fix)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms    |  2 --
+ src/util/virnetdev.c        | 84 +++++++++++++++++++++++++++++++++++++--------
+ src/util/virnetdev.h        | 17 ++-------
+ src/util/virnetdevmacvlan.c |  7 ++--
+ 4 files changed, 75 insertions(+), 35 deletions(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 927d155..6276010 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1504,9 +1504,7 @@ virNetDevGetVirtualFunctions;
+ virNetDevIsOnline;
+ virNetDevIsVirtualFunction;
+ virNetDevLinkDump;
+-virNetDevReplaceMacAddress;
+ virNetDevReplaceNetConfig;
+-virNetDevRestoreMacAddress;
+ virNetDevRestoreNetConfig;
+ virNetDevSetIPv4Address;
+ virNetDevSetMAC;
+diff --git a/src/util/virnetdev.c b/src/util/virnetdev.c
+index 286406b..123c262 100644
+--- a/src/util/virnetdev.c
++++ b/src/util/virnetdev.c
+@@ -242,7 +242,7 @@ int virNetDevGetMAC(const char *ifname,
+  * Returns 0 on success, -1 on failure
+  *
+  */
+-int
++static int
+ virNetDevReplaceMacAddress(const char *linkdev,
+                            const virMacAddrPtr macaddress,
+                            const char *stateDir)
+@@ -282,7 +282,7 @@ virNetDevReplaceMacAddress(const char *linkdev,
+  * Returns 0 on success, -errno on failure.
+  *
+  */
+-int
++static int
+ virNetDevRestoreMacAddress(const char *linkdev,
+                            const char *stateDir)
+ {
+@@ -1623,7 +1623,8 @@ cleanup:
+ }
+ 
+ static int
+-virNetDevRestoreVfConfig(const char *pflinkdev, int vf,
++virNetDevRestoreVfConfig(const char *pflinkdev,
++                         int vf, const char *vflinkdev,
+                          const char *stateDir)
+ {
+     int rc = -1;
+@@ -1640,6 +1641,17 @@ virNetDevRestoreVfConfig(const char *pflinkdev, int vf,
+         return rc;
+     }
+ 
++    if (vflinkdev && !virFileExists(path)) {
++        /* this VF's config may have been stored with
++         * virNetDevReplaceMacAddress while running an older version
++         * of libvirt. If so, the ${pf}_vf${id} file won't exist. In
++         * that case, try to restore using the older method with the
++         * VF's name directly.
++         */
++        rc = virNetDevRestoreMacAddress(vflinkdev, stateDir);
++        goto cleanup;
++    }
++
+     if (virFileReadAll(path, 128, &fileData) < 0) {
+         goto cleanup;
+     }
+@@ -1690,15 +1702,35 @@ cleanup:
+  *
+  */
+ int
+-virNetDevReplaceNetConfig(char *linkdev, int vf,
++virNetDevReplaceNetConfig(const char *linkdev, int vf,
+                           const virMacAddrPtr macaddress, int vlanid,
+-                          char *stateDir)
++                          const char *stateDir)
+ {
++    int ret = -1;
++    char *pfdevname = NULL;
++
++    if (vf == -1 && virNetDevIsVirtualFunction(linkdev)) {
++        /* If this really *is* a VF and the caller just didn't know
++         * it, we should set the MAC address via PF+vf# instead of
++         * setting directly via VF, because the latter will be
++         * rejected any time after the former has been done.
++         */
++        if (virNetDevGetPhysicalFunction(linkdev, &pfdevname) < 0)
++            goto cleanup;
++        if (virNetDevGetVirtualFunctionIndex(pfdevname, linkdev, &vf) < 0)
++            goto cleanup;
++        linkdev = pfdevname;
++    }
++
+     if (vf == -1)
+-        return virNetDevReplaceMacAddress(linkdev, macaddress, stateDir);
++        ret = virNetDevReplaceMacAddress(linkdev, macaddress, stateDir);
+     else
+-        return virNetDevReplaceVfConfig(linkdev, vf, macaddress, vlanid,
+-                                        stateDir);
++        ret = virNetDevReplaceVfConfig(linkdev, vf, macaddress, vlanid,
++                                       stateDir);
++
++ cleanup:
++    VIR_FREE(pfdevname);
++    return ret;
+ }
+ 
+ /**
+@@ -1711,12 +1743,34 @@ virNetDevReplaceNetConfig(char *linkdev, int vf,
+  *
+  */
+ int
+-virNetDevRestoreNetConfig(char *linkdev, int vf, char *stateDir)
++virNetDevRestoreNetConfig(const char *linkdev, int vf, const char *stateDir)
+ {
++    int ret = -1;
++    char *pfdevname = NULL;
++    const char *vfdevname = NULL;
++
++    if (vf == -1 && virNetDevIsVirtualFunction(linkdev)) {
++        /* If this really *is* a VF and the caller just didn't know
++         * it, we should set the MAC address via PF+vf# instead of
++         * setting directly via VF, because the latter will be
++         * rejected any time after the former has been done.
++         */
++        if (virNetDevGetPhysicalFunction(linkdev, &pfdevname) < 0)
++            goto cleanup;
++        if (virNetDevGetVirtualFunctionIndex(pfdevname, linkdev, &vf) < 0)
++            goto cleanup;
++        vfdevname = linkdev;
++        linkdev = pfdevname;
++    }
++
+     if (vf == -1)
+-        return virNetDevRestoreMacAddress(linkdev, stateDir);
++        ret = virNetDevRestoreMacAddress(linkdev, stateDir);
+     else
+-        return virNetDevRestoreVfConfig(linkdev, vf, stateDir);
++        ret = virNetDevRestoreVfConfig(linkdev, vf, vfdevname, stateDir);
++
++ cleanup:
++    VIR_FREE(pfdevname);
++    return ret;
+ }
+ 
+ #else /* defined(__linux__) && defined(HAVE_LIBNL) */
+@@ -1735,11 +1789,11 @@ virNetDevLinkDump(const char *ifname ATTRIBUTE_UNUSED,
+ }
+ 
+ int
+-virNetDevReplaceNetConfig(char *linkdev ATTRIBUTE_UNUSED,
++virNetDevReplaceNetConfig(const char *linkdev ATTRIBUTE_UNUSED,
+                           int vf ATTRIBUTE_UNUSED,
+                           const virMacAddrPtr macaddress ATTRIBUTE_UNUSED,
+                           int vlanid ATTRIBUTE_UNUSED,
+-                          char *stateDir ATTRIBUTE_UNUSED)
++                          const char *stateDir ATTRIBUTE_UNUSED)
+ {
+     virReportSystemError(ENOSYS, "%s",
+                          _("Unable to replace net config on this platform"));
+@@ -1748,9 +1802,9 @@ virNetDevReplaceNetConfig(char *linkdev ATTRIBUTE_UNUSED,
+ }
+ 
+ int
+-virNetDevRestoreNetConfig(char *linkdev ATTRIBUTE_UNUSED,
++virNetDevRestoreNetConfig(const char *linkdev ATTRIBUTE_UNUSED,
+                           int vf ATTRIBUTE_UNUSED,
+-                          char *stateDir ATTRIBUTE_UNUSED)
++                          const char *stateDir ATTRIBUTE_UNUSED)
+ {
+     virReportSystemError(ENOSYS, "%s",
+                          _("Unable to restore net config on this platform"));
+diff --git a/src/util/virnetdev.h b/src/util/virnetdev.h
+index 123667c..fc8d49f 100644
+--- a/src/util/virnetdev.h
++++ b/src/util/virnetdev.h
+@@ -57,17 +57,6 @@ int virNetDevGetMAC(const char *ifname,
+                     virMacAddrPtr macaddr)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+ 
+-int virNetDevReplaceMacAddress(const char *linkdev,
+-                               const virMacAddrPtr macaddress,
+-                               const char *stateDir)
+-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
+-    ATTRIBUTE_RETURN_CHECK;
+-
+-int virNetDevRestoreMacAddress(const char *linkdev,
+-                               const char *stateDir)
+-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+-
+-
+ int virNetDevSetMTU(const char *ifname,
+                     int mtu)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+@@ -115,12 +104,12 @@ int virNetDevLinkDump(const char *ifname, int ifindex,
+                       uint32_t src_pid, uint32_t dst_pid)
+     ATTRIBUTE_RETURN_CHECK;
+ 
+-int virNetDevReplaceNetConfig(char *linkdev, int vf,
++int virNetDevReplaceNetConfig(const char *linkdev, int vf,
+                               const virMacAddrPtr macaddress, int vlanid,
+-                              char *stateDir)
++                              const char *stateDir)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(5);
+ 
+-int virNetDevRestoreNetConfig(char *linkdev, int vf, char *stateDir)
++int virNetDevRestoreNetConfig(const char *linkdev, int vf, const char *stateDir)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
+ 
+ int virNetDevGetVirtualFunctionInfo(const char *vfname, char **pfname,
+diff --git a/src/util/virnetdevmacvlan.c b/src/util/virnetdevmacvlan.c
+index 216b791..26dca46 100644
+--- a/src/util/virnetdevmacvlan.c
++++ b/src/util/virnetdevmacvlan.c
+@@ -849,7 +849,7 @@ int virNetDevMacVLanCreateWithVPortProfile(const char *tgifname,
+      * emulate their switch in firmware.
+      */
+     if (mode == VIR_NETDEV_MACVLAN_MODE_PASSTHRU) {
+-        if (virNetDevReplaceMacAddress(linkdev, macaddress, stateDir) < 0)
++        if (virNetDevReplaceNetConfig(linkdev, -1, macaddress, -1, stateDir) < 0)
+             return -1;
+     }
+ 
+@@ -988,9 +988,8 @@ int virNetDevMacVLanDeleteWithVPortProfile(const char *ifname,
+     int ret = 0;
+     int vf = -1;
+ 
+-    if (mode == VIR_NETDEV_MACVLAN_MODE_PASSTHRU) {
+-        ignore_value(virNetDevRestoreMacAddress(linkdev, stateDir));
+-    }
++    if (mode == VIR_NETDEV_MACVLAN_MODE_PASSTHRU)
++        ignore_value(virNetDevRestoreNetConfig(linkdev, vf, stateDir));
+ 
+     if (ifname) {
+         if (virNetDevVPortProfileDisassociate(ifname,
+-- 
+2.3.6
+

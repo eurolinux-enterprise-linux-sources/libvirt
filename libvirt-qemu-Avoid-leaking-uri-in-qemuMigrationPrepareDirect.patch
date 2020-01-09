@@ -1,0 +1,36 @@
+From f121f4ad033c48431a34982d9af57efeef8e5776 Mon Sep 17 00:00:00 2001
+Message-Id: <f121f4ad033c48431a34982d9af57efeef8e5776.1373271643.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 25 Jun 2013 18:54:19 +0200
+Subject: [PATCH] qemu: Avoid leaking uri in qemuMigrationPrepareDirect
+
+https://bugzilla.redhat.com/show_bug.cgi?id=977961
+(cherry picked from commit ddf8ad82eb5f638d6153f4b1869af17dca572e67)
+---
+ src/qemu/qemu_migration.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 0777b1b..f66aab3 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1543,7 +1543,7 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+     const char *p;
+     char *uri_str = NULL;
+     int ret = -1;
+-    virURIPtr uri;
++    virURIPtr uri = NULL;
+ 
+     VIR_DEBUG("driver=%p, dconn=%p, cookiein=%s, cookieinlen=%d, "
+               "cookieout=%p, cookieoutlen=%p, uri_in=%s, uri_out=%p, "
+@@ -1648,6 +1648,7 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+                                   cookieout, cookieoutlen, dname, dom_xml,
+                                   NULL, this_port);
+ cleanup:
++    virURIFree(uri);
+     VIR_FREE(hostname);
+     if (ret != 0)
+         VIR_FREE(*uri_out);
+-- 
+1.8.2.1
+

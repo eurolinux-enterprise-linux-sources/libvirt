@@ -1,0 +1,127 @@
+From d4d88afab0f5d6a79a7e131b44b4f9393a771e9b Mon Sep 17 00:00:00 2001
+Message-Id: <d4d88afab0f5d6a79a7e131b44b4f9393a771e9b@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 5 Nov 2013 10:30:56 -0700
+Subject: [PATCH] util: Implement virFileReadHeaderFD
+
+This is a partial cherry-pick from commit 5327fad4f29:
+
+    storage: avoid short reads while chasing backing chain
+
+    Our backing file chain code was not very robust to an ill-timed
+    EINTR, which could lead to a short read causing us to randomly
+    treat metadata differently than usual.  But the existing
+    virFileReadLimFD forces an error if we don't read the entire
+    file, even though we only care about the header of the file.
+    So add a new virFile function that does what we want.
+
+    * src/util/virfile.h (virFileReadHeaderFD): New prototype.
+    * src/util/virfile.c (virFileReadHeaderFD): New function.
+    * src/libvirt_private.syms (virfile.h): Export it.
+    * src/util/virstoragefile.c (virStorageFileGetMetadataInternal)
+    (virStorageFileProbeFormatFromFD): Use it.
+
+    Signed-off-by: Eric Blake <eblake@redhat.com>
+
+but only limited to introducing the new function.
+
+Conflicts:
+	src/util/storage_file.c
+            - changes dropped from the backport
+
+	src/util/virfile.c
+	src/util/virfile.h
+            - context, virfile.[ch] are a lot smaller in 6.9 as most
+              of the content is still in util.[ch]
+
+CVE-2017-5715
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms |  1 +
+ src/util/util.c          |  2 +-
+ src/util/util.h          |  1 +
+ src/util/virfile.c       | 20 ++++++++++++++++++++
+ src/util/virfile.h       |  3 +++
+ 5 files changed, 26 insertions(+), 1 deletion(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index ee9685597a..4f49f8353d 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1295,6 +1295,7 @@ virFileMatchesNameSuffix;
+ virFileOpenAs;
+ virFileOpenTty;
+ virFileReadAll;
++virFileReadHeaderFD;
+ virFileReadLimFD;
+ virFileResolveAllLinks;
+ virFileResolveLink;
+diff --git a/src/util/util.c b/src/util/util.c
+index ce4e35d398..ed0ddfbaad 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -385,7 +385,7 @@ error:
+ /* Like gnulib's fread_file, but read no more than the specified maximum
+    number of bytes.  If the length of the input is <= max_len, and
+    upon error while reading that data, it works just like fread_file.  */
+-static char *
++char *
+ saferead_lim (int fd, size_t max_len, size_t *length)
+ {
+     char *buf = NULL;
+diff --git a/src/util/util.h b/src/util/util.h
+index 47c2bc1611..e7d4665a14 100644
+--- a/src/util/util.h
++++ b/src/util/util.h
+@@ -40,6 +40,7 @@
+ # endif
+ 
+ ssize_t saferead(int fd, void *buf, size_t count) ATTRIBUTE_RETURN_CHECK;
++char *saferead_lim(int fd, size_t max_len, size_t *length);
+ ssize_t safewrite(int fd, const void *buf, size_t count)
+     ATTRIBUTE_RETURN_CHECK;
+ int safezero(int fd, off_t offset, off_t len)
+diff --git a/src/util/virfile.c b/src/util/virfile.c
+index 9593151747..522c0db4e1 100644
+--- a/src/util/virfile.c
++++ b/src/util/virfile.c
+@@ -727,3 +727,23 @@ int virFileLoopDeviceAssociate(const char *file,
+ }
+ 
+ #endif /* __linux__ */
++
++
++/* A wrapper around saferead_lim that merely stops reading at the
++ * specified maximum size.  */
++int
++virFileReadHeaderFD(int fd, int maxlen, char **buf)
++{
++    size_t len;
++    char *s;
++
++    if (maxlen <= 0) {
++        errno = EINVAL;
++        return -1;
++    }
++    s = saferead_lim(fd, maxlen, &len);
++    if (s == NULL)
++        return -1;
++    *buf = s;
++    return len;
++}
+diff --git a/src/util/virfile.h b/src/util/virfile.h
+index 80daf867a5..b664cf3e5b 100644
+--- a/src/util/virfile.h
++++ b/src/util/virfile.h
+@@ -110,4 +110,7 @@ int virFileUpdatePerm(const char *path,
+ int virFileLoopDeviceAssociate(const char *file,
+                                char **dev);
+ 
++int virFileReadHeaderFD(int fd, int maxlen, char **buf)
++    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(3);
++
+ #endif /* __VIR_FILES_H */
+-- 
+2.15.1
+

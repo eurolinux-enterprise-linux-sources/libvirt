@@ -1,0 +1,33 @@
+From 131c54fa1f6b80c305db9a2f4b96a7d04fb63a1d Mon Sep 17 00:00:00 2001
+Message-Id: <131c54fa1f6b80c305db9a2f4b96a7d04fb63a1d.1355319681.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 11 Dec 2012 11:36:45 +0100
+Subject: [PATCH] qemu: Restart CPUs with valid async job type when doing
+ external snapshots
+
+https://bugzilla.redhat.com/show_bug.cgi?id=885081
+
+When restarting CPUs after an external snapshot, the restarting function
+was called without the appropriate async job type. This caused that a
+new sync job wasn't created and allowed races in the monitor.
+(cherry picked from commit 46b0c93332fb16fd9f64cd9b3bb95a0990145f0c)
+---
+ src/qemu/qemu_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index ff7f684..3e99b76 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11394,7 +11394,7 @@ endjob:
+     if (resume && vm && virDomainObjIsActive(vm) &&
+         qemuProcessStartCPUs(driver, vm, conn,
+                              VIR_DOMAIN_RUNNING_UNPAUSED,
+-                             QEMU_ASYNC_JOB_NONE) < 0) {
++                             QEMU_ASYNC_JOB_SNAPSHOT) < 0) {
+         virDomainEventPtr event = NULL;
+         event = virDomainEventNewFromObj(vm,
+                                          VIR_DOMAIN_EVENT_SUSPENDED,
+-- 
+1.8.0
+

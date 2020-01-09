@@ -1,0 +1,37 @@
+From 6ce75c2fcb32cbe5bc12db31999addbb9c29bbe7 Mon Sep 17 00:00:00 2001
+Message-Id: <6ce75c2fcb32cbe5bc12db31999addbb9c29bbe7.1373885148.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Wed, 10 Jul 2013 16:59:02 +0200
+Subject: [PATCH] usb: don't spoil decimal addresses
+
+https://bugzilla.redhat.com/show_bug.cgi?id=981503
+
+For USB devices, dev->name gets formated as %.3o:%.3o even though the
+numbers are decimal.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=967712
+(cherry picked from commit dc0c7915697a902d6edc5820f5930653b7684c3c)
+---
+ src/util/hostusb.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/hostusb.c b/src/util/hostusb.c
+index 81a9f5a..d21462c 100644
+--- a/src/util/hostusb.c
++++ b/src/util/hostusb.c
+@@ -313,10 +313,10 @@ usbGetDevice(unsigned int bus,
+     dev->bus     = bus;
+     dev->dev     = devno;
+ 
+-    if (snprintf(dev->name, sizeof(dev->name), "%.3o:%.3o",
++    if (snprintf(dev->name, sizeof(dev->name), "%.3d:%.3d",
+                  dev->bus, dev->dev) >= sizeof(dev->name)) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("dev->name buffer overflow: %.3o:%.3o"),
++                       _("dev->name buffer overflow: %.3d:%.3d"),
+                        dev->bus, dev->dev);
+         usbFreeDevice(dev);
+         return NULL;
+-- 
+1.8.3.2
+

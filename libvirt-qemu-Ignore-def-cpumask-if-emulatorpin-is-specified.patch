@@ -1,0 +1,32 @@
+From c1eb647409adc940dc4884012c564f4bb8bfa284 Mon Sep 17 00:00:00 2001
+Message-Id: <c1eb647409adc940dc4884012c564f4bb8bfa284.1350297262.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 15 Oct 2012 12:36:15 +0800
+Subject: [PATCH] qemu: Ignore def->cpumask if emulatorpin is specified
+
+https://bugzilla.redhat.com/show_bug.cgi?id=855218
+
+If the vcpu placement is "static", it's just fine to ignore the
+def->cpumask if emulatorpin is specified.
+(cherry picked from commit 3635b41e155ba81bfb8fb259ec7379502237b4b7)
+---
+ src/qemu/qemu_process.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index ff2dc3d..e6c3e56 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2618,7 +2618,8 @@ static int qemuProcessHook(void *data)
+ 
+     /* This must be done after cgroup placement to avoid resetting CPU
+      * affinity */
+-    if (qemuProcessInitCpuAffinity(h->driver, h->vm, h->nodemask) < 0)
++    if (!h->vm->def->cputune.emulatorpin &&
++        qemuProcessInitCpuAffinity(h->driver, h->vm, h->nodemask) < 0)
+         goto cleanup;
+ 
+     if (qemuProcessInitNumaMemoryPolicy(h->vm, h->nodemask) < 0)
+-- 
+1.7.12.3
+

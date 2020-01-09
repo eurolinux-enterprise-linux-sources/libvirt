@@ -1,0 +1,118 @@
+From de1ab191e2c18a15dad21d0656ecdb0000c8e620 Mon Sep 17 00:00:00 2001
+Message-Id: <de1ab191e2c18a15dad21d0656ecdb0000c8e620@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Tue, 11 Jun 2013 15:03:17 +0200
+Subject: [PATCH] qemu: allow restore with non-migratable XML input
+
+Convert input XML to migratable before using it in
+qemuDomainSaveImageOpen.
+
+XML in the save image is migratable, i.e. doesn't contain implicit
+controllers. If these controllers were in a non-default order in the
+input XML, the ABI check would fail. Removing and re-adding these
+controllers fixes it.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=834196
+(cherry picked from commit 07966f6a8b5ccb5bb4c716b25deb8ba2e572cc67)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_domain.h -- virQEMUDriverPtr is still struct
+        qemud_driver * in RHEL-6
+
+Changes:
+    - caps were not separated from struct qemud_driver
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1141838
+https://bugzilla.redhat.com/show_bug.cgi?id=1155564
+---
+ src/qemu/qemu_domain.c | 24 ++++++++++++++++++++++++
+ src/qemu/qemu_domain.h |  4 ++++
+ src/qemu/qemu_driver.c | 13 ++++++++++---
+ 3 files changed, 38 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index caa9c1a..0c3d459 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -1286,6 +1286,30 @@ void qemuDomainObjExitRemoteWithDriver(struct qemud_driver *driver,
+ }
+ 
+ 
++virDomainDefPtr
++qemuDomainDefCopy(struct qemud_driver *driver,
++                  virDomainDefPtr src,
++                  unsigned int flags)
++{
++    virBuffer buf = VIR_BUFFER_INITIALIZER;
++    virDomainDefPtr ret = NULL;
++    const char *xml = NULL;
++
++    if (qemuDomainDefFormatBuf(driver, src, flags, &buf) < 0)
++        goto cleanup;
++
++    xml = virBufferContentAndReset(&buf);
++
++    if (!(ret = virDomainDefParseString(driver->caps, xml,
++                                        QEMU_EXPECTED_VIRT_TYPES,
++                                        VIR_DOMAIN_XML_INACTIVE)))
++        goto cleanup;
++
++cleanup:
++    VIR_FREE(xml);
++    return ret;
++}
++
+ int
+ qemuDomainDefFormatBuf(struct qemud_driver *driver,
+                        virDomainDefPtr def,
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 90e26ff..91f06d8 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -271,6 +271,10 @@ void qemuDomainObjExitRemoteWithDriver(struct qemud_driver *driver,
+                                        virDomainObjPtr obj)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+ 
++virDomainDefPtr qemuDomainDefCopy(struct qemud_driver *driver,
++                                  virDomainDefPtr src,
++                                  unsigned int flags);
++
+ int qemuDomainDefFormatBuf(struct qemud_driver *driver,
+                            virDomainDefPtr vm,
+                            unsigned int flags,
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 5090919..76c7f80 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5442,17 +5442,24 @@ qemuDomainSaveImageOpen(struct qemud_driver *driver,
+         goto error;
+     if (xmlin) {
+         virDomainDefPtr def2 = NULL;
++        virDomainDefPtr newdef = NULL;
+ 
+         if (!(def2 = virDomainDefParseString(driver->caps, xmlin,
+                                              QEMU_EXPECTED_VIRT_TYPES,
+                                              VIR_DOMAIN_XML_INACTIVE)))
+             goto error;
+-        if (!virDomainDefCheckABIStability(def, def2)) {
+-            virDomainDefFree(def2);
++
++        newdef = qemuDomainDefCopy(driver, def2, VIR_DOMAIN_XML_MIGRATABLE);
++        virDomainDefFree(def2);
++        if (!newdef)
++            goto error;
++
++        if (!virDomainDefCheckABIStability(def, newdef)) {
++            virDomainDefFree(newdef);
+             goto error;
+         }
+         virDomainDefFree(def);
+-        def = def2;
++        def = newdef;
+     }
+ 
+     VIR_FREE(xml);
+-- 
+2.2.0
+

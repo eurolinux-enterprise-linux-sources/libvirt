@@ -1,0 +1,57 @@
+From 014d30d508530313ae29840c2692e04ad63c11bd Mon Sep 17 00:00:00 2001
+Message-Id: <014d30d508530313ae29840c2692e04ad63c11bd.1353944811.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 23 Nov 2012 14:10:03 +0100
+Subject: [PATCH] virsh: Report error when taking a snapshot with empty
+ --memspec argument
+
+https://bugzilla.redhat.com/show_bug.cgi?id=879130
+
+When the value of memspec was empty taking of a snapshot failed without
+reporting an error.
+(cherry picked from commit fe910efd8a67c25c9d0538bbb466239af113dc71)
+---
+ tools/virsh-snapshot.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/tools/virsh-snapshot.c b/tools/virsh-snapshot.c
+index 398730c..8ec6456 100644
+--- a/tools/virsh-snapshot.c
++++ b/tools/virsh-snapshot.c
+@@ -358,18 +358,19 @@ cmdSnapshotCreateAs(vshControl *ctl, const vshCmd *cmd)
+     if (desc)
+         virBufferEscapeString(&buf, "  <description>%s</description>\n", desc);
+ 
+-    if (vshCommandOptString(cmd, "memspec", &memspec) < 0 ||
+-        vshParseSnapshotMemspec(ctl, &buf, memspec) < 0) {
+-        virBufferFreeAndReset(&buf);
++    if (vshCommandOptString(cmd, "memspec", &memspec) < 0) {
++        vshError(ctl, _("memspec argument must not be empty"));
+         goto cleanup;
+     }
++
++    if (memspec && vshParseSnapshotMemspec(ctl, &buf, memspec) < 0)
++        goto cleanup;
++
+     if (vshCommandOptBool(cmd, "diskspec")) {
+         virBufferAddLit(&buf, "  <disks>\n");
+         while ((opt = vshCommandOptArgv(cmd, opt))) {
+-            if (vshParseSnapshotDiskspec(ctl, &buf, opt->data) < 0) {
+-                virBufferFreeAndReset(&buf);
++            if (vshParseSnapshotDiskspec(ctl, &buf, opt->data) < 0)
+                 goto cleanup;
+-            }
+         }
+         virBufferAddLit(&buf, "  </disks>\n");
+     }
+@@ -390,6 +391,7 @@ cmdSnapshotCreateAs(vshControl *ctl, const vshCmd *cmd)
+     ret = vshSnapshotCreate(ctl, dom, buffer, flags, NULL);
+ 
+ cleanup:
++    virBufferFreeAndReset(&buf);
+     VIR_FREE(buffer);
+     if (dom)
+         virDomainFree(dom);
+-- 
+1.8.0
+

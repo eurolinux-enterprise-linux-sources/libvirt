@@ -1,0 +1,49 @@
+From 55276493d15d227cb378b92f922ef3adf84da6d6 Mon Sep 17 00:00:00 2001
+Message-Id: <55276493d15d227cb378b92f922ef3adf84da6d6.1373271637.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 25 Feb 2013 16:21:46 -0700
+Subject: [PATCH] Fix probing of QED file format
+
+https://bugzilla.redhat.com/show_bug.cgi?id=903248
+
+The QED file format is non-versioned, so although the magic
+value matched, libvirt rejected it due to lack of a version
+number to compare against. We need to distinguish this case
+by allowing a value of '-2' to indicate a non-versioned file
+where only the magic is required to match
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 32bef82a2d061fc131ab26c6d8ee09705ccab5c4)
+---
+ src/util/storage_file.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index 24ef3ea..f354693 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -174,8 +174,8 @@ static struct FileTypeInfo const fileTypeInfo[] = {
+     },
+     [VIR_STORAGE_FILE_QED] = {
+         /* http://wiki.qemu.org/Features/QED */
+-        "QED\0", NULL,
+-        LV_LITTLE_ENDIAN, -1, -1,
++        "QED", NULL,
++        LV_LITTLE_ENDIAN, -2, -1,
+         QED_HDR_IMAGE_SIZE, 8, 1, -1, qedGetBackingStore,
+     },
+     [VIR_STORAGE_FILE_VMDK] = {
+@@ -612,6 +612,10 @@ virStorageFileMatchesVersion(int format,
+     if (fileTypeInfo[format].versionOffset == -1)
+         return false;
+ 
++    /* -2 == non-versioned file format, so trivially match */
++    if (fileTypeInfo[format].versionOffset == -2)
++        return true;
++
+     if ((fileTypeInfo[format].versionOffset + 4) > buflen)
+         return false;
+ 
+-- 
+1.8.2.1
+

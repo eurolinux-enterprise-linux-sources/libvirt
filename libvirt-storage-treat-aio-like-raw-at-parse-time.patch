@@ -1,0 +1,176 @@
+From 41eeb8afc7423013eee920b2b9364b181422d902 Mon Sep 17 00:00:00 2001
+Message-Id: <41eeb8afc7423013eee920b2b9364b181422d902.1350990678.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:28 -0600
+Subject: [PATCH] storage: treat 'aio' like 'raw' at parse time
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+We have historically allowed 'aio' as a synonym for 'raw' for
+back-compat to xen, but since a future patch will move to using
+an enum value, we have to pick one to be our preferred output
+name.  This is a slight change in the output XML, but the sexpr
+and xm outputs should still be identical, and the input XML can
+still use either form.
+
+* src/conf/domain_conf.c (virDomainDiskDefForeachPath): Move aio
+back-compat...
+(virDomainDiskDefParseXML): ...to parse time.
+* src/xenxs/xen_sxpr.c (xenParseSxprDisks, xenFormatSxprDisk): ...and
+to output time.
+* src/xenxs/xen_xm.c (xenParseXM, xenFormatXMDisk): Likewise.
+* tests/sexpr2xmldata/sexpr2xml-*.xml: Update tests.
+(cherry picked from commit 41e0edaf84a9ecdce0c4868656ff899989bb51fa)
+---
+ src/conf/domain_conf.c                                 |  8 ++++++--
+ src/xenxs/xen_sxpr.c                                   | 12 ++++++++++--
+ src/xenxs/xen_xm.c                                     | 11 ++++++++++-
+ tests/sexpr2xmldata/sexpr2xml-curmem.xml               |  2 +-
+ tests/sexpr2xmldata/sexpr2xml-disk-block-shareable.xml |  2 +-
+ tests/sexpr2xmldata/sexpr2xml-disk-drv-blktap-raw.xml  |  2 +-
+ tests/sexpr2xmldata/sexpr2xml-disk-drv-blktap2-raw.xml |  2 +-
+ 7 files changed, 30 insertions(+), 9 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 66fed50..79930bf 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -3728,6 +3728,12 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+                        xmlStrEqual(cur->name, BAD_CAST "driver")) {
+                 driverName = virXMLPropString(cur, "name");
+                 driverType = virXMLPropString(cur, "type");
++                if (STREQ_NULLABLE(driverType, "aio")) {
++                    /* In-place conversion to "raw", for Xen back-compat */
++                    driverType[0] = 'r';
++                    driverType[1] = 'a';
++                    driverType[2] = 'w';
++                }
+                 cachetag = virXMLPropString(cur, "cache");
+                 error_policy = virXMLPropString(cur, "error_policy");
+                 rerror_policy = virXMLPropString(cur, "rerror_policy");
+@@ -14853,8 +14859,6 @@ int virDomainDiskDefForeachPath(virDomainDiskDefPtr disk,
+ 
+     if (disk->driverType) {
+         const char *formatStr = disk->driverType;
+-        if (STREQ(formatStr, "aio"))
+-            formatStr = "raw"; /* Xen compat */
+ 
+         if ((format = virStorageFileFormatTypeFromString(formatStr)) <= 0) {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+diff --git a/src/xenxs/xen_sxpr.c b/src/xenxs/xen_sxpr.c
+index df92702..8f8a59b 100644
+--- a/src/xenxs/xen_sxpr.c
++++ b/src/xenxs/xen_sxpr.c
+@@ -443,6 +443,12 @@ xenParseSxprDisks(virDomainDefPtr def,
+                                        src);
+                         goto error;
+                     }
++                    if (STREQ(disk->driverType, "aio")) {
++                        /* In-place conversion to "raw" */
++                        disk->driverType[0] = 'r';
++                        disk->driverType[1] = 'a';
++                        disk->driverType[2] = 'w';
++                    }
+ 
+                     src = offset + 1;
+                     /* Its possible to use blktap driver for block devs
+@@ -1831,9 +1837,11 @@ xenFormatSxprDisk(virDomainDiskDefPtr def,
+         if (def->driverName) {
+             if (STREQ(def->driverName, "tap") ||
+                 STREQ(def->driverName, "tap2")) {
++                const char *type = def->driverType ? def->driverType : "aio";
++                if (STREQ(type, "raw"))
++                    type = "aio";
+                 virBufferEscapeSexpr(buf, "(uname '%s:", def->driverName);
+-                virBufferEscapeSexpr(buf, "%s:",
+-                                     def->driverType ? def->driverType : "aio");
++                virBufferEscapeSexpr(buf, "%s:", type);
+                 virBufferEscapeSexpr(buf, "%s')", def->src);
+             } else {
+                 virBufferEscapeSexpr(buf, "(uname '%s:", def->driverName);
+diff --git a/src/xenxs/xen_xm.c b/src/xenxs/xen_xm.c
+index 40a99be..c564d35 100644
+--- a/src/xenxs/xen_xm.c
++++ b/src/xenxs/xen_xm.c
+@@ -566,6 +566,12 @@ xenParseXM(virConfPtr conf, int xendConfigVersion,
+                                        disk->src);
+                         goto cleanup;
+                     }
++                    if (STREQ(disk->driverType, "aio")) {
++                        /* In-place conversion to "raw" */
++                        disk->driverType[0] = 'r';
++                        disk->driverType[1] = 'a';
++                        disk->driverType[2] = 'w';
++                    }
+ 
+                     /* Strip the prefix we found off the source file name */
+                     memmove(disk->src, disk->src+(tmp-disk->src)+1,
+@@ -1203,9 +1209,12 @@ static int xenFormatXMDisk(virConfValuePtr list,
+ 
+     if(disk->src) {
+         if (disk->driverName) {
++            const char *type = disk->driverType ? disk->driverType : "aio";
++            if (STREQ(type, "raw"))
++                type = "aio";
+             virBufferAsprintf(&buf, "%s:", disk->driverName);
+             if (STREQ(disk->driverName, "tap"))
+-                virBufferAsprintf(&buf, "%s:", disk->driverType ? disk->driverType : "aio");
++                virBufferAsprintf(&buf, "%s:", type);
+         } else {
+             switch (disk->type) {
+             case VIR_DOMAIN_DISK_TYPE_FILE:
+diff --git a/tests/sexpr2xmldata/sexpr2xml-curmem.xml b/tests/sexpr2xmldata/sexpr2xml-curmem.xml
+index ac5ab51..1edc52b 100644
+--- a/tests/sexpr2xmldata/sexpr2xml-curmem.xml
++++ b/tests/sexpr2xmldata/sexpr2xml-curmem.xml
+@@ -17,7 +17,7 @@
+   <on_crash>restart</on_crash>
+   <devices>
+     <disk type='file' device='disk'>
+-      <driver name='tap' type='aio'/>
++      <driver name='tap' type='raw'/>
+       <source file='/xen/rhel5.img'/>
+       <target dev='xvda' bus='xen'/>
+     </disk>
+diff --git a/tests/sexpr2xmldata/sexpr2xml-disk-block-shareable.xml b/tests/sexpr2xmldata/sexpr2xml-disk-block-shareable.xml
+index e4cd3a8..571b349 100644
+--- a/tests/sexpr2xmldata/sexpr2xml-disk-block-shareable.xml
++++ b/tests/sexpr2xmldata/sexpr2xml-disk-block-shareable.xml
+@@ -14,7 +14,7 @@
+   <on_crash>restart</on_crash>
+   <devices>
+     <disk type='file' device='disk'>
+-      <driver name='tap' type='aio'/>
++      <driver name='tap' type='raw'/>
+       <source file='/var/lib/xen/images/rhel5pv.img'/>
+       <target dev='xvda' bus='xen'/>
+       <shareable/>
+diff --git a/tests/sexpr2xmldata/sexpr2xml-disk-drv-blktap-raw.xml b/tests/sexpr2xmldata/sexpr2xml-disk-drv-blktap-raw.xml
+index 98ed5c5..df8e7ec 100644
+--- a/tests/sexpr2xmldata/sexpr2xml-disk-drv-blktap-raw.xml
++++ b/tests/sexpr2xmldata/sexpr2xml-disk-drv-blktap-raw.xml
+@@ -16,7 +16,7 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <disk type='file' device='disk'>
+-      <driver name='tap' type='aio'/>
++      <driver name='tap' type='raw'/>
+       <source file='/root/some.img'/>
+       <target dev='xvda' bus='xen'/>
+     </disk>
+diff --git a/tests/sexpr2xmldata/sexpr2xml-disk-drv-blktap2-raw.xml b/tests/sexpr2xmldata/sexpr2xml-disk-drv-blktap2-raw.xml
+index b61182b..ea93195 100644
+--- a/tests/sexpr2xmldata/sexpr2xml-disk-drv-blktap2-raw.xml
++++ b/tests/sexpr2xmldata/sexpr2xml-disk-drv-blktap2-raw.xml
+@@ -16,7 +16,7 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <disk type='file' device='disk'>
+-      <driver name='tap2' type='aio'/>
++      <driver name='tap2' type='raw'/>
+       <source file='/root/some.img'/>
+       <target dev='xvda' bus='xen'/>
+     </disk>
+-- 
+1.7.12.4
+

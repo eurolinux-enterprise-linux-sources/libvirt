@@ -1,0 +1,48 @@
+From 96906b3d3b33e2eb67d3589b18e6c066faaf8ba7 Mon Sep 17 00:00:00 2001
+Message-Id: <96906b3d3b33e2eb67d3589b18e6c066faaf8ba7@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 25 Apr 2014 16:35:38 +0200
+Subject: [PATCH] qemu: Avoid overflow when setting migration speed on inactive
+ domains
+
+Commit c4206d7 fixed the overflow for running domains. However, we need
+a similar check when setting migration speed on inactive domains.
+
+At first look, it may seem the check in c4206d7 is now redundant but
+qemuDomainMigrateSetMaxSpeed is not the only caller of
+qemuMonitorSetMigrationSpeed so we need to check the bandwidth in both
+places.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1083483
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit dff3ad004acd2c8754a76553742cc5c18c77766c)
+
+Conflicts:
+	src/qemu/qemu_driver.c - context, no ACLs
+---
+ src/qemu/qemu_driver.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 568aa7d..0f2e4e3 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11137,6 +11137,14 @@ qemuDomainMigrateSetMaxSpeed(virDomainPtr dom,
+     }
+ 
+     priv = vm->privateData;
++
++    if (bandwidth > QEMU_DOMAIN_MIG_BANDWIDTH_MAX) {
++        virReportError(VIR_ERR_OVERFLOW,
++                       _("bandwidth must be less than %llu"),
++                       QEMU_DOMAIN_MIG_BANDWIDTH_MAX + 1ULL);
++        goto cleanup;
++    }
++
+     if (virDomainObjIsActive(vm)) {
+         if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_MIGRATION_OP) < 0)
+             goto cleanup;
+-- 
+1.9.2
+

@@ -1,0 +1,39 @@
+From 4e997c195dd48000ede43837cb143fee3639b8e2 Mon Sep 17 00:00:00 2001
+Message-Id: <4e997c195dd48000ede43837cb143fee3639b8e2@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 14 May 2014 16:12:19 +0200
+Subject: [PATCH] bridge_driver.h: Fix build --without-network
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+The networkNotifyActualDevice function is accepting two arguments, not
+one:
+
+qemu/qemu_process.c: In function 'qemuProcessNotifyNets':
+qemu/qemu_process.c:2776:47: error: macro "networkNotifyActualDevice" passed 2 arguments, but takes just 1
+         if (networkNotifyActualDevice(def, net) < 0)
+                                               ^
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 4d88294483b89948c9b4aea585b0c853147aa158)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/network/bridge_driver.h b/src/network/bridge_driver.h
+index 8ffeaff..b4b9b02 100644
+--- a/src/network/bridge_driver.h
++++ b/src/network/bridge_driver.h
+@@ -57,7 +57,7 @@ int networkBuildDhcpDaemonCommandLine(virNetworkObjPtr network,
+ # else
+ /* Define no-op replacements that don't drag in any link dependencies.  */
+ #  define networkAllocateActualDevice(dom, iface) 0
+-#  define networkNotifyActualDevice(iface) (iface=iface, 0)
++#  define networkNotifyActualDevice(dom, iface) (dom=dom, iface=iface, 0)
+ #  define networkReleaseActualDevice(dom, iface) (dom=dom, iface=iface, 0)
+ #  define networkGetNetworkAddress(netname, netaddr) (-2)
+ #  define networkBuildDhcpDaemonCommandLine(network, cmdout, pidfile, dctx, caps) 0
+-- 
+1.9.3
+

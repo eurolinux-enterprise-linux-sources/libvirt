@@ -1,0 +1,206 @@
+From b05ccb37a7781b7a30a44bb8e2ea74e5f7a3d742 Mon Sep 17 00:00:00 2001
+Message-Id: <b05ccb37a7781b7a30a44bb8e2ea74e5f7a3d742@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:51 +0100
+Subject: [PATCH] qemu: Implement support for default 'random' backend for
+ virtio-rng
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+This patch implements support for the virtio-rng-pci device and the
+rng-random backend in qemu.
+
+Two capabilities bits are added to track support for those:
+
+QEMU_CAPS_DEVICE_VIRTIO_RNG - for the device support and
+QEMU_CAPS_OBJECT_RNG_RANDOM - for the backend support.
+
+qemu is invoked with these additional parameters if the device is
+enabled:
+
+-object rng-random,id=rng0,filename=/test/phile (to add the backend)
+-device virtio-rng-pci,rng=rng0,bus=pci.0,addr=0x4 (to add the device)
+(cherry picked from commit 234a55604eed46b1d4dd55a4d20b66e12a485bc6)
+
+Conflicts:
+	src/qemu/qemu_capabilities.c - multiple features not backported
+	src/qemu/qemu_capabilities.h - different structure of capability
+    features
+	src/qemu/qemu_command.c - context: features not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c |  4 ++
+ src/qemu/qemu_capabilities.h |  3 ++
+ src/qemu/qemu_command.c      | 98 ++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 105 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index b30a585..f4e8513 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -200,6 +200,8 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "ipv6-migration",
+               "vnc-share-policy",
+               "mlock",
++              "virtio-rng",
++              "rng-random",
+     );
+ 
+ struct _qemuCaps {
+@@ -1313,6 +1315,8 @@ struct qemuCapsStringFlags qemuCapsObjectTypes[] = {
+     { "VGA", QEMU_CAPS_DEVICE_VGA },
+     { "cirrus-vga", QEMU_CAPS_DEVICE_CIRRUS_VGA },
+     { "vmware-svga", QEMU_CAPS_DEVICE_VMWARE_SVGA },
++    { "virtio-rng-pci", QEMU_CAPS_DEVICE_VIRTIO_RNG },
++    { "rng-random", QEMU_CAPS_OBJECT_RNG_RANDOM },
+ };
+ 
+ 
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 41c72fe..d2fca60 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -167,6 +167,9 @@ enum qemuCapsFlags {
+     QEMU_CAPS_IPV6_MIGRATION,           /* -incoming [::] */
+     QEMU_CAPS_VNC_SHARE_POLICY,         /* set display sharing policy */
+     QEMU_CAPS_MLOCK,                    /* -realtime mlock=on|off */
++    QEMU_CAPS_DEVICE_VIRTIO_RNG,        /* virtio-rng device */
++    QEMU_CAPS_OBJECT_RNG_RANDOM,        /* the rng-random backend for
++                                           virtio rng */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 0f2f8b7..c66dc25 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -798,6 +798,10 @@ qemuAssignDeviceAliases(virDomainDefPtr def, qemuCapsPtr caps)
+         if (virAsprintf(&def->memballoon->info.alias, "balloon%d", 0) < 0)
+             goto no_memory;
+     }
++    if (def->rng) {
++        if (virAsprintf(&def->rng->info.alias, "rng%d", 0) < 0)
++            goto no_memory;
++    }
+ 
+     return 0;
+ 
+@@ -1703,6 +1707,14 @@ qemuAssignDevicePCISlots(virDomainDefPtr def,
+             goto error;
+     }
+ 
++    /* VirtIO RNG */
++    if (def->rng &&
++        def->rng->model == VIR_DOMAIN_RNG_MODEL_VIRTIO &&
++        def->rng->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE) {
++        if (qemuDomainPCIAddressSetNextAddr(addrs, &def->rng->info) < 0)
++            goto error;
++    }
++
+     /* A watchdog - skip IB700, it is not a PCI device */
+     if (def->watchdog &&
+         def->watchdog->model != VIR_DOMAIN_WATCHDOG_MODEL_IB700 &&
+@@ -4116,6 +4128,82 @@ error:
+     return NULL;
+ }
+ 
++
++static int
++qemuBuildRNGBackendArgs(virCommandPtr cmd,
++                        virDomainRNGDefPtr dev,
++                        qemuCapsPtr caps)
++{
++    virBuffer buf = VIR_BUFFER_INITIALIZER;
++    int ret = -1;
++
++    switch ((enum virDomainRNGBackend) dev->backend) {
++    case VIR_DOMAIN_RNG_BACKEND_RANDOM:
++        if (!qemuCapsGet(caps, QEMU_CAPS_OBJECT_RNG_RANDOM)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                           _("this qemu doesn't support the rng-random "
++                             " backend"));
++            goto cleanup;
++        }
++
++        virBufferAsprintf(&buf, "rng-random,id=%s", dev->info.alias);
++        if (dev->source.file)
++            virBufferAsprintf(&buf, ",filename=%s", dev->source.file);
++
++        virCommandAddArg(cmd, "-object");
++        virCommandAddArgBuffer(cmd, &buf);
++        break;
++
++    case VIR_DOMAIN_RNG_BACKEND_EGD:
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("egd RNG backend not yet implemented"));
++        goto cleanup;
++        break;
++
++    case VIR_DOMAIN_RNG_BACKEND_LAST:
++        break;
++    }
++
++    ret = 0;
++
++cleanup:
++    virBufferFreeAndReset(&buf);
++    return ret;
++}
++
++
++static int
++qemuBuildRNGDeviceArgs(virCommandPtr cmd,
++                       virDomainRNGDefPtr dev,
++                       qemuCapsPtr caps)
++{
++    virBuffer buf = VIR_BUFFER_INITIALIZER;
++    int ret = -1;
++
++    if (dev->model != VIR_DOMAIN_RNG_MODEL_VIRTIO ||
++        !qemuCapsGet(caps, QEMU_CAPS_DEVICE_VIRTIO_RNG)) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("this qemu doesn't support RNG device type '%s'"),
++                       virDomainRNGModelTypeToString(dev->model));
++        goto cleanup;
++    }
++
++    virBufferAsprintf(&buf, "virtio-rng-pci,rng=%s", dev->info.alias);
++
++    if (qemuBuildDeviceAddressStr(&buf, &dev->info, caps) < 0)
++        goto cleanup;
++
++    virCommandAddArg(cmd, "-device");
++    virCommandAddArgBuffer(cmd, &buf);
++
++    ret = 0;
++
++cleanup:
++    virBufferFreeAndReset(&buf);
++    return ret;
++}
++
++
+ static char *qemuBuildSmbiosBiosStr(virSysinfoDefPtr def)
+ {
+     virBuffer buf = VIR_BUFFER_INITIALIZER;
+@@ -6933,6 +7021,16 @@ qemuBuildCommandLine(virConnectPtr conn,
+         }
+     }
+ 
++    if (def->rng) {
++        /* add the RNG source backend */
++        if (qemuBuildRNGBackendArgs(cmd, def->rng, caps) < 0)
++            goto error;
++
++        /* add the device */
++        if (qemuBuildRNGDeviceArgs(cmd, def->rng, caps) < 0)
++            goto error;
++    }
++
+     if (snapshot)
+         virCommandAddArgList(cmd, "-loadvm", snapshot->def->name, NULL);
+ 
+-- 
+1.9.1
+

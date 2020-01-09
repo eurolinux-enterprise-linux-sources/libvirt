@@ -1,0 +1,227 @@
+From 8e3f3e1cb08ffc8cc065f10fd12153b2d31627d1 Mon Sep 17 00:00:00 2001
+Message-Id: <8e3f3e1cb08ffc8cc065f10fd12153b2d31627d1@dist-git>
+From: Hu Tao <hutao@cn.fujitsu.com>
+Date: Mon, 21 Apr 2014 08:22:31 -0600
+Subject: [PATCH] conf: introduce generic ISA address
+
+RHEL 6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1033984
+
+For example:
+<address type='isa' iobase='0x505' irq='0x1'/>
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit f1a039ef57f48fbc28c629163d2fedf9f273179f)
+
+Conflicts:
+	src/conf/domain_conf.c - no virtio-mmio (commit 4fa1722) or ccw (e50a2ba)
+	src/conf/domain_conf.h - likewise
+	docs/formatdomain.html.in - context: no ccw
+	docs/schemas/domaincommon.rng - likewise
+	docs/schemas/basictypes.rng - context: lots of other types not present
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in     |  5 ++++
+ docs/schemas/basictypes.rng   | 17 ++++++++++++
+ docs/schemas/domaincommon.rng |  6 +++++
+ src/conf/domain_conf.c        | 63 ++++++++++++++++++++++++++++++++++++++++++-
+ src/conf/domain_conf.h        |  9 +++++++
+ 5 files changed, 99 insertions(+), 1 deletion(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 45005fe..55edaa2 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -2022,6 +2022,11 @@
+         of the starting register).  <span class="since">Since
+         0.9.9.</span>
+       </dd>
++      <dt><code>type='isa'</code></dt>
++      <dd>ISA addresses have the following additional
++        attributes: <code>iobase</code> and <code>irq</code>.
++        <span class="since">Since 1.2.1</span>
++      </dd>
+     </dl>
+ 
+     <h4><a name="elementsControllers">Controllers</a></h4>
+diff --git a/docs/schemas/basictypes.rng b/docs/schemas/basictypes.rng
+index 8e44e8d..9453bea 100644
+--- a/docs/schemas/basictypes.rng
++++ b/docs/schemas/basictypes.rng
+@@ -225,4 +225,21 @@
+     </data>
+   </define>
+ 
++  <define name="isaaddress">
++    <optional>
++      <attribute name="iobase">
++        <data type="string">
++          <param name="pattern">0x[a-fA-F0-9]{1,4}</param>
++        </data>
++      </attribute>
++    </optional>
++    <optional>
++      <attribute name="irq">
++        <data type="string">
++          <param name="pattern">0x[a-fA-F0-9]</param>
++        </data>
++      </attribute>
++    </optional>
++  </define>
++
+ </grammar>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index b74845d..7af3a1a 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -3393,6 +3393,12 @@
+           </attribute>
+           <ref name="spaprvioaddress"/>
+         </group>
++        <group>
++          <attribute name="type">
++            <value>isa</value>
++          </attribute>
++          <ref name="isaaddress"/>
++        </group>
+       </choice>
+     </element>
+   </define>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 1ce6dae..884a2b2 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -178,7 +178,8 @@ VIR_ENUM_IMPL(virDomainDeviceAddress, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_LAST,
+               "ccid",
+               "usb",
+               "spapr-vio",
+-              "virtio-s390")
++              "virtio-s390",
++              "isa")
+ 
+ VIR_ENUM_IMPL(virDomainDisk, VIR_DOMAIN_DISK_TYPE_LAST,
+               "block",
+@@ -2324,6 +2325,13 @@ virDomainDeviceInfoFormat(virBufferPtr buf,
+             virBufferAsprintf(buf, " reg='0x%llx'", info->addr.spaprvio.reg);
+         break;
+ 
++    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_ISA:
++        if (info->addr.isa.iobase > 0)
++            virBufferAsprintf(buf, " iobase='0x%x'", info->addr.isa.iobase);
++        if (info->addr.isa.irq > 0)
++            virBufferAsprintf(buf, " irq='0x%x'", info->addr.isa.irq);
++        break;
++
+     default:
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("unknown address type '%d'"), info->type);
+@@ -2602,6 +2610,40 @@ cleanup:
+     return ret;
+ }
+ 
++static int
++virDomainDeviceISAAddressParseXML(xmlNodePtr node,
++                                  virDomainDeviceISAAddressPtr addr)
++{
++    int ret = -1;
++    char *iobase;
++    char *irq;
++
++    memset(addr, 0, sizeof(*addr));
++
++    iobase = virXMLPropString(node, "iobase");
++    irq = virXMLPropString(node, "irq");
++
++    if (iobase &&
++        virStrToLong_ui(iobase, NULL, 16, &addr->iobase) < 0) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("Cannot parse <address> 'iobase' attribute"));
++        goto cleanup;
++    }
++
++    if (irq &&
++        virStrToLong_ui(irq, NULL, 16, &addr->irq) < 0) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("Cannot parse <address> 'irq' attribute"));
++        goto cleanup;
++    }
++
++    ret = 0;
++cleanup:
++    VIR_FREE(iobase);
++    VIR_FREE(irq);
++    return ret;
++}
++
+ /* Parse the XML definition for a device address
+  * @param node XML nodeset to parse for device address definition
+  */
+@@ -2724,6 +2766,11 @@ virDomainDeviceInfoParseXML(xmlNodePtr node,
+             goto cleanup;
+         break;
+ 
++    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_ISA:
++        if (virDomainDeviceISAAddressParseXML(address, &info->addr.isa) < 0)
++            goto cleanup;
++        break;
++
+     default:
+         /* Should not happen */
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+@@ -10860,6 +10907,20 @@ static bool virDomainDeviceInfoCheckABIStability(virDomainDeviceInfoPtr src,
+             goto cleanup;
+         }
+         break;
++
++    case VIR_DOMAIN_DEVICE_ADDRESS_TYPE_ISA:
++        if (src->addr.isa.iobase != dst->addr.isa.iobase ||
++            src->addr.isa.irq != dst->addr.isa.irq) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("Target device isa address %d:%d "
++                             "does not match source %d:%d"),
++                           dst->addr.isa.iobase,
++                           dst->addr.isa.irq,
++                           src->addr.isa.iobase,
++                           src->addr.isa.irq);
++            return false;
++        }
++        break;
+     }
+ 
+     identical = true;
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index d67bd88..a3273ff 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -196,6 +196,7 @@ enum virDomainDeviceAddressType {
+     VIR_DOMAIN_DEVICE_ADDRESS_TYPE_USB,
+     VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO,
+     VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_S390,
++    VIR_DOMAIN_DEVICE_ADDRESS_TYPE_ISA,
+ 
+     VIR_DOMAIN_DEVICE_ADDRESS_TYPE_LAST
+ };
+@@ -259,6 +260,13 @@ struct _virDomainDeviceUSBMaster {
+     unsigned int startport;
+ };
+ 
++typedef struct _virDomainDeviceISAAddress virDomainDeviceISAAddress;
++typedef virDomainDeviceISAAddress *virDomainDeviceISAAddressPtr;
++struct _virDomainDeviceISAAddress {
++    unsigned int iobase;
++    unsigned int irq;
++};
++
+ typedef struct _virDomainDeviceInfo virDomainDeviceInfo;
+ typedef virDomainDeviceInfo *virDomainDeviceInfoPtr;
+ struct _virDomainDeviceInfo {
+@@ -275,6 +283,7 @@ struct _virDomainDeviceInfo {
+         virDomainDeviceCcidAddress ccid;
+         virDomainDeviceUSBAddress usb;
+         virDomainDeviceSpaprVioAddress spaprvio;
++        virDomainDeviceISAAddress isa;
+     } addr;
+     int mastertype;
+     union {
+-- 
+1.9.2
+

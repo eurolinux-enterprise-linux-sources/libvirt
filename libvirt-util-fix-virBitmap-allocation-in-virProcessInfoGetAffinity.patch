@@ -1,0 +1,36 @@
+From 44e2edfd8320074bbaefec235f29c71ab758a8f3 Mon Sep 17 00:00:00 2001
+Message-Id: <44e2edfd8320074bbaefec235f29c71ab758a8f3.1354720508.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 3 Dec 2012 15:20:18 +0100
+Subject: [PATCH] util: fix virBitmap allocation in virProcessInfoGetAffinity
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=878376
+
+Found by coverity:
+Error: REVERSE_INULL (CWE-476):
+    libvirt-0.10.2/src/util/processinfo.c:141: deref_ptr: Directly
+    dereferencing pointer "map".
+    libvirt-0.10.2/src/util/processinfo.c:142: check_after_deref:
+    Null-checking "map" suggests that it may be null, but it has already
+    been dereferenced on all paths leading to the check.
+(cherry picked from commit 7730257db30972a6f4db8d582b232b240b2a06b8)
+---
+ src/util/processinfo.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/util/processinfo.c b/src/util/processinfo.c
+index d9d255c..faafa27 100644
+--- a/src/util/processinfo.c
++++ b/src/util/processinfo.c
+@@ -139,7 +139,7 @@ realloc:
+     }
+ 
+     *map = virBitmapNew(maxcpu);
+-    if (!map) {
++    if (!*map) {
+         virReportOOMError();
+         return -1;
+     }
+-- 
+1.8.0
+

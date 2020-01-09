@@ -1,0 +1,34 @@
+From e978fd02e81ca20d022b5ae97ad76f4dc6c6fa64 Mon Sep 17 00:00:00 2001
+Message-Id: <e978fd02e81ca20d022b5ae97ad76f4dc6c6fa64@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 19 Jul 2013 14:55:41 +0200
+Subject: [PATCH] util: Non-existent string array does not contain any string
+
+Make virStringArrayHasString return false when called on a non-existent
+string array.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit 09e9f28118af848cb0a40a99a5b1502e0de88495)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virstring.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/util/virstring.c b/src/util/virstring.c
+index 7ce6f84..536d311 100644
+--- a/src/util/virstring.c
++++ b/src/util/virstring.c
+@@ -173,6 +173,9 @@ virStringArrayHasString(char **strings, const char *needle)
+ {
+     size_t i = 0;
+ 
++    if (!strings)
++        return false;
++
+     while (strings[i]) {
+         if (STREQ(strings[i++], needle))
+             return true;
+-- 
+2.0.0
+

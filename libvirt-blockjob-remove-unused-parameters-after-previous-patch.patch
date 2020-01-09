@@ -1,0 +1,171 @@
+From e70e7eb6525256e1d472367769bb4b81751033fb Mon Sep 17 00:00:00 2001
+Message-Id: <e70e7eb6525256e1d472367769bb4b81751033fb.1350990679.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:40 -0600
+Subject: [PATCH] blockjob: remove unused parameters after previous patch
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+Minor cleanup made possible by previous simplifications.
+
+* src/qemu/qemu_cgroup.h (qemuSetupDiskCgroup)
+(qemuTeardownDiskCgroup): Alter signature.
+* src/qemu/qemu_cgroup.c (qemuSetupDiskCgroup)
+(qemuTeardownDiskCgroup, qemuSetupCgroup): Update all uses.
+* src/qemu/qemu_hotplug.c (qemuDomainDetachPciDiskDevice)
+(qemuDomainDetachDiskDevice): Likewise.
+* src/qemu/qemu_driver.c (qemuDomainAttachDeviceDiskLive)
+(qemuDomainChangeDiskMediaLive)
+(qemuDomainSnapshotCreateSingleDiskActive)
+(qemuDomainSnapshotUndoSingleDiskActive): Likewise.
+(cherry picked from commit 67aea3fb780346b4aa5aea486af1e7738019959f)
+---
+ src/qemu/qemu_cgroup.c  |  8 +++-----
+ src/qemu/qemu_cgroup.h  |  6 ++----
+ src/qemu/qemu_driver.c  | 14 +++++++-------
+ src/qemu/qemu_hotplug.c |  4 ++--
+ 4 files changed, 14 insertions(+), 18 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 428befd..db371a0 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -87,8 +87,7 @@ qemuSetupDiskPathAllow(virDomainDiskDefPtr disk,
+ }
+ 
+ 
+-int qemuSetupDiskCgroup(struct qemud_driver *driver ATTRIBUTE_UNUSED,
+-                        virDomainObjPtr vm,
++int qemuSetupDiskCgroup(virDomainObjPtr vm,
+                         virCgroupPtr cgroup,
+                         virDomainDiskDefPtr disk)
+ {
+@@ -127,8 +126,7 @@ qemuTeardownDiskPathDeny(virDomainDiskDefPtr disk ATTRIBUTE_UNUSED,
+ }
+ 
+ 
+-int qemuTeardownDiskCgroup(struct qemud_driver *driver ATTRIBUTE_UNUSED,
+-                           virDomainObjPtr vm,
++int qemuTeardownDiskCgroup(virDomainObjPtr vm,
+                            virCgroupPtr cgroup,
+                            virDomainDiskDefPtr disk)
+ {
+@@ -230,7 +228,7 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+         for (i = 0; i < vm->def->ndisks ; i++) {
+             if (qemuDomainDetermineDiskChain(driver, vm->def->disks[i],
+                                              false) < 0 ||
+-                qemuSetupDiskCgroup(driver, vm, cgroup, vm->def->disks[i]) < 0)
++                qemuSetupDiskCgroup(vm, cgroup, vm->def->disks[i]) < 0)
+                 goto cleanup;
+         }
+ 
+diff --git a/src/qemu/qemu_cgroup.h b/src/qemu/qemu_cgroup.h
+index 362080a..c552162 100644
+--- a/src/qemu/qemu_cgroup.h
++++ b/src/qemu/qemu_cgroup.h
+@@ -36,12 +36,10 @@ typedef struct _qemuCgroupData qemuCgroupData;
+ 
+ bool qemuCgroupControllerActive(struct qemud_driver *driver,
+                                 int controller);
+-int qemuSetupDiskCgroup(struct qemud_driver *driver,
+-                        virDomainObjPtr vm,
++int qemuSetupDiskCgroup(virDomainObjPtr vm,
+                         virCgroupPtr cgroup,
+                         virDomainDiskDefPtr disk);
+-int qemuTeardownDiskCgroup(struct qemud_driver *driver,
+-                           virDomainObjPtr vm,
++int qemuTeardownDiskCgroup(virDomainObjPtr vm,
+                            virCgroupPtr cgroup,
+                            virDomainDiskDefPtr disk);
+ int qemuSetupHostUsbDeviceCgroup(usbDevice *dev,
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 9d49fe9..3314826 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5823,7 +5823,7 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+                            vm->def->name);
+             goto end;
+         }
+-        if (qemuSetupDiskCgroup(driver, vm, cgroup, disk) < 0)
++        if (qemuSetupDiskCgroup(vm, cgroup, disk) < 0)
+             goto end;
+     }
+     switch (disk->device)  {
+@@ -5859,7 +5859,7 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+     }
+ 
+     if (ret != 0 && cgroup) {
+-        if (qemuTeardownDiskCgroup(driver, vm, cgroup, disk) < 0)
++        if (qemuTeardownDiskCgroup(vm, cgroup, disk) < 0)
+             VIR_WARN("Failed to teardown cgroup for disk path %s",
+                      NULLSTR(disk->src));
+     }
+@@ -6055,7 +6055,7 @@ qemuDomainChangeDiskMediaLive(virDomainObjPtr vm,
+                            vm->def->name);
+             goto end;
+         }
+-        if (qemuSetupDiskCgroup(driver, vm, cgroup, disk) < 0)
++        if (qemuSetupDiskCgroup(vm, cgroup, disk) < 0)
+             goto end;
+     }
+ 
+@@ -6074,7 +6074,7 @@ qemuDomainChangeDiskMediaLive(virDomainObjPtr vm,
+     }
+ 
+     if (ret != 0 && cgroup) {
+-        if (qemuTeardownDiskCgroup(driver, vm, cgroup, disk) < 0)
++        if (qemuTeardownDiskCgroup(vm, cgroup, disk) < 0)
+              VIR_WARN("Failed to teardown cgroup for disk path %s",
+                       NULLSTR(disk->src));
+     }
+@@ -10803,14 +10803,14 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+     if (virDomainLockDiskAttach(driver->lockManager, driver->uri,
+                                 vm, disk) < 0)
+         goto cleanup;
+-    if (cgroup && qemuSetupDiskCgroup(driver, vm, cgroup, disk) < 0) {
++    if (cgroup && qemuSetupDiskCgroup(vm, cgroup, disk) < 0) {
+         if (virDomainLockDiskDetach(driver->lockManager, vm, disk) < 0)
+             VIR_WARN("Unable to release lock on %s", source);
+         goto cleanup;
+     }
+     if (virSecurityManagerSetImageLabel(driver->securityManager, vm->def,
+                                         disk) < 0) {
+-        if (cgroup && qemuTeardownDiskCgroup(driver, vm, cgroup, disk) < 0)
++        if (cgroup && qemuTeardownDiskCgroup(vm, cgroup, disk) < 0)
+             VIR_WARN("Failed to teardown cgroup for disk path %s", source);
+         if (virDomainLockDiskDetach(driver->lockManager, vm, disk) < 0)
+             VIR_WARN("Unable to release lock on %s", source);
+@@ -10882,7 +10882,7 @@ qemuDomainSnapshotUndoSingleDiskActive(struct qemud_driver *driver,
+     if (virSecurityManagerRestoreImageLabel(driver->securityManager,
+                                             vm->def, disk) < 0)
+         VIR_WARN("Unable to restore security label on %s", disk->src);
+-    if (cgroup && qemuTeardownDiskCgroup(driver, vm, cgroup, disk) < 0)
++    if (cgroup && qemuTeardownDiskCgroup(vm, cgroup, disk) < 0)
+         VIR_WARN("Failed to teardown cgroup for disk path %s", disk->src);
+     if (virDomainLockDiskDetach(driver->lockManager, vm, disk) < 0)
+         VIR_WARN("Unable to release lock on %s", disk->src);
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 4fd93bf..98bf770 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -2006,7 +2006,7 @@ int qemuDomainDetachPciDiskDevice(struct qemud_driver *driver,
+         VIR_WARN("Unable to restore security label on %s", dev->data.disk->src);
+ 
+     if (cgroup != NULL) {
+-        if (qemuTeardownDiskCgroup(driver, vm, cgroup, dev->data.disk) < 0)
++        if (qemuTeardownDiskCgroup(vm, cgroup, dev->data.disk) < 0)
+             VIR_WARN("Failed to teardown cgroup for disk path %s",
+                      NULLSTR(dev->data.disk->src));
+     }
+@@ -2089,7 +2089,7 @@ int qemuDomainDetachDiskDevice(struct qemud_driver *driver,
+         VIR_WARN("Unable to restore security label on %s", dev->data.disk->src);
+ 
+     if (cgroup != NULL) {
+-        if (qemuTeardownDiskCgroup(driver, vm, cgroup, dev->data.disk) < 0)
++        if (qemuTeardownDiskCgroup(vm, cgroup, dev->data.disk) < 0)
+             VIR_WARN("Failed to teardown cgroup for disk path %s",
+                      NULLSTR(dev->data.disk->src));
+     }
+-- 
+1.7.12.4
+

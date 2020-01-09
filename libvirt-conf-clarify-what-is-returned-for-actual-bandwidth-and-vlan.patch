@@ -1,0 +1,80 @@
+From b136d322748fafc9f6867a2ce2ee0f98adff6a43 Mon Sep 17 00:00:00 2001
+Message-Id: <b136d322748fafc9f6867a2ce2ee0f98adff6a43@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Wed, 14 May 2014 16:12:21 +0200
+Subject: [PATCH] conf: clarify what is returned for actual bandwidth and vlan
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+In practice, if a virDomainNetDef has a virDomainActualNetDef
+allocated, the ActualNetDef will *always* contain the bandwidth and
+vlan data from the NetDef (unless there was also a portgroup involved
+- see networkAllocateActualDevice()).
+
+However, virDomainNetGetActual(Bandwidth|Vlan)() were coded to make it
+appear as if it might be possible to have a valid bandwidth/vlan in
+the NetDef, but a NULL in the ActualNetDef. Believing this un-truth
+could lead to writing unnecessarily defensive code when dealing with
+the virDomainGetActual*() functions, so this patch makes it more
+obvious:
+
+   If there is an ActualNetDef, it will always have a copy of the
+   various appropriate bits from its parent NetDef, and the
+   virDomainGetActual* function will *always* return the data from the
+   ActualNetDef, not from the NetDef.
+
+The reason for this effective-NOP patch is that a subsequent patch to
+change virDomainNetDefFormat will rely on the above rule.
+
+(cherry picked from commit 6d4ffae4fc1350542b5675c215caf7d7e1e15fc4)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 22 +++++++++++++++-------
+ 1 file changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index ce41f39..2be9c9b 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -15908,8 +15908,11 @@ virDomainNetGetActualVirtPortProfile(virDomainNetDefPtr iface)
+ virNetDevBandwidthPtr
+ virDomainNetGetActualBandwidth(virDomainNetDefPtr iface)
+ {
++    /* if there is an ActualNetDef, *always* return
++     * its bandwidth rather than the NetDef's bandwidth.
++     */
+     if (iface->type == VIR_DOMAIN_NET_TYPE_NETWORK &&
+-        iface->data.network.actual && iface->data.network.actual->bandwidth) {
++        iface->data.network.actual) {
+         return iface->data.network.actual->bandwidth;
+     }
+     return iface->bandwidth;
+@@ -15918,13 +15921,18 @@ virDomainNetGetActualBandwidth(virDomainNetDefPtr iface)
+ virNetDevVlanPtr
+ virDomainNetGetActualVlan(virDomainNetDefPtr iface)
+ {
++    virNetDevVlanPtr vlan = &iface->vlan;
++
++    /* if there is an ActualNetDef, *always* return
++     * its vlan rather than the NetDef's vlan.
++     */
+     if (iface->type == VIR_DOMAIN_NET_TYPE_NETWORK &&
+-        iface->data.network.actual &&
+-        iface->data.network.actual->vlan.nTags > 0)
+-        return &iface->data.network.actual->vlan;
+-    if (iface->vlan.nTags > 0)
+-        return &iface->vlan;
+-    return 0;
++        iface->data.network.actual)
++        vlan = &iface->data.network.actual->vlan;
++
++    if (vlan->nTags > 0)
++        return vlan;
++    return NULL;
+ }
+ 
+ /* Return listens[ii] from the appropriate union for the graphics
+-- 
+1.9.3
+

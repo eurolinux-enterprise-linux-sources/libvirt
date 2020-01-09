@@ -1,0 +1,43 @@
+From 3396908bce70536f45ba618b0d216575358a2a60 Mon Sep 17 00:00:00 2001
+Message-Id: <3396908bce70536f45ba618b0d216575358a2a60@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 9 Apr 2015 11:44:58 +0200
+Subject: [PATCH] qemu: fix crash when removing <filterref> from interface with
+ update-device
+
+RHEL-6.7: https://bugzilla.redhat.com/show_bug.cgi?id=1205042
+F20: https://bugzilla.redhat.com/show_bug.cgi?id=1093301
+
+If a domain network interface that contains a <filterref> is modified
+"live" using "virsh update-device --live", libvirtd would crash. This
+was because the code supporting live update of an interface's
+filterref was assuming that a filterref might be added or modified,
+but didn't account for removing the filterref, resulting in a null
+dereference of the filter name.
+
+Introduced with commit 258fb278, which was first in libvirt v1.0.1.
+
+(cherry picked from commit 0eac9d1e90fc3388030c6109aeb1f4860f108054)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index c9acbef..4d11b76 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1327,7 +1327,8 @@ qemuDomainChangeNetFilter(virConnectPtr conn,
+ 
+     virDomainConfNWFilterTeardown(olddev);
+ 
+-    if (virDomainConfNWFilterInstantiate(conn, vm->def->uuid, newdev) < 0) {
++    if (newdev->filter &&
++        virDomainConfNWFilterInstantiate(conn, vm->def->uuid, newdev) < 0) {
+         virErrorPtr errobj;
+ 
+         virReportError(VIR_ERR_OPERATION_FAILED,
+-- 
+2.3.5
+

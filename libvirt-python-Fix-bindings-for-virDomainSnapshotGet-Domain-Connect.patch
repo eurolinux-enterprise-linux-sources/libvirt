@@ -1,0 +1,107 @@
+From a0c6483eb5582eecccf82875481dd28dc3c6d4a0 Mon Sep 17 00:00:00 2001
+Message-Id: <a0c6483eb5582eecccf82875481dd28dc3c6d4a0.1373271637.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 23 Jan 2013 12:14:57 +0100
+Subject: [PATCH] python: Fix bindings for virDomainSnapshotGet{Domain,Connect}
+
+https://bugzilla.redhat.com/show_bug.cgi?id=895882
+
+virDomainSnapshot.getDomain() and virDomainSnapshot.getConnect()
+wrappers around virDomainSnapshotGet{Domain,Connect} were not supposed
+to be ever implemented. The class should contain proper domain() and
+connect() accessors that fetch python objects stored internally within
+the class. While domain() was already provided, connect() was missing.
+
+This patch adds connect() method to virDomainSnapshot class and
+reimplements getDomain() and getConnect() methods as aliases to domain()
+and connect() for backward compatibility.
+(cherry picked from commit 7b35fd718d2156224797ace08f752dfbb9884520)
+
+Conflicts:
+	python/generator.py -- context
+---
+ python/generator.py                          |  4 +++-
+ python/libvirt-override-virDomainSnapshot.py |  8 ++++++++
+ src/libvirt.c                                | 14 ++++++++++++--
+ 3 files changed, 23 insertions(+), 3 deletions(-)
+
+diff --git a/python/generator.py b/python/generator.py
+index a98a894..9096f9e 100755
+--- a/python/generator.py
++++ b/python/generator.py
+@@ -497,6 +497,8 @@ skip_function = (
+     "virNWFilterGetConnect",
+     "virStoragePoolGetConnect",
+     "virStorageVolGetConnect",
++    "virDomainSnapshotGetConnect",
++    "virDomainSnapshotGetDomain",
+ )
+ 
+ qemu_skip_function = (
+@@ -877,7 +879,6 @@ classes_destructors = {
+ 
+ class_skip_connect_impl = {
+     "virConnect" : True,
+-    "virDomainSnapshot": True,
+ }
+ 
+ class_domain_impl = {
+@@ -1358,6 +1359,7 @@ def buildWrappers(module):
+                                   "            self._conn = conn._conn\n")
+                 elif classname in [ "virDomainSnapshot" ]:
+                     classes.write("        self._dom = dom\n")
++                    classes.write("        self._conn = dom.connect()\n")
+                 classes.write("        if _obj != None:self._o = _obj;return\n")
+                 classes.write("        self._o = None\n\n");
+             destruct=None
+diff --git a/python/libvirt-override-virDomainSnapshot.py b/python/libvirt-override-virDomainSnapshot.py
+index 3da7bfd..bf708a5 100644
+--- a/python/libvirt-override-virDomainSnapshot.py
++++ b/python/libvirt-override-virDomainSnapshot.py
+@@ -1,3 +1,11 @@
++    def getConnect(self):
++        """Get the connection that owns the domain that a snapshot was created for"""
++        return self.connect()
++
++    def getDomain(self):
++        """Get the domain that a snapshot was created for"""
++        return self.domain()
++
+     def listAllChildren(self, flags):
+         """List all child snapshots and returns a list of snapshot objects"""
+         ret = libvirtmod.virDomainSnapshotListAllChildren(self._o, flags)
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 711806d..04a218b 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -17669,7 +17669,12 @@ virDomainSnapshotGetName(virDomainSnapshotPtr snapshot)
+  * virDomainSnapshotGetDomain:
+  * @snapshot: a snapshot object
+  *
+- * Get the domain that a snapshot was created for
++ * Provides the domain pointer associated with a snapshot.  The
++ * reference counter on the domain is not increased by this
++ * call.
++ *
++ * WARNING: When writing libvirt bindings in other languages, do not use this
++ * function.  Instead, store the domain and the snapshot object together.
+  *
+  * Returns the domain or NULL.
+  */
+@@ -17693,7 +17698,12 @@ virDomainSnapshotGetDomain(virDomainSnapshotPtr snapshot)
+  * virDomainSnapshotGetConnect:
+  * @snapshot: a snapshot object
+  *
+- * Get the connection that owns the domain that a snapshot was created for
++ * Provides the connection pointer associated with a snapshot.  The
++ * reference counter on the connection is not increased by this
++ * call.
++ *
++ * WARNING: When writing libvirt bindings in other languages, do not use this
++ * function.  Instead, store the connection and the snapshot object together.
+  *
+  * Returns the connection or NULL.
+  */
+-- 
+1.8.2.1
+

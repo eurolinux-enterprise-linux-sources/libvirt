@@ -1,0 +1,50 @@
+From a57343f2879df6acbcb1548b7c8ce27949f84eb4 Mon Sep 17 00:00:00 2001
+Message-Id: <a57343f2879df6acbcb1548b7c8ce27949f84eb4.1354720508.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 3 Dec 2012 15:20:19 +0100
+Subject: [PATCH] virsh: use correct sizeof when allocating cpumap
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=878376
+
+Found by coverity:
+Error: SIZEOF_MISMATCH (CWE-569):
+    libvirt-0.10.2/tools/virsh-domain.c:4754: suspicious_sizeof: Passing
+    argument "8UL /* sizeof (cpumap) */" to function
+    "_vshCalloc(vshControl *, size_t, size_t, char const *, int)" and
+    then casting the return value to "unsigned char *" is suspicious.
+
+Error: SIZEOF_MISMATCH (CWE-569):
+    libvirt-0.10.2/tools/virsh-domain.c:4942: suspicious_sizeof: Passing
+    argument "8UL /* sizeof (cpumap) */" to function
+    "_vshCalloc(vshControl *, size_t, size_t, char const *, int)" and
+    then casting the return value to "unsigned char *" is suspicious.
+(cherry picked from commit dc04b2a737c8c4240d0d412080ce798b977068a1)
+---
+ tools/virsh-domain.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 76fe9e4..624544f 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -4751,7 +4751,7 @@ cmdVcpuPin(vshControl *ctl, const vshCmd *cmd)
+ 
+     /* Pin mode: pinning specified vcpu to specified physical cpus*/
+ 
+-    cpumap = vshCalloc(ctl, cpumaplen, sizeof(cpumap));
++    cpumap = vshCalloc(ctl, cpumaplen, sizeof(*cpumap));
+     /* Parse cpulist */
+     cur = cpulist;
+     if (*cur == 0) {
+@@ -4939,7 +4939,7 @@ cmdEmulatorPin(vshControl *ctl, const vshCmd *cmd)
+ 
+     /* Pin mode: pinning emulator threads to specified physical cpus*/
+ 
+-    cpumap = vshCalloc(ctl, cpumaplen, sizeof(cpumap));
++    cpumap = vshCalloc(ctl, cpumaplen, sizeof(*cpumap));
+     /* Parse cpulist */
+     cur = cpulist;
+     if (*cur == 0) {
+-- 
+1.8.0
+

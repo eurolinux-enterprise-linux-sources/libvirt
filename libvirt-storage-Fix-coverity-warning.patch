@@ -1,0 +1,56 @@
+From 9fb1c4a5c8049a2c64608af18442ab2157ec8109 Mon Sep 17 00:00:00 2001
+Message-Id: <9fb1c4a5c8049a2c64608af18442ab2157ec8109.1377097597.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Wed, 21 Aug 2013 18:16:23 +0800
+Subject: [PATCH] storage: Fix coverity warning
+
+https://bugzilla.redhat.com/show_bug.cgi?id=965442
+
+Introduced by commit e0139e30444:
+
+1777 	    /* Updating pool metadata */
+
+(40) Event var_deref_op: Dereferencing null pointer "newvol".
+     Also see events: [assign_zero]
+
+1778 	    pool->def->allocation += newvol->allocation;
+1779 	    pool->def->available -= newvol->allocation;
+(cherry picked from commit b8a0103d45e8f82a6f66f3334b24d6deb99d7521)
+---
+ src/storage/storage_driver.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/storage/storage_driver.c b/src/storage/storage_driver.c
+index ea1e436..818a08e 100644
+--- a/src/storage/storage_driver.c
++++ b/src/storage/storage_driver.c
+@@ -1494,6 +1494,7 @@ storageVolumeCreateXMLFrom(virStoragePoolPtr obj,
+     virStorageBackendPtr backend;
+     virStorageVolDefPtr origvol = NULL, newvol = NULL;
+     virStorageVolPtr ret = NULL, volobj = NULL;
++    unsigned long long allocation;
+     int buildret;
+ 
+     virCheckFlags(0, NULL);
+@@ -1615,6 +1616,7 @@ storageVolumeCreateXMLFrom(virStoragePoolPtr obj,
+ 
+     origvol->building = 0;
+     newvol->building = 0;
++    allocation = newvol->allocation;
+     newvol = NULL;
+     pool->asyncjobs--;
+ 
+@@ -1632,8 +1634,8 @@ storageVolumeCreateXMLFrom(virStoragePoolPtr obj,
+     }
+ 
+     /* Updating pool metadata */
+-    pool->def->allocation += newvol->allocation;
+-    pool->def->available -= newvol->allocation;
++    pool->def->allocation += allocation;
++    pool->def->available -= allocation;
+ 
+     VIR_INFO("Creating volume '%s' in storage pool '%s'",
+              volobj->name, pool->def->name);
+-- 
+1.8.3.2
+

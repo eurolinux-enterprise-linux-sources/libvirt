@@ -1,0 +1,47 @@
+From 217e6a67fe67caa364e73e84f302c765c48a2877 Mon Sep 17 00:00:00 2001
+Message-Id: <217e6a67fe67caa364e73e84f302c765c48a2877.1350297259.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 10 Oct 2012 15:35:11 +0100
+Subject: [PATCH] Change qemuSetSchedularParameters to use AFFECT_CURRENT
+
+https://bugzilla.redhat.com/show_bug.cgi?id=852260
+
+When adding variants of parameter setting APIs which accepted
+flags, the existing APIs were all adapted internally to pass
+VIR_DOMAIN_AFFECT_CURRENT to the new API. The QEMU impl
+qemuSetSchedularParameters was an exception, which instead
+used VIR_DOMAIN_AFFECT_LIVE. Change this to match other
+compatibility scenarios, so that calling
+
+   virDomainSetSchedularParameters(dom, params, nparams);
+
+Has the same semantics as
+
+   virDomainSetSchedularParametersFlags(dom, params, nparams, 0);
+
+And
+
+   virDomainSetSchedularParametersFlags(dom, params, nparams, VIR_DOMAIN_AFFECT_CURRENT);
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 4da9b2c1636ffcebbbaee8d31662ac7308b4e54f)
+---
+ src/qemu/qemu_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 3584502..df202c6 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -7963,7 +7963,7 @@ qemuSetSchedulerParameters(virDomainPtr dom,
+     return qemuSetSchedulerParametersFlags(dom,
+                                            params,
+                                            nparams,
+-                                           VIR_DOMAIN_AFFECT_LIVE);
++                                           VIR_DOMAIN_AFFECT_CURRENT);
+ }
+ 
+ static int
+-- 
+1.7.12.3
+

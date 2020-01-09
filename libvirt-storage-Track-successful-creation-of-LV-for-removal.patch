@@ -1,0 +1,64 @@
+From 61264f12ab5d951b55f5fd8143b89b2a398aea3e Mon Sep 17 00:00:00 2001
+Message-Id: <61264f12ab5d951b55f5fd8143b89b2a398aea3e@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Tue, 13 Oct 2015 19:18:10 -0400
+Subject: [PATCH] storage: Track successful creation of LV for removal
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1232170
+
+Track when the logical volume was successfully created in order to
+properly handle the call to virStorageBackendLogicalDeleteVol. It's
+possible that the failure to create was because someone created an
+LV in the pool outside of libvirt's knowledge. In this case, we don't
+want to delete that LV.  A subsequent or future refresh of the pool
+will find the volume and cause an earlier failure
+
+Relevant RHEL7: https://bugzilla.redhat.com/show_bug.cgi?id=1233003
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit c4dd2a1fafe564d72b50c6e6d2c76a37edfae108)
+
+Conflicts:
+	src/storage/storage_backend_logical.c
+
+   Downstream doesn't have upstream commit 'fa5b5549'
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/storage/storage_backend_logical.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/storage/storage_backend_logical.c b/src/storage/storage_backend_logical.c
+index c0274f2..bbfb33c 100644
+--- a/src/storage/storage_backend_logical.c
++++ b/src/storage/storage_backend_logical.c
+@@ -713,6 +713,7 @@ virStorageBackendLogicalCreateVol(virConnectPtr conn,
+     int fd = -1;
+     virCommandPtr cmd = NULL;
+     virErrorPtr err;
++    bool created = false;
+ 
+     if (vol->target.encryption != NULL) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+@@ -753,6 +754,7 @@ virStorageBackendLogicalCreateVol(virConnectPtr conn,
+     if (virCommandRun(cmd, NULL) < 0)
+         goto error;
+ 
++    created = true;
+     virCommandFree(cmd);
+     cmd = NULL;
+ 
+@@ -795,7 +797,8 @@ virStorageBackendLogicalCreateVol(virConnectPtr conn,
+  error:
+     err = virSaveLastError();
+     VIR_FORCE_CLOSE(fd);
+-    virStorageBackendLogicalDeleteVol(conn, pool, vol, 0);
++    if (created)
++        virStorageBackendLogicalDeleteVol(conn, pool, vol, 0);
+     virCommandFree(cmd);
+     virSetError(err);
+     virFreeError(err);
+-- 
+2.6.2
+

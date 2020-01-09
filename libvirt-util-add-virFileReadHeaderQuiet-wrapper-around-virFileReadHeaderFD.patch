@@ -1,0 +1,79 @@
+From f6591968a6cdcb2027357cd84e3f05206fd9d700 Mon Sep 17 00:00:00 2001
+Message-Id: <f6591968a6cdcb2027357cd84e3f05206fd9d700@dist-git>
+From: Paolo Bonzini <pbonzini@redhat.com>
+Date: Tue, 12 Dec 2017 16:23:40 +0100
+Subject: [PATCH] util: add virFileReadHeaderQuiet wrapper around
+ virFileReadHeaderFD
+
+CVE-2017-5715
+
+Signed-off-by: Paolo Bonzini <pbonzini@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/util/virfile.c
+	src/util/virfile.h
+            - context, virfile.[ch] are a lot smaller in 6.9 as most
+              of the content is still in util.[ch]
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms |  1 +
+ src/util/virfile.c       | 19 +++++++++++++++++++
+ src/util/virfile.h       |  2 ++
+ 3 files changed, 22 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 4f49f8353d..498d570690 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1296,6 +1296,7 @@ virFileOpenAs;
+ virFileOpenTty;
+ virFileReadAll;
+ virFileReadHeaderFD;
++virFileReadHeaderQuiet;
+ virFileReadLimFD;
+ virFileResolveAllLinks;
+ virFileResolveLink;
+diff --git a/src/util/virfile.c b/src/util/virfile.c
+index 522c0db4e1..68acc52185 100644
+--- a/src/util/virfile.c
++++ b/src/util/virfile.c
+@@ -747,3 +747,22 @@ virFileReadHeaderFD(int fd, int maxlen, char **buf)
+     *buf = s;
+     return len;
+ }
++
++
++int
++virFileReadHeaderQuiet(const char *path,
++                       int maxlen,
++                       char **buf)
++{
++    int fd;
++    int len;
++
++    fd = open(path, O_RDONLY);
++    if (fd < 0)
++        return -1;
++
++    len = virFileReadHeaderFD(fd, maxlen, buf);
++    VIR_FORCE_CLOSE(fd);
++
++    return len;
++}
+diff --git a/src/util/virfile.h b/src/util/virfile.h
+index b664cf3e5b..e2232dce5a 100644
+--- a/src/util/virfile.h
++++ b/src/util/virfile.h
+@@ -112,5 +112,7 @@ int virFileLoopDeviceAssociate(const char *file,
+ 
+ int virFileReadHeaderFD(int fd, int maxlen, char **buf)
+     ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(3);
++int virFileReadHeaderQuiet(const char *path, int maxlen, char **buf)
++    ATTRIBUTE_RETURN_CHECK ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3);
+ 
+ #endif /* __VIR_FILES_H */
+-- 
+2.15.1
+

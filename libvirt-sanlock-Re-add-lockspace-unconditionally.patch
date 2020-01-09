@@ -1,0 +1,80 @@
+From ba17ee6964bda62c0b4742501d25fbb254deadce Mon Sep 17 00:00:00 2001
+Message-Id: <ba17ee6964bda62c0b4742501d25fbb254deadce.1355928878.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 14 Dec 2012 15:03:09 +0100
+Subject: [PATCH] sanlock: Re-add lockspace unconditionally
+
+https://bugzilla.redhat.com/show_bug.cgi?id=820173
+
+Currently, if sanlock is already registering a lockspace other
+libvirtd instances (from other hosts) obtain -EINPROGRESS. On
+sufficiently new sanlock, sanlock_inq_lockspace() is called,
+which suspend execution until lockspace state is changed. With
+current libvirt implementation, we fail to retry adding the
+lockspace again but continue in error path. Therefore we produce
+meaningless error message:
+
+virLockManagerSanlockSetupLockspace:363 : Unable to add lockspace
+/var/lib/libvirt/sanlock/__LIBVIRT__DISKS__: Success
+qemudLoadDriverConfig:558 : Failed to load lock manager sanlock
+
+We should try to re-add the lockspace after its state change to
+be sure it was added successfully. In fact, with sufficiently new
+sanlock we can just avoid dummy usleep() which is used if there's
+no inquire API.
+(cherry picked from commit 2dc650cf3cea5498b394b3ccf95f3ef787868df0)
+---
+ src/locking/lock_driver_sanlock.c | 20 ++++++++------------
+ 1 file changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index 54c9597..6a6220a 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -197,9 +197,7 @@ static int virLockManagerSanlockSetupLockspace(void)
+     struct sanlk_lockspace ls;
+     char *path = NULL;
+     char *dir = NULL;
+-#ifndef HAVE_SANLOCK_INQ_LOCKSPACE
+     int retries = LOCKSPACE_RETRIES;
+-#endif
+ 
+     if (virAsprintf(&path, "%s/%s",
+                     driver->autoDiskLeasePath,
+@@ -332,25 +330,23 @@ static int virLockManagerSanlockSetupLockspace(void)
+      * either call a sanlock API that blocks us until lockspace changes state,
+      * or we can fallback to polling.
+      */
+-#ifndef HAVE_SANLOCK_INQ_LOCKSPACE
+ retry:
+-#endif
+     if ((rv = sanlock_add_lockspace(&ls, 0)) < 0) {
+-        if (-rv == EINPROGRESS) {
++        if (-rv == EINPROGRESS && --retries) {
+ #ifdef HAVE_SANLOCK_INQ_LOCKSPACE
+             /* we have this function which blocks until lockspace change the
+              * state. It returns 0 if lockspace has been added, -ENOENT if it
+-             * hasn't. XXX should we goto retry? */
++             * hasn't. */
+             VIR_DEBUG("Inquiring lockspace");
+-            rv = sanlock_inq_lockspace(&ls, SANLK_INQ_WAIT);
++            if (sanlock_inq_lockspace(&ls, SANLK_INQ_WAIT) < 0)
++                VIR_DEBUG("Unable to inquire lockspace");
+ #else
+             /* fall back to polling */
+-            if (retries--) {
+-                usleep(LOCKSPACE_SLEEP * 1000);
+-                VIR_DEBUG("Retrying to add lockspace (left %d)", retries);
+-                goto retry;
+-            }
++            VIR_DEBUG("Sleeping for %dms", LOCKSPACE_SLEEP);
++            usleep(LOCKSPACE_SLEEP * 1000);
+ #endif
++            VIR_DEBUG("Retrying to add lockspace (left %d)", retries);
++            goto retry;
+         }
+         if (-rv != EEXIST) {
+             if (rv <= -200)
+-- 
+1.8.0.2
+

@@ -1,0 +1,140 @@
+From ad85d10e60ebc0c6d862bab5f45b574a81312197 Mon Sep 17 00:00:00 2001
+Message-Id: <ad85d10e60ebc0c6d862bab5f45b574a81312197.1378495587.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Thu, 29 Aug 2013 15:43:53 -0600
+Subject: [PATCH] build: more workarounds for if_bridge.h
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1002735
+
+This is a second attempt at fixing the problem first attempted
+in commit 2df8d99; basically undoing the fact that it was
+reverted in commit 43cee32f, plus fixing two more issues: the
+code in configure.ac has to EXACTLY match virnetdevbridge.c
+with regards to declaring in6 types before using if_bridge.h,
+and the fact that RHEL 5 has even more conflicts:
+
+In file included from util/virnetdevbridge.c:49:
+/usr/include/linux/in6.h:47: error: conflicting types for 'in6addr_any'
+/usr/include/netinet/in.h:206: error: previous declaration of 'in6addr_any' was here
+/usr/include/linux/in6.h:49: error: conflicting types for 'in6addr_loopback'
+/usr/include/netinet/in.h:207: error: previous declaration of 'in6addr_loopback' was here
+
+The rest of this commit message borrows from the original try
+of 2df8d99:
+
+A fresh checkout on a RHEL 6 machine with these packages:
+kernel-headers-2.6.32-405.el6.x86_64
+glibc-2.12-1.128.el6.x86_64
+failed to configure with this message:
+checking for linux/if_bridge.h... no
+configure: error: You must install kernel-headers in order to compile libvirt with QEMU or LXC support
+
+Digging in config.log, we see that the problem is identical to
+what we fixed earlier in commit d12c2811:
+
+configure:98831: checking for linux/if_bridge.h
+configure:98853: gcc -std=gnu99 -c -g -O2  conftest.c >&5
+In file included from /usr/include/linux/if_bridge.h:17,
+                 from conftest.c:559:
+/usr/include/linux/in6.h:31: error: redefinition of 'struct in6_addr'
+/usr/include/linux/in6.h:48: error: redefinition of 'struct sockaddr_in6'
+/usr/include/linux/in6.h:56: error: redefinition of 'struct ipv6_mreq'
+configure:98860: $? = 1
+
+I had not hit it earlier because I was using incremental builds,
+where config.cache had shielded me from the kernel-headers breakage.
+
+* configure.ac (if_bridge.h): Avoid conflicting type definitions.
+* src/util/virnetdevbridge.c (includes): Also sanitize for RHEL 5.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 70024dc9192038575ab5217ac35080b038e5b13e)
+
+Done in one patch rather than a series for bisectability reasons
+(as intermediate patches suffer from various problems on various
+platforms), and because the intermediate patches include a revert,
+but it is pointless to backport two patches where one undoes the
+other.  Intermediate patches include: 9a2f36e, c308a9a, 1bf661c,
+d12c281, 2df8d99, 43cee32 (phew, that's a mouthful).
+
+Conflicts:
+	configure.ac - skip the churn of all intermediate patches
+	src/util/virnetdevbridge.c - ditto
+---
+ configure.ac               | 20 +++++++++++++++++---
+ src/util/virnetdevbridge.c | 18 +++++++++++++++++-
+ 2 files changed, 34 insertions(+), 4 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index b6e3e9a..a36760e 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -946,9 +946,23 @@ fi
+ dnl
+ dnl check for kernel headers required by src/bridge.c
+ dnl
+-if test "$with_qemu" = "yes" || test "$with_lxc" = "yes" ; then
+-  AC_CHECK_HEADERS([linux/param.h linux/sockios.h linux/if_bridge.h linux/if_tun.h],,
+-                   AC_MSG_ERROR([You must install kernel-headers in order to compile libvirt with QEMU or LXC support]))
++if test "$with_linux" = "yes"; then
++  if test "$with_qemu" = "yes" || test "$with_lxc" = "yes" ; then
++    AC_CHECK_HEADERS([linux/param.h linux/sockios.h linux/if_bridge.h linux/if_tun.h],,
++      [AC_MSG_ERROR([You must install kernel-headers in order to compile libvirt with QEMU or LXC support])],
++      [[/* The kernel folks broke their headers when used with particular
++         * glibc versions; although the structs are ABI compatible, the
++         * C type system doesn't like struct redefinitions.  We work around
++         * the problem here in the same manner as in virnetdevbridge.c.  */
++        #include <netinet/in.h>
++        #define in6_addr in6_addr_
++        #define sockaddr_in6 sockaddr_in6_
++        #define ipv6_mreq ipv6_mreq_
++        #define in6addr_any in6addr_any_
++        #define in6addr_loopback in6addr_loopback_
++        #include <linux/in6.h>
++      ]])
++  fi
+ fi
+ 
+ 
+diff --git a/src/util/virnetdevbridge.c b/src/util/virnetdevbridge.c
+index 2c4a9eb..9891bea 100644
+--- a/src/util/virnetdevbridge.c
++++ b/src/util/virnetdevbridge.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2007-2012 Red Hat, Inc.
++ * Copyright (C) 2007-2013 Red Hat, Inc.
+  *
+  * This library is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU Lesser General Public
+@@ -32,11 +32,27 @@
+ #include <sys/ioctl.h>
+ #include <sys/socket.h>
+ #include <net/if.h>
++#include <netinet/in.h>
+ 
+ #ifdef __linux__
+ # include <linux/sockios.h>
+ # include <linux/param.h>     /* HZ                 */
++/* Depending on the version of kernel vs. glibc, there may be a collision
++ * between <net/in.h> and kernel IPv6 structures.  The different types
++ * are ABI compatible, but choke the C type system; work around it by
++ * using temporary redefinitions.  */
++# define in6_addr in6_addr_
++# define sockaddr_in6 sockaddr_in6_
++# define ipv6_mreq ipv6_mreq_
++# define in6addr_any in6addr_any_
++# define in6addr_loopback in6addr_loopback_
++# include <linux/in6.h>
+ # include <linux/if_bridge.h> /* SYSFS_BRIDGE_ATTR  */
++# undef in6_addr
++# undef sockaddr_in6
++# undef ipv6_mreq
++# undef in6addr_any
++# undef in6addr_loopback
+ 
+ # define JIFFIES_TO_MS(j) (((j)*1000)/HZ)
+ # define MS_TO_JIFFIES(ms) (((ms)*HZ)/1000)
+-- 
+1.8.3.2
+

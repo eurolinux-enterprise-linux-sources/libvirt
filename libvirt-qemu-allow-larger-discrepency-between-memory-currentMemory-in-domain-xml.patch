@@ -1,0 +1,86 @@
+From d53a4d856f7b83a99790c56c788949e1d16dd3f4 Mon Sep 17 00:00:00 2001
+Message-Id: <d53a4d856f7b83a99790c56c788949e1d16dd3f4.1353330051.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Fri, 16 Nov 2012 17:12:04 -0500
+Subject: [PATCH] qemu: allow larger discrepency between memory &
+ currentMemory in domain xml
+
+This resolves:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=873134
+
+The reported problem is that an attempt to restore a saved domain that
+was configured with <currentMemory> and <memory> set to some (same for
+both) number that's not a multiple of 4096KiB results in an error like
+this:
+
+  error: Failed to start domain libvirt_test_api
+  error: XML error: current memory '4001792k' exceeds maximum '4000768k'
+
+(in this case, currentMemory was set to 4000000KiB).
+
+The reason for this failure is:
+
+1) a saved image contains the "live xml" of the domain at the time of
+the save.
+
+2) the live xml of a running domain gets its currentMemory
+(a.k.a. cur_balloon) directly from the qemu monitor rather than from
+the configuration of the domain.
+
+3) the value reported by qemu is (sometimes) not exactly what was
+originally given to qemu when the domain was started, but is rounded
+up to [some indeterminate granularity] - in some versions of qemu that
+granularity is apparently 1MiB, and in others it is 4MiB.
+
+4) When the XML is parsed to setup the state of the restored domain,
+the XML parser for <currentMemory> compares it to <memory> (which is
+the maximum allowed memory size for the domain) and if <currentMemory>
+is greater than the next 1024KiB boundary above <memory>, it spits out
+an error and fails.
+
+For example (from the BZ) if you start qemu on RHEL6 with both
+<currentMemory> and <memory> of 4000000 (this number is in KiB),
+libvirt's dominfo or dumpxml will report "4001792" back (rounded up to
+next 4MiB) for 10-20 seconds after the start, then revert to reporting
+"4000000". On Fedora 16 (which uses qemu-1.0), it will instead report
+"4000768" (rounded up to next 1MiB). On Fedora 17 (qemu-1.2), it seems
+to always report "4000000". ("4000000" is of course okay, and
+"4000768" is also okay since that's the next 1024KiB boundary above
+"4000000" and the parser was already allowing for that. But "4001792
+is *not* okay and produces the error message.)
+
+This patch solves the problem by changing the allowed "fudge factor"
+when parsing from 1024KiB to 4096KiB to match the maximum up-rounding
+that could be done in qemu.
+
+(I had earlier thought to fix this by up-rounding <memory> in the
+dumpxml that's put into the saved image, but that wouldn't have fixed
+the case where the save image was produced by an "unfixed"
+libvirtd.)
+(cherry picked from commit 89204fca7f193c7cf48f941bf2917c1a0e71096c)
+---
+ src/conf/domain_conf.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 65d4aa0..905aa9a 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8719,10 +8719,10 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+ 
+     if (def->mem.cur_balloon > def->mem.max_balloon) {
+         /* Older libvirt could get into this situation due to
+-         * rounding; if the discrepancy is less than 1MiB, we silently
++         * rounding; if the discrepancy is less than 4MiB, we silently
+          * round down, otherwise we flag the issue.  */
+-        if (VIR_DIV_UP(def->mem.cur_balloon, 1024) >
+-            VIR_DIV_UP(def->mem.max_balloon, 1024)) {
++        if (VIR_DIV_UP(def->mem.cur_balloon, 4096) >
++            VIR_DIV_UP(def->mem.max_balloon, 4096)) {
+             virReportError(VIR_ERR_XML_ERROR,
+                            _("current memory '%lluk' exceeds "
+                              "maximum '%lluk'"),
+-- 
+1.8.0
+

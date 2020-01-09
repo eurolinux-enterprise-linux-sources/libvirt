@@ -1,0 +1,441 @@
+From 68b7bcf7b8037ea963eb41708c60e68149405d27 Mon Sep 17 00:00:00 2001
+Message-Id: <68b7bcf7b8037ea963eb41708c60e68149405d27@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 22 Oct 2015 10:41:13 +0200
+Subject: [PATCH] Update ESX driver to always use privateData
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1213348
+
+Since the secondary drivers are only active when the primary
+driver is also the ESX driver, there is no need to use the
+different type specific privateData fields.
+
+(cherry picked from commit e84666c576602dcd708d64443e87d3edca79eb32)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/esx/esx_device_monitor.c   |  6 +-----
+ src/esx/esx_interface_driver.c | 16 ++++++----------
+ src/esx/esx_network_driver.c   | 20 ++++++++------------
+ src/esx/esx_nwfilter_driver.c  |  6 +-----
+ src/esx/esx_secret_driver.c    |  6 +-----
+ src/esx/esx_storage_driver.c   | 42 +++++++++++++++++++-----------------------
+ 6 files changed, 36 insertions(+), 60 deletions(-)
+
+diff --git a/src/esx/esx_device_monitor.c b/src/esx/esx_device_monitor.c
+index c3f9339..ced5054 100644
+--- a/src/esx/esx_device_monitor.c
++++ b/src/esx/esx_device_monitor.c
+@@ -50,18 +50,14 @@ esxDeviceOpen(virConnectPtr conn,
+         return VIR_DRV_OPEN_DECLINED;
+     }
+ 
+-    conn->devMonPrivateData = conn->privateData;
+-
+     return VIR_DRV_OPEN_SUCCESS;
+ }
+ 
+ 
+ 
+ static int
+-esxDeviceClose(virConnectPtr conn)
++esxDeviceClose(virConnectPtr conn ATTRIBUTE_UNUSED)
+ {
+-    conn->devMonPrivateData = NULL;
+-
+     return 0;
+ }
+ 
+diff --git a/src/esx/esx_interface_driver.c b/src/esx/esx_interface_driver.c
+index 35bc7fa..c623223 100644
+--- a/src/esx/esx_interface_driver.c
++++ b/src/esx/esx_interface_driver.c
+@@ -52,18 +52,14 @@ esxInterfaceOpen(virConnectPtr conn,
+         return VIR_DRV_OPEN_DECLINED;
+     }
+ 
+-    conn->interfacePrivateData = conn->privateData;
+-
+     return VIR_DRV_OPEN_SUCCESS;
+ }
+ 
+ 
+ 
+ static int
+-esxInterfaceClose(virConnectPtr conn)
++esxInterfaceClose(virConnectPtr conn ATTRIBUTE_UNUSED)
+ {
+-    conn->interfacePrivateData = NULL;
+-
+     return 0;
+ }
+ 
+@@ -72,7 +68,7 @@ esxInterfaceClose(virConnectPtr conn)
+ static int
+ esxNumberOfInterfaces(virConnectPtr conn)
+ {
+-    esxPrivate *priv = conn->interfacePrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_PhysicalNic *physicalNicList = NULL;
+     esxVI_PhysicalNic *physicalNic = NULL;
+     int count = 0;
+@@ -98,7 +94,7 @@ static int
+ esxListInterfaces(virConnectPtr conn, char **const names, int maxnames)
+ {
+     bool success = false;
+-    esxPrivate *priv = conn->interfacePrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_PhysicalNic *physicalNicList = NULL;
+     esxVI_PhysicalNic *physicalNic = NULL;
+     int count = 0;
+@@ -167,7 +163,7 @@ static virInterfacePtr
+ esxInterfaceLookupByName(virConnectPtr conn, const char *name)
+ {
+     virInterfacePtr iface = NULL;
+-    esxPrivate *priv = conn->interfacePrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_PhysicalNic *physicalNic = NULL;
+ 
+     if (esxVI_EnsureSession(priv->primary) < 0 ||
+@@ -189,7 +185,7 @@ static virInterfacePtr
+ esxInterfaceLookupByMACString(virConnectPtr conn, const char *mac)
+ {
+     virInterfacePtr iface = NULL;
+-    esxPrivate *priv = conn->interfacePrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_PhysicalNic *physicalNic = NULL;
+ 
+     if (esxVI_EnsureSession(priv->primary) < 0 ||
+@@ -211,7 +207,7 @@ static char *
+ esxInterfaceGetXMLDesc(virInterfacePtr iface, unsigned int flags)
+ {
+     char *xml = NULL;
+-    esxPrivate *priv = iface->conn->interfacePrivateData;
++    esxPrivate *priv = iface->conn->privateData;
+     esxVI_PhysicalNic *physicalNic = NULL;
+     virInterfaceDef def;
+     bool hasAddress = false;
+diff --git a/src/esx/esx_network_driver.c b/src/esx/esx_network_driver.c
+index c8f101a..625d3fa 100644
+--- a/src/esx/esx_network_driver.c
++++ b/src/esx/esx_network_driver.c
+@@ -58,18 +58,14 @@ esxNetworkOpen(virConnectPtr conn,
+         return VIR_DRV_OPEN_DECLINED;
+     }
+ 
+-    conn->networkPrivateData = conn->privateData;
+-
+     return VIR_DRV_OPEN_SUCCESS;
+ }
+ 
+ 
+ 
+ static int
+-esxNetworkClose(virConnectPtr conn)
++esxNetworkClose(virConnectPtr conn ATTRIBUTE_UNUSED)
+ {
+-    conn->networkPrivateData = NULL;
+-
+     return 0;
+ }
+ 
+@@ -78,7 +74,7 @@ esxNetworkClose(virConnectPtr conn)
+ static int
+ esxNumberOfNetworks(virConnectPtr conn)
+ {
+-    esxPrivate *priv = conn->networkPrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_HostVirtualSwitch *hostVirtualSwitchList = NULL;
+     esxVI_HostVirtualSwitch *hostVirtualSwitch = NULL;
+     int count = 0;
+@@ -105,7 +101,7 @@ static int
+ esxListNetworks(virConnectPtr conn, char **const names, int maxnames)
+ {
+     bool success = false;
+-    esxPrivate *priv = conn->networkPrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_HostVirtualSwitch *hostVirtualSwitchList = NULL;
+     esxVI_HostVirtualSwitch *hostVirtualSwitch = NULL;
+     int count = 0;
+@@ -175,7 +171,7 @@ static virNetworkPtr
+ esxNetworkLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
+ {
+     virNetworkPtr network = NULL;
+-    esxPrivate *priv = conn->networkPrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_HostVirtualSwitch *hostVirtualSwitchList = NULL;
+     esxVI_HostVirtualSwitch *hostVirtualSwitch = NULL;
+     unsigned char md5[MD5_DIGEST_SIZE]; /* MD5_DIGEST_SIZE = VIR_UUID_BUFLEN = 16 */
+@@ -220,7 +216,7 @@ static virNetworkPtr
+ esxNetworkLookupByName(virConnectPtr conn, const char *name)
+ {
+     virNetworkPtr network = NULL;
+-    esxPrivate *priv = conn->networkPrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_HostVirtualSwitch *hostVirtualSwitch = NULL;
+     unsigned char md5[MD5_DIGEST_SIZE]; /* MD5_DIGEST_SIZE = VIR_UUID_BUFLEN = 16 */
+ 
+@@ -324,7 +320,7 @@ static virNetworkPtr
+ esxNetworkDefineXML(virConnectPtr conn, const char *xml)
+ {
+     virNetworkPtr network = NULL;
+-    esxPrivate *priv = conn->networkPrivateData;
++    esxPrivate *priv = conn->privateData;
+     virNetworkDefPtr def = NULL;
+     esxVI_HostVirtualSwitch *hostVirtualSwitch = NULL;
+     esxVI_HostPortGroup *hostPortGroupList = NULL;
+@@ -535,7 +531,7 @@ static int
+ esxNetworkUndefine(virNetworkPtr network)
+ {
+     int result = -1;
+-    esxPrivate *priv = network->conn->networkPrivateData;
++    esxPrivate *priv = network->conn->privateData;
+     esxVI_HostVirtualSwitch *hostVirtualSwitch = NULL;
+     esxVI_HostPortGroup *hostPortGroupList = NULL;
+     esxVI_String *hostPortGroupKey = NULL;
+@@ -680,7 +676,7 @@ static char *
+ esxNetworkGetXMLDesc(virNetworkPtr network_, unsigned int flags)
+ {
+     char *xml = NULL;
+-    esxPrivate *priv = network_->conn->networkPrivateData;
++    esxPrivate *priv = network_->conn->privateData;
+     esxVI_HostVirtualSwitch *hostVirtualSwitch = NULL;
+     int count = 0;
+     esxVI_PhysicalNic *physicalNicList = NULL;
+diff --git a/src/esx/esx_nwfilter_driver.c b/src/esx/esx_nwfilter_driver.c
+index 9780ca6..d896c11 100644
+--- a/src/esx/esx_nwfilter_driver.c
++++ b/src/esx/esx_nwfilter_driver.c
+@@ -50,18 +50,14 @@ esxNWFilterOpen(virConnectPtr conn,
+         return VIR_DRV_OPEN_DECLINED;
+     }
+ 
+-    conn->nwfilterPrivateData = conn->privateData;
+-
+     return VIR_DRV_OPEN_SUCCESS;
+ }
+ 
+ 
+ 
+ static int
+-esxNWFilterClose(virConnectPtr conn)
++esxNWFilterClose(virConnectPtr conn ATTRIBUTE_UNUSED)
+ {
+-    conn->nwfilterPrivateData = NULL;
+-
+     return 0;
+ }
+ 
+diff --git a/src/esx/esx_secret_driver.c b/src/esx/esx_secret_driver.c
+index 55b2e9a..46af8f1 100644
+--- a/src/esx/esx_secret_driver.c
++++ b/src/esx/esx_secret_driver.c
+@@ -48,18 +48,14 @@ esxSecretOpen(virConnectPtr conn, virConnectAuthPtr auth ATTRIBUTE_UNUSED,
+         return VIR_DRV_OPEN_DECLINED;
+     }
+ 
+-    conn->secretPrivateData = conn->privateData;
+-
+     return VIR_DRV_OPEN_SUCCESS;
+ }
+ 
+ 
+ 
+ static int
+-esxSecretClose(virConnectPtr conn)
++esxSecretClose(virConnectPtr conn ATTRIBUTE_UNUSED)
+ {
+-    conn->secretPrivateData = NULL;
+-
+     return 0;
+ }
+ 
+diff --git a/src/esx/esx_storage_driver.c b/src/esx/esx_storage_driver.c
+index 08d5ab1..51f4177 100644
+--- a/src/esx/esx_storage_driver.c
++++ b/src/esx/esx_storage_driver.c
+@@ -112,18 +112,14 @@ esxStorageOpen(virConnectPtr conn,
+         return VIR_DRV_OPEN_DECLINED;
+     }
+ 
+-    conn->storagePrivateData = conn->privateData;
+-
+     return VIR_DRV_OPEN_SUCCESS;
+ }
+ 
+ 
+ 
+ static int
+-esxStorageClose(virConnectPtr conn)
++esxStorageClose(virConnectPtr conn ATTRIBUTE_UNUSED)
+ {
+-    conn->storagePrivateData = NULL;
+-
+     return 0;
+ }
+ 
+@@ -133,7 +129,7 @@ static int
+ esxNumberOfStoragePools(virConnectPtr conn)
+ {
+     int count = 0;
+-    esxPrivate *priv = conn->storagePrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_ObjectContent *datastoreList = NULL;
+     esxVI_ObjectContent *datastore = NULL;
+ 
+@@ -161,7 +157,7 @@ static int
+ esxListStoragePools(virConnectPtr conn, char **const names, int maxnames)
+ {
+     bool success = false;
+-    esxPrivate *priv = conn->storagePrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_String *propertyNameList = NULL;
+     esxVI_DynamicProperty *dynamicProperty = NULL;
+     esxVI_ObjectContent *datastoreList = NULL;
+@@ -251,7 +247,7 @@ esxListDefinedStoragePools(virConnectPtr conn ATTRIBUTE_UNUSED,
+ static virStoragePoolPtr
+ esxStoragePoolLookupByName(virConnectPtr conn, const char *name)
+ {
+-    esxPrivate *priv = conn->storagePrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_ObjectContent *datastore = NULL;
+     esxVI_DatastoreHostMount *hostMount = NULL;
+     unsigned char md5[MD5_DIGEST_SIZE]; /* MD5_DIGEST_SIZE = VIR_UUID_BUFLEN = 16 */
+@@ -296,7 +292,7 @@ esxStoragePoolLookupByName(virConnectPtr conn, const char *name)
+ static virStoragePoolPtr
+ esxStoragePoolLookupByUUID(virConnectPtr conn, const unsigned char *uuid)
+ {
+-    esxPrivate *priv = conn->storagePrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_String *propertyNameList = NULL;
+     esxVI_ObjectContent *datastoreList = NULL;
+     esxVI_ObjectContent *datastore = NULL;
+@@ -372,7 +368,7 @@ static int
+ esxStoragePoolRefresh(virStoragePoolPtr pool, unsigned int flags)
+ {
+     int result = -1;
+-    esxPrivate *priv = pool->conn->storagePrivateData;
++    esxPrivate *priv = pool->conn->privateData;
+     esxVI_ObjectContent *datastore = NULL;
+ 
+     virCheckFlags(0, -1);
+@@ -401,7 +397,7 @@ static int
+ esxStoragePoolGetInfo(virStoragePoolPtr pool, virStoragePoolInfoPtr info)
+ {
+     int result = -1;
+-    esxPrivate *priv = pool->conn->storagePrivateData;
++    esxPrivate *priv = pool->conn->privateData;
+     esxVI_String *propertyNameList = NULL;
+     esxVI_ObjectContent *datastore = NULL;
+     esxVI_DynamicProperty *dynamicProperty = NULL;
+@@ -466,7 +462,7 @@ esxStoragePoolGetInfo(virStoragePoolPtr pool, virStoragePoolInfoPtr info)
+ static char *
+ esxStoragePoolGetXMLDesc(virStoragePoolPtr pool, unsigned int flags)
+ {
+-    esxPrivate *priv = pool->conn->storagePrivateData;
++    esxPrivate *priv = pool->conn->privateData;
+     esxVI_String *propertyNameList = NULL;
+     esxVI_ObjectContent *datastore = NULL;
+     esxVI_DatastoreHostMount *hostMount = NULL;
+@@ -621,7 +617,7 @@ static int
+ esxStoragePoolNumberOfStorageVolumes(virStoragePoolPtr pool)
+ {
+     bool success = false;
+-    esxPrivate *priv = pool->conn->storagePrivateData;
++    esxPrivate *priv = pool->conn->privateData;
+     esxVI_HostDatastoreBrowserSearchResults *searchResultsList = NULL;
+     esxVI_HostDatastoreBrowserSearchResults *searchResults = NULL;
+     esxVI_FileInfo *fileInfo = NULL;
+@@ -660,7 +656,7 @@ esxStoragePoolListStorageVolumes(virStoragePoolPtr pool, char **const names,
+                                  int maxnames)
+ {
+     bool success = false;
+-    esxPrivate *priv = pool->conn->storagePrivateData;
++    esxPrivate *priv = pool->conn->privateData;
+     esxVI_HostDatastoreBrowserSearchResults *searchResultsList = NULL;
+     esxVI_HostDatastoreBrowserSearchResults *searchResults = NULL;
+     esxVI_FileInfo *fileInfo = NULL;
+@@ -748,7 +744,7 @@ static virStorageVolPtr
+ esxStorageVolumeLookupByName(virStoragePoolPtr pool, const char *name)
+ {
+     virStorageVolPtr volume = NULL;
+-    esxPrivate *priv = pool->conn->storagePrivateData;
++    esxPrivate *priv = pool->conn->privateData;
+     char *datastorePath = NULL;
+     char *key = NULL;
+ 
+@@ -781,7 +777,7 @@ static virStorageVolPtr
+ esxStorageVolumeLookupByPath(virConnectPtr conn, const char *path)
+ {
+     virStorageVolPtr volume = NULL;
+-    esxPrivate *priv = conn->storagePrivateData;
++    esxPrivate *priv = conn->privateData;
+     char *datastoreName = NULL;
+     char *directoryAndFileName = NULL;
+     char *key = NULL;
+@@ -816,7 +812,7 @@ static virStorageVolPtr
+ esxStorageVolumeLookupByKey(virConnectPtr conn, const char *key)
+ {
+     virStorageVolPtr volume = NULL;
+-    esxPrivate *priv = conn->storagePrivateData;
++    esxPrivate *priv = conn->privateData;
+     esxVI_String *propertyNameList = NULL;
+     esxVI_ObjectContent *datastoreList = NULL;
+     esxVI_ObjectContent *datastore = NULL;
+@@ -960,7 +956,7 @@ esxStorageVolumeCreateXML(virStoragePoolPtr pool, const char *xmldesc,
+                           unsigned int flags)
+ {
+     virStorageVolPtr volume = NULL;
+-    esxPrivate *priv = pool->conn->storagePrivateData;
++    esxPrivate *priv = pool->conn->privateData;
+     virStoragePoolDef poolDef;
+     virStorageVolDefPtr def = NULL;
+     char *tmp;
+@@ -1188,7 +1184,7 @@ esxStorageVolumeCreateXMLFrom(virStoragePoolPtr pool, const char *xmldesc,
+                               virStorageVolPtr sourceVolume, unsigned int flags)
+ {
+     virStorageVolPtr volume = NULL;
+-    esxPrivate *priv = pool->conn->storagePrivateData;
++    esxPrivate *priv = pool->conn->privateData;
+     virStoragePoolDef poolDef;
+     char *sourceDatastorePath = NULL;
+     virStorageVolDefPtr def = NULL;
+@@ -1384,7 +1380,7 @@ static int
+ esxStorageVolumeDelete(virStorageVolPtr volume, unsigned int flags)
+ {
+     int result = -1;
+-    esxPrivate *priv = volume->conn->storagePrivateData;
++    esxPrivate *priv = volume->conn->privateData;
+     char *datastorePath = NULL;
+     esxVI_ManagedObjectReference *task = NULL;
+     esxVI_TaskInfoState taskInfoState;
+@@ -1433,7 +1429,7 @@ static int
+ esxStorageVolumeWipe(virStorageVolPtr volume, unsigned int flags)
+ {
+     int result = -1;
+-    esxPrivate *priv = volume->conn->storagePrivateData;
++    esxPrivate *priv = volume->conn->privateData;
+     char *datastorePath = NULL;
+     esxVI_ManagedObjectReference *task = NULL;
+     esxVI_TaskInfoState taskInfoState;
+@@ -1482,7 +1478,7 @@ static int
+ esxStorageVolumeGetInfo(virStorageVolPtr volume, virStorageVolInfoPtr info)
+ {
+     int result = -1;
+-    esxPrivate *priv = volume->conn->storagePrivateData;
++    esxPrivate *priv = volume->conn->privateData;
+     char *datastorePath = NULL;
+     esxVI_FileInfo *fileInfo = NULL;
+     esxVI_VmDiskFileInfo *vmDiskFileInfo = NULL;
+@@ -1530,7 +1526,7 @@ esxStorageVolumeGetInfo(virStorageVolPtr volume, virStorageVolInfoPtr info)
+ static char *
+ esxStorageVolumeGetXMLDesc(virStorageVolPtr volume, unsigned int flags)
+ {
+-    esxPrivate *priv = volume->conn->storagePrivateData;
++    esxPrivate *priv = volume->conn->privateData;
+     virStoragePoolDef pool;
+     char *datastorePath = NULL;
+     esxVI_FileInfo *fileInfo = NULL;
+-- 
+2.7.0
+

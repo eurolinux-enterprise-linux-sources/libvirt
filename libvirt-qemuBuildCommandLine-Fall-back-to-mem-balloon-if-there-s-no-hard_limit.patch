@@ -1,0 +1,49 @@
+From 54cc7a53a4e8ae2101b1e971841aa57a4184a5d2 Mon Sep 17 00:00:00 2001
+Message-Id: <54cc7a53a4e8ae2101b1e971841aa57a4184a5d2.1380730269.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 30 Sep 2013 20:14:57 +0200
+Subject: [PATCH] qemuBuildCommandLine: Fall back to mem balloon if there's no
+ hard_limit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1013758
+
+If there's no hard_limit set and domain uses VFIO we still must lock the
+guest memory (prerequisite from qemu). Hence, we should compute the
+amount to be locked from max_balloon.
+(cherry picked from commit a7f94a40bb2554c56d0c6bea98a5843690dc3933)
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 628f8d4..763a265 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -6957,8 +6957,19 @@ qemuBuildCommandLine(virConnectPtr conn,
+         goto error;
+     }
+ 
+-    if (mlock)
+-        virCommandSetMaxMemLock(cmd, def->mem.hard_limit * 1024);
++    if (mlock) {
++        unsigned long long memKB;
++
++        /* VFIO requires all of the guest's memory to be
++         * locked resident, plus some amount for IO
++         * space. Alex Williamson suggested adding 1GiB for IO
++         * space just to be safe (some finer tuning might be
++         * nice, though).
++         */
++        memKB = def->mem.hard_limit ?
++            def->mem.hard_limit : def->mem.max_balloon + 1024 * 1024;
++        virCommandSetMaxMemLock(cmd, memKB * 1024);
++    }
+ 
+     return cmd;
+ 
+-- 
+1.8.3.2
+

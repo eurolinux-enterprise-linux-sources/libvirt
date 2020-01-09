@@ -1,0 +1,71 @@
+From 7d4a06f151e7d050b952c1baf3e40b1451b9f4ed Mon Sep 17 00:00:00 2001
+Message-Id: <7d4a06f151e7d050b952c1baf3e40b1451b9f4ed@dist-git>
+From: Francesco Romani <fromani@redhat.com>
+Date: Mon, 28 Apr 2014 15:02:54 +0200
+Subject: [PATCH] qemu: export disk snapshot support in capabilities
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1081032
+
+This patch adds an element to QEMU's capability XML, to
+show if the underlying QEMU binary supports the live disk
+snapshotting or not.
+This allows any client to know ahead of time if the feature
+is available.
+
+Without this information available, the only way to check
+for the snapshot support is to request one and check for
+errors.
+
+Signed-off-by: Francesco Romani <fromani@redhat.com>
+(cherry picked from commit 85a3eb8a6d44e4501c00c9aeed0039ccaf29cdc5)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/schemas/capability.rng  | 6 ++++++
+ src/qemu/qemu_capabilities.c | 7 +++++++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/docs/schemas/capability.rng b/docs/schemas/capability.rng
+index 734ed81..95f4400 100644
+--- a/docs/schemas/capability.rng
++++ b/docs/schemas/capability.rng
+@@ -347,6 +347,12 @@
+             <empty/>
+           </element>
+         </optional>
++        <optional>
++          <element name='disksnapshot'>
++            <ref name='featuretoggle'/>
++            <empty/>
++          </element>
++        </optional>
+       </interleave>
+     </element>
+   </define>
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 44b5138..c29c621 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -624,6 +624,7 @@ qemuCapsInitGuest(virCapsPtr caps,
+     qemuCapsPtr qemubinCaps = NULL;
+     qemuCapsPtr kvmbinCaps = NULL;
+     int ret = -1;
++    bool hasdisksnapshot = false;
+ 
+     /* Check for existance of base emulator, or alternate base
+      * which can be used with magic cpu choice
+@@ -712,6 +713,12 @@ qemuCapsInitGuest(virCapsPtr caps,
+         !virCapabilitiesAddGuestFeature(guest, "deviceboot", 1, 0))
+         goto error;
+ 
++    if (qemuCapsGet(qemubinCaps, QEMU_CAPS_DISK_SNAPSHOT))
++        hasdisksnapshot = true;
++
++    if (!virCapabilitiesAddGuestFeature(guest, "disksnapshot", hasdisksnapshot, 0))
++        goto error;
++
+     if (virCapabilitiesAddGuestDomain(guest,
+                                       "qemu",
+                                       NULL,
+-- 
+1.9.2
+

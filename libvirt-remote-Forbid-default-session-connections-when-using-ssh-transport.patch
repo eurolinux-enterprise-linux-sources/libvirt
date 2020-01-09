@@ -1,0 +1,69 @@
+From c7e8747c21950e3fa6c348fb6d367bbe802ea593 Mon Sep 17 00:00:00 2001
+Message-Id: <c7e8747c21950e3fa6c348fb6d367bbe802ea593.1373271643.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 14 Jun 2013 10:53:45 +0200
+Subject: [PATCH] remote: Forbid default "/session" connections when using ssh
+ transport
+
+https://bugzilla.redhat.com/show_bug.cgi?id=847822
+
+Without the socket path explicitly specified, the remote driver tried to
+connect to the "/system" instance socket even if "/session" was
+specified in the uri. With this patch this configuration now produces an
+error.
+
+It is still possible to initiate a session connection with specifying
+the path to the socket manually and also manually starting the session
+daemon. This was also possible prior to this patch,
+
+This is a minimal fix. We may decide to support remote session
+connections using ssh but this will require changes to the remote driver
+code so this fix shouldn't cause regressions in the case we decide to do
+that.
+(cherry picked from commit 22d81ceb46ea4b83ad817c29b2b04df27a09c671)
+
+Conflicts:
+	src/remote/remote_driver.c: VIR_STRDUP not backported (context)
+---
+ src/remote/remote_driver.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index fedd941..0c7ea763 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -617,6 +617,15 @@ doRemoteOpen(virConnectPtr conn,
+ 
+     case trans_libssh2:
+         if (!sockname) {
++            /* Right now we don't support default session connections */
++            if (STREQ(conn->uri->path, "/session")) {
++                virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
++                               _("Connecting to session instance without "
++                                 "socket path is not supported by the libssh2 "
++                                 "connection driver"));
++                goto failed;
++            }
++
+             if (flags & VIR_DRV_OPEN_REMOTE_RO)
+                 sockname = strdup(LIBVIRTD_PRIV_UNIX_SOCKET_RO);
+             else
+@@ -690,6 +699,15 @@ doRemoteOpen(virConnectPtr conn,
+             goto no_memory;
+ 
+         if (!sockname) {
++            /* Right now we don't support default session connections */
++            if (STREQ(conn->uri->path, "/session")) {
++                virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
++                               _("Connecting to session instance without "
++                                 "socket path is not supported by the ssh "
++                                 "connection driver"));
++                goto failed;
++            }
++
+             if (flags & VIR_DRV_OPEN_REMOTE_RO)
+                 sockname = strdup(LIBVIRTD_PRIV_UNIX_SOCKET_RO);
+             else
+-- 
+1.8.2.1
+

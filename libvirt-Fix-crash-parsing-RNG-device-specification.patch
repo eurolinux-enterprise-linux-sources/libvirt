@@ -1,0 +1,96 @@
+From 270a843cd8f1bbb24c9049a4a40a946fb4ad9fea Mon Sep 17 00:00:00 2001
+Message-Id: <270a843cd8f1bbb24c9049a4a40a946fb4ad9fea@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:58 +0100
+Subject: [PATCH] Fix crash parsing RNG device specification
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+Code that validates the whitelist for the RNG device filename
+didn't account for fact that filename may be NULL. This led
+to a NULL reference crash. This wasn't caught since the test
+suite was not covering this XML syntax
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 75e656a363f649309fc5647c1fd402f852ef16dd)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c                             |  3 ++-
+ .../qemuxml2argv-virtio-rng-default.args           |  6 ++++++
+ .../qemuxml2argv-virtio-rng-default.xml            | 23 ++++++++++++++++++++++
+ tests/qemuxml2argvtest.c                           |  2 ++
+ 4 files changed, 33 insertions(+), 1 deletion(-)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.xml
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 151026d..a95aacf 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -7166,7 +7166,8 @@ virDomainRNGDefParseXML(const xmlNodePtr node,
+     switch ((enum virDomainRNGBackend) def->backend) {
+     case VIR_DOMAIN_RNG_BACKEND_RANDOM:
+         def->source.file = virXPathString("string(./backend)", ctxt);
+-        if (STRNEQ(def->source.file, "/dev/random") &&
++        if (def->source.file &&
++            STRNEQ(def->source.file, "/dev/random") &&
+             STRNEQ(def->source.file, "/dev/hwrng")) {
+             virReportError(VIR_ERR_XML_ERROR,
+                            _("file '%s' is not a supported random source"),
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.args b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.args
+new file mode 100644
+index 0000000..a5f04fd
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.args
+@@ -0,0 +1,6 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu \
++-S -M pc -m 214 -smp 1 -nographic -nodefaults \
++-monitor unix:/tmp/test-monitor,server,nowait -no-acpi -boot c -usb \
++-device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3 \
++-object rng-random,id=rng0 \
++-device virtio-rng-pci,rng=rng0,bus=pci.0,addr=0x4
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.xml b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.xml
+new file mode 100644
+index 0000000..0852dea
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.xml
+@@ -0,0 +1,23 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static' cpuset='1-4,8-20,525'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <controller type='usb' index='0'/>
++    <memballoon model='virtio'/>
++    <rng model='virtio'>
++      <backend model='random'/>
++    </rng>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 2922abd..79b8b69 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -860,6 +860,8 @@ mymain(void)
+     DO_TEST_FAILURE("mlock-on", NONE);
+     DO_TEST("mlock-off", QEMU_CAPS_MLOCK);
+     DO_TEST("mlock-unsupported", NONE);
++    DO_TEST("virtio-rng-default", QEMU_CAPS_DEVICE, QEMU_CAPS_DEVICE_VIRTIO_RNG,
++            QEMU_CAPS_OBJECT_RNG_RANDOM);
+     DO_TEST("virtio-rng-random", QEMU_CAPS_DEVICE, QEMU_CAPS_DEVICE_VIRTIO_RNG,
+             QEMU_CAPS_OBJECT_RNG_RANDOM);
+     DO_TEST("virtio-rng-egd", QEMU_CAPS_DEVICE, QEMU_CAPS_DEVICE_VIRTIO_RNG,
+-- 
+1.9.1
+

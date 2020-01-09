@@ -1,0 +1,38 @@
+From fb02965da4330fb2b2c3d0d930961b6253222bf8 Mon Sep 17 00:00:00 2001
+Message-Id: <fb02965da4330fb2b2c3d0d930961b6253222bf8@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Thu, 12 Jun 2014 12:33:12 +0200
+Subject: [PATCH] Fix crash when saving a domain with type none dac label
+
+qemuDomainGetImageIds did not check if there was a label
+in the seclabel, thus crashing on
+<seclabel type='none' model='dac'/>
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1108590
+(cherry picked from commit 7eb0ee175b278a4439cee65a7a554767f0be9cd1)
+
+Conflicts:
+	src/qemu/qemu_domain.c:
+        qemuDomainGetImageIds is missing - commit 9bf629a is not
+        backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index e929600..e247589 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2754,6 +2754,7 @@ qemuOpenFile(struct qemud_driver *driver,
+     /* TODO: Take imagelabel into account? */
+     if (vm &&
+         (seclabel = virDomainDefGetSecurityLabelDef(vm->def, "dac")) != NULL &&
++        seclabel->label != NULL &&
+         (virParseOwnershipIds(seclabel->label, &user, &group) < 0))
+         goto cleanup;
+ 
+-- 
+2.0.0
+

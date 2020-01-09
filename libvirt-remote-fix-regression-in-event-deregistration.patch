@@ -1,0 +1,38 @@
+From 0796155862d906823fd24bcfac357f1b371f27bf Mon Sep 17 00:00:00 2001
+Message-Id: <0796155862d906823fd24bcfac357f1b371f27bf@dist-git>
+From: Zhou Yimin <zhouyimin@huawei.com>
+Date: Fri, 18 Oct 2013 15:12:14 +0200
+Subject: [PATCH] remote: fix regression in event deregistration
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1020372
+
+Introduced by 7b87a3
+When I quit the process which only register VIR_DOMAIN_EVENT_ID_REBOOT,
+I got error like:
+"libvirt: XML-RPC error : internal error: domain event 0 not registered".
+Then I add the following code, it fixed.
+
+Signed-off-by: Zhou Yimin <zhouyimin@huawei.com>
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 9712c2510ec87a87578576a407768380e250a6a4)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/remote/remote_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index f7d7119..7c226fe 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -4996,7 +4996,7 @@ static int remoteDomainEventDeregisterAny(virConnectPtr conn,
+     /* If that was the last callback for this eventID, we need to disable
+      * events on the server */
+     if (count == 0) {
+-        args.eventID = callbackID;
++        args.eventID = eventID;
+ 
+         if (call (conn, priv, 0, REMOTE_PROC_DOMAIN_EVENTS_DEREGISTER_ANY,
+                   (xdrproc_t) xdr_remote_domain_events_deregister_any_args, (char *) &args,
+-- 
+1.9.1
+

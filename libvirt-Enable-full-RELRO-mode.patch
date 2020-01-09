@@ -1,0 +1,198 @@
+From 8e1512816ec3729b720c1a28a10679faec415c60 Mon Sep 17 00:00:00 2001
+Message-Id: <8e1512816ec3729b720c1a28a10679faec415c60@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 3 Apr 2013 12:36:32 +0100
+Subject: [PATCH] Enable full RELRO mode
+
+By passing the flags -z relro -z now to the linker, we can force
+it to resolve all library symbols at startup, instead of on-demand.
+This allows it to then make the global offset table (GOT) read-only,
+which makes some security attacks harder.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit fc8c1787d8b8eb6c462b8e5b49c2b3ccf3669bc0)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1242156
+
+Conflicts:
+	src/Makefile.am -- libvirt-lxc library and vrtlockd did not
+        exist yet
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ configure.ac            |  1 +
+ daemon/Makefile.am      |  1 +
+ m4/virt-linker-relro.m4 | 32 ++++++++++++++++++++++++++++++++
+ src/Makefile.am         | 30 ++++++++++++++++++++++--------
+ tools/Makefile.am       |  2 ++
+ 5 files changed, 58 insertions(+), 8 deletions(-)
+ create mode 100644 m4/virt-linker-relro.m4
+
+diff --git a/configure.ac b/configure.ac
+index 0df2cca..ba47276 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -148,6 +148,7 @@ AC_MSG_RESULT([$VERSION_SCRIPT_FLAGS])
+ 
+ LIBVIRT_COMPILE_WARNINGS
+ LIBVIRT_COMPILE_PIE
++LIBVIRT_LINKER_RELRO
+ 
+ AC_MSG_CHECKING([for CPUID instruction])
+ AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
+diff --git a/daemon/Makefile.am b/daemon/Makefile.am
+index aa22cb3..fac1d9e 100644
+--- a/daemon/Makefile.am
++++ b/daemon/Makefile.am
+@@ -103,6 +103,7 @@ libvirtd_CFLAGS = \
+ libvirtd_LDFLAGS =					\
+ 	$(WARN_LDFLAGS)					\
+ 	$(PIE_LDFLAGS)					\
++	$(RELRO_LDFLAGS)				\
+ 	$(COVERAGE_LDFLAGS)
+ 
+ libvirtd_LDADD =					\
+diff --git a/m4/virt-linker-relro.m4 b/m4/virt-linker-relro.m4
+new file mode 100644
+index 0000000..9bca90e
+--- /dev/null
++++ b/m4/virt-linker-relro.m4
+@@ -0,0 +1,32 @@
++dnl
++dnl Check for -z now and -z relro linker flags
++dnl
++dnl Copyright (C) 2013 Red Hat, Inc.
++dnl
++dnl This library is free software; you can redistribute it and/or
++dnl modify it under the terms of the GNU Lesser General Public
++dnl License as published by the Free Software Foundation; either
++dnl version 2.1 of the License, or (at your option) any later version.
++dnl
++dnl This library is distributed in the hope that it will be useful,
++dnl but WITHOUT ANY WARRANTY; without even the implied warranty of
++dnl MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++dnl Lesser General Public License for more details.
++dnl
++dnl You should have received a copy of the GNU Lesser General Public
++dnl License along with this library.  If not, see
++dnl <http://www.gnu.org/licenses/>.
++dnl
++
++AC_DEFUN([LIBVIRT_LINKER_RELRO],[
++    AC_MSG_CHECKING([for how to force completely read-only GOT table])
++
++    RELRO_LDFLAGS=
++    `$LD --help 2>&1 | grep -- "-z relro" >/dev/null` && \
++        RELRO_LDFLAGS="-Wl,-z -Wl,relro"
++    `$LD --help 2>&1 | grep -- "-z now" >/dev/null` && \
++        RELRO_LDFLAGS="$RELRO_LDFLAGS -Wl,-z -Wl,now"
++    AC_SUBST([RELRO_LDFLAGS])
++
++    AC_MSG_RESULT([$RELRO_LDFLAGS])
++])
+diff --git a/src/Makefile.am b/src/Makefile.am
+index b88d59a..4ae7d0b 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -1408,10 +1408,15 @@ libvirt_qemu.def: $(srcdir)/libvirt_qemu.syms
+ 
+ # Empty source list - it merely links a bunch of convenience libs together
+ libvirt_la_SOURCES =
+-libvirt_la_LDFLAGS = $(VERSION_SCRIPT_FLAGS)$(LIBVIRT_SYMBOL_FILE) \
+-		     -version-info $(LIBVIRT_VERSION_INFO) \
+-		    $(LIBVIRT_NODELETE) $(AM_LDFLAGS) \
+-		    $(CYGWIN_EXTRA_LDFLAGS) $(MINGW_EXTRA_LDFLAGS)
++libvirt_la_LDFLAGS = \
++		$(VERSION_SCRIPT_FLAGS)$(LIBVIRT_SYMBOL_FILE) \
++		-version-info $(LIBVIRT_VERSION_INFO) \
++		$(LIBVIRT_NODELETE) \
++		$(AM_LDFLAGS) \
++		$(RELRO_LDFLAGS) \
++		$(CYGWIN_EXTRA_LDFLAGS) \
++		$(MINGW_EXTRA_LDFLAGS) \
++		$(NULL)
+ libvirt_la_BUILT_LIBADD += ../gnulib/lib/libgnu.la
+ libvirt_la_LIBADD += \
+ 		    $(DRIVER_MODULE_LIBS) \
+@@ -1484,10 +1489,14 @@ endif
+ EXTRA_DIST += libvirt_probes.d libvirt_qemu_probes.d
+ 
+ libvirt_qemu_la_SOURCES = libvirt-qemu.c
+-libvirt_qemu_la_LDFLAGS = $(VERSION_SCRIPT_FLAGS)$(LIBVIRT_QEMU_SYMBOL_FILE) \
+-			  -version-info $(LIBVIRT_VERSION_INFO) \
+-			  $(CYGWIN_EXTRA_LDFLAGS) $(MINGW_EXTRA_LDFLAGS) \
+-			  $(AM_LDFLAGS)
++libvirt_qemu_la_LDFLAGS = \
++		$(VERSION_SCRIPT_FLAGS)$(LIBVIRT_QEMU_SYMBOL_FILE) \
++		-version-info $(LIBVIRT_VERSION_INFO) \
++		$(AM_LDFLAGS) \
++		$(RELRO_LDFLAGS) \
++		$(CYGWIN_EXTRA_LDFLAGS) \
++		$(MINGW_EXTRA_LDFLAGS) \
++		$(NULL)
+ libvirt_qemu_la_CFLAGS = $(AM_CFLAGS)
+ libvirt_qemu_la_LIBADD = libvirt.la $(CYGWIN_EXTRA_LIBADD)
+ EXTRA_DIST += $(LIBVIRT_QEMU_SYMBOL_FILE)
+@@ -1623,6 +1632,7 @@ libvirt_iohelper_LDFLAGS = \
+ 		$(WARN_LDFLAGS) \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
++		$(RELRO_LDFLAGS) \
+ 		$(NULL)
+ libvirt_iohelper_LDADD =		\
+ 		libvirt_util.la		\
+@@ -1646,6 +1656,7 @@ libvirt_parthelper_LDFLAGS = \
+ 		$(WARN_LDFLAGS) \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
++		$(RELRO_LDFLAGS) \
+ 		$(NULL)
+ libvirt_parthelper_LDADD =		\
+ 		$(LIBPARTED_LIBS)	\
+@@ -1678,6 +1689,7 @@ libvirt_sanlock_helper_LDFLAGS = \
+ 		$(WARN_LDFLAGS) \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
++		$(RELRO_LDFLAGS) \
+ 		$(NULL)
+ libvirt_sanlock_helper_LDADD = libvirt.la
+ endif
+@@ -1694,6 +1706,7 @@ libvirt_lxc_LDFLAGS = \
+ 		$(WARN_LDFLAGS) \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
++		$(RELRO_LDFLAGS) \
+ 		$(NULL)
+ libvirt_lxc_LDADD =			\
+ 		$(NUMACTL_LIBS) \
+@@ -1741,6 +1754,7 @@ virt_aa_helper_LDFLAGS = \
+ 		$(WARN_LDFLAGS) \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
++		$(RELRO_LDFLAGS) \
+ 		$(NULL)
+ virt_aa_helper_LDADD =						\
+ 		libvirt_conf.la					\
+diff --git a/tools/Makefile.am b/tools/Makefile.am
+index 0ce865e..e4fdd73 100644
+--- a/tools/Makefile.am
++++ b/tools/Makefile.am
+@@ -91,6 +91,7 @@ virt_host_validate_SOURCES = \
+ virt_host_validate_LDFLAGS = \
+ 		$(WARN_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
++		$(RELRO_LDFLAGS) \
+ 		$(COVERAGE_LDFLAGS) \
+ 		$(NULL)
+ 
+@@ -126,6 +127,7 @@ virsh_LDADD =							\
+ 		$(STATIC_BINARIES)				\
+ 		$(WARN_LDFLAGS)					\
+ 		$(PIE_LDFLAGS)					\
++		$(RELRO_LDFLAGS) \
+ 		../src/libvirt.la				\
+ 		../src/libvirt-qemu.la				\
+ 		../gnulib/lib/libgnu.la				\
+-- 
+2.7.0
+

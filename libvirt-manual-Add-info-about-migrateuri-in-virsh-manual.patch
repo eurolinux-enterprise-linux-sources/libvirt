@@ -1,0 +1,88 @@
+From c0bcfc9a651b6d3d228d755c0f3766380c92d95a Mon Sep 17 00:00:00 2001
+Message-Id: <c0bcfc9a651b6d3d228d755c0f3766380c92d95a.1373271643.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Mon, 24 Jun 2013 12:32:03 +0200
+Subject: [PATCH] manual: Add info about migrateuri in virsh manual
+
+https://bugzilla.redhat.com/show_bug.cgi?id=878765
+
+The virsh(1) man page wasn't saying anything about the 'migrateuri'
+parameter other than it can be usually omitted.  A patched version of
+docs/migrate.html.in is taken in this patch to fix that up in the man
+page.
+(cherry picked from commit d1d2acd7f250185415bdbc2e67c6e2b0bed0d7b3)
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+---
+ docs/migration.html.in |  4 ++--
+ tools/virsh.pod        | 28 +++++++++++++++++++++++++++-
+ 2 files changed, 29 insertions(+), 3 deletions(-)
+
+diff --git a/docs/migration.html.in b/docs/migration.html.in
+index be3f9b7..b86aff5 100644
+--- a/docs/migration.html.in
++++ b/docs/migration.html.in
+@@ -178,12 +178,12 @@
+         should specify the hypervisor specific URI, using an IP address
+         associated with the network to be used.</li>
+       <li>The firewall restricts what ports are available. When libvirt
+-        generates a migration URI will pick a port number using hypervisor
++        generates a migration URI it will pick a port number using hypervisor
+         specific rules. Some hypervisors only require a single port to be
+         open in the firewalls, while others require a whole range of port
+         numbers. In the latter case the management application may wish
+         to choose a specific port number outside the default range in order
+-        to comply with local firewall policies</li>
++        to comply with local firewall policies.</li>
+     </ol>
+ 
+     <h2><a id="config">Configuration file handling</a></h2>
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 28b5d90..027fb09 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -1056,7 +1056,7 @@ such as GFS2 or GPFS. If you are sure the migration is safe or you just do not
+ care, use I<--unsafe> to force the migration.
+ 
+ The I<desturi> is the connection URI of the destination host, and
+-I<migrateuri> is the migration URI, which usually can be omitted.
++I<migrateuri> is the migration URI, which usually can be omitted (see below).
+ I<dname> is used for renaming the domain to new name during migration, which
+ also usually can be omitted.  Likewise, I<--xml> B<file> is usually
+ omitted, but can be used to supply an alternative XML file for use on
+@@ -1084,6 +1084,32 @@ seen from the source machine.
+ 
+ =back
+ 
++When I<migrateuri> is not specified, libvirt will automatically determine the
++hypervisor specific URI, by looking up the target host's configured hostname.
++There are a few scenarios where specifying I<migrateuri> may help:
++
++=over 4
++
++=item * The configured hostname is incorrect, or DNS is broken.  If a host has a
++hostname which will not resolve to match one of its public IP addresses, then
++libvirt will generate an incorrect URI.  In this case I<migrateuri> should be
++explicitly specified, using an IP address, or a correct hostname.
++
++=item * The host has multiple network interaces.  If a host has multiple network
++interfaces, it might be desirable for the migration data stream to be sent over
++a specific interface for either security or performance reasons.  In this case
++I<migrateuri> should be explicitly specified, using an IP address associated
++with the network to be used.
++
++=item * The firewall restricts what ports are available.  When libvirt generates
++a migration URI, it will pick a port number using hypervisor specific rules.
++Some hypervisors only require a single port to be open in the firewalls, while
++others require a whole range of port numbers.  In the latter case I<migrateuri>
++might be specified to choose a specific port number outside the default range in
++order to comply with local firewall policies.
++
++=back
++
+ =item B<migrate-setmaxdowntime> I<domain> I<downtime>
+ 
+ Set maximum tolerable downtime for a domain which is being live-migrated to
+-- 
+1.8.2.1
+

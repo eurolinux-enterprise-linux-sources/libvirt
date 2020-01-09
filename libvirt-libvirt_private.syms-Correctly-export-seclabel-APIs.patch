@@ -1,0 +1,45 @@
+From 23277faea6955e08b449ffb8dbcd78db1e4300a3 Mon Sep 17 00:00:00 2001
+Message-Id: <23277faea6955e08b449ffb8dbcd78db1e4300a3.1373271640.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 28 Mar 2013 23:14:48 +0100
+Subject: [PATCH] libvirt_private.syms: Correctly export seclabel APIs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=923946
+
+One of my previous patches manipulated virSecurityLabel* APIs,
+some were added to header files, and some were renamed. However,
+these changes were not reflected in libvirt_private.syms.
+(cherry picked from commit a919e6f7769b27168b9217fd2fd5143259f63173)
+
+Conflicts:
+	src/libvirt_private.syms: a8c8685e and 27cf98e2 are not backported yet
+---
+ src/libvirt_private.syms | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 103ece7..9171745 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -325,7 +325,9 @@ virDomainDefCompatibleDevice;
+ virDomainDefFormat;
+ virDomainDefFormatInternal;
+ virDomainDefFree;
++virDomainDefGenSecurityLabelDef;
+ virDomainDefGetSecurityLabelDef;
++virDomainDiskDefGenSecurityLabelDef;
+ virDomainDiskDefGetSecurityLabelDef;
+ virDomainDefAddSecurityLabelDef;
+ virDomainDefParseFile;
+@@ -545,6 +547,8 @@ virDomainWatchdogActionTypeFromString;
+ virDomainWatchdogActionTypeToString;
+ virDomainWatchdogModelTypeFromString;
+ virDomainWatchdogModelTypeToString;
++virSecurityDeviceLabelDefFree;
++virSecurityLabelDefFree;
+ 
+ 
+ # domain_event.h
+-- 
+1.8.2.1
+

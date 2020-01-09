@@ -1,0 +1,91 @@
+From 527c57b1b3373780fb018ff24fe2b5d050c8a4f0 Mon Sep 17 00:00:00 2001
+Message-Id: <527c57b1b3373780fb018ff24fe2b5d050c8a4f0@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Mon, 21 Apr 2014 08:22:34 -0600
+Subject: [PATCH] PanicCheckABIStability: Need to check for existence
+
+RHEL 6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1033984
+
+Commit id '4313fead' added a call to virDomainPanicCheckABIStability()
+which did not check whether the panic device existed before making a call
+to virDomainDeviceInfoCheckABIStability() which ended up segfaulting:
+
+Thread 1 (Thread 0x7f5332837700 (LWP 10964)):
+    (src=<optimized out>, dst=<optimized out>)
+    at conf/domain_conf.c:13007
+    (dst=<optimized out>, src=<optimized out>)
+    at conf/domain_conf.c:13712
+    (src=<optimized out>, dst=<optimized out>)
+    at conf/domain_conf.c:14056
+    (domain=domain@entry=0x7f53000057c0, vm=vm@entry=0x7f53000036d0,
+     defptr=defptr@entry=0x7f5332836978, snap=snap@entry=0x7f5332836970,
+     update_current=update_current@entry=0x7f5332836962, flags=flags@entry=1)
+    at conf/snapshot_conf.c:1230
+    (domain=0x7f53000057c0, xmlDesc=<optimized out>, flags=1)
+    at qemu/qemu_driver.c:12719
+    (domain=domain@entry=0x7f53000057c0, xmlDesc=0x7f53000081d0
+     "<domainsnapshot>\n  <name>snap2</name>\n
+     <description>new-desc</description>\n  <state>running</state>\n
+     <parent>\n    <name>snap1</name>\n  </parent>\n
+     <creationTime>1387487268</creationTime>\n  <memory s"..., flags=1)
+    at libvirt.c:19695
+...
+
+(gdb) up 3
+(gdb) print *other->def->dom
+$2 = {virtType = 2, id = -1, ..
+...
+  rng = 0x0, panic = 0x0, namespaceData = 0x0,...
+...
+(gdb) print *def->dom
+$3 = {virtType = 2, id = -1, ...
+...
+  rng = 0x0, panic = 0x0, namespaceData = 0x0,...
+...
+(gdb)
+
+Also seen using following sequence:
+
+virsh save $dom $file
+virsh save-image-edit $file
+  add (or remove) a <panic/> line
+  <devices>
+  ...
+    <panic>
+      <address type='isa' iobase='0x505'/>
+    </panic>
+  ...
+  </devices>
+
+(cherry picked from commit d53c57b806b94adaed650b7ff10893905ff2fa1f)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 4e5385d..a80255c 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -11635,6 +11635,17 @@ static bool
+ virDomainPanicCheckABIStability(virDomainPanicDefPtr src,
+                                 virDomainPanicDefPtr dst)
+ {
++    if (!src && !dst)
++        return true;
++
++    if (!src || !dst) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("Target domain panic device count '%d' "
++                         "does not match source count '%d'"),
++                       src ? 1 : 0, dst ? 1 : 0);
++        return false;
++    }
++
+     return virDomainDeviceInfoCheckABIStability(&src->info, &dst->info);
+ }
+ 
+-- 
+1.9.2
+

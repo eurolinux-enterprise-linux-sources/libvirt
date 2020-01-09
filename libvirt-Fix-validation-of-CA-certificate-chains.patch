@@ -1,0 +1,390 @@
+From dc17824e09e60dfcb5461551b562d19e274fcf0f Mon Sep 17 00:00:00 2001
+Message-Id: <dc17824e09e60dfcb5461551b562d19e274fcf0f.1376483448.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 13 Aug 2013 16:40:41 +0100
+Subject: [PATCH] Fix validation of CA certificate chains
+
+For https://bugzilla.redhat.com/show_bug.cgi?id=975201
+
+The code added to validate CA certificates did not take into
+account the possibility that the cacert.pem file can contain
+multiple (concatenated) cert data blocks. Extend the code for
+loading CA certs to use the gnutls APIs for loading cert lists.
+Add test cases to check that multi-level trees of certs will
+validate correctly.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 31d41d9268a6731e303700b5a5825a87a6f36a19)
+---
+ src/rpc/virnettlscontext.c   | 70 ++++++++++++++++++++++++++++++++++----------
+ tests/virnettlscontexttest.c | 59 +++++++++++++++++++++++++++++++++++++
+ tests/virnettlshelpers.c     | 34 +++++++++++++++++++++
+ tests/virnettlshelpers.h     |  3 ++
+ tests/virnettlssessiontest.c | 63 +++++++++++++++++++++++++++++++++++++--
+ 5 files changed, 211 insertions(+), 18 deletions(-)
+
+diff --git a/src/rpc/virnettlscontext.c b/src/rpc/virnettlscontext.c
+index 9769969..0afc1ce 100644
+--- a/src/rpc/virnettlscontext.c
++++ b/src/rpc/virnettlscontext.c
+@@ -453,14 +453,15 @@ static int virNetTLSContextCheckCert(gnutls_x509_crt_t cert,
+ 
+ static int virNetTLSContextCheckCertPair(gnutls_x509_crt_t cert,
+                                          const char *certFile,
+-                                         gnutls_x509_crt_t cacert,
++                                         gnutls_x509_crt_t *cacerts,
++                                         size_t ncacerts,
+                                          const char *cacertFile,
+                                          bool isServer)
+ {
+     unsigned int status;
+ 
+     if (gnutls_x509_crt_list_verify(&cert, 1,
+-                                    &cacert, 1,
++                                    cacerts, ncacerts,
+                                     NULL, 0,
+                                     0, &status) < 0) {
+         virReportError(VIR_ERR_SYSTEM_ERROR, isServer ?
+@@ -498,16 +499,15 @@ static int virNetTLSContextCheckCertPair(gnutls_x509_crt_t cert,
+ 
+ 
+ static gnutls_x509_crt_t virNetTLSContextLoadCertFromFile(const char *certFile,
+-                                                          bool isServer,
+-                                                          bool isCA ATTRIBUTE_UNUSED)
++                                                          bool isServer)
+ {
+     gnutls_datum_t data;
+     gnutls_x509_crt_t cert = NULL;
+     char *buf = NULL;
+     int ret = -1;
+ 
+-    VIR_DEBUG("isServer %d isCA %d certFile %s",
+-              isServer, isCA, certFile);
++    VIR_DEBUG("isServer %d certFile %s",
++              isServer, certFile);
+ 
+     if (gnutls_x509_crt_init(&cert) < 0) {
+         virReportError(VIR_ERR_SYSTEM_ERROR, "%s",
+@@ -541,31 +541,69 @@ cleanup:
+ }
+ 
+ 
++static int virNetTLSContextLoadCACertListFromFile(const char *certFile,
++                                                  gnutls_x509_crt_t *certs,
++                                                  size_t *ncerts)
++{
++    gnutls_datum_t data;
++    char *buf = NULL;
++    int ret = -1;
++    unsigned int certMax = *ncerts;
++
++    *ncerts = 0;
++    VIR_DEBUG("certFile %s", certFile);
++
++    if (virFileReadAll(certFile, (1<<16), &buf) < 0)
++        goto cleanup;
++
++    data.data = (unsigned char *)buf;
++    data.size = strlen(buf);
++
++    if (gnutls_x509_crt_list_import(certs, &certMax, &data, GNUTLS_X509_FMT_PEM, 0) < 0) {
++        virReportError(VIR_ERR_SYSTEM_ERROR,
++                       _("Unable to import CA certificate list %s"),
++                       certFile);
++        goto cleanup;
++    }
++    *ncerts = certMax;
++
++    ret = 0;
++
++cleanup:
++    VIR_FREE(buf);
++    return ret;
++}
++
++
++#define MAX_CERTS 16
+ static int virNetTLSContextSanityCheckCredentials(bool isServer,
+                                                   const char *cacertFile,
+                                                   const char *certFile)
+ {
+     gnutls_x509_crt_t cert = NULL;
+-    gnutls_x509_crt_t cacert = NULL;
++    gnutls_x509_crt_t cacerts[MAX_CERTS];
++    size_t ncacerts = MAX_CERTS;
++    size_t i;
+     int ret = -1;
+ 
+     if ((access(certFile, R_OK) == 0) &&
+-        !(cert = virNetTLSContextLoadCertFromFile(certFile, isServer, false)))
++        !(cert = virNetTLSContextLoadCertFromFile(certFile, isServer)))
+         goto cleanup;
+     if ((access(cacertFile, R_OK) == 0) &&
+-        !(cacert = virNetTLSContextLoadCertFromFile(cacertFile, isServer, false)))
++        virNetTLSContextLoadCACertListFromFile(cacertFile, cacerts, &ncacerts) < 0)
+         goto cleanup;
+ 
+     if (cert &&
+         virNetTLSContextCheckCert(cert, certFile, isServer, false) < 0)
+         goto cleanup;
+ 
+-    if (cacert &&
+-        virNetTLSContextCheckCert(cacert, cacertFile, isServer, true) < 0)
+-        goto cleanup;
++    for (i = 0; i < ncacerts; i++) {
++        if (virNetTLSContextCheckCert(cacerts[i], cacertFile, isServer, true) < 0)
++            goto cleanup;
++    }
+ 
+-    if (cert && cacert &&
+-        virNetTLSContextCheckCertPair(cert, certFile, cacert, cacertFile, isServer) < 0)
++    if (cert && ncacerts &&
++        virNetTLSContextCheckCertPair(cert, certFile, cacerts, ncacerts, cacertFile, isServer) < 0)
+         goto cleanup;
+ 
+     ret = 0;
+@@ -573,8 +611,8 @@ static int virNetTLSContextSanityCheckCredentials(bool isServer,
+ cleanup:
+     if (cert)
+         gnutls_x509_crt_deinit(cert);
+-    if (cacert)
+-        gnutls_x509_crt_deinit(cacert);
++    for (i = 0; i < ncacerts; i++)
++        gnutls_x509_crt_deinit(cacerts[i]);
+     return ret;
+ }
+ 
+diff --git a/tests/virnettlscontexttest.c b/tests/virnettlscontexttest.c
+index 04aa212..80768f4 100644
+--- a/tests/virnettlscontexttest.c
++++ b/tests/virnettlscontexttest.c
+@@ -510,6 +510,57 @@ mymain(void)
+     DO_CTX_TEST(true, cacertreq.filename, servercertnew1req.filename, true);
+     DO_CTX_TEST(false, cacertreq.filename, clientcertnew1req.filename, true);
+ 
++    TLS_ROOT_REQ(cacertrootreq,
++                 "UK", "libvirt root", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(cacertlevel1areq, cacertrootreq,
++                 "UK", "libvirt level 1a", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(cacertlevel1breq, cacertrootreq,
++                 "UK", "libvirt level 1b", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(cacertlevel2areq, cacertlevel1areq,
++                 "UK", "libvirt level 2a", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(servercertlevel3areq, cacertlevel2areq,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
++    TLS_CERT_REQ(clientcertlevel2breq, cacertlevel1breq,
++                 "UK", "libvirt client level 2b", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
++                 0, 0);
++
++    gnutls_x509_crt_t certchain[] = {
++        cacertrootreq.crt,
++        cacertlevel1areq.crt,
++        cacertlevel1breq.crt,
++        cacertlevel2areq.crt,
++    };
++
++    testTLSWriteCertChain("cacertchain.pem",
++                          certchain,
++                          ARRAY_CARDINALITY(certchain));
++
++    DO_CTX_TEST(true, "cacertchain.pem", servercertlevel3areq.filename, false);
++    DO_CTX_TEST(false, "cacertchain.pem", clientcertlevel2breq.filename, false);
++
+     testTLSDiscardCert(&cacertreq);
+     testTLSDiscardCert(&cacert1req);
+     testTLSDiscardCert(&cacert2req);
+@@ -558,6 +609,14 @@ mymain(void)
+     testTLSDiscardCert(&servercertnew1req);
+     testTLSDiscardCert(&clientcertnew1req);
+ 
++    testTLSDiscardCert(&cacertrootreq);
++    testTLSDiscardCert(&cacertlevel1areq);
++    testTLSDiscardCert(&cacertlevel1breq);
++    testTLSDiscardCert(&cacertlevel2areq);
++    testTLSDiscardCert(&servercertlevel3areq);
++    testTLSDiscardCert(&clientcertlevel2breq);
++    unlink("cacertchain.pem");
++
+     testTLSCleanup();
+ 
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+diff --git a/tests/virnettlshelpers.c b/tests/virnettlshelpers.c
+index 3efa9a4..8f71acb 100644
+--- a/tests/virnettlshelpers.c
++++ b/tests/virnettlshelpers.c
+@@ -407,6 +407,40 @@ testTLSGenerateCert(struct testTLSCertReq *req,
+ }
+ 
+ 
++void testTLSWriteCertChain(const char *filename,
++                           gnutls_x509_crt_t *certs,
++                           size_t ncerts)
++{
++    size_t i;
++    int fd;
++    int err;
++    static char buffer[1024*1024];
++    size_t size;
++
++    if ((fd = open(filename, O_WRONLY|O_CREAT, 0600)) < 0) {
++        VIR_WARN("Failed to open %s", filename);
++        abort();
++    }
++
++    for (i = 0; i < ncerts; i++) {
++        size = sizeof(buffer);
++        if ((err = gnutls_x509_crt_export(certs[i], GNUTLS_X509_FMT_PEM, buffer, &size) < 0)) {
++            VIR_WARN("Failed to export certificate %s", gnutls_strerror(err));
++            unlink(filename);
++            abort();
++        }
++
++        if (safewrite(fd, buffer, size) != size) {
++            VIR_WARN("Failed to write certificate to %s", filename);
++            unlink(filename);
++            abort();
++        }
++    }
++
++    VIR_FORCE_CLOSE(fd);
++}
++
++
+ void testTLSDiscardCert(struct testTLSCertReq *req)
+ {
+     if (!req->crt)
+diff --git a/tests/virnettlshelpers.h b/tests/virnettlshelpers.h
+index 50a4ba1..7c3f8da 100644
+--- a/tests/virnettlshelpers.h
++++ b/tests/virnettlshelpers.h
+@@ -71,6 +71,9 @@ struct testTLSCertReq {
+ 
+ void testTLSGenerateCert(struct testTLSCertReq *req,
+                          gnutls_x509_crt_t ca);
++void testTLSWriteCertChain(const char *filename,
++                           gnutls_x509_crt_t *certs,
++                           size_t ncerts);
+ void testTLSDiscardCert(struct testTLSCertReq *req);
+ 
+ void testTLSInit(void);
+diff --git a/tests/virnettlssessiontest.c b/tests/virnettlssessiontest.c
+index 54ca722..cf95d46 100644
+--- a/tests/virnettlssessiontest.c
++++ b/tests/virnettlssessiontest.c
+@@ -193,7 +193,7 @@ static int testTLSSessionInit(const void *opaque)
+             VIR_WARN("Expected server cert check fail");
+             goto cleanup;
+         } else {
+-            VIR_DEBUG("Not unexpected server cert fail");
++            VIR_DEBUG("No unexpected server cert fail");
+         }
+     }
+ 
+@@ -213,7 +213,7 @@ static int testTLSSessionInit(const void *opaque)
+             VIR_WARN("Expected client cert check fail");
+             goto cleanup;
+         } else {
+-            VIR_DEBUG("Not unexpected client cert fail");
++            VIR_DEBUG("No unexpected client cert fail");
+         }
+     }
+ 
+@@ -405,6 +405,57 @@ mymain(void)
+     DO_SESS_TEST(cacertreq.filename, servercertreq.filename, clientcertreq.filename,
+                  false, false, "libvirt.org", wildcards6);
+ 
++    TLS_ROOT_REQ(cacertrootreq,
++                 "UK", "libvirt root", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(cacertlevel1areq, cacertrootreq,
++                 "UK", "libvirt level 1a", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(cacertlevel1breq, cacertrootreq,
++                 "UK", "libvirt level 1b", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(cacertlevel2areq, cacertlevel1areq,
++                 "UK", "libvirt level 2a", NULL, NULL, NULL, NULL,
++                 true, true, true,
++                 true, true, GNUTLS_KEY_KEY_CERT_SIGN,
++                 false, false, NULL, NULL,
++                 0, 0);
++    TLS_CERT_REQ(servercertlevel3areq, cacertlevel2areq,
++                 "UK", "libvirt.org", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_SERVER, NULL,
++                 0, 0);
++    TLS_CERT_REQ(clientcertlevel2breq, cacertlevel1breq,
++                 "UK", "libvirt client level 2b", NULL, NULL, NULL, NULL,
++                 true, true, false,
++                 true, true, GNUTLS_KEY_DIGITAL_SIGNATURE | GNUTLS_KEY_KEY_ENCIPHERMENT,
++                 true, true, GNUTLS_KP_TLS_WWW_CLIENT, NULL,
++                 0, 0);
++
++    gnutls_x509_crt_t certchain[] = {
++        cacertrootreq.crt,
++        cacertlevel1areq.crt,
++        cacertlevel1breq.crt,
++        cacertlevel2areq.crt,
++    };
++
++    testTLSWriteCertChain("cacertchain.pem",
++                          certchain,
++                          ARRAY_CARDINALITY(certchain));
++
++    DO_SESS_TEST("cacertchain.pem", servercertlevel3areq.filename, clientcertlevel2breq.filename,
++                 false, false, "libvirt.org", NULL);
++
+     testTLSDiscardCert(&clientcertreq);
+     testTLSDiscardCert(&clientcertaltreq);
+ 
+@@ -415,6 +466,14 @@ mymain(void)
+     testTLSDiscardCert(&cacertreq);
+     testTLSDiscardCert(&altcacertreq);
+ 
++    testTLSDiscardCert(&cacertrootreq);
++    testTLSDiscardCert(&cacertlevel1areq);
++    testTLSDiscardCert(&cacertlevel1breq);
++    testTLSDiscardCert(&cacertlevel2areq);
++    testTLSDiscardCert(&servercertlevel3areq);
++    testTLSDiscardCert(&clientcertlevel2breq);
++    unlink("cacertchain.pem");
++
+     testTLSCleanup();
+ 
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+-- 
+1.8.3.2
+

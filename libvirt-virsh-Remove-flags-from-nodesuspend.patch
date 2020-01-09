@@ -1,0 +1,78 @@
+From e05de9855a280ee7df9189d4e2079de86bb932e9 Mon Sep 17 00:00:00 2001
+Message-Id: <e05de9855a280ee7df9189d4e2079de86bb932e9.1351526126.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 29 Oct 2012 09:51:31 +0100
+Subject: [PATCH] virsh: Remove --flags from nodesuspend
+
+https://bugzilla.redhat.com/show_bug.cgi?id=869508
+
+We always expose individual bits from flags as separate options rather
+than exposing a raw flags options. Since virNodeSuspendForDuration does
+not currently support any flags, the only way of using this --flags
+options that would not fail is "--flags 0", which is equivalent to
+omitting the option. Thus it is highly unlikely anyone would actually be
+using it and removing it should be safe.
+(cherry picked from commit ab54581549667af43b2bef493c696633d46031ff)
+---
+ tools/virsh-host.c | 10 +---------
+ tools/virsh.pod    |  2 +-
+ 2 files changed, 2 insertions(+), 10 deletions(-)
+
+diff --git a/tools/virsh-host.c b/tools/virsh-host.c
+index 62ecafc..0b1fd5b 100644
+--- a/tools/virsh-host.c
++++ b/tools/virsh-host.c
+@@ -466,7 +466,6 @@ static const vshCmdOptDef opts_node_suspend[] = {
+     {"target", VSH_OT_DATA, VSH_OFLAG_REQ, N_("mem(Suspend-to-RAM), "
+                                                "disk(Suspend-to-Disk), hybrid(Hybrid-Suspend)")},
+     {"duration", VSH_OT_INT, VSH_OFLAG_REQ, N_("Suspend duration in seconds, at least 60")},
+-    {"flags", VSH_OT_INT, VSH_OFLAG_NONE, N_("Suspend flags, 0 for default")},
+     {NULL, 0, 0, NULL}
+ };
+ 
+@@ -476,7 +475,6 @@ cmdNodeSuspend(vshControl *ctl, const vshCmd *cmd)
+     const char *target = NULL;
+     unsigned int suspendTarget;
+     long long duration;
+-    unsigned int flags = 0;
+ 
+     if (vshCommandOptString(cmd, "target", &target) < 0) {
+         vshError(ctl, _("Invalid target argument"));
+@@ -488,11 +486,6 @@ cmdNodeSuspend(vshControl *ctl, const vshCmd *cmd)
+         return false;
+     }
+ 
+-    if (vshCommandOptUInt(cmd, "flags", &flags) < 0) {
+-        vshError(ctl, _("Invalid flags argument"));
+-        return false;
+-    }
+-
+     if (STREQ(target, "mem"))
+         suspendTarget = VIR_NODE_SUSPEND_TARGET_MEM;
+     else if (STREQ(target, "disk"))
+@@ -509,8 +502,7 @@ cmdNodeSuspend(vshControl *ctl, const vshCmd *cmd)
+         return false;
+     }
+ 
+-    if (virNodeSuspendForDuration(ctl->conn, suspendTarget, duration,
+-                                  flags) < 0) {
++    if (virNodeSuspendForDuration(ctl->conn, suspendTarget, duration, 0) < 0) {
+         vshError(ctl, "%s", _("The host was not suspended"));
+         return false;
+     }
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index dead838..2363bf8 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -285,7 +285,7 @@ statistics during 1 second.
+ Returns memory stats of the node.
+ If I<cell> is specified, this will prints specified cell statistics only.
+ 
+-=item B<nodesuspend> [I<target>] [I<duration>] [I<flags>]
++=item B<nodesuspend> [I<target>] [I<duration>]
+ 
+ Puts the node (host machine) into a system-wide sleep state such as
+ Suspend-to-RAM, Suspend-to-Disk or Hybrid-Suspend and sets up a
+-- 
+1.7.12.4
+

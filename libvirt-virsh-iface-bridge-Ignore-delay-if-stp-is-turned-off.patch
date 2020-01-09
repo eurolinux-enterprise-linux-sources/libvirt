@@ -1,0 +1,30 @@
+From 5a2c560bc5641ec63426570da43c4a8934c09603 Mon Sep 17 00:00:00 2001
+Message-Id: <5a2c560bc5641ec63426570da43c4a8934c09603.1373271643.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Sat, 1 Jun 2013 01:28:36 +0200
+Subject: [PATCH] virsh iface-bridge: Ignore delay if stp is turned off
+
+https://bugzilla.redhat.com/show_bug.cgi?id=892403
+
+Delay only makes sense with STP enabled.
+(cherry picked from commit a923865a0e0e7d8dc1bcd08a0b13a1a7e3cb20a7)
+---
+ tools/virsh-interface.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh-interface.c b/tools/virsh-interface.c
+index 9f898c8..9031df8 100644
+--- a/tools/virsh-interface.c
++++ b/tools/virsh-interface.c
+@@ -779,7 +779,7 @@ cmdInterfaceBridge(vshControl *ctl, const vshCmd *cmd)
+         goto cleanup;
+     }
+ 
+-    if ((delay || stp) &&
++    if (stp &&
+         ((virAsprintf(&delay_str, "%d", delay) < 0) ||
+          !xmlSetProp(br_node, BAD_CAST "delay", BAD_CAST delay_str))) {
+         vshError(ctl, _("Failed to set bridge delay %d in xml document"), delay);
+-- 
+1.8.2.1
+

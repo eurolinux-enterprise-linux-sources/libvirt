@@ -1,0 +1,82 @@
+From 38ebdae5184101392a9fe2e3fdfff8d539845944 Mon Sep 17 00:00:00 2001
+Message-Id: <38ebdae5184101392a9fe2e3fdfff8d539845944.1373271640.git.jdenemar@redhat.com>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 14 Mar 2013 11:19:12 -0400
+Subject: [PATCH] domain_conf: Resolve resource leaks found by Valgrind
+
+https://bugzilla.redhat.com/show_bug.cgi?id=906299
+
+Fix various resource leaks discovered while parsing through Valgrind output
+
+(cherry picked from commit 7af7c42d05dbc8661a9905c1e32d7086f90863b6)
+---
+ src/conf/domain_conf.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index f905018..a0e308a 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -9239,6 +9239,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+                         goto error;
+                     }
+ 
++                    VIR_FREE(tmp);
+                     def->hyperv_features[feature] = value;
+                     break;
+ 
+@@ -9558,6 +9559,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+         if (controller->type == VIR_DOMAIN_CONTROLLER_TYPE_USB) {
+             if (controller->model == VIR_DOMAIN_CONTROLLER_MODEL_USB_NONE) {
+                 if (usb_other || usb_none) {
++                    virDomainControllerDefFree(controller);
+                     virReportError(VIR_ERR_XML_DETAIL, "%s",
+                                    _("Can't add another USB controller: "
+                                      "USB is disabled for this domain"));
+@@ -9566,6 +9568,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+                 usb_none = true;
+             } else {
+                 if (usb_none) {
++                    virDomainControllerDefFree(controller);
+                     virReportError(VIR_ERR_XML_DETAIL, "%s",
+                                    _("Can't add another USB controller: "
+                                      "USB is disabled for this domain"));
+@@ -9863,6 +9866,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+ 
+         /* Check if USB bus is required */
+         if (input->bus == VIR_DOMAIN_INPUT_BUS_USB && usb_none) {
++            virDomainInputDefFree(input);
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                            _("Can't add USB input device. "
+                              "USB bus is disabled"));
+@@ -9960,6 +9964,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+ 
+         if (video->primary) {
+             if (primaryVideo) {
++                virDomainVideoDefFree(video);
+                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                                _("Only one primary video device is supported"));
+                 goto error;
+@@ -9971,8 +9976,10 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+         if (VIR_INSERT_ELEMENT_INPLACE(def->videos,
+                                        ii,
+                                        def->nvideos,
+-                                       video) < 0)
++                                       video) < 0) {
++            virDomainVideoDefFree(video);
+             goto error;
++        }
+     }
+     VIR_FREE(nodes);
+ 
+@@ -10089,6 +10096,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+             goto error;
+ 
+         if (hub->type == VIR_DOMAIN_HUB_TYPE_USB && usb_none) {
++            virDomainHubDefFree(hub);
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                            _("Can't add USB hub: "
+                              "USB is disabled for this domain"));
+-- 
+1.8.2.1
+

@@ -1,0 +1,32 @@
+From 1c443a4324f7ff1ef63ca8b0c0251c7c35282d15 Mon Sep 17 00:00:00 2001
+Message-Id: <1c443a4324f7ff1ef63ca8b0c0251c7c35282d15.1377097597.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Wed, 21 Aug 2013 18:16:24 +0800
+Subject: [PATCH] storage: Fix the use-after-free memory bug
+
+https://bugzilla.redhat.com/show_bug.cgi?id=965442
+
+Introduced by commit e0139e30444. virStorageVolDefFree free'ed the
+pointers that are still used by the added volume object, this changes
+it back to VIR_FREE.
+(cherry picked from commit 4140dbedd9d2733b2beb1fda0878ad742f1122d2)
+---
+ src/storage/storage_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/storage/storage_driver.c b/src/storage/storage_driver.c
+index 818a08e..0ebede1 100644
+--- a/src/storage/storage_driver.c
++++ b/src/storage/storage_driver.c
+@@ -1477,7 +1477,7 @@ storageVolumeCreateXML(virStoragePoolPtr obj,
+ cleanup:
+     virObjectUnref(volobj);
+     virStorageVolDefFree(voldef);
+-    virStorageVolDefFree(buildvoldef);
++    VIR_FREE(buildvoldef);
+     if (pool)
+         virStoragePoolObjUnlock(pool);
+     return ret;
+-- 
+1.8.3.2
+

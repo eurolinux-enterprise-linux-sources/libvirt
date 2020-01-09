@@ -1,0 +1,31 @@
+From d652b8c78e84dc8dbd041a72009db7f9c8bca577 Mon Sep 17 00:00:00 2001
+Message-Id: <d652b8c78e84dc8dbd041a72009db7f9c8bca577.1354720507.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 27 Nov 2012 11:26:04 +0100
+Subject: [PATCH] Fix uninitialized variable in virLXCControllerSetupDevPTS
+
+https://bugzilla.redhat.com/show_bug.cgi?id=880064
+
+The lack of initialization of 'opts' caused a SEGV in the
+cleanup: path if the root->src directory did not exist
+(cherry picked from commit 3782814d4ad787d815e56382b6f809fe9020f14b)
+---
+ src/lxc/lxc_controller.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/lxc/lxc_controller.c b/src/lxc/lxc_controller.c
+index 8947a4a..f3d87e8 100644
+--- a/src/lxc/lxc_controller.c
++++ b/src/lxc/lxc_controller.c
+@@ -1132,7 +1132,7 @@ virLXCControllerSetupDevPTS(virLXCControllerPtr ctrl)
+ {
+     virDomainFSDefPtr root = virDomainGetRootFilesystem(ctrl->def);
+     char *mount_options = NULL;
+-    char *opts;
++    char *opts = NULL;
+     char *devpts = NULL;
+     int ret = -1;
+ 
+-- 
+1.8.0
+

@@ -1,0 +1,215 @@
+From c22b6574eae56765c6c98fc085b259bcfcd04f56 Mon Sep 17 00:00:00 2001
+Message-Id: <c22b6574eae56765c6c98fc085b259bcfcd04f56@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 5 Feb 2015 12:52:52 +0100
+Subject: [PATCH] conf: Don't mangle vcpu placement randomly
+
+RHEL-6.7: https://bugzilla.redhat.com/show_bug.cgi?id=1170495
+RHEL-7.2: https://bugzilla.redhat.com/show_bug.cgi?id=1170492
+
+In one of our previous commits (dc8b7ce7) we've done a functional
+change even though it was intended as pure refactor. The problem is,
+that the following XML:
+
+ <vcpu placement='static' current='2'>6</vcpu>
+ <cputune>
+   <emulatorpin cpuset='1-3'/>
+ </cputune>
+ <numatune>
+   <memory mode='strict' placement='auto'/>
+ </numatune>
+
+gets translated into this one:
+
+ <vcpu placement='auto' current='2'>6</vcpu>
+ <cputune>
+   <emulatorpin cpuset='1-3'/>
+ </cputune>
+ <numatune>
+   <memory mode='strict' placement='auto'/>
+ </numatune>
+
+We should not change the vcpu placement mode. Moreover, we're doing
+something similar in case of emulatorpin and iothreadpin. If they were
+set, but vcpu placement was auto, we've mistakenly removed them from
+the domain XML even though we are able to set them independently on
+vcpus.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit bbd3eb50987676f486effe55feec1fe0d01cafd0)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+
+Conflicts:
+	docs/formatdomain.html.in: There's no iothreadpin yet
+	src/conf/domain_conf.c: ditto
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in                          |  8 ++----
+ src/conf/domain_conf.c                             | 32 ++++++++--------------
+ .../qemuxml2argv-cputune-numatune.xml              | 29 ++++++++++++++++++++
+ .../qemuxml2argv-vcpu-placement-static.xml         | 29 ++++++++++++++++++++
+ tests/qemuxml2xmltest.c                            |  2 ++
+ 5 files changed, 75 insertions(+), 25 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-cputune-numatune.xml
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-vcpu-placement-static.xml
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index e1a1d44..4f996bd 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -432,14 +432,12 @@
+        <dt><code>emulatorpin</code></dt>
+        <dd>
+          The optional <code>emulatorpin</code> element specifies which of host
+-         physical CPUs the "emulator", a subset of a domain not including vcpu,
+-         will be pinned to. If this is omitted, and attribute
++         physical CPUs the "emulator", a subset of a domain not including vcpu
++         or iothreads will be pinned to. If this is omitted, and attribute
+          <code>cpuset</code> of element <code>vcpu</code> is not specified,
+          "emulator" is pinned to all the physical CPUs by default. It contains
+          one required attribute <code>cpuset</code> specifying which physical
+-         CPUs to pin to. NB, <code>emulatorpin</code> is not allowed if
+-         attribute <code>placement</code> of element <code>vcpu</code> is
+-         "auto".
++         CPUs to pin to.
+        </dd>
+       <dt><code>shares</code></dt>
+       <dd>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index c209462..b1490e8 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -9415,27 +9415,19 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+         goto error;
+     }
+ 
+-    /* Ignore emulatorpin if <vcpu> placement is "auto", they
+-     * conflicts with each other, and <vcpu> placement can't be
+-     * simply ignored, as <numatune>'s placement defaults to it.
+-     */
+     if (n) {
+-        if (def->placement_mode != VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO) {
+-            if (n > 1) {
+-                virReportError(VIR_ERR_XML_ERROR, "%s",
+-                               _("only one emulatorpin is supported"));
+-                VIR_FREE(nodes);
+-                goto error;
+-            }
+-
+-            def->cputune.emulatorpin = virDomainVcpuPinDefParseXML(nodes[0], ctxt,
+-                                                                   def->maxvcpus, 1);
+-
+-            if (!def->cputune.emulatorpin)
+-                goto error;
+-        } else {
+-            VIR_WARN("Ignore emulatorpin for <vcpu> placement is 'auto'");
++        if (n > 1) {
++            virReportError(VIR_ERR_XML_ERROR, "%s",
++                           _("only one emulatorpin is supported"));
++            VIR_FREE(nodes);
++            goto error;
+         }
++
++        def->cputune.emulatorpin = virDomainVcpuPinDefParseXML(nodes[0], ctxt,
++                                                               def->maxvcpus, 1);
++
++        if (!def->cputune.emulatorpin)
++            goto error;
+     }
+     VIR_FREE(nodes);
+ 
+@@ -9533,7 +9525,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+                      * is not specified and 'placement' of <numatune> is specified.
+                      */
+                     if (placement_mode == VIR_DOMAIN_NUMATUNE_MEM_PLACEMENT_MODE_AUTO &&
+-                        !def->cpumask)
++                        !def->cpumask && !def->cputune.vcpupin && !def->cputune.emulatorpin)
+                         def->placement_mode = VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO;
+ 
+                     def->numatune.memory.placement_mode = placement_mode;
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-cputune-numatune.xml b/tests/qemuxml2argvdata/qemuxml2argv-cputune-numatune.xml
+new file mode 100644
+index 0000000..cb4d207
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-cputune-numatune.xml
+@@ -0,0 +1,29 @@
++<domain type='kvm'>
++  <name>dummy2</name>
++  <uuid>4d92ec27-9ebf-400b-ae91-20c71c647c19</uuid>
++  <memory unit='KiB'>131072</memory>
++  <currentMemory unit='KiB'>65536</currentMemory>
++  <vcpu placement='auto' current='2'>6</vcpu>
++  <cputune>
++    <emulatorpin cpuset='1-3'/>
++  </cputune>
++  <numatune>
++    <memory mode='strict' placement='auto'/>
++  </numatune>
++  <os>
++    <type arch='x86_64' machine='pc-q35-2.3'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-x86_64</emulator>
++    <controller type='sata' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x1f' function='0x2'/>
++    </controller>
++    <controller type='usb' index='0'/>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-vcpu-placement-static.xml b/tests/qemuxml2argvdata/qemuxml2argv-vcpu-placement-static.xml
+new file mode 100644
+index 0000000..92bea05
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-vcpu-placement-static.xml
+@@ -0,0 +1,29 @@
++<domain type='kvm'>
++  <name>dummy2</name>
++  <uuid>4d92ec27-9ebf-400b-ae91-20c71c647c19</uuid>
++  <memory unit='KiB'>131072</memory>
++  <currentMemory unit='KiB'>65536</currentMemory>
++  <vcpu placement='static' current='2'>6</vcpu>
++  <cputune>
++    <emulatorpin cpuset='1-3'/>
++  </cputune>
++  <numatune>
++    <memory mode='strict' placement='auto'/>
++  </numatune>
++  <os>
++    <type arch='x86_64' machine='pc-q35-2.3'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-x86_64</emulator>
++    <controller type='sata' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x1f' function='0x2'/>
++    </controller>
++    <controller type='usb' index='0'/>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index f7236ab..257dcba 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -225,6 +225,8 @@ mymain(void)
+     DO_TEST("blkiotune-device");
+     DO_TEST("cputune");
+     DO_TEST("cputune-zero-shares");
++    DO_TEST("cputune-numatune");
++    DO_TEST("vcpu-placement-static");
+ 
+     DO_TEST("smp");
+     DO_TEST("lease");
+-- 
+2.2.2
+

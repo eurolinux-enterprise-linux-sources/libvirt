@@ -1,0 +1,72 @@
+From 1b83806078b6f32e754aa711dc3a44a3f0a3ccc8 Mon Sep 17 00:00:00 2001
+Message-Id: <1b83806078b6f32e754aa711dc3a44a3f0a3ccc8@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 17 Jan 2014 16:06:02 -0700
+Subject: [PATCH] qemu: Fix job usage in qemuDomainBlockJobImpl
+
+CVE-2013-6458
+
+Every API that is going to begin a job should do that before fetching
+data from vm->def.
+
+(cherry picked from commit f93d2caa070f6197ab50d372d286018b0ba6bbd8)
+
+Conflicts:
+	src/qemu/qemu_driver.c - older style BeginJobWithDriver
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 22 +++++++++++-----------
+ 1 file changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 317fbe1..c45c756 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -13602,16 +13602,25 @@ qemuDomainBlockJobImpl(virDomainPtr dom, const char *path, const char *base,
+         goto cleanup;
+     }
+ 
++    if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0)
++        goto cleanup;
++
++    if (!virDomainObjIsActive(vm)) {
++        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
++                       _("domain is not running"));
++        goto endjob;
++    }
++
+     device = qemuDiskPathToAlias(vm, path, &idx);
+     if (!device)
+-        goto cleanup;
++        goto endjob;
+     disk = vm->def->disks[idx];
+ 
+     if (mode == BLOCK_JOB_PULL && disk->mirror) {
+         virReportError(VIR_ERR_BLOCK_COPY_ACTIVE,
+                        _("disk '%s' already in active block copy job"),
+                        disk->dst);
+-        goto cleanup;
++        goto endjob;
+     }
+     if (mode == BLOCK_JOB_ABORT &&
+         (flags & VIR_DOMAIN_BLOCK_JOB_ABORT_PIVOT) &&
+@@ -13619,15 +13628,6 @@ qemuDomainBlockJobImpl(virDomainPtr dom, const char *path, const char *base,
+         virReportError(VIR_ERR_OPERATION_INVALID,
+                        _("pivot of disk '%s' requires an active copy job"),
+                        disk->dst);
+-        goto cleanup;
+-    }
+-
+-    if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0)
+-        goto cleanup;
+-
+-    if (!virDomainObjIsActive(vm)) {
+-        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+-                       _("domain is not running"));
+         goto endjob;
+     }
+ 
+-- 
+1.9.1
+

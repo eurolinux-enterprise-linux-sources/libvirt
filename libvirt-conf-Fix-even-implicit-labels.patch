@@ -1,0 +1,56 @@
+From 650259c4a501815ba17782632555f6022ec40bf1 Mon Sep 17 00:00:00 2001
+Message-Id: <650259c4a501815ba17782632555f6022ec40bf1@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 3 Dec 2014 16:58:18 +0100
+Subject: [PATCH] conf: Fix even implicit labels
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1138500
+
+There are two ways in which security model can make it way into
+<seclabel/>. One is as the @model attribute, the second one is
+via security_driver knob in qemu.conf. Then, while parsing
+<seclabel/> several checks and fix ups of old, stale combinations
+are performed. However, iff @model is specified. They are not
+done in the latter case. So it's still possible to feed libvirt
+with senseless combinations (if qemu.conf is adjusted correctly).
+
+One example of a seclabel that needs some adjustment (in case
+security_driver=none in qemu.conf) is:
+
+    <seclabel type='dynamic' relabel='yes'/>
+
+The fixup code is copied from virSecurityLabelDefParseXML
+(covering the former case) into virSecurityLabelDefsParseXML
+(which handles the latter case).
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit d869a6ea03eca6cffe8913a541161bb9bbedc8a1)
+
+Conflicts:
+	src/conf/domain_conf.c: Some context conflict
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index b44f99b..c209462 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -3429,6 +3429,13 @@ virSecurityLabelDefsParseXML(virDomainDefPtr def,
+                 virReportOOMError();
+                 goto error;
+             }
++
++            if (STREQ(def->seclabels[0]->model, "none") &&
++                flags & VIR_DOMAIN_XML_INACTIVE) {
++                /* Fix older configurations */
++                def->seclabels[0]->type = VIR_DOMAIN_SECLABEL_NONE;
++                def->seclabels[0]->norelabel = true;
++            }
+         } else {
+             virReportError(VIR_ERR_XML_ERROR, "%s",
+                            _("missing security model in domain seclabel"));
+-- 
+2.2.0
+

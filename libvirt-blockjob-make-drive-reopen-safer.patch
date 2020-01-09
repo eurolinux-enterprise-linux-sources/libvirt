@@ -1,0 +1,128 @@
+From c65f6a794b7a9e516a1e466dc9f5808b9a28bfc2 Mon Sep 17 00:00:00 2001
+Message-Id: <c65f6a794b7a9e516a1e466dc9f5808b9a28bfc2.1350990680.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 22 Oct 2012 21:48:48 -0600
+Subject: [PATCH] blockjob: make drive-reopen safer
+
+https://bugzilla.redhat.com/show_bug.cgi?id=856247
+[rebase of 6.3 https://bugzilla.redhat.com/show_bug.cgi?id=638506]
+
+Since libvirt drops locks between issuing a monitor command and
+getting a response, it is possible for libvirtd to be restarted
+before getting a response on a drive-reopen command; worse, it is
+also possible for the guest to shut itself down during the window
+while libvirtd is down, ending the qemu process.  A management app
+needs to know if the pivot happened (and the destination file
+contains guest contents not in the source) or failed (and the source
+file contains guest contents not in the destination), but since
+the job is finished, 'query-block-jobs' no longer tracks the
+status of the job, and if the qemu process itself has disappeared,
+even 'query-block' cannot be checked to ask qemu its current state.
+
+This is mainly a problem for the RHEL 6.3 drive-reopen command; which
+partly explains why upstream qemu 1.3 abandoned that command and
+went with block-job-complete plus persistent bitmap instead.  At
+the time of this patch, the design for persistent bitmap has not
+been clarified, so a followup patch will be needed once we actually
+figure out how to use the qemu 1.3 interface.
+
+If we surround 'drive-reopen' with a pause/resume pair, then we can
+guarantee that the guest cannot modify either source or destination
+files in the window of libvirtd uncertainty, and the management app
+is guaranteed that either libvirt knows the outcome and reported it
+correctly; or that on libvirtd restart, the guest will still be
+paused and that the qemu process cannot have disappeared due to
+guest shutdown; and use that as a clue that the management app must
+implement recovery protocol, with both source and destination files
+still being in sync and with 'query-block' still being an option as
+part of that recovery.  My testing of the RHEL 6.3 implementation
+of 'drive-reopen' show that the pause window will typically be only
+a fraction of a second.
+
+* src/qemu/qemu_driver.c (qemuDomainBlockPivot): Pause around
+drive-reopen.
+(qemuDomainBlockJobImpl): Update caller.
+(cherry picked from TBD)
+---
+ src/qemu/qemu_driver.c | 37 +++++++++++++++++++++++++++++++++++--
+ 1 file changed, 35 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 4a7ac11..7aa7428 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -12536,7 +12536,8 @@ cleanup:
+  * either success or failure (although there are some forms of
+  * catastrophic failure that will leave the VM unusable).  */
+ static int
+-qemuDomainBlockPivot(struct qemud_driver *driver, virDomainObjPtr vm,
++qemuDomainBlockPivot(virConnectPtr conn,
++                     struct qemud_driver *driver, virDomainObjPtr vm,
+                      const char *device, virDomainDiskDefPtr disk)
+ {
+     int ret = -1;
+@@ -12544,6 +12545,7 @@ qemuDomainBlockPivot(struct qemud_driver *driver, virDomainObjPtr vm,
+     virDomainBlockJobInfo info;
+     bool reopen = qemuCapsGet(priv->caps, QEMU_CAPS_DRIVE_REOPEN);
+     const char *format = virStorageFileFormatTypeToString(disk->mirrorFormat);
++    bool resume = false;
+ 
+     /* Probe the status, if needed.  */
+     if (!disk->mirroring) {
+@@ -12570,6 +12572,29 @@ qemuDomainBlockPivot(struct qemud_driver *driver, virDomainObjPtr vm,
+         goto cleanup;
+     }
+ 
++    /* If we are using the older 'drive-reopen', we want to make sure
++     * that management apps can tell whether the command succeeded,
++     * even if libvirtd is restarted at the wrong time.  To accomplish
++     * that, we pause the guest before drive-reopen, and resume it
++     * only when we know the outcome; if libvirtd restarts, then
++     * management will see the guest still paused, and know that no
++     * guest I/O has caused the source and mirror to diverge.  XXX
++     * With the newer 'block-job-complete', we need to use a
++     * persistent bitmap to make things safe; so for now, we just
++     * blindly pause the guest.  */
++    if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_RUNNING) {
++        if (qemuProcessStopCPUs(driver, vm, VIR_DOMAIN_PAUSED_SAVE,
++                                QEMU_ASYNC_JOB_NONE) < 0)
++            goto cleanup;
++
++        resume = true;
++        if (!virDomainObjIsActive(vm)) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("guest unexpectedly quit"));
++            goto cleanup;
++        }
++    }
++
+     /* Attempt the pivot.  */
+     qemuDomainObjEnterMonitorWithDriver(driver, vm);
+     ret = qemuMonitorDrivePivot(priv->mon, device, disk->mirror, format,
+@@ -12610,6 +12635,14 @@ qemuDomainBlockPivot(struct qemud_driver *driver, virDomainObjPtr vm,
+     }
+ 
+ cleanup:
++    if (resume && virDomainObjIsActive(vm) &&
++        qemuProcessStartCPUs(driver, vm, conn,
++                             VIR_DOMAIN_RUNNING_UNPAUSED,
++                             QEMU_ASYNC_JOB_NONE) < 0 &&
++        virGetLastError() == NULL) {
++        virReportError(VIR_ERR_OPERATION_FAILED, "%s",
++                       _("resuming after drive-reopen failed"));
++    }
+     return ret;
+ }
+ 
+@@ -12693,7 +12726,7 @@ qemuDomainBlockJobImpl(virDomainPtr dom, const char *path, const char *base,
+ 
+     if (disk->mirror && mode == BLOCK_JOB_ABORT &&
+         (flags & VIR_DOMAIN_BLOCK_JOB_ABORT_PIVOT)) {
+-        ret = qemuDomainBlockPivot(driver, vm, device, disk);
++        ret = qemuDomainBlockPivot(dom->conn, driver, vm, device, disk);
+         goto endjob;
+     }
+ 
+-- 
+1.7.12.4
+

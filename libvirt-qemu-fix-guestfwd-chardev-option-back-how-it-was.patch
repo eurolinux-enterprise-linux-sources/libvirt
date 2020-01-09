@@ -1,0 +1,61 @@
+From 0e61731eaaaa021c7747957c55864054d5bc75a3 Mon Sep 17 00:00:00 2001
+Message-Id: <0e61731eaaaa021c7747957c55864054d5bc75a3@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Thu, 26 Jun 2014 17:07:06 +0200
+Subject: [PATCH] qemu: fix guestfwd chardev option back how it was
+
+Since commit d86c876a66e320b55220d00113027c9ad6199cff we are using
+guestfwd=tcp:IP:PORT,chardev=ID for guestfwd specification, however,
+that has not changed in qemu, so guestfwd does not work since.
+
+Apart from that, guestfwd is not working with older qemu that doesn't
+have QEMU_CAPS_DEVICE.
+
+Both regressions exist since late 2009 and nobody found that (until
+now), so I'm only fixing the first one.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1112066
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit 39931f5ee8314137dba453bad9742310fc275f5b)
+
+Conflicts:
+
+	src/qemu/qemu_command.c -- the code is not split, but
+	                           basically it's just a different
+	                           function and line number
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c                                   | 2 +-
+ tests/qemuxml2argvdata/qemuxml2argv-channel-guestfwd.args | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index ff79ce5..4735de7 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -6573,7 +6573,7 @@ qemuBuildCommandLine(virConnectPtr conn,
+ 
+             virCommandAddArg(cmd, "-netdev");
+             virCommandAddArgFormat(cmd,
+-                                   "user,guestfwd=tcp:%s:%i,chardev=char%s,id=user-%s",
++                                   "user,guestfwd=tcp:%s:%i-chardev:char%s,id=user-%s",
+                                    addr, port, channel->info.alias,
+                                    channel->info.alias);
+             VIR_FREE(addr);
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-channel-guestfwd.args b/tests/qemuxml2argvdata/qemuxml2argv-channel-guestfwd.args
+index b65eb14..899f899 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-channel-guestfwd.args
++++ b/tests/qemuxml2argvdata/qemuxml2argv-channel-guestfwd.args
+@@ -3,5 +3,5 @@ pc -m 214 -smp 1 -nographic -nodefconfig -nodefaults -chardev socket,\
+ id=charmonitor,path=/tmp/test-monitor,server,nowait -mon chardev=charmonitor,\
+ id=monitor,mode=readline -no-acpi -boot c -usb -hda /dev/HostVG/QEMUGuest1 -chardev \
+ pipe,id=charchannel0,path=/tmp/guestfwd -netdev user,\
+-guestfwd=tcp:10.0.2.1:4600,chardev=charchannel0,id=user-channel0 -device \
++guestfwd=tcp:10.0.2.1:4600-chardev:charchannel0,id=user-channel0 -device \
+ virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3
+-- 
+2.0.0
+

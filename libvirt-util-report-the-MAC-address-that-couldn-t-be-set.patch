@@ -1,0 +1,65 @@
+From ed9438231a143df311ace5c49e5ce7691daa64d6 Mon Sep 17 00:00:00 2001
+Message-Id: <ed9438231a143df311ace5c49e5ce7691daa64d6@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Feb 2016 06:59:41 -0500
+Subject: [PATCH] util: report the MAC address that couldn't be set
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1276478
+
+I noticed in a log file that we had failed to set a MAC address. The
+log said which interface we were trying to set, but didn't give the
+offending MAC address, which could have been useful in determining the
+source of the problem. This patch modifies all three places in the
+code that set MAC addresses to report the failed MAC as well as
+interface.
+
+(cherry-pick from commit 5ffa236bb403be5d6746dcc1318d7f78e6a2e22b with
+one conflict - FreeBSD version of virNetDevSetMac was added upstream)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdev.c | 19 ++++++++++++++-----
+ 1 file changed, 14 insertions(+), 5 deletions(-)
+
+diff --git a/src/util/virnetdev.c b/src/util/virnetdev.c
+index 815d4ac..275817a 100644
+--- a/src/util/virnetdev.c
++++ b/src/util/virnetdev.c
+@@ -161,9 +161,11 @@ int virNetDevSetMAC(const char *ifname,
+     virMacAddrGetRaw(macaddr, (unsigned char *)ifr.ifr_hwaddr.sa_data);
+ 
+     if (ioctl(fd, SIOCSIFHWADDR, &ifr) < 0) {
++        char macstr[VIR_MAC_STRING_BUFLEN];
++
+         virReportSystemError(errno,
+-                             _("Cannot set interface MAC on '%s'"),
+-                             ifname);
++                             _("Cannot set interface MAC to %s on '%s'"),
++                             virMacAddrFormat(macaddr, macstr), ifname);
+         goto cleanup;
+     }
+ 
+@@ -1474,10 +1476,17 @@ virNetDevSetVfConfig(const char *ifname, int ifindex, int vf,
+             goto malformed_resp;
+ 
+         if (err->error) {
++            char macstr[VIR_MAC_STRING_BUFLEN];
++
+             virReportSystemError(-err->error,
+-                _("error during set %s of ifindex %d"),
+-                (macaddr ? (vlanid >= 0 ? "mac/vlan" : "mac") : "vlanid"),
+-                ifindex);
++                                 _("Cannot set interface MAC/vlanid to %s/%d "
++                                   "for ifname %s ifindex %d vf %d"),
++                                 (macaddr
++                                  ? virMacAddrFormat(macaddr, macstr)
++                                  : "(unchanged)"),
++                                 vlanid,
++                                 ifname ? ifname : "(unspecified)",
++                                 ifindex, vf);
+             goto cleanup;
+         }
+         break;
+-- 
+2.7.1
+

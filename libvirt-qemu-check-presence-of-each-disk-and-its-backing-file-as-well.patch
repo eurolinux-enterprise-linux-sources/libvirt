@@ -1,0 +1,121 @@
+From 73746224d4d2e3c0dacd22c1148d5dfa5ae72dd5 Mon Sep 17 00:00:00 2001
+Message-Id: <73746224d4d2e3c0dacd22c1148d5dfa5ae72dd5@dist-git>
+From: Guannan Ren <gren@redhat.com>
+Date: Fri, 11 Apr 2014 16:34:01 +0200
+Subject: [PATCH] qemu: check presence of each disk and its backing file as
+ well
+
+For disk with startupPolicy support, such as cdrom and floppy
+when its chain is broken, the startup policy will apply,
+otherwise, report an error.
+
+(cherry picked from commit dbca8414577a0d76a5bad9eb5919130db7bc451f)
+
+(https://bugzilla.redhat.com/show_bug.cgi?id=1014730)
+
+Conflicts:
+	src/qemu/qemu_domain.c
+	src/qemu/qemu_process.c
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_domain.c  | 31 +++++++++++++------------------
+ src/qemu/qemu_process.c |  6 ------
+ 2 files changed, 13 insertions(+), 24 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index d942ba0..33f999e 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -1880,19 +1880,11 @@ qemuDomainCheckDiskStartupPolicy(struct qemud_driver *driver,
+             break;
+ 
+         case VIR_DOMAIN_STARTUP_POLICY_MANDATORY:
+-            virReportSystemError(errno,
+-                                 _("cannot access file '%s'"),
+-                                 disk->src);
+             goto error;
+-            break;
+ 
+         case VIR_DOMAIN_STARTUP_POLICY_REQUISITE:
+-            if (cold_boot) {
+-                virReportSystemError(errno,
+-                                     _("cannot access file '%s'"),
+-                                     disk->src);
++            if (cold_boot)
+                 goto error;
+-            }
+             break;
+ 
+         case VIR_DOMAIN_STARTUP_POLICY_DEFAULT:
+@@ -1901,6 +1893,7 @@ qemuDomainCheckDiskStartupPolicy(struct qemud_driver *driver,
+             break;
+     }
+ 
++    virResetLastError();
+     VIR_DEBUG("Dropping disk '%s' on domain '%s' (UUID '%s') "
+               "due to inaccessible source '%s'",
+               disk->dst, vm->def->name, uuid, disk->src);
+@@ -1927,27 +1920,29 @@ qemuDomainCheckDiskPresence(struct qemud_driver *driver,
+     int i;
+     virDomainDiskDefPtr disk;
+ 
++    VIR_DEBUG("Checking for disk presence");
+     for (i = 0; i < vm->def->ndisks; i++) {
+         disk = vm->def->disks[i];
+ 
+-        if (!disk->startupPolicy || !disk->src)
++        if (!disk->src)
+             continue;
+ 
+-        if (virFileAccessibleAs(disk->src, F_OK,
+-                                driver->user,
+-                                driver->group) >= 0) {
+-            /* disk accessible */
++        if (qemuDomainDetermineDiskChain(driver, disk, false) >= 0 &&
++            qemuDiskChainCheckBroken(disk) >= 0)
+             continue;
++
++        if (disk->startupPolicy) {
++            if (qemuDomainCheckDiskStartupPolicy(driver, vm, disk,
++                                                 cold_boot) >= 0)
++                continue;
+         }
+ 
+-        if (qemuDomainCheckDiskStartupPolicy(driver, vm, disk,
+-                                             cold_boot) < 0)
+-            goto cleanup;
++        goto error;
+     }
+ 
+     ret = 0;
+ 
+-cleanup:
++error:
+     return ret;
+ }
+ 
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index cdf79d5..64eea03 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3839,16 +3839,10 @@ int qemuProcessStart(virConnectPtr conn,
+     if (qemuAssignDeviceAliases(vm->def, priv->caps) < 0)
+         goto cleanup;
+ 
+-    VIR_DEBUG("Checking for CDROM and floppy presence");
+     if (qemuDomainCheckDiskPresence(driver, vm,
+                                     flags & VIR_QEMU_PROCESS_START_COLD) < 0)
+         goto cleanup;
+ 
+-    for (i = 0; i < vm->def->ndisks ; i++) {
+-        if (qemuDomainDetermineDiskChain(driver, vm->def->disks[i],
+-                                         false) < 0)
+-            goto cleanup;
+-    }
+ 
+     /* Get the advisory nodeset from numad if 'placement' of
+      * either <vcpu> or <numatune> is 'auto'.
+-- 
+1.9.2
+

@@ -1,0 +1,87 @@
+From f3fbcac4dea16b9e017b6b8210d01620e64c6dd6 Mon Sep 17 00:00:00 2001
+Message-Id: <f3fbcac4dea16b9e017b6b8210d01620e64c6dd6@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 15 Feb 2016 06:59:44 -0500
+Subject: [PATCH] Introduce virBitmapIsBitSet
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1276478
+
+A helper that never returns an error and treats bits out of bitmap range
+as false.
+
+Use it everywhere we use ignore_value on virBitmapGetBit, or loop over
+the bitmap size.
+
+(appropriate pieces hand-picked from upstream commit
+22fd3ac38f4b07ae76e2f8874c4531c00f0e3131, which added the new function
+as well as using it in several places that don't exist in 0.10.2)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms |  1 +
+ src/util/bitmap.c        | 20 ++++++++++++++++++++
+ src/util/bitmap.h        |  5 +++++
+ 3 files changed, 26 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 97b84c7..cc92043 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -15,6 +15,7 @@ virBitmapFormat;
+ virBitmapFree;
+ virBitmapGetBit;
+ virBitmapIsAllSet;
++virBitmapIsBitSet;
+ virBitmapNew;
+ virBitmapNewCopy;
+ virBitmapNewData;
+diff --git a/src/util/bitmap.c b/src/util/bitmap.c
+index 5c47561..a1faad4 100644
+--- a/src/util/bitmap.c
++++ b/src/util/bitmap.c
+@@ -154,6 +154,26 @@ static bool virBitmapIsSet(virBitmapPtr bitmap, size_t b)
+     return !!(bitmap->map[VIR_BITMAP_UNIT_OFFSET(b)] & VIR_BITMAP_BIT(b));
+ }
+ 
++
++/**
++ * virBitmapIsBitSet:
++ * @bitmap: Pointer to bitmap
++ * @b: bit position to get
++ *
++ * Get setting of bit position @b in @bitmap.
++ *
++ * If @b is in the range of @bitmap, returns the value of the bit.
++ * Otherwise false is returned.
++ */
++bool virBitmapIsBitSet(virBitmapPtr bitmap, size_t b)
++{
++    if (bitmap->max_bit <= b)
++        return false;
++
++    return virBitmapIsSet(bitmap, b);
++}
++
++
+ /**
+  * virBitmapGetBit:
+  * @bitmap: Pointer to bitmap
+diff --git a/src/util/bitmap.h b/src/util/bitmap.h
+index 1eaea6b..d045aae 100644
+--- a/src/util/bitmap.h
++++ b/src/util/bitmap.h
+@@ -61,6 +61,11 @@ int virBitmapClearBit(virBitmapPtr bitmap, size_t b)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+ 
+ /*
++ * Get bit @b in @bitmap. Returns false if b is out of range.
++ */
++bool virBitmapIsBitSet(virBitmapPtr bitmap, size_t b)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
++/*
+  * Get setting of bit position @b in @bitmap and store in @result
+  */
+ int virBitmapGetBit(virBitmapPtr bitmap, size_t b, bool *result)
+-- 
+2.7.1
+

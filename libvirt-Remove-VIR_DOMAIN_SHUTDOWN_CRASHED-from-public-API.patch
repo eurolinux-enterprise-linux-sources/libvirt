@@ -1,0 +1,68 @@
+From 0ef79900b7faff57b126acf12ecf66d199ad6bc4 Mon Sep 17 00:00:00 2001
+Message-Id: <0ef79900b7faff57b126acf12ecf66d199ad6bc4.1376483447.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 29 Jul 2013 15:27:19 -0600
+Subject: [PATCH] Remove VIR_DOMAIN_SHUTDOWN_CRASHED from public API
+
+https://bugzilla.redhat.com/show_bug.cgi?id=822306
+https://bugzilla.redhat.com/show_bug.cgi?id=826315
+
+The VIR_DOMAIN_SHUTDOWN_CRASHED state constant does not appear
+to be used in the QEMU code anyway. It also doesn't make much
+(any) sense, since the 'shutdown' state is a transient state
+between 'running' and 'shutoff' and when a guest crashes, it
+does not end up in a 'shutdown' state, only 'shutoff'.
+
+It was added in commit 14e7e0ae8db9843aea80245a3d9e6cf5f2ef720d
+which post-dates v1.1.0, so is safe to remove before 1.1.1
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 8c20d3f8e7e2368d48dff7a646613e1ac38d1e49)
+---
+ include/libvirt/libvirt.h.in | 1 -
+ src/conf/domain_conf.c       | 3 +--
+ tools/virsh-domain-monitor.c | 2 --
+ 3 files changed, 1 insertion(+), 5 deletions(-)
+
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index 00057c5..80a8c23 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -191,7 +191,6 @@ typedef enum {
+ typedef enum {
+     VIR_DOMAIN_SHUTDOWN_UNKNOWN = 0,    /* the reason is unknown */
+     VIR_DOMAIN_SHUTDOWN_USER = 1,       /* shutting down on user request */
+-    VIR_DOMAIN_SHUTDOWN_CRASHED = 2,    /* domain crashed */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_SHUTDOWN_LAST
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index f361dff..2ed0fee 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -604,8 +604,7 @@ VIR_ENUM_IMPL(virDomainPausedReason, VIR_DOMAIN_PAUSED_LAST,
+ 
+ VIR_ENUM_IMPL(virDomainShutdownReason, VIR_DOMAIN_SHUTDOWN_LAST,
+               "unknown",
+-              "user",
+-              "crashed")
++              "user")
+ 
+ VIR_ENUM_IMPL(virDomainShutoffReason, VIR_DOMAIN_SHUTOFF_LAST,
+               "unknown",
+diff --git a/tools/virsh-domain-monitor.c b/tools/virsh-domain-monitor.c
+index 0c852b2..967edcd 100644
+--- a/tools/virsh-domain-monitor.c
++++ b/tools/virsh-domain-monitor.c
+@@ -239,8 +239,6 @@ vshDomainStateReasonToString(int state, int reason)
+         switch ((virDomainShutdownReason) reason) {
+         case VIR_DOMAIN_SHUTDOWN_USER:
+             return N_("user");
+-        case VIR_DOMAIN_SHUTDOWN_CRASHED:
+-            return N_("crashed");
+         case VIR_DOMAIN_SHUTDOWN_UNKNOWN:
+         case VIR_DOMAIN_SHUTDOWN_LAST:
+             ;
+-- 
+1.8.3.2
+

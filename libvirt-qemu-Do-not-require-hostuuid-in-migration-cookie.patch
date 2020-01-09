@@ -1,0 +1,62 @@
+From 6acd69921bf62f851ff4b6cfb4e11e5f4c0b987d Mon Sep 17 00:00:00 2001
+Message-Id: <6acd69921bf62f851ff4b6cfb4e11e5f4c0b987d.1350990678.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 19 Oct 2012 21:40:15 +0200
+Subject: [PATCH] qemu: Do not require hostuuid in migration cookie
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863059
+
+Having hostuuid in migration cookie is a nice bonus since it provides an
+easy way of detecting migration to the same host. However, requiring it
+breaks backward compatibility with older libvirt releases.
+(cherry picked from commit 8d75e47edefdd77b86df1ee9af3cd5001d456f73)
+---
+ src/qemu/qemu_migration.c | 31 ++++++++++++++++---------------
+ 1 file changed, 16 insertions(+), 15 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index a2402ce..487182e 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -576,22 +576,23 @@ qemuMigrationCookieXMLParse(qemuMigrationCookiePtr mig,
+     }
+ 
+     if (!(tmp = virXPathString("string(./hostuuid[1])", ctxt))) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       "%s", _("missing hostuuid element in migration data"));
+-        goto error;
+-    }
+-    if (virUUIDParse(tmp, mig->remoteHostuuid) < 0) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       "%s", _("malformed hostuuid element in migration data"));
+-        goto error;
+-    }
+-    if (memcmp(mig->remoteHostuuid, mig->localHostuuid, VIR_UUID_BUFLEN) == 0) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("Attempt to migrate guest to the same host %s"),
+-                       tmp);
+-        goto error;
++        VIR_WARN("Missing hostuuid element in migration data; cannot "
++                 "detect migration to the same host");
++    } else {
++        if (virUUIDParse(tmp, mig->remoteHostuuid) < 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("malformed hostuuid element in migration data"));
++            goto error;
++        }
++        if (memcmp(mig->remoteHostuuid, mig->localHostuuid,
++                   VIR_UUID_BUFLEN) == 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("Attempt to migrate guest to the same host %s"),
++                           tmp);
++            goto error;
++        }
++        VIR_FREE(tmp);
+     }
+-    VIR_FREE(tmp);
+ 
+     /* Check to ensure all mandatory features from XML are also
+      * present in 'flags' */
+-- 
+1.7.12.4
+

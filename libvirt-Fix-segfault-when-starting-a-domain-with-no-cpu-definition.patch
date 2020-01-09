@@ -1,0 +1,39 @@
+From 4dce25312d33d888ef26a755be50ef23fc24fd06 Mon Sep 17 00:00:00 2001
+Message-Id: <4dce25312d33d888ef26a755be50ef23fc24fd06@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 2 Jul 2014 11:55:19 +0200
+Subject: [PATCH] Fix segfault when starting a domain with no cpu definition
+
+https://bugzilla.redhat.com/show_bug.cgi?id=996772
+
+My commit fba6bc4 iterated over the features in cpu definition
+without checking if there is one.
+
+(cherry picked from commit 1cd8f500ee133653ecb9d1b7f72b2b2e9870a1c3)
+
+Conflicts:
+    src/qemu/qemu_migration.c - NBD support missing downstream
+    src/qemu/qemu_process.c - downstream doesn't have
+        qemuProcessVerifyGuestCPU
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_migration.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index d5fd309..32b3563 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -868,7 +868,7 @@ qemuMigrationIsAllowed(struct qemud_driver *driver, virDomainObjPtr vm,
+         return false;
+     }
+ 
+-    for (i = 0; i < def->cpu->nfeatures; i++) {
++    for (i = 0; def->cpu && i < def->cpu->nfeatures; i++) {
+         virCPUFeatureDefPtr feature = &def->cpu->features[i];
+ 
+         if (feature->policy != VIR_CPU_FEATURE_REQUIRE)
+-- 
+2.0.0
+

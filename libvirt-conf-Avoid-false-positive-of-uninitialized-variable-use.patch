@@ -1,0 +1,60 @@
+From 5b1ffd2e23c67321a5de3532123823e56d87105c Mon Sep 17 00:00:00 2001
+Message-Id: <5b1ffd2e23c67321a5de3532123823e56d87105c@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 2 Jul 2014 15:49:28 +0200
+Subject: [PATCH] conf: Avoid false positive of uninitialized variable use
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115039
+
+GCC 4.8.0+ whines about variable "new" being uninitialized since
+commit 73bfac0e7182a3abd. This is a false positive as the
+xmlFreeNode(new) statement can be only reached if new was actually
+allocated successfully.
+
+  CC       conf/libvirt_conf_la-domain_conf.lo
+  conf/domain_conf.c: In function 'virDomainDefSetMetadata':
+  conf/domain_conf.c:18650:24: error: 'new' may be used uninitialized in this function [-Werror=maybe-uninitialized]
+               xmlFreeNode(new);
+
+Reported independently by John Ferlan and Michal Privoznik.
+
+(cherry picked from commit 0d4f469c871fb5997bb24f192924163263445980)
+
+Conflicts:
+	src/conf/domain_conf.c - context
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 462ca48..607cb53 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -16646,7 +16646,7 @@ virDomainDefSetMetadata(virDomainDefPtr def,
+ {
+     xmlDocPtr doc = NULL;
+     xmlNodePtr old;
+-    xmlNodePtr new;
++    xmlNodePtr new = NULL;
+     int ret = -1;
+ 
+     switch ((virDomainMetadataType) type) {
+@@ -16690,11 +16690,8 @@ virDomainDefSetMetadata(virDomainDefPtr def,
+             xmlFreeNode(old);
+         }
+ 
+-        /* just delete the metadata */
+-        if (!metadata)
+-            break;
+-
+-        if (!(xmlAddChild(def->metadata, new))) {
++        if (new &&
++            !(xmlAddChild(def->metadata, new))) {
+             xmlFreeNode(new);
+             virReportOOMError();
+             goto cleanup;
+-- 
+2.0.0
+

@@ -1,0 +1,101 @@
+From 6b9e6b0a68517506021062f3833a0d58ff4e3600 Mon Sep 17 00:00:00 2001
+Message-Id: <6b9e6b0a68517506021062f3833a0d58ff4e3600@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 7 Apr 2014 13:30:50 +0200
+Subject: [PATCH] schema: make source optional in volume XML
+
+We don't parse it anyway.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=893273
+(cherry picked from commit 25b98d31ec5519a914551a6cab15c8d8b4e67034)
+
+Conflicts:
+	tests/Makefile.am - storagevolxml2argvtest not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/schemas/storagevol.rng                    |  4 +++-
+ tests/Makefile.am                              |  1 +
+ tests/storagevolschemadata/qcow2-no-source.xml | 29 ++++++++++++++++++++++++++
+ tests/storagevolschematest                     |  2 +-
+ 4 files changed, 34 insertions(+), 2 deletions(-)
+ create mode 100644 tests/storagevolschemadata/qcow2-no-source.xml
+
+diff --git a/docs/schemas/storagevol.rng b/docs/schemas/storagevol.rng
+index 8335b61..dffcc7d 100644
+--- a/docs/schemas/storagevol.rng
++++ b/docs/schemas/storagevol.rng
+@@ -20,7 +20,9 @@
+           <text/>
+         </element>
+       </optional>
+-      <ref name='source'/>
++      <optional>
++        <ref name='source'/>
++      </optional>
+       <ref name='sizing'/>
+       <ref name='target'/>
+       <optional>
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index f896ecf..c246fd7 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -74,6 +74,7 @@ EXTRA_DIST =		\
+ 	storagepoolschematest \
+ 	storagepoolxml2xmlin \
+ 	storagepoolxml2xmlout \
++	storagevolschemadata \
+ 	storagevolschematest \
+ 	storagevolxml2xmlin \
+ 	storagevolxml2xmlout \
+diff --git a/tests/storagevolschemadata/qcow2-no-source.xml b/tests/storagevolschemadata/qcow2-no-source.xml
+new file mode 100644
+index 0000000..777294e
+--- /dev/null
++++ b/tests/storagevolschemadata/qcow2-no-source.xml
+@@ -0,0 +1,29 @@
++<volume>
++  <name>OtherDemo.img</name>
++  <key>/var/lib/libvirt/images/OtherDemo.img</key>
++  <capacity unit="G">5</capacity>
++  <allocation>294912</allocation>
++  <target>
++    <path>/var/lib/libvirt/images/OtherDemo.img</path>
++    <format type='qcow2'/>
++    <permissions>
++      <mode>0644</mode>
++      <owner>0</owner>
++      <group>0</group>
++      <label>unconfined_u:object_r:virt_image_t:s0</label>
++    </permissions>
++    <encryption format='qcow'>
++      <secret type='passphrase' uuid='e78d4b51-a2af-485f-b0f5-afca709a80f4'/>
++    </encryption>
++  </target>
++  <backingStore>
++    <path>/dev/null</path>
++    <format type='raw'/>
++    <permissions>
++      <mode>0644</mode>
++      <owner>0</owner>
++      <group>0</group>
++      <label>unconfined_u:object_r:virt_image_t:s0</label>
++    </permissions>
++  </backingStore>
++</volume>
+diff --git a/tests/storagevolschematest b/tests/storagevolschematest
+index e1afa8d..9045e6b4 100755
+--- a/tests/storagevolschematest
++++ b/tests/storagevolschematest
+@@ -4,7 +4,7 @@
+ . $srcdir/test-lib.sh
+ . $abs_srcdir/schematestutils.sh
+ 
+-DIRS="storagevolxml2xmlin storagevolxml2xmlout"
++DIRS="storagevolxml2xmlin storagevolxml2xmlout storagevolschemadata"
+ SCHEMA="storagevol.rng"
+ 
+ check_schema "$DIRS" "$SCHEMA"
+-- 
+1.9.1
+

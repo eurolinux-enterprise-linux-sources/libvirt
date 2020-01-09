@@ -1,0 +1,54 @@
+From b093232f65aff7fc4ef63d9dd383add249c10a43 Mon Sep 17 00:00:00 2001
+Message-Id: <b093232f65aff7fc4ef63d9dd383add249c10a43@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:46 +0200
+Subject: [PATCH] snapshot: Mention disk-only snapshots in error message
+
+https://bugzilla.redhat.com/show_bug.cgi?id=880521
+
+When a disk-only snapshot is requested the domain is treated as if it
+was offline. This forbids to mix memory checkpoints with the DISK_ONLY
+flag.
+
+This patch improves the error message and mentions the restriction in
+the virsh man page.
+
+(cherry picked from commit 366a3d52ee6cf7b37f7e77cd3c13aff2915e5544)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/snapshot_conf.c | 3 ++-
+ tools/virsh.pod          | 3 ++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index 97176dc..280f5a4 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -313,7 +313,8 @@ virDomainSnapshotDefParseString(const char *xmlStr,
+     if (offline && def->memory &&
+         def->memory != VIR_DOMAIN_SNAPSHOT_LOCATION_NONE) {
+         virReportError(VIR_ERR_XML_ERROR, "%s",
+-                       _("memory state cannot be saved with offline snapshot"));
++                       _("memory state cannot be saved with offline or "
++                         "disk-only snapshot"));
+         goto cleanup;
+     }
+     def->file = memoryFile;
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 806f247..e343170 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -2706,7 +2706,8 @@ The I<--memspec> option can be used to control whether a checkpoint
+ is internal or external.  The I<--memspec> flag is mandatory, followed
+ by a B<memspec> of the form B<[file=]name[,snapshot=type]>, where
+ type can be B<none>, B<internal>, or B<external>.  To include a literal
+-comma in B<file=name>, escape it with a second comma.
++comma in B<file=name>, escape it with a second comma. I<--memspec> cannot
++be used together with I<--disk-only>.
+ 
+ The I<--diskspec> option can be used to control how I<--disk-only> and
+ external checkpoints create external files.  This option can occur
+-- 
+1.9.2
+

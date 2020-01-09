@@ -1,0 +1,42 @@
+From eac420f772d23e7c4df4fc542dc0a8a95495b7d4 Mon Sep 17 00:00:00 2001
+Message-Id: <eac420f772d23e7c4df4fc542dc0a8a95495b7d4@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 9 Feb 2016 14:52:55 +0100
+Subject: [PATCH] qemu: snapshot: Don't leak XML definition and forget to
+ unlock job
+
+RHEL-only
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1305793
+
+When we fail to start the vCPUs after a external snapshot, the code
+would just return without freeing some temporary memory and without
+unlocking the domain job. This patch changes the return value and lets
+the code continue.
+
+Based on upstream commits d5b2828763e104b7bd003a01c305cce7b93376f4 and
+986831a8d4f16921c5c81323a2ced70174da1a4e. The commit messages for the
+upstream commits would not make sense on their own since RHEL-6 did not
+backport a lot of changes in between.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index c096727..0c923ff 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -12306,7 +12306,7 @@ endjob:
+                            _("resuming after snapshot failed"));
+         }
+ 
+-        return -1;
++        ret = -1;
+     }
+     if (vm && thaw != 0 &&
+         qemuDomainSnapshotFSThaw(driver, vm, thaw > 0) < 0) {
+-- 
+2.7.1
+

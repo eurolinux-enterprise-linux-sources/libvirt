@@ -1,0 +1,54 @@
+From 1d62e2d3549ec2990c6d0177944dd6f6dd10b7ea Mon Sep 17 00:00:00 2001
+Message-Id: <1d62e2d3549ec2990c6d0177944dd6f6dd10b7ea.1352118321.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Sun, 4 Nov 2012 20:47:36 +0100
+Subject: [PATCH] snapshot: qemu: Rename qemuDomainSnapshotCreateActive
+
+https://bugzilla.redhat.com/show_bug.cgi?id=638512
+
+Before now, libvirt supported only internal snapshots for active guests.
+This patch renames this function to qemuDomainSnapshotCreateActiveInternal
+to prepare the grounds for external active snapshots.
+(cherry picked from commit b5fd4044716ac1d764c694f4d2a5382f70b9e38f)
+---
+ src/qemu/qemu_driver.c | 15 ++++++++-------
+ 1 file changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 11973fe..78cf89e 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -10636,13 +10636,14 @@ qemuDomainSnapshotCreateInactive(struct qemud_driver *driver,
+     return qemuDomainSnapshotForEachQcow2(driver, vm, snap, "-c", false);
+ }
+ 
++
+ /* The domain is expected to be locked and active. */
+ static int
+-qemuDomainSnapshotCreateActive(virConnectPtr conn,
+-                               struct qemud_driver *driver,
+-                               virDomainObjPtr *vmptr,
+-                               virDomainSnapshotObjPtr snap,
+-                               unsigned int flags)
++qemuDomainSnapshotCreateActiveInternal(virConnectPtr conn,
++                                       struct qemud_driver *driver,
++                                       virDomainObjPtr *vmptr,
++                                       virDomainSnapshotObjPtr snap,
++                                       unsigned int flags)
+ {
+     virDomainObjPtr vm = *vmptr;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+@@ -11431,8 +11432,8 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+         if (qemuDomainSnapshotCreateInactive(driver, vm, snap) < 0)
+             goto cleanup;
+     } else {
+-        if (qemuDomainSnapshotCreateActive(domain->conn, driver,
+-                                           &vm, snap, flags) < 0)
++        if (qemuDomainSnapshotCreateActiveInternal(domain->conn, driver,
++                                                   &vm, snap, flags) < 0)
+             goto cleanup;
+     }
+ 
+-- 
+1.8.0
+

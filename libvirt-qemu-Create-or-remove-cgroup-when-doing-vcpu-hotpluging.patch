@@ -1,0 +1,115 @@
+From 5061036606c61a08eb673e1cbfcb0ece4844d48a Mon Sep 17 00:00:00 2001
+Message-Id: <5061036606c61a08eb673e1cbfcb0ece4844d48a.1350297261.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 15 Oct 2012 12:36:12 +0800
+Subject: [PATCH] qemu: Create or remove cgroup when doing vcpu hotpluging
+
+https://bugzilla.redhat.com/show_bug.cgi?id=857013
+
+Various APIs use cgroup to either set or get the statistics of
+host or guest. Hotplug or hot unplug new vcpus without creating
+or removing the cgroup for the vcpus could cause problems for
+those APIs. E.g.
+
+% virsh vcpucount dom
+maximum      config        10
+maximum      live          10
+current      config         1
+current      live           1
+
+% virsh setvcpu dom 2
+
+% virsh schedinfo dom --set vcpu_quota=1000
+Scheduler      : posix
+error: Unable to find vcpu cgroup for rhel6.2(vcpu: 1): No such file or
+directory
+
+This patch fixes the problem by creating cgroups for each of the
+onlined vcpus, and destroying cgroups for each of the offlined
+vcpus.
+(cherry picked from commit a9bfe887f936879a50415818ee6e15b967700e0c)
+---
+ src/qemu/qemu_driver.c | 53 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 53 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 961850a..0a17bed 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3540,6 +3540,8 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+     int vcpus = oldvcpus;
+     pid_t *cpupids = NULL;
+     int ncpupids;
++    virCgroupPtr cgroup = NULL;
++    virCgroupPtr cgroup_vcpu = NULL;
+ 
+     qemuDomainObjEnterMonitor(driver, vm);
+ 
+@@ -3593,6 +3595,53 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+         goto cleanup;
+     }
+ 
++    if (virCgroupForDomain(driver->cgroup, vm->def->name, &cgroup, 0) == 0) {
++        int rv = -1;
++
++        if (nvcpus > oldvcpus) {
++            for (i = oldvcpus; i < nvcpus; i++) {
++                /* Create cgroup for the onlined vcpu */
++                rv = virCgroupForVcpu(cgroup, i, &cgroup_vcpu, 1);
++                if (rv < 0) {
++                    virReportSystemError(-rv,
++                                         _("Unable to create vcpu cgroup for %s(vcpu:"
++                                           " %d)"),
++                                         vm->def->name, i);
++                    goto cleanup;
++                }
++
++                /* Add vcpu thread to the cgroup */
++                rv = virCgroupAddTask(cgroup_vcpu, cpupids[i]);
++                if (rv < 0) {
++                    virReportSystemError(-rv,
++                                         _("unable to add vcpu %d task %d to cgroup"),
++                                         i, cpupids[i]);
++                    virCgroupRemove(cgroup_vcpu);
++                    goto cleanup;
++                }
++
++                virCgroupFree(&cgroup_vcpu);
++            }
++        } else {
++            for (i = oldvcpus - 1; i >= nvcpus; i--) {
++                rv = virCgroupForVcpu(cgroup, i, &cgroup_vcpu, 0);
++                if (rv < 0) {
++                    virReportSystemError(-rv,
++                                         _("Unable to access vcpu cgroup for %s(vcpu:"
++                                           " %d)"),
++                                         vm->def->name, i);
++                    goto cleanup;
++                }
++
++                /* Remove cgroup for the offlined vcpu */
++                virCgroupRemove(cgroup_vcpu);
++                virCgroupFree(&cgroup_vcpu);
++            }
++        }
++
++        virCgroupFree(&cgroup);
++    }
++
+     priv->nvcpupids = ncpupids;
+     VIR_FREE(priv->vcpupids);
+     priv->vcpupids = cpupids;
+@@ -3603,6 +3652,10 @@ cleanup:
+     vm->def->vcpus = vcpus;
+     VIR_FREE(cpupids);
+     virDomainAuditVcpu(vm, oldvcpus, nvcpus, "update", rc == 1);
++    if (cgroup)
++        virCgroupFree(&cgroup);
++    if (cgroup_vcpu)
++        virCgroupFree(&cgroup_vcpu);
+     return ret;
+ 
+ unsupported:
+-- 
+1.7.12.3
+

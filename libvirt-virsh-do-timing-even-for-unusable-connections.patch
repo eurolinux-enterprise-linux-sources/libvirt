@@ -1,0 +1,48 @@
+From b4a501114372b7c34eef42214f64b97241658f2f Mon Sep 17 00:00:00 2001
+Message-Id: <b4a501114372b7c34eef42214f64b97241658f2f.1354720508.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 3 Dec 2012 15:20:21 +0100
+Subject: [PATCH] virsh: do timing even for unusable connections
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=878376
+
+Time values were uninitialized if the connection wasn't usable.
+(cherry picked from commit 8b235d40576d5b5077a4ab2ee52a1897211f5e4d)
+---
+ tools/virsh.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/tools/virsh.c b/tools/virsh.c
+index be5319d..f7fd2fd 100644
+--- a/tools/virsh.c
++++ b/tools/virsh.c
+@@ -1562,20 +1562,20 @@ vshCommandRun(vshControl *ctl, const vshCmd *cmd)
+             !(cmd->def->flags & VSH_CMD_FLAG_NOCONNECT))
+             vshReconnect(ctl);
+ 
++        if (enable_timing)
++            GETTIMEOFDAY(&before);
++
+         if ((cmd->def->flags & VSH_CMD_FLAG_NOCONNECT) ||
+             vshConnectionUsability(ctl, ctl->conn)) {
+-            if (enable_timing)
+-                GETTIMEOFDAY(&before);
+-
+             ret = cmd->def->handler(ctl, cmd);
+-
+-            if (enable_timing)
+-                GETTIMEOFDAY(&after);
+         } else {
+             /* connection is not usable, return error */
+             ret = false;
+         }
+ 
++        if (enable_timing)
++            GETTIMEOFDAY(&after);
++
+         /* try to automatically catch disconnections */
+         if (!ret &&
+             ((last_error != NULL) &&
+-- 
+1.8.0
+

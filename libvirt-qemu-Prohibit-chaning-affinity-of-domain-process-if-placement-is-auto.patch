@@ -1,0 +1,39 @@
+From 8cb54c3a66b68daf2e09548b4ddc797c31768d3a Mon Sep 17 00:00:00 2001
+Message-Id: <8cb54c3a66b68daf2e09548b4ddc797c31768d3a.1351526125.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Thu, 25 Oct 2012 10:58:17 +0800
+Subject: [PATCH] qemu: Prohibit chaning affinity of domain process if
+ placement is 'auto'
+
+https://bugzilla.redhat.com/show_bug.cgi?id=870099
+
+On one hand, numad probably will manage the affinity of domain process
+dynamically in future. On the other hand, even numad won't manage it,
+it still could confusion. Let's make things simpler enough to avoid
+the lair for now.
+(cherry picked from commit a6bd7c22ea31af5db0251733ce1321addb9d27a4)
+---
+ src/qemu/qemu_driver.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index cd14173..586104c 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -4205,6 +4205,13 @@ qemudDomainPinEmulator(virDomainPtr dom,
+         goto cleanup;
+     }
+ 
++    if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO) {
++        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
++                       _("Changing affinity for emulator thread dynamically "
++                         "is not allowed when CPU placement is 'auto'"));
++        goto cleanup;
++    }
++
+     if (virDomainLiveConfigHelperMethod(driver->caps, vm, &flags,
+                                         &persistentDef) < 0)
+         goto cleanup;
+-- 
+1.7.12.4
+

@@ -1,0 +1,42 @@
+From 8b00da7a4c8f2efb4a3ab8683a4b051debc813f8 Mon Sep 17 00:00:00 2001
+Message-Id: <8b00da7a4c8f2efb4a3ab8683a4b051debc813f8@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 11 Dec 2015 16:04:25 +0100
+Subject: [PATCH] RHEL: virsh: remove duplicate --config for 'virsh
+ update-device'
+
+RHEL-only
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1224037
+
+Commit e8d2b680abad727a653e4c3d5c4c493061968a16 incorrectly resolved
+conflict of the commit being backported and the missing backport of C99
+struct initializers in virsh. As a result the --config option is
+reported twice in the output of "virsh update-device --help".
+
+Since it's a customer issue and the fix is trivial I opted to fix it
+rather than closing the BZ.
+
+As a resolution I've deleted the old style init to match all the other
+backports of similar patches.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-domain.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index cefcc90..66f0afe 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -7764,7 +7764,6 @@ static const vshCmdInfo info_update_device[] = {
+ static const vshCmdOptDef opts_update_device[] = {
+     {"domain", VSH_OT_DATA, VSH_OFLAG_REQ, N_("domain name, id or uuid")},
+     {"file",   VSH_OT_DATA, VSH_OFLAG_REQ, N_("XML file")},
+-    {"config", VSH_OT_BOOL, 0, N_("affect next boot")},
+     {"force",  VSH_OT_BOOL, 0, N_("force device update")},
+     {.name = "persistent",
+      .type = VSH_OT_BOOL,
+-- 
+2.7.0
+

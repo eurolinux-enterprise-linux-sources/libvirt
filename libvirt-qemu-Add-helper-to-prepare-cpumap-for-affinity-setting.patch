@@ -1,0 +1,138 @@
+From fc398c5f982ad72861a640487d6732fd761531b0 Mon Sep 17 00:00:00 2001
+Message-Id: <fc398c5f982ad72861a640487d6732fd761531b0.1351526125.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Thu, 25 Oct 2012 10:58:15 +0800
+Subject: [PATCH] qemu: Add helper to prepare cpumap for affinity setting
+
+https://bugzilla.redhat.com/show_bug.cgi?id=869096
+
+Abstract the codes to prepare cpumap into a helper a function,
+which can be used later.
+
+* src/qemu/qemu_process.h: Declare qemuPrepareCpumap
+* src/qemu/qemu_process.c: Implement qemuPrepareCpumap, and use it.
+(cherry picked from commit 0039a32fcaf7f748cad22376681f505fcfa78cef)
+---
+ src/qemu/qemu_process.c | 62 ++++++++++++++++++++++++++++++++-----------------
+ src/qemu/qemu_process.h |  2 ++
+ 2 files changed, 43 insertions(+), 21 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 5bab03b..c0f0b4a 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1893,23 +1893,20 @@ qemuGetNumadAdvice(virDomainDefPtr def ATTRIBUTE_UNUSED)
+ }
+ #endif
+ 
+-/*
+- * To be run between fork/exec of QEMU only
++/* Helper to prepare cpumap for affinity setting, convert
++ * NUMA nodeset into cpuset if @nodemask is not NULL, otherwise
++ * just return a new allocated bitmap.
+  */
+-static int
+-qemuProcessInitCpuAffinity(struct qemud_driver *driver,
+-                           virDomainObjPtr vm,
+-                           virBitmapPtr nodemask)
++virBitmapPtr
++qemuPrepareCpumap(struct qemud_driver *driver,
++                  virBitmapPtr nodemask)
+ {
+-    int ret = -1;
+     int i, hostcpus, maxcpu = QEMUD_CPUMASK_LEN;
+     virNodeInfo nodeinfo;
+-    virBitmapPtr cpumap, cpumapToSet;
+-
+-    VIR_DEBUG("Setting CPU affinity");
++    virBitmapPtr cpumap = NULL;
+ 
+     if (nodeGetInfo(NULL, &nodeinfo) < 0)
+-        return -1;
++        return NULL;
+ 
+     /* setaffinity fails if you set bits for CPUs which
+      * aren't present, so we have to limit ourselves */
+@@ -1917,34 +1914,57 @@ qemuProcessInitCpuAffinity(struct qemud_driver *driver,
+     if (maxcpu > hostcpus)
+         maxcpu = hostcpus;
+ 
+-    cpumap = virBitmapNew(maxcpu);
+-    if (!cpumap) {
++    if (!(cpumap = virBitmapNew(maxcpu))) {
+         virReportOOMError();
+-        return -1;
++        return NULL;
+     }
+ 
+-    cpumapToSet = cpumap;
+-
+-    if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO) {
+-        VIR_DEBUG("Set CPU affinity with advisory nodeset from numad");
+-        /* numad returns the NUMA node list, convert it to cpumap */
++    if (nodemask) {
+         for (i = 0; i < driver->caps->host.nnumaCell; i++) {
+             int j;
+             int cur_ncpus = driver->caps->host.numaCell[i]->ncpus;
+             bool result;
+-            if (virBitmapGetBit(nodemask, i, &result) < 0)
+-                goto cleanup;
++            if (virBitmapGetBit(nodemask, i, &result) < 0) {
++                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                               _("Failed to covert nodeset to cpuset"));
++                virBitmapFree(cpumap);
++                return NULL;
++            }
+             if (result) {
+                 for (j = 0; j < cur_ncpus; j++)
+                     ignore_value(virBitmapSetBit(cpumap,
+                                                  driver->caps->host.numaCell[i]->cpus[j]));
+             }
+         }
++    }
++
++    return cpumap;
++}
++
++/*
++ * To be run between fork/exec of QEMU only
++ */
++static int
++qemuProcessInitCpuAffinity(struct qemud_driver *driver,
++                           virDomainObjPtr vm,
++                           virBitmapPtr nodemask)
++{
++    int ret = -1;
++    virBitmapPtr cpumap = NULL;
++    virBitmapPtr cpumapToSet = NULL;
++
++    if (!(cpumap = qemuPrepareCpumap(driver, nodemask)))
++        return -1;
++
++    if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO) {
++        VIR_DEBUG("Set CPU affinity with advisory nodeset from numad");
++        cpumapToSet = cpumap;
+     } else {
+         VIR_DEBUG("Set CPU affinity with specified cpuset");
+         if (vm->def->cpumask) {
+             cpumapToSet = vm->def->cpumask;
+         } else {
++            cpumapToSet = cpumap;
+             /* You may think this is redundant, but we can't assume libvirtd
+              * itself is running on all pCPUs, so we need to explicitly set
+              * the spawned QEMU instance to all pCPUs if no map is given in
+diff --git a/src/qemu/qemu_process.h b/src/qemu/qemu_process.h
+index 38edde7..543c9ee 100644
+--- a/src/qemu/qemu_process.h
++++ b/src/qemu/qemu_process.h
+@@ -96,5 +96,7 @@ int qemuProcessAutoDestroyRemove(struct qemud_driver *driver,
+                                  virDomainObjPtr vm);
+ bool qemuProcessAutoDestroyActive(struct qemud_driver *driver,
+                                   virDomainObjPtr vm);
++virBitmapPtr qemuPrepareCpumap(struct qemud_driver *driver,
++                               virBitmapPtr nodemask);
+ 
+ #endif /* __QEMU_PROCESS_H__ */
+-- 
+1.7.12.4
+

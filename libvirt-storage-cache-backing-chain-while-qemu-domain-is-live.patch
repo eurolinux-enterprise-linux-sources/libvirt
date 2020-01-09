@@ -1,0 +1,184 @@
+From 181d46d36da91eb871b2fb0b6dc41e27cfd12f1e Mon Sep 17 00:00:00 2001
+Message-Id: <181d46d36da91eb871b2fb0b6dc41e27cfd12f1e.1350990679.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:38 -0600
+Subject: [PATCH] storage: cache backing chain while qemu domain is live
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+Technically, we should not be re-probing any file that qemu might
+be currently writing to.  As such, we should cache the backing
+file chain prior to starting qemu.  This patch adds the cache,
+but does not use it until the next patch.
+
+Ultimately, we want to also store the chain in domain XML, so that
+it is remembered across libvirtd restarts, and so that the only
+kosher way to modify the backing chain of an offline domain will be
+through libvirt API calls, but we aren't there yet.  So for now, we
+merely invalidate the cache any time we do a live operation that
+alters the chain (block-pull, block-commit, external disk snapshot),
+as well as tear down the cache when the domain is not running.
+
+* src/conf/domain_conf.h (_virDomainDiskDef): New field.
+* src/conf/domain_conf.c (virDomainDiskDefFree): Clean new field.
+* src/qemu/qemu_domain.h (qemuDomainDetermineDiskChain): New
+prototype.
+* src/qemu/qemu_domain.c (qemuDomainDetermineDiskChain): New
+function.
+* src/qemu/qemu_driver.c (qemuDomainAttachDeviceDiskLive)
+(qemuDomainChangeDiskMediaLive): Pre-populate chain.
+(qemuDomainSnapshotCreateSingleDiskActive): Uncache chain before
+snapshot.
+* src/qemu/qemu_process.c (qemuProcessHandleBlockJob): Update
+chain after block pull.
+(cherry picked from commit 4d34c92947e8cf9e9bedfa227ada1d2dba92d68a)
+---
+ src/conf/domain_conf.c  |  1 +
+ src/conf/domain_conf.h  |  2 ++
+ src/qemu/qemu_domain.c  | 26 ++++++++++++++++++++++++++
+ src/qemu/qemu_domain.h  |  3 +++
+ src/qemu/qemu_driver.c  | 14 ++++++++++++++
+ src/qemu/qemu_process.c |  8 ++++++++
+ 6 files changed, 54 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index e0d26e7..fe3bd81 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -975,6 +975,7 @@ void virDomainDiskDefFree(virDomainDiskDefPtr def)
+     VIR_FREE(def->src);
+     VIR_FREE(def->dst);
+     VIR_FREE(def->driverName);
++    virStorageFileFreeMetadata(def->backingChain);
+     VIR_FREE(def->mirror);
+     VIR_FREE(def->auth.username);
+     VIR_FREE(def->wwn);
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 99b8a83..fb174c5 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -47,6 +47,7 @@
+ # include "virobject.h"
+ # include "device_conf.h"
+ # include "bitmap.h"
++# include "storage_file.h"
+ 
+ /* forward declarations of all device types, required by
+  * virDomainDeviceDef
+@@ -568,6 +569,7 @@ struct _virDomainDiskDef {
+     } auth;
+     char *driverName;
+     int format; /* enum virStorageFileFormat */
++    virStorageFileMetadataPtr backingChain;
+ 
+     char *mirror;
+     int mirrorFormat; /* enum virStorageFileFormat */
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index fe4e67d..a6f8931 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -1996,3 +1996,29 @@ qemuDomainCleanupRun(struct qemud_driver *driver,
+     priv->ncleanupCallbacks = 0;
+     priv->ncleanupCallbacks_max = 0;
+ }
++
++int
++qemuDomainDetermineDiskChain(struct qemud_driver *driver,
++                             virDomainDiskDefPtr disk,
++                             bool force)
++{
++    bool probe = driver->allowDiskFormatProbing;
++
++    if (!disk->src)
++        return 0;
++
++    if (disk->backingChain) {
++        if (force) {
++            virStorageFileFreeMetadata(disk->backingChain);
++            disk->backingChain = NULL;
++        } else {
++            return 0;
++        }
++    }
++    disk->backingChain = virStorageFileGetMetadata(disk->src, disk->format,
++                                                   driver->user, driver->group,
++                                                   probe);
++    if (!disk->backingChain)
++        return -1;
++    return 0;
++}
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 26b6c55..8a66f14 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -343,6 +343,9 @@ bool qemuDomainJobAllowed(qemuDomainObjPrivatePtr priv,
+ int qemuDomainCheckDiskPresence(struct qemud_driver *driver,
+                                 virDomainObjPtr vm,
+                                 bool start_with_state);
++int qemuDomainDetermineDiskChain(struct qemud_driver *driver,
++                                 virDomainDiskDefPtr disk,
++                                 bool force);
+ 
+ int qemuDomainCleanupAdd(virDomainObjPtr vm,
+                          qemuDomainCleanupCallback cb);
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index ab94888..9d49fe9 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5813,6 +5813,9 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+         goto end;
+     }
+ 
++    if (qemuDomainDetermineDiskChain(driver, disk, false) < 0)
++        goto end;
++
+     if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_DEVICES)) {
+         if (virCgroupForDomain(driver->cgroup, vm->def->name, &cgroup, 0)) {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+@@ -6041,6 +6044,9 @@ qemuDomainChangeDiskMediaLive(virDomainObjPtr vm,
+     virCgroupPtr cgroup = NULL;
+     int ret = -1;
+ 
++    if (qemuDomainDetermineDiskChain(driver, disk, false) < 0)
++        goto end;
++
+     if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_DEVICES)) {
+         if (virCgroupForDomain(driver->cgroup,
+                                vm->def->name, &cgroup, 0) != 0) {
+@@ -10785,6 +10791,14 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+     disk->src = source;
+     origdriver = disk->format;
+     disk->format = VIR_STORAGE_FILE_RAW; /* Don't want to probe backing files */
++    /* XXX Here, we know we are about to alter disk->backingChain if
++     * successful, so we nuke the existing chain so that future
++     * commands will recompute it.  Better would be storing the chain
++     * ourselves rather than reprobing, but this requires modifying
++     * domain_conf and our XML to fully track the chain across
++     * libvirtd restarts.  */
++    virStorageFileFreeMetadata(disk->backingChain);
++    disk->backingChain = NULL;
+ 
+     if (virDomainLockDiskAttach(driver->lockManager, driver->uri,
+                                 vm, disk) < 0)
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index c4013fa..83ddc19 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -908,6 +908,14 @@ qemuProcessHandleBlockJob(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+     if (disk) {
+         path = disk->src;
+         event = virDomainEventBlockJobNewFromObj(vm, path, type, status);
++        /* XXX If we completed a block pull, then recompute the cached
++         * backing chain to match.  Better would be storing the chain
++         * ourselves rather than reprobing, but this requires
++         * modifying domain_conf and our XML to fully track the chain
++         * across libvirtd restarts.  */
++        if (type == VIR_DOMAIN_BLOCK_JOB_TYPE_PULL &&
++            status == VIR_DOMAIN_BLOCK_JOB_COMPLETED)
++            qemuDomainDetermineDiskChain(driver, disk, true);
+     }
+ 
+     virDomainObjUnlock(vm);
+-- 
+1.7.12.4
+

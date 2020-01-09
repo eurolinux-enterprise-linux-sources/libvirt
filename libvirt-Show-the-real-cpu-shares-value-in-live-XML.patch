@@ -1,0 +1,154 @@
+From 46d6752bd6567936695663afddb03e62a06c5392 Mon Sep 17 00:00:00 2001
+Message-Id: <46d6752bd6567936695663afddb03e62a06c5392@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Fri, 11 Apr 2014 10:44:00 +0200
+Subject: [PATCH] Show the real cpu shares value in live XML
+
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1040784
+
+Currently, the Linux kernel treats values of '0' and '1' as
+the minimum of 2. Values larger than the maximum are changed
+to the maximum.
+
+Re-reading the shares value after setting it reflects this in
+the live domain XML.
+
+(cherry picked from commit 97814d8ab342c18297c7b39f3b5c208cbc47b038)
+
+Conflicts:
+  missing 0d7f45a Convert remainder of cgroups code to report errors
+  632f78c Store a virCgroupPtr instance in qemuDomainObjPrivatePtr
+	src/lxc/lxc_cgroup.c
+  missing 4dceffa LXC: add cpuset cgroup support for lxc
+	src/lxc/lxc_driver.c
+	src/qemu/qemu_cgroup.c
+  missing 8da9516:
+    qemu: Abstract code for the cpu controller setting into a helper
+	src/qemu/qemu_driver.c
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/lxc/lxc_cgroup.c   |  9 +++++++++
+ src/lxc/lxc_driver.c   |  9 ++++++++-
+ src/qemu/qemu_cgroup.c | 10 ++++++++++
+ src/qemu/qemu_driver.c | 10 +++++++++-
+ 4 files changed, 36 insertions(+), 2 deletions(-)
+
+diff --git a/src/lxc/lxc_cgroup.c b/src/lxc/lxc_cgroup.c
+index 0924469..c7a136f 100644
+--- a/src/lxc/lxc_cgroup.c
++++ b/src/lxc/lxc_cgroup.c
+@@ -35,6 +35,7 @@ static int virLXCCgroupSetupCpuTune(virDomainDefPtr def,
+ {
+     int ret = -1;
+     if (def->cputune.sharesSpecified) {
++        unsigned long long val;
+         int rc = virCgroupSetCpuShares(cgroup, def->cputune.shares);
+         if (rc != 0) {
+             virReportSystemError(-rc,
+@@ -42,6 +43,14 @@ static int virLXCCgroupSetupCpuTune(virDomainDefPtr def,
+                                  def->name);
+             goto cleanup;
+         }
++        rc = virCgroupGetCpuShares(cgroup, &val);
++        if (rc != 0) {
++            virReportSystemError(-rc,
++                                 _("Unable to get io cpu shares for domain %s"),
++                                 def->name);
++            goto cleanup;
++        }
++        def->cputune.shares = val;
+     }
+     if (def->cputune.quota != 0) {
+         int rc = virCgroupSetCpuCfsQuota(cgroup, def->cputune.quota);
+diff --git a/src/lxc/lxc_driver.c b/src/lxc/lxc_driver.c
+index b1208f7..8bb0a80 100644
+--- a/src/lxc/lxc_driver.c
++++ b/src/lxc/lxc_driver.c
+@@ -1823,6 +1823,7 @@ lxcSetSchedulerParametersFlags(virDomainPtr dom,
+ 
+         if (STREQ(param->field, VIR_DOMAIN_SCHEDULER_CPU_SHARES)) {
+             if (flags & VIR_DOMAIN_AFFECT_LIVE) {
++                unsigned long long val;
+                 rc = virCgroupSetCpuShares(group, params[i].value.ul);
+                 if (rc != 0) {
+                     virReportSystemError(-rc, "%s",
+@@ -1830,7 +1831,13 @@ lxcSetSchedulerParametersFlags(virDomainPtr dom,
+                     goto cleanup;
+                 }
+ 
+-                vm->def->cputune.shares = params[i].value.ul;
++                if (virCgroupGetCpuShares(group, &val) < 0) {
++                    virReportSystemError(-rc, "%s",
++                                         _("unable to get cpu shares tunable"));
++                    goto cleanup;
++                }
++
++                vm->def->cputune.shares = val;
+                 vm->def->cputune.sharesSpecified = true;
+             }
+ 
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 3e8b0c6..498ac0f 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -383,6 +383,7 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+ 
+     if (vm->def->cputune.sharesSpecified) {
+         if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_CPU)) {
++            unsigned long long val;
+             rc = virCgroupSetCpuShares(cgroup, vm->def->cputune.shares);
+             if(rc != 0) {
+                 virReportSystemError(-rc,
+@@ -390,6 +391,14 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+                                      vm->def->name);
+                 goto cleanup;
+             }
++
++            if (virCgroupGetCpuShares(cgroup, &val) < 0) {
++                virReportSystemError(-rc,
++                                     _("Unable to get io cpu shares for domain %s"),
++                                     vm->def->name);
++                goto cleanup;
++            }
++            vm->def->cputune.shares = val;
+         } else {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                            _("CPU tuning is not available on this host"));
+@@ -424,6 +433,7 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+     }
+ done:
+     virCgroupFree(&cgroup);
++
+     return 0;
+ 
+ cleanup:
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index e045be4..60977b1 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -8673,12 +8673,20 @@ qemuSetSchedulerParametersFlags(virDomainPtr dom,
+ 
+         if (STREQ(param->field, VIR_DOMAIN_SCHEDULER_CPU_SHARES)) {
+             if (flags & VIR_DOMAIN_AFFECT_LIVE) {
++                unsigned long long val;
+                 if ((rc = virCgroupSetCpuShares(group, value_ul))) {
+                     virReportSystemError(-rc, "%s",
+                                          _("unable to set cpu shares tunable"));
+                     goto cleanup;
+                 }
+-                vm->def->cputune.shares = value_ul;
++
++                if (virCgroupGetCpuShares(group, &val) < 0) {
++                    virReportSystemError(-rc, "%s",
++                                         _("unable to get cpu shares tunable"));
++                    goto cleanup;
++                }
++
++                vm->def->cputune.shares = val;
+                 vm->def->cputune.sharesSpecified = true;
+             }
+ 
+-- 
+1.9.2
+

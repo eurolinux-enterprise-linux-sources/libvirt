@@ -1,0 +1,52 @@
+From 02cad18a925e2744a18e78fa11258eabe916eac1 Mon Sep 17 00:00:00 2001
+Message-Id: <02cad18a925e2744a18e78fa11258eabe916eac1.1352118320.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Sun, 4 Nov 2012 20:47:32 +0100
+Subject: [PATCH] qemu: Clean up snapshot retrieval to use the new helper
+
+https://bugzilla.redhat.com/show_bug.cgi?id=638512
+
+Two other places were left with the old code to look up snapshots.
+Change them to use the snapshot lookup helper.
+(cherry picked from commit ec69ca14f9b97a40e958d1b5003102441badc4e6)
+---
+ src/qemu/qemu_driver.c | 14 ++------------
+ 1 file changed, 2 insertions(+), 12 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 298b840..2690ef3 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11820,13 +11820,8 @@ static int qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+         goto cleanup;
+     }
+ 
+-    snap = virDomainSnapshotFindByName(vm->snapshots, snapshot->name);
+-    if (!snap) {
+-        virReportError(VIR_ERR_NO_DOMAIN_SNAPSHOT,
+-                       _("no domain snapshot with matching name '%s'"),
+-                       snapshot->name);
++    if (!(snap = qemuSnapObjFromSnapshot(vm, snapshot)))
+         goto cleanup;
+-    }
+ 
+     if (!vm->persistent &&
+         snap->def->state != VIR_DOMAIN_RUNNING &&
+@@ -12188,13 +12183,8 @@ static int qemuDomainSnapshotDelete(virDomainSnapshotPtr snapshot,
+         goto cleanup;
+     }
+ 
+-    snap = virDomainSnapshotFindByName(vm->snapshots, snapshot->name);
+-    if (!snap) {
+-        virReportError(VIR_ERR_NO_DOMAIN_SNAPSHOT,
+-                       _("no domain snapshot with matching name '%s'"),
+-                       snapshot->name);
++    if (!(snap = qemuSnapObjFromSnapshot(vm, snapshot)))
+         goto cleanup;
+-    }
+ 
+     if (!(flags & VIR_DOMAIN_SNAPSHOT_DELETE_METADATA_ONLY)) {
+         if (!(flags & VIR_DOMAIN_SNAPSHOT_DELETE_CHILDREN_ONLY) &&
+-- 
+1.8.0
+

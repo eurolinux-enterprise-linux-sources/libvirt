@@ -1,0 +1,55 @@
+From 5cc6d43dc27f95662edbb0eed5981bf16aba2391 Mon Sep 17 00:00:00 2001
+Message-Id: <5cc6d43dc27f95662edbb0eed5981bf16aba2391@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 25 Mar 2014 14:59:27 +0100
+Subject: [PATCH] virNetClientSetTLSSession: Restore original signal mask
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1078589
+
+Currently, we use pthread_sigmask(SIG_BLOCK, ...) prior to calling
+poll(). This is okay, as we don't want poll() to be interrupted.
+However, then - immediately as we fall out from the poll() - we try to
+restore the original sigmask - again using SIG_BLOCK. But as the man
+page says, SIG_BLOCK adds signals to the signal mask:
+
+SIG_BLOCK
+      The set of blocked signals is the union of the current set and the set argument.
+
+Therefore, when restoring the original mask, we need to completely
+overwrite the one we set earlier and hence we should be using:
+
+SIG_SETMASK
+      The set of blocked signals is set to the argument set.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 3d4b4f5ac634c123af1981084add29d3a2ca6ab0)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/rpc/virnetclient.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/rpc/virnetclient.c b/src/rpc/virnetclient.c
+index 5af5fc8..75652c0 100644
+--- a/src/rpc/virnetclient.c
++++ b/src/rpc/virnetclient.c
+@@ -799,7 +799,7 @@ int virNetClientSetTLSSession(virNetClientPtr client,
+         if (ret < 0 && (errno == EAGAIN || errno == EINTR))
+             goto repoll;
+ 
+-        ignore_value(pthread_sigmask(SIG_BLOCK, &oldmask, NULL));
++        ignore_value(pthread_sigmask(SIG_SETMASK, &oldmask, NULL));
+     }
+ 
+     ret = virNetTLSContextCheckCertificate(tls, client->tls);
+@@ -823,7 +823,7 @@ int virNetClientSetTLSSession(virNetClientPtr client,
+     if (ret < 0 && (errno == EAGAIN || errno == EINTR))
+         goto repoll2;
+ 
+-    ignore_value(pthread_sigmask(SIG_BLOCK, &oldmask, NULL));
++    ignore_value(pthread_sigmask(SIG_SETMASK, &oldmask, NULL));
+ 
+     len = virNetTLSSessionRead(client->tls, buf, 1);
+     if (len < 0 && errno != ENOMSG) {
+-- 
+1.9.1
+

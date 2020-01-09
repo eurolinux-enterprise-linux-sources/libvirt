@@ -1,0 +1,32 @@
+From d5a36852cc91373e4a4f421954af684bd54c553f Mon Sep 17 00:00:00 2001
+Message-Id: <d5a36852cc91373e4a4f421954af684bd54c553f.1355928878.git.jdenemar@redhat.com>
+From: =?UTF-8?q?Guido=20G=C3=BCnther?= <agx@sigxcpu.org>
+Date: Fri, 14 Dec 2012 09:12:39 -0700
+Subject: [PATCH] Fix "virsh create" example
+
+https://bugzilla.redhat.com/show_bug.cgi?id=887187
+
+We require a file and don't accept standard input:
+
+http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=692322
+(cherry picked from commit d49adae2e261d2736b22be37ef8d4fe0460df0ad)
+---
+ tools/virsh.pod | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 9ede3c6..2eb6941 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -548,7 +548,7 @@ B<Example>
+ 
+  virsh dumpxml <domain> > domain.xml
+  vi domain.xml (or make changes with your other text editor)
+- virsh create < domain.xml
++ virsh create domain.xml
+ 
+ =item B<define> I<FILE>
+ 
+-- 
+1.8.0.2
+

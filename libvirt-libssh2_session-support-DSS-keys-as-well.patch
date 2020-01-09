@@ -1,0 +1,29 @@
+From ab7f864201ef3bb9715ed29adba89315bbf8ca2d Mon Sep 17 00:00:00 2001
+Message-Id: <ab7f864201ef3bb9715ed29adba89315bbf8ca2d.1354720507.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 3 Dec 2012 15:20:13 +0100
+Subject: [PATCH] libssh2_session: support DSS keys as well
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=878376
+
+Missing break in the switch.
+(cherry picked from commit 7475ee0f751bed4dae568d545bcb59f228ec02f2)
+---
+ src/rpc/virnetsshsession.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/rpc/virnetsshsession.c b/src/rpc/virnetsshsession.c
+index 13a0368..286cc4d 100644
+--- a/src/rpc/virnetsshsession.c
++++ b/src/rpc/virnetsshsession.c
+@@ -412,6 +412,7 @@ virNetSSHCheckHostKey(virNetSSHSessionPtr sess)
+             break;
+         case LIBSSH2_HOSTKEY_TYPE_DSS:
+             keyType = LIBSSH2_KNOWNHOST_KEY_SSHDSS;
++            break;
+ 
+         case LIBSSH2_HOSTKEY_TYPE_UNKNOWN:
+         default:
+-- 
+1.8.0
+

@@ -1,0 +1,261 @@
+From 04444a7af5ce8afb4998676684fcadffa971dda6 Mon Sep 17 00:00:00 2001
+Message-Id: <04444a7af5ce8afb4998676684fcadffa971dda6.1349722366.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 26 Sep 2012 13:36:50 +0200
+Subject: [PATCH] qemu: wait for SPICE to migrate
+
+https://bugzilla.redhat.com/show_bug.cgi?id=836135
+
+Recently, there have been some improvements made to qemu so it
+supports seamless migration or something very close to it.
+However, it requires libvirt interaction. Once qemu is migrated,
+the SPICE server needs to send its internal state to the destination.
+Once it's done, it fires SPICE_MIGRATE_COMPLETED event and this
+fact is advertised in 'query-spice' output as well.
+We must not kill qemu until SPICE server finishes the transfer.
+(cherry picked from commit 3521cd1c328c1ac3437e6953cf05bf108ce056ab)
+
+Conflicts:
+
+	src/qemu/qemu_capabilities.c: context
+---
+ src/qemu/qemu_capabilities.c |  5 ++++-
+ src/qemu/qemu_capabilities.h |  1 +
+ src/qemu/qemu_command.c      |  8 +++++++
+ src/qemu/qemu_migration.c    | 19 +++++++++++++++-
+ src/qemu/qemu_monitor.c      | 24 ++++++++++++++++++++
+ src/qemu/qemu_monitor.h      |  2 ++
+ src/qemu/qemu_monitor_json.c | 52 ++++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_monitor_json.h |  3 +++
+ 8 files changed, 112 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 1c2d3fb..ea572da 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -183,7 +183,8 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+ 
+               "reboot-timeout", /* 110 */
+               "dump-guest-core",
+-              "disable-ksm", /* 112 */
++              "seamless-migration",
++              "disable-ksm",
+               "virtio-net-pci.__com_redhat_macvtap_compat", /* RHEL-specific */
+                /* RHEL-only for now; the name 'drive-reopen' is
+                 * essential for XML compatibility, even though the
+@@ -1157,6 +1158,8 @@ qemuCapsComputeCmdFlags(const char *help,
+     }
+     if (strstr(help, "-spice"))
+         qemuCapsSet(caps, QEMU_CAPS_SPICE);
++    if (strstr(help, "seamless-migration="))
++        qemuCapsSet(caps, QEMU_CAPS_SEAMLESS_MIGRATION);
+     if (strstr(help, "boot=on"))
+         qemuCapsSet(caps, QEMU_CAPS_DRIVE_BOOT);
+     if (strstr(help, "serial=s"))
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index e03be83..a32335a 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -147,6 +147,7 @@ enum qemuCapsFlags {
+     QEMU_CAPS_SECCOMP_SANDBOX    = 109, /* -sandbox */
+     QEMU_CAPS_REBOOT_TIMEOUT     = 110, /* -boot reboot-timeout */
+     QEMU_CAPS_DUMP_GUEST_CORE    = 111, /* dump-guest-core-parameter */
++    QEMU_CAPS_SEAMLESS_MIGRATION = 112, /* seamless-migration for SPICE */
+ 
+     QEMU_CAPS_DISABLE_KSM           , /* Is '-redhat-disable-KSM' available? */
+     QEMU_CAPS_VIRTIO_NET_MACVTAP_COMPAT, /* virtio-net-pci.__com_redhat_macvtap_compat */
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 590be08..669b08e 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -6169,6 +6169,14 @@ qemuBuildCommandLine(virConnectPtr conn,
+         if (def->graphics[0]->data.spice.copypaste == VIR_DOMAIN_GRAPHICS_SPICE_CLIPBOARD_COPYPASTE_NO)
+             virBufferAddLit(&opt, ",disable-copy-paste");
+ 
++        if (qemuCapsGet(caps, QEMU_CAPS_SEAMLESS_MIGRATION)) {
++            /* If qemu supports seamless migration turn it
++             * unconditionally on. If migration destination
++             * doesn't support it, it fallbacks to previous
++             * migration algorithm silently. */
++            virBufferAddLit(&opt, ",seamless-migration=on");
++        }
++
+         virCommandAddArg(cmd, "-spice");
+         virCommandAddArgBuffer(cmd, &opt);
+         if (def->graphics[0]->data.spice.keymap)
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 8e85875..db69a0a 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -896,10 +896,19 @@ qemuMigrationUpdateJobStatus(struct qemud_driver *driver,
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     int ret;
+     int status;
++    bool wait_for_spice = false;
++    bool spice_migrated = false;
+     unsigned long long memProcessed;
+     unsigned long long memRemaining;
+     unsigned long long memTotal;
+ 
++    /* If guest uses SPICE and supports seamles_migration we have to hold up
++     * migration finish until SPICE server transfers its data */
++    if (vm->def->ngraphics == 1 &&
++        vm->def->graphics[0]->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE &&
++        qemuCapsGet(priv->caps, QEMU_CAPS_SEAMLESS_MIGRATION))
++        wait_for_spice = true;
++
+     ret = qemuDomainObjEnterMonitorAsync(driver, vm, asyncJob);
+     if (ret < 0) {
+         /* Guest already exited; nothing further to update.  */
+@@ -910,6 +919,13 @@ qemuMigrationUpdateJobStatus(struct qemud_driver *driver,
+                                         &memProcessed,
+                                         &memRemaining,
+                                         &memTotal);
++
++    /* If qemu says migrated, check spice */
++    if (wait_for_spice && (ret == 0) &&
++        (status == QEMU_MONITOR_MIGRATION_STATUS_COMPLETED))
++        ret = qemuMonitorGetSpiceMigrationStatus(priv->mon,
++                                                 &spice_migrated);
++
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+ 
+     if (ret < 0 || virTimeMillisNow(&priv->job.info.timeElapsed) < 0) {
+@@ -939,7 +955,8 @@ qemuMigrationUpdateJobStatus(struct qemud_driver *driver,
+         break;
+ 
+     case QEMU_MONITOR_MIGRATION_STATUS_COMPLETED:
+-        priv->job.info.type = VIR_DOMAIN_JOB_COMPLETED;
++        if ((wait_for_spice && spice_migrated) || (!wait_for_spice))
++            priv->job.info.type = VIR_DOMAIN_JOB_COMPLETED;
+         ret = 0;
+         break;
+ 
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index cfd09c6..e15a59b 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -1860,6 +1860,30 @@ int qemuMonitorGetMigrationStatus(qemuMonitorPtr mon,
+ }
+ 
+ 
++int qemuMonitorGetSpiceMigrationStatus(qemuMonitorPtr mon,
++                                       bool *spice_migrated)
++{
++    int ret;
++    VIR_DEBUG("mon=%p", mon);
++
++    if (!mon) {
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("monitor must not be NULL"));
++        return -1;
++    }
++
++    if (mon->json) {
++        ret = qemuMonitorJSONGetSpiceMigrationStatus(mon, spice_migrated);
++    } else {
++        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
++                       _("JSON monitor is required"));
++        return -1;
++    }
++
++    return ret;
++}
++
++
+ int qemuMonitorMigrateToFd(qemuMonitorPtr mon,
+                            unsigned int flags,
+                            int fd)
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 8ded11d..2d5ab6d 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -348,6 +348,8 @@ int qemuMonitorGetMigrationStatus(qemuMonitorPtr mon,
+                                   unsigned long long *transferred,
+                                   unsigned long long *remaining,
+                                   unsigned long long *total);
++int qemuMonitorGetSpiceMigrationStatus(qemuMonitorPtr mon,
++                                       bool *spice_migrated);
+ 
+ typedef enum {
+   QEMU_MONITOR_MIGRATE_BACKGROUND	= 1 << 0,
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index c41d664..68d3474 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -2525,6 +2525,58 @@ int qemuMonitorJSONGetMigrationStatus(qemuMonitorPtr mon,
+ }
+ 
+ 
++static int
++qemuMonitorJSONSpiceGetMigrationStatusReply(virJSONValuePtr reply,
++                                            bool *spice_migrated)
++{
++    virJSONValuePtr ret;
++    const char *migrated_str;
++
++    if (!(ret = virJSONValueObjectGet(reply, "return"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-spice reply was missing return data"));
++        return -1;
++    }
++
++    if (!(migrated_str = virJSONValueObjectGetString(ret, "migrated"))) {
++        /* Deliberately don't report error here as we are
++         * probably dealing with older qemu which doesn't
++         * report this yet. Pretend spice is migrated. */
++        *spice_migrated = true;
++    } else {
++        *spice_migrated = STREQ(migrated_str, "true");
++    }
++
++    return 0;
++}
++
++
++int qemuMonitorJSONGetSpiceMigrationStatus(qemuMonitorPtr mon,
++                                           bool *spice_migrated)
++{
++    int ret;
++    virJSONValuePtr cmd = qemuMonitorJSONMakeCommand("query-spice",
++                                                     NULL);
++    virJSONValuePtr reply = NULL;
++
++    if (!cmd)
++        return -1;
++
++    ret = qemuMonitorJSONCommand(mon, cmd, &reply);
++
++    if (ret == 0)
++        ret = qemuMonitorJSONCheckError(cmd, reply);
++
++    if (ret == 0)
++        ret = qemuMonitorJSONSpiceGetMigrationStatusReply(reply,
++                                                          spice_migrated);
++
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
++
++
+ int qemuMonitorJSONMigrate(qemuMonitorPtr mon,
+                            unsigned int flags,
+                            const char *uri)
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index e3cd02b..33b380b 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -139,6 +139,9 @@ int qemuMonitorJSONGetMigrationStatus(qemuMonitorPtr mon,
+ int qemuMonitorJSONMigrate(qemuMonitorPtr mon,
+                            unsigned int flags,
+                            const char *uri);
++int qemuMonitorJSONGetSpiceMigrationStatus(qemuMonitorPtr mon,
++                                           bool *spice_migrated);
++
+ 
+ int qemuMonitorJSONMigrateCancel(qemuMonitorPtr mon);
+ 
+-- 
+1.7.12
+

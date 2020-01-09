@@ -1,0 +1,112 @@
+From b7cbf554c662e47f3ddf94afa7f0fe5f1e084f0d Mon Sep 17 00:00:00 2001
+Message-Id: <b7cbf554c662e47f3ddf94afa7f0fe5f1e084f0d@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Tue, 22 Apr 2014 16:50:10 +0200
+Subject: [PATCH] Properly free vcpupin info for unplugged CPUs
+
+Remove the pointer from def->cputune.vcpupin after unplugging
+the CPU and also free the bitmap contained in the structure
+by calling virDomainVcpuPinDel instead of VIR_FREE.
+
+Introduced by commit 0df1a79.
+
+This makes virDomainLookupVcpuPin redundant.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1088165
+(cherry picked from commit a0a8dc695e9e20fa8b4ebe9c7ad697a4e9b3ac41)
+
+Conflicts (context):
+	src/conf/domain_conf.c
+	src/conf/domain_conf.h
+	src/qemu/qemu_driver.c
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c   | 20 --------------------
+ src/conf/domain_conf.h   |  3 ---
+ src/libvirt_private.syms |  1 -
+ src/qemu/qemu_driver.c   |  6 +-----
+ 4 files changed, 1 insertion(+), 29 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index d8737e2..3774b74 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8858,26 +8858,6 @@ error:
+     goto cleanup;
+ }
+ 
+-/*
+- * Return the vcpupin related with the vcpu id on SUCCESS, or
+- * NULL on failure.
+- */
+-virDomainVcpuPinDefPtr
+-virDomainLookupVcpuPin(virDomainDefPtr def,
+-                       int vcpuid)
+-{
+-    int i;
+-
+-    if (!def->cputune.vcpupin)
+-        return NULL;
+-
+-    for (i = 0; i < def->cputune.nvcpupin; i++) {
+-        if (def->cputune.vcpupin[i]->vcpuid == vcpuid)
+-            return def->cputune.vcpupin[i];
+-    }
+-
+-    return NULL;
+-}
+ 
+ static int virDomainDefMaybeAddController(virDomainDefPtr def,
+                                           int type,
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 2f6a6c8..5739e55 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2418,7 +2418,4 @@ VIR_ENUM_DECL(virDomainStartupPolicy)
+ int virDomainList(virConnectPtr conn, virHashTablePtr domobjs,
+                   virDomainPtr **domains, unsigned int flags);
+ 
+-virDomainVcpuPinDefPtr virDomainLookupVcpuPin(virDomainDefPtr def,
+-                                              int vcpuid);
+-
+ #endif /* __DOMAIN_CONF_H */
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 37b4d30..d742c72 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -448,7 +448,6 @@ virDomainLiveConfigHelperMethod;
+ virDomainLoadAllConfigs;
+ virDomainLockFailureTypeFromString;
+ virDomainLockFailureTypeToString;
+-virDomainLookupVcpuPin;
+ virDomainMemballoonModelTypeFromString;
+ virDomainMemballoonModelTypeToString;
+ virDomainMemDumpTypeFromString;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 60977b1..0b78de0 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -4092,8 +4092,6 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+ 	}
+     } else {
+         for (i = oldvcpus - 1; i >= nvcpus; i--) {
+-            virDomainVcpuPinDefPtr vcpupin = NULL;
+-
+             if (cgroup_available) {
+                 int rv = -1;
+ 
+@@ -4112,9 +4110,7 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+             }
+ 
+             /* Free vcpupin setting */
+-            if ((vcpupin = virDomainLookupVcpuPin(vm->def, i))) {
+-                VIR_FREE(vcpupin);
+-            }
++            ignore_value(virDomainVcpuPinDel(vm->def, i));
+         }
+     }
+ 
+-- 
+1.9.2
+

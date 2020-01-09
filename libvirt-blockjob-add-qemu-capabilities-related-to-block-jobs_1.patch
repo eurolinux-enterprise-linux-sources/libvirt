@@ -1,0 +1,352 @@
+From b1a60dcf9561d30980bb79676bb843cce1a9f965 Mon Sep 17 00:00:00 2001
+Message-Id: <b1a60dcf9561d30980bb79676bb843cce1a9f965.1350990680.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 22 Oct 2012 21:48:44 -0600
+Subject: [PATCH] blockjob: add qemu capabilities related to block jobs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=856247
+https://bugzilla.redhat.com/show_bug.cgi?id=837787
+[rebase of 6.3 https://bugzilla.redhat.com/show_bug.cgi?id=638506]
+
+Upstream qemu 1.3 is adding two new monitor commands, 'drive-mirror'
+and 'block-job-complete'[1], which can drive live block copy and
+storage migration.  Additionally, RHEL 6.3 had backported an earlier
+version of most of the same functionality, but under the names
+'__com.redhat_drive-mirror' and '__com.redhat_drive-reopen' and with
+slightly different JSON arguments, which we can support without too
+much extra effort.
+
+The libvirt API virDomainBlockRebase as already committed for 0.9.12
+is flexible enough to expose the basics of block copy, but some
+additional features in the 'drive-mirror' qemu command, such as
+setting error policy, setting granularity, or using a persistent
+bitmap, may later require a new libvirt API virDomainBlockCopy.  I
+will wait to add that API until we know more about what qemu 1.3
+will finally provide.
+
+The use of two capability bits allows the bulk of libvirt code to
+handle both RHEL 6.3 and upstream qemu 1.3 without caring about the
+difference in monitor commands used; one bit that says whether the
+commands are present, and another saying whether the RHEL 6.3
+limitations are in effect.  The choice of XML names for the
+capability bits is essential for interoperability with the RHEL 6.3
+version of libvirt.
+
+For consistency with other block job commands, libvirt must handle
+the bandwidth argument as MiB/sec from the user, even though qemu
+exposes the speed argument as bytes/sec; then again, qemu rounds
+up to cluster size internally, so using MiB hides the worst effects
+of that rounding if you pass small numbers.
+
+[1]https://lists.gnu.org/archive/html/qemu-devel/2012-10/msg03256.html
+
+* src/qemu/qemu_capabilities.h (QEMU_CAPS_DRIVE_MIRROR)
+(QEMU_CAPS_DRIVE_REOPEN): New bits.
+* src/qemu/qemu_capabilities.c (qemuCaps): Name them.
+* src/qemu/qemu_monitor_json.c (qemuMonitorJSONCheckCommands): Set
+them.
+(qemuMonitorJSONDriveMirror, qemuMonitorDrivePivot): New functions.
+* src/qemu/qemu_monitor_json.h (qemuMonitorJSONDriveMirror)
+(qemuMonitorDrivePivot): Declare them.
+* src/qemu/qemu_monitor.c (qemuMonitorDriveMirror)
+(qemuMonitorDrivePivot): New passthroughs.
+* src/qemu/qemu_monitor.h (qemuMonitorDriveMirror)
+(qemuMonitorDrivePivot): Declare them.
+(cherry picked from TBD)
+
+Conflicts:
+	src/qemu/qemu_capabilities.c - context with RHEL-only capabilities,
+    including the fact that we graduated these to upstream capabilities;
+    also, omitting upstream commit dcbfd572
+	src/qemu/qemu_capabilities.h - likewise
+---
+ src/qemu/qemu_capabilities.c |  5 +++
+ src/qemu/qemu_capabilities.h | 12 ++-----
+ src/qemu/qemu_monitor.c      | 56 ++++++++++++++++++++++++++++++--
+ src/qemu/qemu_monitor.h      | 14 ++++++++
+ src/qemu/qemu_monitor_json.c | 77 ++++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_monitor_json.h | 21 ++++++++++--
+ 6 files changed, 171 insertions(+), 14 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 39cd365..aca21a6 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1888,6 +1888,11 @@ qemuCapsProbeQMPCommands(qemuCapsPtr caps,
+         else if (STREQ(name, "block-commit") ||
+                  STREQ(name, "__com.redhat_block-commit"))
+             qemuCapsSet(caps, QEMU_CAPS_BLOCK_COMMIT);
++        else if (STREQ(name, "drive-mirror") ||
++                 STREQ(name, "__com.redhat_drive-mirror"))
++            qemuCapsSet(caps, QEMU_CAPS_DRIVE_MIRROR);
++        else if (STREQ(name, "__com.redhat_drive-reopen"))
++            qemuCapsSet(caps, QEMU_CAPS_DRIVE_REOPEN);
+         VIR_FREE(name);
+     }
+     VIR_FREE(commands);
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 2c7839d..d154cf1 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -155,16 +155,8 @@ enum qemuCapsFlags {
+     /* RHEL-only below here */
+     QEMU_CAPS_DISABLE_KSM           , /* Is '-redhat-disable-KSM' available? */
+     QEMU_CAPS_VIRTIO_NET_MACVTAP_COMPAT, /* virtio-net-pci.__com_redhat_macvtap_compat */
+-
+-    /* RHEL-only: these two caps must exist in order to upgrade
+-     * running domains from 6.3 to prerelease 6.4 libvirt.  They are
+-     * unused in this particular build, but will be used once we
+-     * rebase to upstream qemu and libvirt drive-mirror support.  */
+-    QEMU_CAPS_DRIVE_MIRROR, /* 6.3 __com.redhat.drive-mirror, will hit
+-                             * upstream qemu 1.2 as drive-mirror */
+-    QEMU_CAPS_DRIVE_REOPEN, /* 6.3 __com.redhat.drive-reopen, will hit
+-                             * upstream qemu 1.2 as
+-                             * block-job-complete */
++    QEMU_CAPS_DRIVE_MIRROR,             /* drive-mirror monitor command */
++    QEMU_CAPS_DRIVE_REOPEN,             /* drive-reopen vs block-job-complete */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 2b56f01..c54d84f 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -2812,6 +2812,39 @@ qemuMonitorDiskSnapshot(qemuMonitorPtr mon, virJSONValuePtr actions,
+     return ret;
+ }
+ 
++/* Start a drive-mirror block job.  bandwidth is in MiB/sec.  */
++int
++qemuMonitorDriveMirror(qemuMonitorPtr mon,
++                       const char *device, const char *file,
++                       const char *format, unsigned long bandwidth,
++                       bool reopen, unsigned int flags)
++{
++    int ret = -1;
++    unsigned long long speed;
++
++    VIR_DEBUG("mon=%p, device=%s, file=%s, format=%s, bandwidth=%ld, "
++              "reopen=%d, flags=%x",
++              mon, device, file, NULLSTR(format), bandwidth, reopen, flags);
++
++    /* Convert bandwidth MiB to bytes */
++    speed = bandwidth;
++    if (speed > ULLONG_MAX / 1024 / 1024) {
++        virReportError(VIR_ERR_OVERFLOW,
++                       _("bandwidth must be less than %llu"),
++                       ULLONG_MAX / 1024 / 1024);
++        return -1;
++    }
++    speed <<= 20;
++
++    if (mon->json)
++        ret = qemuMonitorJSONDriveMirror(mon, device, file, format, speed,
++                                         reopen, flags);
++    else
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("drive-mirror requires JSON monitor"));
++    return ret;
++}
++
+ /* Use the transaction QMP command to run atomic snapshot commands.  */
+ int
+ qemuMonitorTransaction(qemuMonitorPtr mon, virJSONValuePtr actions)
+@@ -2828,7 +2861,7 @@ qemuMonitorTransaction(qemuMonitorPtr mon, virJSONValuePtr actions)
+     return ret;
+ }
+ 
+-/* Start a block-commit block job.  bandwidth is in MB/sec.  */
++/* Start a block-commit block job.  bandwidth is in MiB/sec.  */
+ int
+ qemuMonitorBlockCommit(qemuMonitorPtr mon, const char *device,
+                        const char *top, const char *base,
+@@ -2858,6 +2891,25 @@ qemuMonitorBlockCommit(qemuMonitorPtr mon, const char *device,
+     return ret;
+ }
+ 
++/* Use the block-job-complete or drive-reopen monitor command to pivot
++ * a block copy job.  */
++int
++qemuMonitorDrivePivot(qemuMonitorPtr mon, const char *device,
++                      const char *file, const char *format, bool reopen)
++{
++    int ret = -1;
++
++    VIR_DEBUG("mon=%p, device=%s, file=%s, format=%s, reopen=%d",
++              mon, device, file, NULLSTR(format), reopen);
++
++    if (mon->json)
++        ret = qemuMonitorJSONDrivePivot(mon, device, file, format, reopen);
++    else
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("drive pivot requires JSON monitor"));
++    return ret;
++}
++
+ int qemuMonitorArbitraryCommand(qemuMonitorPtr mon,
+                                 const char *cmd,
+                                 char **reply,
+@@ -2933,7 +2985,7 @@ int qemuMonitorScreendump(qemuMonitorPtr mon,
+     return ret;
+ }
+ 
+-/* bandwidth is in MB/sec */
++/* bandwidth is in MiB/sec */
+ int qemuMonitorBlockJob(qemuMonitorPtr mon,
+                         const char *device,
+                         const char *base,
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 779d32a..0bbeb6c 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -528,6 +528,20 @@ int qemuMonitorDiskSnapshot(qemuMonitorPtr mon,
+                             bool reuse);
+ int qemuMonitorTransaction(qemuMonitorPtr mon, virJSONValuePtr actions)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
++int qemuMonitorDriveMirror(qemuMonitorPtr mon,
++                           const char *device,
++                           const char *file,
++                           const char *format,
++                           unsigned long bandwidth,
++                           bool reopen,
++                           unsigned int flags)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
++int qemuMonitorDrivePivot(qemuMonitorPtr mon,
++                          const char *device,
++                          const char *file,
++                          const char *format,
++                          bool reopen)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+ 
+ int qemuMonitorBlockCommit(qemuMonitorPtr mon,
+                            const char *device,
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 163da22..80cdf78 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -3381,6 +3381,52 @@ cleanup:
+     return ret;
+ }
+ 
++/* speed is in bytes/sec */
++int
++qemuMonitorJSONDriveMirror(qemuMonitorPtr mon,
++                           const char *device, const char *file,
++                           const char *format, unsigned long long speed,
++                           bool reopen, unsigned int flags)
++{
++    int ret = -1;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++    bool shallow = (flags & VIR_DOMAIN_BLOCK_REBASE_SHALLOW) != 0;
++    bool reuse = (flags & VIR_DOMAIN_BLOCK_REBASE_REUSE_EXT) != 0;
++
++    if (reopen)
++        cmd = qemuMonitorJSONMakeCommand("__com.redhat_drive-mirror",
++                                         "s:device", device,
++                                         "s:target", file,
++                                         "U:speed", speed,
++                                         "b:full", !shallow,
++                                         "s:mode",
++                                         reuse ? "existing" : "absolute-paths",
++                                         format ? "s:format" : NULL, format,
++                                         NULL);
++    else
++        cmd = qemuMonitorJSONMakeCommand("drive-mirror",
++                                         "s:device", device,
++                                         "s:target", file,
++                                         "U:speed", speed,
++                                         "s:sync", shallow ? "top" : "full",
++                                         "s:mode",
++                                         reuse ? "existing" : "absolute-paths",
++                                         format ? "s:format" : NULL, format,
++                                         NULL);
++    if (!cmd)
++        return -1;
++
++    if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply)) < 0)
++        goto cleanup;
++    ret = qemuMonitorJSONCheckError(cmd, reply);
++
++cleanup:
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
++
+ int
+ qemuMonitorJSONTransaction(qemuMonitorPtr mon, virJSONValuePtr actions)
+ {
+@@ -3454,6 +3500,37 @@ cleanup:
+     return ret;
+ }
+ 
++int
++qemuMonitorJSONDrivePivot(qemuMonitorPtr mon, const char *device,
++                          const char *file, const char *format, bool reopen)
++{
++    int ret;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++
++    if (reopen)
++        cmd = qemuMonitorJSONMakeCommand("__com.redhat_drive-reopen",
++                                         "s:device", device,
++                                         "s:new-image-file", file,
++                                         format ? "s:format" : NULL, format,
++                                         NULL);
++    else
++        cmd = qemuMonitorJSONMakeCommand("block-job-complete",
++                                         "s:device", device,
++                                         NULL);
++    if (!cmd)
++        return -1;
++
++    if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply)) < 0)
++        goto cleanup;
++    ret = qemuMonitorJSONCheckError(cmd, reply);
++
++cleanup:
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
++
+ 
+ int qemuMonitorJSONArbitraryCommand(qemuMonitorPtr mon,
+                                     const char *cmd_str,
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index 55f5dc9..8d8dc43 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -237,8 +237,25 @@ int qemuMonitorJSONDiskSnapshot(qemuMonitorPtr mon,
+                                 const char *device,
+                                 const char *file,
+                                 const char *format,
+-                                bool reuse);
+-int qemuMonitorJSONTransaction(qemuMonitorPtr mon, virJSONValuePtr actions);
++                                bool reuse)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3)
++    ATTRIBUTE_NONNULL(4) ATTRIBUTE_NONNULL(5);
++int qemuMonitorJSONTransaction(qemuMonitorPtr mon, virJSONValuePtr actions)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
++int qemuMonitorJSONDriveMirror(qemuMonitorPtr mon,
++                               const char *device,
++                               const char *file,
++                               const char *format,
++                               unsigned long long speed,
++                               bool reopen,
++                               unsigned int flags)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
++int qemuMonitorJSONDrivePivot(qemuMonitorPtr mon,
++                              const char *device,
++                              const char *file,
++                              const char *format,
++                              bool reopen)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+ 
+ int qemuMonitorJSONBlockCommit(qemuMonitorPtr mon,
+                                const char *device,
+-- 
+1.7.12.4
+

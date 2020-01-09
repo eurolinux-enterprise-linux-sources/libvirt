@@ -1,0 +1,44 @@
+From c36ab09038dc448cdd48a579f8f4bec5cd65dc9e Mon Sep 17 00:00:00 2001
+Message-Id: <c36ab09038dc448cdd48a579f8f4bec5cd65dc9e.1354720507.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 29 Nov 2012 14:17:27 -0500
+Subject: [PATCH] network: fix crash when portgroup has no name
+
+This resolves: https://bugzilla.redhat.com/show_bug.cgi?id=879473
+
+The name attribute is required for portgroup elements (yes, the RNG
+specifies that), and there is code in libvirt that assumes it is
+non-null.  Unfortunately, the portgroup parsing function wasn't
+checking for lack of portgroup. One adverse result of this was that
+attempts to update a network by adding a portgroup with no name would
+cause libvirtd to segfault. For example:
+
+   virsh net-update default add portgroup "<portgroup default='yes'/>"
+
+This patch causes virNetworkPortGroupParseXML to fail if no name is
+specified, thus avoiding any later problems.
+(cherry picked from commit 012d69dff1e031f8079a9952e886a31795e589b2)
+---
+ src/conf/network_conf.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index a55339d..54d1d35 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -1174,6 +1174,12 @@ virNetworkPortGroupParseXML(virPortGroupDefPtr def,
+ 
+     /* grab raw data from XML */
+     def->name = virXPathString("string(./@name)", ctxt);
++    if (!def->name) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("Missing required name attribute in portgroup"));
++        goto error;
++    }
++
+     isDefault = virXPathString("string(./@default)", ctxt);
+     def->isDefault = isDefault && STRCASEEQ(isDefault, "yes");
+ 
+-- 
+1.8.0
+

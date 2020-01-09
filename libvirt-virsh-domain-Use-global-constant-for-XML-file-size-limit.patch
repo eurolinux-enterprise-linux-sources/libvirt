@@ -1,0 +1,85 @@
+From 583f228ae50206e2d6dfbcf25005305959f9139b Mon Sep 17 00:00:00 2001
+Message-Id: <583f228ae50206e2d6dfbcf25005305959f9139b@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 20 Jan 2015 11:34:27 +0100
+Subject: [PATCH] virsh: domain: Use global constant for XML file size limit
+
+Few places still used hardcoded limit for maximum XML size for commands
+that accept XML files. The hardcoded limits ranged from 8k to 1M. Use
+VSH_MAX_XML_FILE to express this limit in a unified way. This will bump
+the limit for the commands that used hardcoded string lengths to 10M.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1152427
+https://bugzilla.redhat.com/show_bug.cgi?id=1134671
+(cherry picked from commit 4d1852c48541a29e3c47caf0f2b801dfcb6579db)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	tools/virsh-domain.c -- the code changed upstream in some areas;
+        this backport is basically changing all hardcoded values which
+        were still present in 6.6
+---
+ tools/virsh-domain.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index cb9adf0..8d83b5e 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -3003,7 +3003,7 @@ doSave(void *opaque)
+         goto out;
+ 
+     if (xmlfile &&
+-        virFileReadAll(xmlfile, 8192, &xml) < 0) {
++        virFileReadAll(xmlfile, VSH_MAX_XML_FILE, &xml) < 0) {
+         vshReportError(ctl);
+         goto out;
+     }
+@@ -3247,7 +3247,7 @@ cmdSaveImageDefine(vshControl *ctl, const vshCmd *cmd)
+         return false;
+     }
+ 
+-    if (virFileReadAll(xmlfile, 8192, &xml) < 0)
++    if (virFileReadAll(xmlfile, VSH_MAX_XML_FILE, &xml) < 0)
+         goto cleanup;
+ 
+     if (virDomainSaveImageDefineXML(ctl->conn, file, xml, flags) < 0) {
+@@ -3747,7 +3747,7 @@ cmdRestore(vshControl *ctl, const vshCmd *cmd)
+     }
+ 
+     if (xmlfile &&
+-        virFileReadAll(xmlfile, 8192, &xml) < 0)
++        virFileReadAll(xmlfile, VSH_MAX_XML_FILE, &xml) < 0)
+         goto cleanup;
+ 
+     if (((flags || xml)
+@@ -6573,7 +6573,7 @@ cmdDomXMLFromNative(vshControl *ctl, const vshCmd *cmd)
+         vshCommandOptString(cmd, "config", &configFile) < 0)
+         return false;
+ 
+-    if (virFileReadAll(configFile, 1024*1024, &configData) < 0)
++    if (virFileReadAll(configFile, VSH_MAX_XML_FILE, &configData) < 0)
+         return false;
+ 
+     xmlData = virConnectDomainXMLFromNative(ctl->conn, format, configData, flags);
+@@ -6617,7 +6617,7 @@ cmdDomXMLToNative(vshControl *ctl, const vshCmd *cmd)
+         || vshCommandOptString(cmd, "xml", &xmlFile) < 0)
+         return false;
+ 
+-    if (virFileReadAll(xmlFile, 1024*1024, &xmlData) < 0)
++    if (virFileReadAll(xmlFile, VSH_MAX_XML_FILE, &xmlData) < 0)
+         return false;
+ 
+     configData = virConnectDomainXMLToNative(ctl->conn, format, xmlData, flags);
+@@ -6830,7 +6830,7 @@ doMigrate(void *opaque)
+         flags |= VIR_MIGRATE_ABORT_ON_ERROR;
+ 
+     if (xmlfile &&
+-        virFileReadAll(xmlfile, 8192, &xml) < 0) {
++        virFileReadAll(xmlfile, VSH_MAX_XML_FILE, &xml) < 0) {
+         vshError(ctl, _("file '%s' doesn't exist"), xmlfile);
+         goto out;
+     }
+-- 
+2.2.2
+

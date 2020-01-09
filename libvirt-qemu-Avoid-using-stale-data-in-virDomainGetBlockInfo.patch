@@ -1,0 +1,69 @@
+From 2eb2dafef61d28038b6e7387a8a7aa8cda7e359f Mon Sep 17 00:00:00 2001
+Message-Id: <2eb2dafef61d28038b6e7387a8a7aa8cda7e359f@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 17 Jan 2014 16:06:01 -0700
+Subject: [PATCH] qemu: Avoid using stale data in virDomainGetBlockInfo
+
+CVE-2013-6458
+
+Generally, every API that is going to begin a job should do that before
+fetching data from vm->def. However, qemuDomainGetBlockInfo does not
+know whether it will have to start a job or not before checking vm->def.
+To avoid using disk alias that might have been freed while we were
+waiting for a job, we use its copy. In case the disk was removed in the
+meantime, we will fail with "cannot find statistics for device '...'"
+error message.
+
+(cherry picked from commit b799259583bd65c0b2f5042e6c3ff19637ade881)
+
+Conflicts:
+	src/qemu/qemu_driver.c - VIR_STRDUP not backported, context
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 740d7cb..317fbe1 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -9839,6 +9839,7 @@ static int qemuDomainGetBlockInfo(virDomainPtr dom,
+     struct stat sb;
+     int i;
+     int format;
++    char *alias = NULL;
+ 
+     virCheckFlags(0, -1);
+ 
+@@ -9950,13 +9951,18 @@ static int qemuDomainGetBlockInfo(virDomainPtr dom,
+         virDomainObjIsActive(vm)) {
+         qemuDomainObjPrivatePtr priv = vm->privateData;
+ 
++        if (!(alias = strdup(disk->info.alias))) {
++            virReportOOMError();
++            goto cleanup;
++        }
++
+         if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_QUERY) < 0)
+             goto cleanup;
+ 
+         if (virDomainObjIsActive(vm)) {
+             qemuDomainObjEnterMonitor(driver, vm);
+             ret = qemuMonitorGetBlockExtent(priv->mon,
+-                                            disk->info.alias,
++                                            alias,
+                                             &info->allocation);
+             qemuDomainObjExitMonitor(driver, vm);
+         } else {
+@@ -9970,6 +9976,7 @@ static int qemuDomainGetBlockInfo(virDomainPtr dom,
+     }
+ 
+ cleanup:
++    VIR_FREE(alias);
+     virStorageFileFreeMetadata(meta);
+     VIR_FORCE_CLOSE(fd);
+     if (vm)
+-- 
+1.9.1
+

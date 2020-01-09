@@ -1,0 +1,164 @@
+From 865d928e712e785790981439e426b592205c299b Mon Sep 17 00:00:00 2001
+Message-Id: <865d928e712e785790981439e426b592205c299b.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:41 -0600
+Subject: [PATCH] Add a qemuMonitorGetObjectTypes() method for QMP
+ qom-list-types command
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+Add a new qemuMonitorGetObjectTypes() method to support invocation
+of the 'qom-list-types' JSON monitor command. No HMP equivalent
+is required, since this will only be present for QEMU >= 1.2
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 2ccaa8e6ba7d811a3939e0f90737ba96a258f483)
+---
+ src/qemu/qemu_monitor.c      | 22 +++++++++++++
+ src/qemu/qemu_monitor.h      |  3 ++
+ src/qemu/qemu_monitor_json.c | 74 ++++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_monitor_json.h |  4 +++
+ 4 files changed, 103 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 396b4e1..335f525 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -3181,3 +3181,25 @@ int qemuMonitorGetEvents(qemuMonitorPtr mon,
+ 
+     return qemuMonitorJSONGetEvents(mon, events);
+ }
++
++
++int qemuMonitorGetObjectTypes(qemuMonitorPtr mon,
++                              char ***types)
++{
++    VIR_DEBUG("mon=%p types=%p",
++              mon, types);
++
++    if (!mon) {
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("monitor must not be NULL"));
++        return -1;
++    }
++
++    if (!mon->json) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("JSON monitor is required"));
++        return -1;
++    }
++
++    return qemuMonitorJSONGetObjectTypes(mon, types);
++}
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index ac3fd31..05cb03f 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -607,6 +607,9 @@ int qemuMonitorGetCommands(qemuMonitorPtr mon,
+ int qemuMonitorGetEvents(qemuMonitorPtr mon,
+                          char ***events);
+ 
++int qemuMonitorGetObjectTypes(qemuMonitorPtr mon,
++                              char ***types);
++
+ 
+ /**
+  * When running two dd process and using <> redirection, we need a
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index be39799..6ce1226 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -4374,3 +4374,77 @@ cleanup:
+     virJSONValueFree(reply);
+     return ret;
+ }
++
++
++int qemuMonitorJSONGetObjectTypes(qemuMonitorPtr mon,
++                                  char ***types)
++{
++    int ret;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++    virJSONValuePtr data;
++    char **typelist = NULL;
++    int n = 0;
++    size_t i;
++
++    *types = NULL;
++
++    if (!(cmd = qemuMonitorJSONMakeCommand("qom-list-types", NULL)))
++        return -1;
++
++    ret = qemuMonitorJSONCommand(mon, cmd, &reply);
++
++    if (ret == 0)
++        ret = qemuMonitorJSONCheckError(cmd, reply);
++
++    if (ret < 0)
++        goto cleanup;
++
++    ret = -1;
++
++    if (!(data = virJSONValueObjectGet(reply, "return"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("qom-list-types reply was missing return data"));
++        goto cleanup;
++    }
++
++    if ((n = virJSONValueArraySize(data)) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("qom-list-types reply data was not an array"));
++        goto cleanup;
++    }
++
++    if (VIR_ALLOC_N(typelist, n) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    for (i = 0 ; i < n ; i++) {
++        virJSONValuePtr child = virJSONValueArrayGet(data, i);
++        const char *tmp;
++
++        if (!(tmp = virJSONValueObjectGetString(child, "name"))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("qom-list-types reply data was missing 'name'"));
++            goto cleanup;
++        }
++
++        if (!(typelist[i] = strdup(tmp))) {
++            virReportOOMError();
++            goto cleanup;
++        }
++    }
++
++    ret = n;
++    *types = typelist;
++
++cleanup:
++    if (ret < 0 && typelist) {
++        for (i = 0 ; i < n ; i++)
++            VIR_FREE(typelist[i]);
++        VIR_FREE(typelist);
++    }
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index 3703379..babc6b0 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -314,4 +314,8 @@ int qemuMonitorJSONGetEvents(qemuMonitorPtr mon,
+                              char ***events)
+     ATTRIBUTE_NONNULL(2);
+ 
++int qemuMonitorJSONGetObjectTypes(qemuMonitorPtr mon,
++                                  char ***types)
++    ATTRIBUTE_NONNULL(2);
++
+ #endif /* QEMU_MONITOR_JSON_H */
+-- 
+1.7.12.3
+

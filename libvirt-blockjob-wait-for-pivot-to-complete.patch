@@ -1,0 +1,55 @@
+From 940d7dd500839eb50b78e58122b958ec2334efa6 Mon Sep 17 00:00:00 2001
+Message-Id: <940d7dd500839eb50b78e58122b958ec2334efa6@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Wed, 16 Jul 2014 07:48:28 -0600
+Subject: [PATCH] blockjob: wait for pivot to complete
+
+RHEL 6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1119385
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1119173 documents that
+commit eaba79d was flawed in the implementation of the
+VIR_DOMAIN_BLOCK_JOB_ABORT_ASYNC flag when it comes to completing
+a blockcopy.  Basically, the qemu pivot action is async (the QMP
+command returns immediately, but the user must wait for the
+BLOCK_JOB_COMPLETE event to know that all I/O related to the job
+has finally been flushed), but the libvirt command was documented
+as synchronous by default.  As active block commit will also be
+using this code, it is worth fixing now.
+
+* src/qemu/qemu_driver.c (qemuDomainBlockJobImpl): Don't skip wait
+loop after pivot.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 97c59b9c46f915c48cd5db96ada40f060553bcae)
+
+Conflicts:
+	src/qemu/qemu_driver.c - context
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 3e24f81..0f26401 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -13892,7 +13892,7 @@ qemuDomainBlockJobImpl(virDomainPtr dom, const char *path, const char *base,
+     if (disk->mirror && mode == BLOCK_JOB_ABORT &&
+         (flags & VIR_DOMAIN_BLOCK_JOB_ABORT_PIVOT)) {
+         ret = qemuDomainBlockPivot(dom->conn, driver, vm, device, disk);
+-        goto endjob;
++        goto waitjob;
+     }
+ 
+     qemuDomainObjEnterMonitorWithDriver(driver, vm);
+@@ -13920,6 +13920,7 @@ qemuDomainBlockJobImpl(virDomainPtr dom, const char *path, const char *base,
+         disk->mirroring = false;
+     }
+ 
++ waitjob:
+     /* With synchronous block cancel, we must synthesize an event, and
+      * we silently ignore the ABORT_ASYNC flag.  With asynchronous
+      * block cancel, the event will come from qemu, but without the
+-- 
+2.0.0
+

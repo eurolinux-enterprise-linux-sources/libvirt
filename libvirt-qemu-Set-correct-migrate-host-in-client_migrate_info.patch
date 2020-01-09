@@ -1,0 +1,72 @@
+From ae1296460cf640d5838b3b5e390219c27855f29d Mon Sep 17 00:00:00 2001
+Message-Id: <ae1296460cf640d5838b3b5e390219c27855f29d.1373271641.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 23 May 2013 16:42:13 +0200
+Subject: [PATCH] qemu: Set correct migrate host in client_migrate_info
+
+RHEL-6.5: https://bugzilla.redhat.com/show_bug.cgi?id=920441
+RHEL-6:4.z: https://bugzilla.redhat.com/show_bug.cgi?id=966587
+
+Currently, we are discarding listen attribute from qemu cookie even though
+we strive to gather it. This result in not so cool bug: if user have
+different networks, one for management/migration, and one for VNC/SPICE we
+pass incorrect host to the qemu in client_migrate_info. What we actually
+pass is remote hostname, while we should be passing remote listen address.
+It doesn't matter as long as these two are the same, but they don't need
+necessary to be like that.
+(cherry picked from commit 7f15ebc7a2b599ab10dbc15bca6f823591213e67)
+---
+ src/conf/domain_conf.c    | 4 +++-
+ src/qemu/qemu_migration.c | 8 +++++++-
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 77c3a74..0de208b 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -15347,8 +15347,10 @@ virDomainGraphicsListenGetAddress(virDomainGraphicsDefPtr def, size_t ii)
+     virDomainGraphicsListenDefPtr listenInfo
+         = virDomainGraphicsGetListen(def, ii, false);
+ 
++    /* even a network can have a listen address */
+     if (!listenInfo ||
+-        (listenInfo->type != VIR_DOMAIN_GRAPHICS_LISTEN_TYPE_ADDRESS))
++        !(listenInfo->type == VIR_DOMAIN_GRAPHICS_LISTEN_TYPE_ADDRESS ||
++          listenInfo->type == VIR_DOMAIN_GRAPHICS_LISTEN_TYPE_NETWORK))
+         return NULL;
+     return listenInfo->address;
+ }
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 938c222..2c50eaf 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1062,6 +1062,7 @@ qemuDomainMigrateGraphicsRelocate(struct qemud_driver *driver,
+ {
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     int ret;
++    char *listenAddress = cookie->graphics->listen;
+ 
+     if (!cookie)
+         return 0;
+@@ -1075,12 +1076,17 @@ qemuDomainMigrateGraphicsRelocate(struct qemud_driver *driver,
+     if (cookie->graphics->type != VIR_DOMAIN_GRAPHICS_TYPE_SPICE)
+         return 0;
+ 
++    if (!listenAddress ||
++        STREQ(listenAddress, "0.0.0.0") ||
++        STREQ(listenAddress, "::"))
++        listenAddress = cookie->remoteHostname;
++
+     ret = qemuDomainObjEnterMonitorAsync(driver, vm,
+                                          QEMU_ASYNC_JOB_MIGRATION_OUT);
+     if (ret == 0) {
+         ret = qemuMonitorGraphicsRelocate(priv->mon,
+                                           cookie->graphics->type,
+-                                          cookie->remoteHostname,
++                                          listenAddress,
+                                           cookie->graphics->port,
+                                           cookie->graphics->tlsPort,
+                                           cookie->graphics->tlsSubject);
+-- 
+1.8.2.1
+

@@ -1,0 +1,68 @@
+From e7d224d246edcbc2a49fa7d06f05604a6a678f62 Mon Sep 17 00:00:00 2001
+Message-Id: <e7d224d246edcbc2a49fa7d06f05604a6a678f62.1373885148.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 12 Jul 2013 09:35:29 +0200
+Subject: [PATCH] sec_manager: Refuse to start domain with unsupported seclabel
+
+https://bugzilla.redhat.com/show_bug.cgi?id=947387
+
+If a user configures a domain to use a seclabel of a specific type,
+but the appropriate driver is not accessible, we should refuse to
+start the domain. For instance, if user requires selinux, but it is
+either non present in the system, or is just disabled, we should not
+start the domain. Moreover, since we are touching only those labels we
+have a security driver for, the other labels may confuse libvirt when
+reconnecting to a domain on libvirtd restart. In our selinux example,
+when starting up a domain, missing security label is okay, as we
+auto-generate one. But later, when libvirt is re-connecting to a live
+qemu instance, we parse a state XML, where security label is required
+and it is an error if missing:
+
+  error : virSecurityLabelDefParseXML:3228 : XML error: security label
+  is missing
+
+This results in a qemu process left behind without any libvirt control.
+(cherry picked from commit 8d68cbeaa8a64759323da1d64526e2a941eb93e1)
+
+Conflicts:
+	src/security/security_manager.c since 48b49a63 is not backported
+---
+ src/security/security_manager.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/security/security_manager.c b/src/security/security_manager.c
+index 8afbe87..89feb73 100644
+--- a/src/security/security_manager.c
++++ b/src/security/security_manager.c
+@@ -321,7 +321,7 @@ int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
+                                virDomainDefPtr vm)
+ {
+     int ret = -1;
+-    size_t i;
++    size_t i, j;
+     virSecurityManagerPtr* sec_managers = NULL;
+     virSecurityLabelDefPtr seclabel;
+     bool generated = false;
+@@ -332,6 +332,19 @@ int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
+     if ((sec_managers = virSecurityManagerGetNested(mgr)) == NULL)
+         return ret;
+ 
++    for (i = 0; vm->nseclabels; i++) {
++        for (j = 0; sec_managers[j]; j++)
++            if (STREQ(vm->seclabels[i]->model, sec_managers[j]->drv->name))
++                break;
++
++        if (!sec_managers[j]) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("Unable to find security driver for label %s"),
++                           vm->seclabels[i]->model);
++            goto cleanup;
++        }
++    }
++
+     for (i = 0; sec_managers[i]; i++) {
+         generated = false;
+         seclabel = virDomainDefGetSecurityLabelDef(vm, sec_managers[i]->drv->name);
+-- 
+1.8.3.2
+

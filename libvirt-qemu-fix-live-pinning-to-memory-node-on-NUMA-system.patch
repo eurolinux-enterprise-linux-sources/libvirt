@@ -1,0 +1,206 @@
+From 523d82f38db69e7c1f6de31ad08b8a4c9072464e Mon Sep 17 00:00:00 2001
+Message-Id: <523d82f38db69e7c1f6de31ad08b8a4c9072464e@dist-git>
+From: Shivaprasad G Bhat <shivaprasadbhat@gmail.com>
+Date: Mon, 7 Apr 2014 11:39:47 +0200
+Subject: [PATCH] qemu: fix live pinning to memory node on NUMA system
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=857312
+
+Ever since the subcpusets(vcpu,emulator) were introduced, the parent
+cpuset cannot be modified to remove the nodes that are in use by the
+subcpusets.
+The fix is to break the memory node modification into three steps:
+ 1. assign new nodes into the parent,
+ 2. change the nodes in the child nodes,
+ 3. remove the old nodes on the parent node.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1009880
+
+Signed-off-by: Shivaprasad G Bhat <sbhat@linux.vnet.ibm.com>
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit 81fae6b95cfe72d0f5a987b6b5cd4bf86e32798c)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+Conflicts:
+  src/qemu/qemu_driver.c: missing commits:
+
+020a030 Stop accessing driver->caps directly in QEMU driver
+632f78c Store a virCgroupPtr instance in qemuDomainObjPrivatePtr
+04c18d2 Rename virCgroupForXXX to virCgroupNewXXX
+106a2dd virBitmapParse: Fix behavior in case of error and fix up callers
+b64dabf Report full errors from virCgroupNew*
+0d7f45a Convert remainder of cgroups code to report errors
+
+a71ec98 qemu: Fix the wrong expression (context)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 131 +++++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 105 insertions(+), 26 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 0e9e0f3..8e027ed 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -8163,6 +8163,110 @@ cleanup:
+ }
+ 
+ static int
++qemuDomainSetNumaParamsLive(virDomainObjPtr vm,
++                            virCgroupPtr group,
++                            virCapsPtr caps,
++                            virBitmapPtr nodeset)
++{
++    virCgroupPtr cgroup_temp = NULL;
++    virBitmapPtr temp_nodeset = NULL;
++    qemuDomainObjPrivatePtr priv = vm->privateData;
++    char *nodeset_str = NULL;
++    size_t i = 0;
++    int ret = -1;
++    int rc = 0;
++
++    if (vm->def->numatune.memory.mode != VIR_DOMAIN_NUMATUNE_MEM_STRICT) {
++        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
++                       _("change of nodeset for running domain "
++                         "requires strict numa mode"));
++        goto cleanup;
++    }
++
++    /*Get Exisitng nodeset values */
++    if ((rc = virCgroupGetCpusetMems(group, &nodeset_str)) < 0) {
++        virReportError(-rc, "%s",
++                       _("unable to get numa nodeset"));
++        goto cleanup;
++    }
++    if (virBitmapParse(nodeset_str, 0, &temp_nodeset,
++                       VIR_DOMAIN_CPUMASK_LEN) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("Failed to parse existing nodeset values"));
++        goto cleanup;
++    }
++    VIR_FREE(nodeset_str);
++
++    for (i = 0; i < caps->host.nnumaCell; i++) {
++        bool result;
++        if (virBitmapGetBit(nodeset, i, &result) < 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("Failed to get cpuset bit values"));
++            goto cleanup;
++        }
++        if (result && (virBitmapSetBit(temp_nodeset, i) < 0)) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("Failed to set temporary cpuset bit values"));
++            goto cleanup;
++        }
++    }
++
++    if (!(nodeset_str = virBitmapFormat(temp_nodeset))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("Failed to format nodeset"));
++        goto cleanup;
++    }
++
++    if ((rc = virCgroupSetCpusetMems(group, nodeset_str)) < 0) {
++        virReportSystemError(-rc, _("Failed to set cpuset.mems to %s"),
++                             nodeset_str);
++        goto cleanup;
++    }
++    VIR_FREE(nodeset_str);
++
++    /* Ensure the cpuset string is formated before passing to cgroup */
++    if (!(nodeset_str = virBitmapFormat(nodeset))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("Failed to format nodeset"));
++        goto cleanup;
++    }
++
++    for (i = 0; i < priv->nvcpupids; i++) {
++        if ((rc = virCgroupForVcpu(group, i, &cgroup_temp, false)) < 0) {
++            virReportSystemError(-rc, _("Unable to access vcpu cgroup for "
++                                        "%s (vcpu: %zu)"),
++                                 vm->def->name, i);
++        }
++        if ((rc = virCgroupSetCpusetMems(cgroup_temp, nodeset_str)) < 0) {
++            virReportSystemError(-rc, _("Failed to set cpuset.mems to %s"),
++                                 nodeset_str);
++            goto cleanup;
++        }
++        virCgroupFree(&cgroup_temp);
++    }
++
++    if ((rc = virCgroupForEmulator(group, &cgroup_temp, false)) < 0) {
++        virReportSystemError(-rc, _("Unable to find emulator cgroup for %s"),
++                             vm->def->name);
++        goto cleanup;
++    }
++    if ((rc = virCgroupSetCpusetMems(cgroup_temp, nodeset_str)) < 0 ||
++        (rc = virCgroupSetCpusetMems(group, nodeset_str)) < 0) {
++        virReportSystemError(-rc, _("Failed to set cpuset.mems to %s"),
++                             nodeset_str);
++        goto cleanup;
++    }
++
++    ret = 0;
++ cleanup:
++    VIR_FREE(nodeset_str);
++    virBitmapFree(temp_nodeset);
++    virCgroupFree(&cgroup_temp);
++
++    return ret;
++}
++
++static int
+ qemuDomainSetNumaParameters(virDomainPtr dom,
+                             virTypedParameterPtr params,
+                             int nparams,
+@@ -8231,9 +8335,7 @@ qemuDomainSetNumaParameters(virDomainPtr dom,
+                 persistentDef->numatune.memory.mode = params[i].value.i;
+             }
+         } else if (STREQ(param->field, VIR_DOMAIN_NUMA_NODESET)) {
+-            int rc;
+             virBitmapPtr nodeset = NULL;
+-            char *nodeset_str = NULL;
+ 
+             if (virBitmapParse(params[i].value.s,
+                                0, &nodeset,
+@@ -8245,34 +8347,11 @@ qemuDomainSetNumaParameters(virDomainPtr dom,
+             }
+ 
+             if (flags & VIR_DOMAIN_AFFECT_LIVE) {
+-                if (vm->def->numatune.memory.mode !=
+-                    VIR_DOMAIN_NUMATUNE_MEM_STRICT) {
+-                    virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+-                                   _("change of nodeset for running domain "
+-                                     "requires strict numa mode"));
+-                    virBitmapFree(nodeset);
+-                    ret = -1;
+-                    continue;
+-                }
+-
+-                /* Ensure the cpuset string is formated before passing to cgroup */
+-                if (!(nodeset_str = virBitmapFormat(nodeset))) {
+-                    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-                                   _("Failed to format nodeset"));
+-                    virBitmapFree(nodeset);
+-                    ret = -1;
+-                    continue;
+-                }
+-
+-                if ((rc = virCgroupSetCpusetMems(group, nodeset_str) != 0)) {
+-                    virReportSystemError(-rc, "%s",
+-                                         _("unable to set numa tunable"));
++                if (qemuDomainSetNumaParamsLive(vm, group, driver->caps, nodeset) < 0) {
+                     virBitmapFree(nodeset);
+-                    VIR_FREE(nodeset_str);
+                     ret = -1;
+                     continue;
+                 }
+-                VIR_FREE(nodeset_str);
+ 
+                 /* update vm->def here so that dumpxml can read the new
+                  * values from vm->def. */
+-- 
+1.9.1
+

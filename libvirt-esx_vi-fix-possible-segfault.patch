@@ -1,0 +1,48 @@
+From 93128ef23e986b84288db5d790cf2e1da288e1ce Mon Sep 17 00:00:00 2001
+Message-Id: <93128ef23e986b84288db5d790cf2e1da288e1ce@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Thu, 22 Jan 2015 20:17:49 +0100
+Subject: [PATCH] esx_vi: fix possible segfault
+
+Clang found possible dereference of NULL pointer which is right.
+Function 'esxVI_LookupTaskInfoByTask' should find a task info. The issue
+is that we could return 0 and leave 'taksInfo' pointer NULL because if
+there is no match we simply end the search loop end set 'result' to 0.
+Every caller count on the fact that if the return value is 0 than it's
+safe to dereference 'taskInfo'. We should return 0 only in case we found
+something and the '*taskInfo' is not NULL.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 3baeea6239636c59454f8d5ffe0d4dbde91518a9)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1136729
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/esx/esx_vi.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/esx/esx_vi.c b/src/esx/esx_vi.c
+index cfed054..d16f260 100644
+--- a/src/esx/esx_vi.c
++++ b/src/esx/esx_vi.c
+@@ -3201,14 +3201,13 @@ esxVI_LookupTaskInfoByTask(esxVI_Context *ctx,
+                 goto cleanup;
+             }
+ 
++            result = 0;
+             break;
+         } else {
+             VIR_WARN("Unexpected '%s' property", dynamicProperty->name);
+         }
+     }
+ 
+-    result = 0;
+-
+   cleanup:
+     esxVI_String_Free(&propertyNameList);
+     esxVI_ObjectContent_Free(&objectContent);
+-- 
+2.2.2
+

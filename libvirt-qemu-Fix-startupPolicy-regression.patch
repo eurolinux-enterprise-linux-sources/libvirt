@@ -1,0 +1,53 @@
+From c81c4942e8d0dc033ae464e493e54deae162d60d Mon Sep 17 00:00:00 2001
+Message-Id: <c81c4942e8d0dc033ae464e493e54deae162d60d.1373271640.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 18 Mar 2013 14:11:58 +0100
+Subject: [PATCH] qemu: Fix startupPolicy regression
+
+https://bugzilla.redhat.com/show_bug.cgi?id=896013
+
+Commit 82d5fe543720da6d83c1d6bfa1c347d7d9fda278
+
+    qemu: check backing chains even when cgroup is omitted
+
+added backing file checks just before the code that removes optional
+disks if they are not present. However, the backing chain code fails in
+case the disk file does not exist, which makes qemuProcessStart fail
+regardless on configured startupPolicy.
+
+Note that startupPolicy implementation is still wrong after this patch
+since it only check the first file in a possible chain. It should rather
+check the complete backing chain. But this is an existing limitation
+that can be solved later. After all, startupPolicy is most useful for
+CDROM images and they won't make use of backing files in most cases.
+(cherry picked from commit ef3cd6473f5227fcc89ac4fd1fc4f8485ffae314)
+---
+ src/qemu/qemu_process.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 3b383d9..281b13c 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3708,14 +3708,15 @@ int qemuProcessStart(virConnectPtr conn,
+         goto cleanup;
+ 
+     VIR_DEBUG("Checking for CDROM and floppy presence");
++    if (qemuDomainCheckDiskPresence(driver, vm,
++                                    flags & VIR_QEMU_PROCESS_START_COLD) < 0)
++        goto cleanup;
++
+     for (i = 0; i < vm->def->ndisks ; i++) {
+         if (qemuDomainDetermineDiskChain(driver, vm->def->disks[i],
+                                          false) < 0)
+             goto cleanup;
+     }
+-    if (qemuDomainCheckDiskPresence(driver, vm,
+-                                    flags & VIR_QEMU_PROCESS_START_COLD) < 0)
+-        goto cleanup;
+ 
+     /* Get the advisory nodeset from numad if 'placement' of
+      * either <vcpu> or <numatune> is 'auto'.
+-- 
+1.8.2.1
+

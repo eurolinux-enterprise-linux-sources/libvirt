@@ -1,0 +1,117 @@
+From fac70396259423835e378e022331226c0aee66ea Mon Sep 17 00:00:00 2001
+Message-Id: <fac70396259423835e378e022331226c0aee66ea@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Feb 2016 06:59:40 -0500
+Subject: [PATCH] util: clean up and expand 802.1QbX negotiation logging
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1276478
+
+The existing log messages for this have several problems; there are
+two lines of log when one will suffice, they duplicate the function
+name in log message (when it's already included by VIR_DEBUG), they're
+missing some useful bits, they get logged even when the call is a NOP.
+
+This patch cleans up the problems with those existing logs, and also
+adds a new VIR_INFO-level log down at the function that is actually
+creating and sending the netlink message that logs *everything* going
+into the netlink message (which turns out to be much more useful in
+practice for me; I didn't want to eliminate the logs at the existing
+location though, in case they are useful in some scenario I'm
+unfamiliar with; anyway those logs are remaining at debug level, so it
+shouldn't be a bother to anyone).
+
+(cherry picked from commit 9cb8b0e5a4650e3d22c21b100970686b7da587b8)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdevvportprofile.c | 58 ++++++++++++++++++++++++++++++++++------
+ 1 file changed, 50 insertions(+), 8 deletions(-)
+
+diff --git a/src/util/virnetdevvportprofile.c b/src/util/virnetdevvportprofile.c
+index b1c3d7a..301069f 100644
+--- a/src/util/virnetdevvportprofile.c
++++ b/src/util/virnetdevvportprofile.c
+@@ -640,6 +640,40 @@ virNetDevVPortProfileOpSetLink(const char *ifname, int ifindex,
+     uint32_t dst_pid = 0;
+     struct nl_msg *nl_msg;
+     struct nlattr *vfports = NULL, *vfport;
++    char macStr[VIR_MAC_STRING_BUFLEN];
++    char hostUUIDStr[VIR_UUID_STRING_BUFLEN];
++    char instanceUUIDStr[VIR_UUID_STRING_BUFLEN];
++    const char *opName;
++
++    switch (op) {
++    case PORT_REQUEST_PREASSOCIATE:
++        opName = "PREASSOCIATE";
++        break;
++    case PORT_REQUEST_PREASSOCIATE_RR:
++        opName = "PREASSOCIATE_RR";
++        break;
++    case PORT_REQUEST_ASSOCIATE:
++        opName = "ASSOCIATE";
++        break;
++    case PORT_REQUEST_DISASSOCIATE:
++        opName = "DISASSOCIATE";
++        break;
++    default:
++        opName = "(unknown)";
++        break;
++    }
++    VIR_INFO("%s: ifname: %s ifindex: %d vf: %d vlanid: %d mac: %s "
++             "profileId: %s instanceId: %s hostUUID: %s",
++             opName, ifname ? ifname : "(unspecified)",
++             ifindex, vf, vlanid,
++             macaddr ? virMacAddrFormat(macaddr, macStr) : "(unspecified)",
++             profileId ? profileId : "(unspecified)",
++             (instanceId
++              ? virUUIDFormat(instanceId, instanceUUIDStr)
++              : "(unspecified)"),
++             (hostUUID
++              ? virUUIDFormat(hostUUID, hostUUIDStr)
++              : "(unspecified)"));
+ 
+     nl_msg = nlmsg_alloc_simple(RTM_SETLINK, NLM_F_REQUEST);
+     if (!nl_msg) {
+@@ -1188,11 +1222,16 @@ virNetDevVPortProfileAssociate(const char *macvtap_ifname,
+                                bool setlink_only)
+ {
+     int rc = 0;
++    char uuidStr[VIR_UUID_STRING_BUFLEN];
++    char macStr[VIR_MAC_STRING_BUFLEN];
+ 
+-    VIR_DEBUG("Associating port profile '%p' on link device '%s'",
+-              virtPort, (macvtap_ifname ? macvtap_ifname : linkdev));
+-
+-    VIR_DEBUG("%s: VM OPERATION: %s", __FUNCTION__, virNetDevVPortProfileOpTypeToString(vmOp));
++    VIR_DEBUG("profile:'%p' vmOp: %s device: %s@%s mac: %s uuid: %s",
++              virtPort, virNetDevVPortProfileOpTypeToString(vmOp),
++              (macvtap_ifname ? macvtap_ifname : ""), linkdev,
++              (macvtap_macaddr
++               ? virMacAddrFormat(macvtap_macaddr, macStr)
++               : "(unspecified)"),
++              vmuuid ? virUUIDFormat(vmuuid, uuidStr) : "(unspecified)");
+ 
+     if (!virtPort || vmOp == VIR_NETDEV_VPORT_PROFILE_OP_NO_OP)
+         return 0;
+@@ -1250,11 +1289,14 @@ virNetDevVPortProfileDisassociate(const char *macvtap_ifname,
+                                   enum virNetDevVPortProfileOp vmOp)
+ {
+     int rc = 0;
++    char macStr[VIR_MAC_STRING_BUFLEN];
+ 
+-    VIR_DEBUG("Disassociating port profile id '%p' on link device '%s' ",
+-              virtPort, macvtap_ifname);
+-
+-    VIR_DEBUG("%s: VM OPERATION: %s", __FUNCTION__, virNetDevVPortProfileOpTypeToString(vmOp));
++    VIR_DEBUG("profile:'%p' vmOp: %s device: %s@%s mac: %s",
++              virtPort, virNetDevVPortProfileOpTypeToString(vmOp),
++              (macvtap_ifname ? macvtap_ifname : ""), linkdev,
++              (macvtap_macaddr
++               ? virMacAddrFormat(macvtap_macaddr, macStr)
++               : "(unspecified)"));
+ 
+     if (!virtPort)
+        return 0;
+-- 
+2.7.1
+

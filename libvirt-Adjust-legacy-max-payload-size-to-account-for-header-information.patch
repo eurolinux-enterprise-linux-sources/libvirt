@@ -1,0 +1,39 @@
+From db79e9afc341b520f1c82218c8964481a8d14549 Mon Sep 17 00:00:00 2001
+Message-Id: <db79e9afc341b520f1c82218c8964481a8d14549@dist-git>
+From: Claudio Bley <cbley@av-test.de>
+Date: Fri, 8 Aug 2014 14:19:53 +0200
+Subject: [PATCH] Adjust legacy max payload size to account for header
+ information
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1126393
+
+Commit 27e81517a87 set the payload size to 256 KB, which is
+actually the max packet size, including the size of the header.
+
+Reduce this by VIR_NET_MESSAGE_HEADER_MAX (24) and set
+VIR_NET_MESSAGE_LEGACY_PAYLOAD_MAX to 262120, which was the original
+value before increasing the limit in commit eb635de1fed.
+
+(cherry picked from commit 609eb987c6cef9082486e66b666f7b9351b783ed)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/rpc/virnetprotocol.x | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/rpc/virnetprotocol.x b/src/rpc/virnetprotocol.x
+index 1eae7cb..7b6f753 100644
+--- a/src/rpc/virnetprotocol.x
++++ b/src/rpc/virnetprotocol.x
+@@ -55,7 +55,7 @@ const VIR_NET_MESSAGE_INITIAL = 65536;
+  * payload size. We need to remember this for compat with
+  * old clients.
+  */
+-const VIR_NET_MESSAGE_LEGACY_PAYLOAD_MAX = 262144;
++const VIR_NET_MESSAGE_LEGACY_PAYLOAD_MAX = 262120;
+ 
+ /* Maximum total message size (serialised). */
+ const VIR_NET_MESSAGE_MAX = 16777216;
+-- 
+2.0.4
+

@@ -1,0 +1,257 @@
+From 3060a70442d908d1d10cb978c9d8bac598ed7b39 Mon Sep 17 00:00:00 2001
+Message-Id: <3060a70442d908d1d10cb978c9d8bac598ed7b39.1376483447.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 6 Aug 2013 17:52:30 +0100
+Subject: [PATCH] Improve LXC startup error reporting
+
+ https://bugzilla.redhat.com/show_bug.cgi?id=903092
+
+Currently we rely on a VIR_ERROR message being logged by the
+virRaiseError function to report LXC startup errors. This gives
+the right message, but is rather ugly and can be truncated
+if lots of log messages are written. Change the LXC controller
+to explicitly print any virErrorPtr message to stderr. Then
+change the driver to skip over anything that looks like a log
+message.
+
+The result is that this
+
+error: Failed to start domain busy
+error: internal error guest failed to start: 2013-03-04 19:46:42.846+0000: 1734: info : libvirt version: 1.0.2
+2013-03-04 19:46:42.846+0000: 1734: error : virFileLoopDeviceAssociate:600 : Unable to open /root/disk.raw: No such file or directory
+
+changes to
+
+error: Failed to start domain busy
+error: internal error guest failed to start: Unable to open /root/disk.raw: No such file or directory
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 09f5e0123f38dac07a4259d9cea33bd1a293706b)
+---
+ src/lxc/lxc_controller.c |  13 ++++-
+ src/lxc/lxc_process.c    | 128 +++++++++++++++++++++++++++++++----------------
+ 2 files changed, 97 insertions(+), 44 deletions(-)
+
+diff --git a/src/lxc/lxc_controller.c b/src/lxc/lxc_controller.c
+index 03f055b..c32e741 100644
+--- a/src/lxc/lxc_controller.c
++++ b/src/lxc/lxc_controller.c
+@@ -256,8 +256,6 @@ static void virLXCControllerFree(virLXCControllerPtr ctrl)
+         virLXCControllerConsoleClose(&(ctrl->consoles[i]));
+     VIR_FREE(ctrl->consoles);
+ 
+-    VIR_FORCE_CLOSE(ctrl->handshakeFd);
+-
+     VIR_FREE(ctrl->devptmx);
+ 
+     virDomainDefFree(ctrl->def);
+@@ -268,6 +266,8 @@ static void virLXCControllerFree(virLXCControllerPtr ctrl)
+ 
+     virObjectUnref(ctrl->server);
+ 
++    /* This must always be the last thing to be closed */
++    VIR_FORCE_CLOSE(ctrl->handshakeFd);
+     VIR_FREE(ctrl);
+ }
+ 
+@@ -1646,6 +1646,15 @@ int main(int argc, char *argv[])
+     rc = virLXCControllerRun(ctrl);
+ 
+ cleanup:
++    if (rc < 0) {
++        virErrorPtr err = virGetLastError();
++        if (err && err->message)
++            fprintf(stderr, "%s\n", err->message);
++        else
++            fprintf(stderr, "%s\n",
++                    _("Unknown failure in libvirt_lxc startup"));
++    }
++
+     virPidFileDelete(LXC_STATE_DIR, name);
+     if (ctrl)
+         virLXCControllerDeleteInterfaces(ctrl);
+diff --git a/src/lxc/lxc_process.c b/src/lxc/lxc_process.c
+index 91ce2d3..c705a91 100644
+--- a/src/lxc/lxc_process.c
++++ b/src/lxc/lxc_process.c
+@@ -683,6 +683,11 @@ int virLXCProcessStop(virLXCDriverPtr driver,
+ 
+     VIR_DEBUG("Stopping VM name=%s pid=%d reason=%d",
+               vm->def->name, (int)vm->pid, (int)reason);
++    if (!virDomainObjIsActive(vm)) {
++        VIR_DEBUG("VM '%s' not active", vm->def->name);
++        return 0;
++    }
++
+     if (vm->pid <= 0) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("Invalid PID %d for container"), vm->pid);
+@@ -806,50 +811,27 @@ cleanup:
+     return NULL;
+ }
+ 
++
+ static int
+-virLXCProcessReadLogOutput(virDomainObjPtr vm,
+-                           char *logfile,
+-                           off_t pos,
+-                           char *buf,
+-                           size_t buflen)
++virLXCProcessReadLogOutputData(virDomainObjPtr vm,
++                               int fd,
++                               char *buf,
++                               size_t buflen)
+ {
+-    int fd;
+-    off_t off;
+-    int whence;
+-    int got = 0, ret = -1;
+     int retries = 10;
++    int got = 0;
++    int ret = -1;
++    char *filter_next = buf;
+ 
+-    if ((fd = open(logfile, O_RDONLY)) < 0) {
+-        virReportSystemError(errno, _("failed to open logfile %s"),
+-                             logfile);
+-        goto cleanup;
+-    }
+-
+-    if (pos < 0) {
+-        off = 0;
+-        whence = SEEK_END;
+-    } else {
+-        off = pos;
+-        whence = SEEK_SET;
+-    }
+-
+-    if (lseek(fd, off, whence) < 0) {
+-        if (whence == SEEK_END)
+-            virReportSystemError(errno,
+-                                 _("unable to seek to end of log for %s"),
+-                                 logfile);
+-        else
+-            virReportSystemError(errno,
+-                                 _("unable to seek to %lld from start for %s"),
+-                                 (long long)off, logfile);
+-        goto cleanup;
+-    }
++    buf[0] = '\0';
+ 
+     while (retries) {
+         ssize_t bytes;
+         int isdead = 0;
++        char *eol;
+ 
+-        if (kill(vm->pid, 0) == -1 && errno == ESRCH)
++        if (vm->pid <= 0 ||
++            (kill(vm->pid, 0) == -1 && errno == ESRCH))
+             isdead = 1;
+ 
+         /* Any failures should be detected before we read the log, so we
+@@ -857,24 +839,80 @@ virLXCProcessReadLogOutput(virDomainObjPtr vm,
+         bytes = saferead(fd, buf+got, buflen-got-1);
+         if (bytes < 0) {
+             virReportSystemError(errno, "%s",
+-                                 _("Failure while reading guest log output"));
++                                 _("Failure while reading log output"));
+             goto cleanup;
+         }
+ 
+         got += bytes;
+         buf[got] = '\0';
+ 
+-        if ((got == buflen-1) || isdead) {
+-            break;
++        /* Filter out debug messages from intermediate libvirt process */
++        while ((eol = strchr(filter_next, '\n'))) {
++            *eol = '\0';
++            if (virLogProbablyLogMessage(filter_next)) {
++                memmove(filter_next, eol + 1, got - (eol - buf));
++                got -= eol + 1 - filter_next;
++            } else {
++                filter_next = eol + 1;
++                *eol = '\n';
++            }
++        }
++
++        if (got == buflen-1) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("Out of space while reading log output: %s"),
++                           buf);
++            goto cleanup;
++        }
++
++        if (isdead) {
++            ret = got;
++            goto cleanup;
+         }
+ 
+         usleep(100*1000);
+         retries--;
+     }
+ 
++    virReportError(VIR_ERR_INTERNAL_ERROR,
++                   _("Timed out while reading log output: %s"),
++                   buf);
+ 
+-    ret = got;
+ cleanup:
++    return ret;
++}
++
++
++static int
++virLXCProcessReadLogOutput(virDomainObjPtr vm,
++                           char *logfile,
++                           off_t pos,
++                           char *buf,
++                           size_t buflen)
++{
++    int fd = -1;
++    int ret;
++
++    if ((fd = open(logfile, O_RDONLY)) < 0) {
++        virReportSystemError(errno,
++                             _("Unable to open log file %s"),
++                             logfile);
++        return -1;
++    }
++
++    if (lseek(fd, pos, SEEK_SET) < 0) {
++        virReportSystemError(errno,
++                             _("Unable to seek log file %s to %llu"),
++                             logfile, (unsigned long long)pos);
++        VIR_FORCE_CLOSE(fd);
++        return -1;
++    }
++
++    ret = virLXCProcessReadLogOutputData(vm,
++                                         fd,
++                                         buf,
++                                         buflen);
++
+     VIR_FORCE_CLOSE(fd);
+     return ret;
+ }
+@@ -1112,9 +1150,15 @@ int virLXCProcessStart(virConnectPtr conn,
+ 
+     /* And get its pid */
+     if ((r = virPidFileRead(driver->stateDir, vm->def->name, &vm->pid)) < 0) {
+-        virReportSystemError(-r,
+-                             _("Failed to read pid file %s/%s.pid"),
+-                             driver->stateDir, vm->def->name);
++        char out[1024];
++
++        if (virLXCProcessReadLogOutput(vm, logfile, pos, out, 1024) > 0)
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("guest failed to start: %s"), out);
++        else
++            virReportSystemError(-r,
++                                 _("Failed to read pid file %s/%s.pid"),
++                                 driver->stateDir, vm->def->name);
+         goto cleanup;
+     }
+ 
+-- 
+1.8.3.2
+

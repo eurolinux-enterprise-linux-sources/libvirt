@@ -1,0 +1,53 @@
+From 5769021209eee3581a8fb77d767dcaab12a66ffc Mon Sep 17 00:00:00 2001
+Message-Id: <5769021209eee3581a8fb77d767dcaab12a66ffc.1373271643.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 31 May 2013 18:00:48 +0200
+Subject: [PATCH] Document that runtime changes may be lost after S4 suspend
+
+https://bugzilla.redhat.com/show_bug.cgi?id=872419
+
+(cherry picked from commit fae2505eee50a4c8d7186c3be94c7cb764177fb8)
+---
+ src/libvirt.c   | 7 +++++++
+ tools/virsh.pod | 7 +++++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 05d4cb2..b2fde9b 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -2437,6 +2437,13 @@ error:
+  * Dependent on hypervisor used, this may require a
+  * guest agent to be available, e.g. QEMU.
+  *
++ * Beware that at least for QEMU, the domain's process will be terminated
++ * when VIR_NODE_SUSPEND_TARGET_DISK is used and a new process will be
++ * launched when libvirt is asked to wake up the domain. As a result of
++ * this, any runtime changes, such as device hotplug or memory settings,
++ * are lost unless such changes were made with VIR_DOMAIN_AFFECT_CONFIG
++ * flag.
++ *
+  * Returns: 0 on success,
+  *          -1 on failure.
+  */
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 027fb09..3e2fae0 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -1597,6 +1597,13 @@ hypervisor driver and 0 should be used.).
+ Note that this command requires a guest agent configured and running in the
+ domain's guest OS.
+ 
++Beware that at least for QEMU, the domain's process will be terminated when
++target disk is used and a new process will be launched when libvirt is asked
++to wake up the domain. As a result of this, any runtime changes, such as
++device hotplug or memory settings, are lost unless such changes were made
++with I<--config> flag.
++
++
+ =item B<dompmwakeup> I<domain>
+ 
+ Wakeup a domain from pmsuspended state (either suspended by dompmsuspend or
+-- 
+1.8.2.1
+

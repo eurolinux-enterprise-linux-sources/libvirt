@@ -1,0 +1,274 @@
+From 8659eae2ad3595e0958ab055aa289914b33fb451 Mon Sep 17 00:00:00 2001
+Message-Id: <8659eae2ad3595e0958ab055aa289914b33fb451@dist-git>
+From: Hu Tao <hutao@cn.fujitsu.com>
+Date: Mon, 21 Apr 2014 08:22:32 -0600
+Subject: [PATCH] conf: add support for panic device
+
+RHEL 6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1033984
+
+panic device is a device that enables libvirt to receive notification
+of guest panic event.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 4313feade44e24ca215416e75299c7d29a70db11)
+
+Conflicts:
+	src/conf/domain_conf.h - context (no rng, nvram, idmap, or blkio array clear)
+	src/conf/domain_conf.c - likewise
+	docs/schemas/domaincommon.rng - context (no nvram)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in     | 28 ++++++++++++++++
+ docs/schemas/domaincommon.rng | 10 ++++++
+ src/conf/domain_conf.c        | 78 +++++++++++++++++++++++++++++++++++++++++++
+ src/conf/domain_conf.h        | 10 ++++++
+ 4 files changed, 126 insertions(+)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 55edaa2..29008ea 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -4266,6 +4266,34 @@ qemu-kvm -net nic,model=? /dev/null
+ 
+     </dl>
+ 
++    <h4><a name="elementsPanic">panic device</a></h4>
++    <p>
++      panic device enables libvirt to receive panic notification from a QEMU
++      guest.
++      <span class="since">Since 1.2.1, QEMU and KVM only</span>
++    </p>
++    <p>
++      Example: usage of panic configuration
++    </p>
++<pre>
++  ...
++  &lt;devices&gt;
++    &lt;panic&gt;
++      &lt;address type='isa' iobase='0x505'/&gt;
++    &lt;/panic&gt;
++  &lt;/devices&gt;
++  ...
++</pre>
++  <dl>
++    <dt><code>address</code></dt>
++    <dd>
++      <p>
++        address of panic. The default ioport is 0x505. Most users
++        don't need to specify an address.
++      </p>
++    </dd>
++  </dl>
++
+     <h3><a name="seclabel">Security label</a></h3>
+ 
+     <p>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 7af3a1a..f19449e 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -3042,6 +3042,9 @@
+         <optional>
+           <ref name="memballoon"/>
+         </optional>
++        <optional>
++          <ref name="panic"/>
++        </optional>
+       </interleave>
+     </element>
+   </define>
+@@ -3846,4 +3849,11 @@
+     </element>
+     <empty/>
+   </define>
++  <define name="panic">
++    <element name="panic">
++      <optional>
++        <ref name="address"/>
++      </optional>
++    </element>
++  </define>
+ </grammar>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 884a2b2..4e5385d 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -1638,6 +1638,18 @@ virDomainVcpuPinDefArrayFree(virDomainVcpuPinDefPtr *def,
+     VIR_FREE(def);
+ }
+ 
++
++void
++virDomainPanicDefFree(virDomainPanicDefPtr panic)
++{
++    if (!panic)
++        return;
++
++    virDomainDeviceInfoClear(&panic->info);
++    VIR_FREE(panic);
++}
++
++
+ void virDomainDefFree(virDomainDefPtr def)
+ {
+     unsigned int i;
+@@ -1719,6 +1731,8 @@ void virDomainDefFree(virDomainDefPtr def)
+         virDomainRedirdevDefFree(def->redirdevs[i]);
+     VIR_FREE(def->redirdevs);
+ 
++    virDomainPanicDefFree(def->panic);
++
+     VIR_FREE(def->os.type);
+     VIR_FREE(def->os.arch);
+     VIR_FREE(def->os.machine);
+@@ -8747,6 +8761,25 @@ cleanup:
+     return ret;
+ }
+ 
++
++static virDomainPanicDefPtr
++virDomainPanicDefParseXML(xmlNodePtr node)
++{
++    virDomainPanicDefPtr panic;
++
++    if (VIR_ALLOC(panic) < 0)
++        return NULL;
++
++    if (virDomainDeviceInfoParseXML(node, NULL, &panic->info, 0) < 0)
++        goto error;
++
++    return panic;
++error:
++    virDomainPanicDefFree(panic);
++    return NULL;
++}
++
++
+ /* Parse the XML definition for a vcpupin or emulatorpin.
+  *
+  * vcpupin has the form of
+@@ -10468,6 +10501,26 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+     }
+     VIR_FREE(nodes);
+ 
++    /* analysis of the panic devices */
++    def->panic = NULL;
++    if ((n = virXPathNodeSet("./devices/panic", ctxt, &nodes)) < 0) {
++        goto error;
++    }
++    if (n > 1) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("only a single panic device is supported"));
++        goto error;
++    }
++    if (n > 0) {
++        virDomainPanicDefPtr panic =
++            virDomainPanicDefParseXML(nodes[0]);
++        if (!panic)
++            goto error;
++
++        def->panic = panic;
++        VIR_FREE(nodes);
++    }
++
+     /* analysis of cpu handling */
+     if ((node = virXPathNode("./cpu[1]", ctxt)) != NULL) {
+         xmlNodePtr oldnode = ctxt->node;
+@@ -11577,6 +11630,15 @@ cleanup:
+     return identical;
+ }
+ 
++
++static bool
++virDomainPanicCheckABIStability(virDomainPanicDefPtr src,
++                                virDomainPanicDefPtr dst)
++{
++    return virDomainDeviceInfoCheckABIStability(&src->info, &dst->info);
++}
++
++
+ /* This compares two configurations and looks for any differences
+  * which will affect the guest ABI. This is primarily to allow
+  * validation of custom XML config passed in during migration
+@@ -11896,6 +11958,8 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (!virDomainRNGDefCheckABIStability(src->rng, dst->rng))
+         goto cleanup;
++    if (!virDomainPanicCheckABIStability(src->panic, dst->panic))
++        goto cleanup;
+ 
+     identical = true;
+ 
+@@ -13528,6 +13592,16 @@ virDomainWatchdogDefFormat(virBufferPtr buf,
+     return 0;
+ }
+ 
++static int virDomainPanicDefFormat(virBufferPtr buf,
++                                     virDomainPanicDefPtr def)
++{
++    virBufferAddLit(buf, "    <panic>\n");
++    if (virDomainDeviceInfoFormat(buf, &def->info, 0) < 0)
++        return -1;
++    virBufferAddLit(buf, "    </panic>\n");
++
++    return 0;
++}
+ 
+ static int
+ virDomainRNGDefFormat(virBufferPtr buf,
+@@ -14794,6 +14868,10 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+     if (def->rng)
+         virDomainRNGDefFormat(buf, def->rng, flags);
+ 
++    if (def->panic &&
++        virDomainPanicDefFormat(buf, def->panic) < 0)
++        goto cleanup;
++
+     virBufferAddLit(buf, "  </devices>\n");
+ 
+     virBufferAdjustIndent(buf, 2);
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index a3273ff..2f6a6c8 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -118,6 +118,9 @@ typedef virDomainSnapshotObjList *virDomainSnapshotObjListPtr;
+ typedef struct _virDomainRNGDef virDomainRNGDef;
+ typedef virDomainRNGDef *virDomainRNGDefPtr;
+ 
++typedef struct _virDomainPanicDef virDomainPanicDef;
++typedef virDomainPanicDef *virDomainPanicDefPtr;
++
+ /* Flags for the 'type' field in virDomainDeviceDef */
+ typedef enum {
+     VIR_DOMAIN_DEVICE_NONE = 0,
+@@ -1722,6 +1725,11 @@ struct _virDomainRNGDef {
+     virDomainDeviceInfo info;
+ };
+ 
++struct _virDomainPanicDef {
++    virDomainDeviceInfo info;
++};
++
++
+ void virBlkioDeviceWeightArrayClear(virBlkioDeviceWeightPtr deviceWeights,
+                                     int ndevices);
+ 
+@@ -1864,6 +1872,7 @@ struct _virDomainDef {
+     virSysinfoDefPtr sysinfo;
+     virDomainRedirFilterDefPtr redirfilter;
+     virDomainRNGDefPtr rng;
++    virDomainPanicDefPtr panic;
+ 
+     void *namespaceData;
+     virDomainXMLNamespace ns;
+@@ -1948,6 +1957,7 @@ virDomainObjPtr virDomainFindByName(const virDomainObjListPtr doms,
+ bool virDomainObjTaint(virDomainObjPtr obj,
+                        enum virDomainTaintFlags taint);
+ 
++void virDomainPanicDefFree(virDomainPanicDefPtr panic);
+ void virDomainGraphicsDefFree(virDomainGraphicsDefPtr def);
+ void virDomainInputDefFree(virDomainInputDefPtr def);
+ void virDomainDiskDefFree(virDomainDiskDefPtr def);
+-- 
+1.9.2
+

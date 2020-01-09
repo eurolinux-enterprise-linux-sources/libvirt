@@ -1,0 +1,34 @@
+From 3fabfca742ec117c8d05a01648460c9ecad77dc6 Mon Sep 17 00:00:00 2001
+Message-Id: <3fabfca742ec117c8d05a01648460c9ecad77dc6.1378495587.git.jdenemar@redhat.com>
+From: Yanbing Du <ydu@redhat.com>
+Date: Fri, 30 Aug 2013 08:03:21 +0200
+Subject: [PATCH] virsh: Correct DESCRIPTION for virsh help blockcopy
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1002790
+
+Signed-off-by: Yanbing Du <ydu@redhat.com>
+(cherry picked from commit 4faf435cbdd59ab09c69bfa47fd3c97395dca316)
+
+Conflicts:
+	tools/virsh-domain.c
+        (C99-style initialization not backported)
+---
+ tools/virsh-domain.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 8eb8d12..e7650ae 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -1419,7 +1419,7 @@ cleanup:
+  */
+ static const vshCmdInfo info_block_copy[] = {
+     {"help", N_("Start a block copy operation.")},
+-    {"desc", N_("Populate a disk from its backing image.")},
++    {"desc", N_("Copy a disk backing image chain to dest.")},
+     {NULL, NULL}
+ };
+ 
+-- 
+1.8.3.2
+

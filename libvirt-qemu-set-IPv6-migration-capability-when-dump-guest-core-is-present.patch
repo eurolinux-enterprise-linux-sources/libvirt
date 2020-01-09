@@ -1,0 +1,36 @@
+From 9b9caefba80dcf38343f2920ddb528c0393f4004 Mon Sep 17 00:00:00 2001
+Message-Id: <9b9caefba80dcf38343f2920ddb528c0393f4004.1373271640.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Thu, 11 Apr 2013 10:38:14 +0200
+Subject: [PATCH] qemu: set IPv6 migration capability when dump-guest-core is
+ present
+
+https://bugzilla.redhat.com/show_bug.cgi?id=846013
+
+IPv6 migration upstream depends on QEMU version being >= 1.1.
+Make it depend on dump-guest-core, which was added to downstream QEMU
+after IPv6 migration.
+
+RHEL-6 only.
+---
+ src/qemu/qemu_capabilities.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 66795a7..bada4fe 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1101,6 +1101,10 @@ qemuCapsComputeCmdFlags(const char *help,
+                strstr(help, "libvirt")) {
+         qemuCapsSet(caps, QEMU_CAPS_MONITOR_JSON);
+         qemuCapsSet(caps, QEMU_CAPS_NETDEV);
++        /* IPv6 migration support was backported to RHEL qemu
++         * before dump-guest-core */
++        if (qemuCapsGet(caps, QEMU_CAPS_DUMP_GUEST_CORE))
++            qemuCapsSet(caps, QEMU_CAPS_IPV6_MIGRATION);
+     }
+ #else
+     /* Starting with qemu 0.15 and newer, upstream qemu no longer
+-- 
+1.8.2.1
+

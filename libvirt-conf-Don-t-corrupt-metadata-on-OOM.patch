@@ -1,0 +1,59 @@
+From 3d358d397ebe37439b9a0d77497d14b1b23c246b Mon Sep 17 00:00:00 2001
+Message-Id: <3d358d397ebe37439b9a0d77497d14b1b23c246b@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 2 Jul 2014 15:49:32 +0200
+Subject: [PATCH] conf: Don't corrupt metadata on OOM
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115039
+
+Eric Blake suggested that we could do a little better in case copying of
+the metadata to be set fails. With this patch, the old metadata is
+discarded after the new string is copied successfuly.
+
+(cherry picked from commit 7655ed0802eecc3d8486a0360d2326ecd052e477)
+
+Conflicts:
+	src/conf/domain_conf.c - context from patch reordering and
+    VIR_STRDUP
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 607cb53..b246155 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -16647,19 +16647,24 @@ virDomainDefSetMetadata(virDomainDefPtr def,
+     xmlDocPtr doc = NULL;
+     xmlNodePtr old;
+     xmlNodePtr new = NULL;
++    char *tmp;
+     int ret = -1;
+ 
+     switch ((virDomainMetadataType) type) {
+     case VIR_DOMAIN_METADATA_DESCRIPTION:
++        if (!(tmp = strdup(metadata)))
++            goto no_memory;
++
+         VIR_FREE(def->description);
+-        if (!(def->description = strdup(metadata)))
+-            goto no_memory;
++        def->description = tmp;
+         break;
+ 
+     case VIR_DOMAIN_METADATA_TITLE:
++        if (!(tmp = strdup(metadata)))
++            goto no_memory;
++
+         VIR_FREE(def->title);
+-        if (!(def->title = strdup(metadata)))
+-            goto no_memory;
++        def->title = tmp;
+         break;
+ 
+     case VIR_DOMAIN_METADATA_ELEMENT:
+-- 
+2.0.0
+

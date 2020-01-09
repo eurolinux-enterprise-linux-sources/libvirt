@@ -1,0 +1,58 @@
+From 84c0c5e5ad9beca53ecbdd96f69d6d5e13fdf200 Mon Sep 17 00:00:00 2001
+Message-Id: <84c0c5e5ad9beca53ecbdd96f69d6d5e13fdf200@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 9 Apr 2014 10:45:21 +0200
+Subject: [PATCH] Disable nwfilter driver when running unprivileged
+
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1029299
+
+When opening a new connection to the driver, nwfilterOpen
+only succeeds if the driverState has been allocated.
+
+Move the privilege check in driver initialization before
+the state allocation to disable the driver.
+
+This changes the nwfilter-define error from:
+error: cannot create config directory (null): Bad address
+To:
+this function is not supported by the connection driver:
+virNWFilterDefineXML
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1029266
+(cherry picked from commit b7829f959b33c6e32422222a9ed745c0da7dc696)
+
+Conflicts:
+	src/nwfilter/nwfilter_driver.c - changes in context
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/nwfilter/nwfilter_driver.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/nwfilter/nwfilter_driver.c b/src/nwfilter/nwfilter_driver.c
+index 6fe86a3..3b2c9b6 100644
+--- a/src/nwfilter/nwfilter_driver.c
++++ b/src/nwfilter/nwfilter_driver.c
+@@ -170,6 +170,9 @@ nwfilterDriverStartup(int privileged)
+     char *base = NULL;
+     DBusConnection *sysbus = NULL;
+ 
++    if (!privileged)
++        return 0;
++
+ #if HAVE_DBUS
+     sysbus = virDBusGetSystemBus();
+ #endif /* HAVE_DBUS */
+@@ -182,9 +185,6 @@ nwfilterDriverStartup(int privileged)
+ 
+     driverState->watchingFirewallD = (sysbus != NULL);
+ 
+-    if (!privileged)
+-        return 0;
+-
+     if (virNWFilterIPAddrMapInit() < 0)
+         goto err_free_driverstate;
+     if (virNWFilterLearnInit() < 0)
+-- 
+1.9.2
+

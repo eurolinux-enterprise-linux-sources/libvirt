@@ -1,0 +1,52 @@
+From f9bdd52935fd9832ed744b674b63b92ea069b946 Mon Sep 17 00:00:00 2001
+Message-Id: <f9bdd52935fd9832ed744b674b63b92ea069b946.1352118320.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Wed, 31 Oct 2012 16:29:00 +0100
+Subject: [PATCH] qemu: Fix EmulatorPinInfo without emulatorpin
+
+https://bugzilla.redhat.com/show_bug.cgi?id=871312
+
+Recent fixes made almost all the right steps to make emulator pinned
+to the cpuset of the whole domain in case <emulatorpin> isn't
+specified, but qemudDomainGetEmulatorPinInfo still reports all the
+CPUs even when cpuset is specified.  This patch fixes that.
+(cherry picked from commit 10c5212b108e8395a6cab2dd449f2b1c0f1442d0)
+---
+ src/qemu/qemu_driver.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 5250969..de986da 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -4345,7 +4345,6 @@ qemudDomainGetEmulatorPinInfo(virDomainPtr dom,
+     virDomainDefPtr targetDef = NULL;
+     int ret = -1;
+     int maxcpu, hostcpus, pcpu;
+-    virDomainVcpuPinDefPtr emulatorpin = NULL;
+     virBitmapPtr cpumask = NULL;
+     bool pinned;
+ 
+@@ -4387,14 +4386,15 @@ qemudDomainGetEmulatorPinInfo(virDomainPtr dom,
+         cpumaps[maplen - 1] &= (1 << maxcpu % 8) - 1;
+     }
+ 
+-    /* If no emulatorpin, all cpus should be used */
+-    emulatorpin = targetDef->cputune.emulatorpin;
+-    if (!emulatorpin) {
++    if (targetDef->cputune.emulatorpin) {
++        cpumask = targetDef->cputune.emulatorpin->cpumask;
++    } else if (targetDef->cpumask) {
++        cpumask = targetDef->cpumask;
++    } else {
+         ret = 0;
+         goto cleanup;
+     }
+ 
+-    cpumask = emulatorpin->cpumask;
+     for (pcpu = 0; pcpu < maxcpu; pcpu++) {
+         if (virBitmapGetBit(cpumask, pcpu, &pinned) < 0)
+             goto cleanup;
+-- 
+1.8.0
+

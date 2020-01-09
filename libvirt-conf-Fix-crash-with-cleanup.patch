@@ -1,0 +1,84 @@
+From bc29f9aa6c9521e2b81e1821ba3b311853038319 Mon Sep 17 00:00:00 2001
+Message-Id: <bc29f9aa6c9521e2b81e1821ba3b311853038319.1350425724.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Tue, 16 Oct 2012 16:58:01 +0200
+Subject: [PATCH] conf: Fix crash with cleanup
+
+https://bugzilla.redhat.com/show_bug.cgi?id=866288
+
+There was a crash possible when both <boot dev... and <boot
+order... were specified due to virDomainDefParseBootXML() erroring out
+before setting *tmp (which was free'd in cleanup).  As a fix, I
+created this cleanup that uses one pointer for all the temporary
+stored XPath strings and values, plus this pointer is correctly
+initialized to NULL.
+(cherry picked from commit 280b8c9e7c94db1decdca08d169c88554c09fa19)
+---
+ src/conf/domain_conf.c | 21 ++++++++++-----------
+ 1 file changed, 10 insertions(+), 11 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 650bc08..14be7a5 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8242,8 +8242,7 @@ virDomainDefParseBootXML(xmlXPathContextPtr ctxt,
+ {
+     xmlNodePtr *nodes = NULL;
+     int i, n;
+-    char *bootstr, *tmp;
+-    char *useserial = NULL;
++    char *tmp = NULL;
+     int ret = -1;
+     unsigned long deviceBoot, serialPorts;
+ 
+@@ -8290,23 +8289,23 @@ virDomainDefParseBootXML(xmlXPathContextPtr ctxt,
+         def->os.bootDevs[0] = VIR_DOMAIN_BOOT_DISK;
+     }
+ 
+-    bootstr = virXPathString("string(./os/bootmenu[1]/@enable)", ctxt);
+-    if (bootstr) {
+-        def->os.bootmenu = virDomainBootMenuTypeFromString(bootstr);
++    tmp = virXPathString("string(./os/bootmenu[1]/@enable)", ctxt);
++    if (tmp) {
++        def->os.bootmenu = virDomainBootMenuTypeFromString(tmp);
+         if (def->os.bootmenu <= 0) {
+             /* In order not to break misconfigured machines, this
+              * should not emit an error, but rather set the bootmenu
+              * to disabled */
+             VIR_WARN("disabling bootmenu due to unknown option '%s'",
+-                     bootstr);
++                     tmp);
+             def->os.bootmenu = VIR_DOMAIN_BOOT_MENU_DISABLED;
+         }
+-        VIR_FREE(bootstr);
++        VIR_FREE(tmp);
+     }
+ 
+-    useserial = virXPathString("string(./os/bios[1]/@useserial)", ctxt);
+-    if (useserial) {
+-        if (STREQ(useserial, "yes")) {
++    tmp = virXPathString("string(./os/bios[1]/@useserial)", ctxt);
++    if (tmp) {
++        if (STREQ(tmp, "yes")) {
+             if (virXPathULong("count(./devices/serial)",
+                               ctxt, &serialPorts) < 0) {
+                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+@@ -8318,6 +8317,7 @@ virDomainDefParseBootXML(xmlXPathContextPtr ctxt,
+         } else {
+             def->os.bios.useserial = VIR_DOMAIN_BIOS_USESERIAL_NO;
+         }
++        VIR_FREE(tmp);
+     }
+ 
+     tmp = virXPathString("string(./os/bios[1]/@rebootTimeout)", ctxt);
+@@ -8339,7 +8339,6 @@ virDomainDefParseBootXML(xmlXPathContextPtr ctxt,
+ 
+ cleanup:
+     VIR_FREE(tmp);
+-    VIR_FREE(useserial);
+     VIR_FREE(nodes);
+     return ret;
+ }
+-- 
+1.7.12.3
+

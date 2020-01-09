@@ -1,0 +1,46 @@
+From 54eb1126f0c4f4fc05edb3926a7a60d3a01892bc Mon Sep 17 00:00:00 2001
+Message-Id: <54eb1126f0c4f4fc05edb3926a7a60d3a01892bc.1353944810.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 22 Nov 2012 17:42:10 +0100
+Subject: [PATCH] qemu: Stop recursive detection of image chains when an image
+ is missing
+
+https://bugzilla.redhat.com/show_bug.cgi?id=878862
+
+Commit e0c469e58b93f852a72265919703cb6abd3779f8 that fixes the detection
+of image chain wasn't complete. Iteration through the backing image
+chain has to stop at the last existing image if some of the images are
+missing otherwise the backing chain that is cached contains entries with
+paths being set to NULL resulting to:
+
+error: Unable to allow access for disk path (null): Bad address
+
+Fortunately stat() is kind enough not to crash when it's presented with
+a NULL argument. At least on Linux.
+(cherry picked from commit 58a54dc37340113f83da587387a297d05d5342cf)
+---
+ src/util/storage_file.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index 54b9ea0..50f64ae 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -728,8 +728,13 @@ virStorageFileGetMetadataFromBuf(int format,
+                 meta->backingStore = absolutePathFromBaseFile(path, backing);
+                 if (meta->backingStore == NULL) {
+                     /* the backing file is (currently) unavailable, treat this
+-                     * file as standalone */
++                     * file as standalone:
++                     * backingStoreRaw is kept to mark broken image chains */
++                    meta->backingStoreIsFile = false;
+                     backingFormat = VIR_STORAGE_FILE_NONE;
++                    VIR_WARN("Backing file '%s' of image '%s' is missing.",
++                             meta->backingStoreRaw, path);
++
+                 }
+             }
+             VIR_FREE(backing);
+-- 
+1.8.0
+

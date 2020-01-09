@@ -1,0 +1,38 @@
+From 9bc70ebedd082bae1a582dacfb9f4b8db51fea5f Mon Sep 17 00:00:00 2001
+Message-Id: <9bc70ebedd082bae1a582dacfb9f4b8db51fea5f@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 27 Mar 2015 15:21:05 +0100
+Subject: [PATCH] virsh: fix typos in virsh man page
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1130835
+
+* tools/virsh.pod (attach-disk): Drop duplicate --config, fix typo
+in --sourcetype.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit be673413a3d6086bc6493dc3b467d5a5a1179b8b)
+Signed-off-by: Jaroslav Suchanek <jsuchane@redhat.com>
+
+Conflicts:
+	tools/virsh.pod - context
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh.pod | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index c4c6432..ac17b67 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -1774,7 +1774,7 @@ an offline domain, and like I<--live> I<--config> for a running domain.
+ =item B<attach-disk> I<domain> I<source> I<target>
+ [[[I<--live>] [I<--config>] | [I<--current>]] | [I<--persistent>]]
+ [I<--driver driver>] [I<--subdriver subdriver>] [I<--cache cache>]
+-[I<--type type>] [I<--mode mode>] [I<--config>] [I<--sourcetype soucetype>]
++[I<--type type>] [I<--mode mode>] [I<--sourcetype sourcetype>]
+ [I<--serial serial>] [I<--shareable>] [I<--rawio>] [I<--address address>]
+ [I<--multifunction>]
+ 
+-- 
+2.3.5
+

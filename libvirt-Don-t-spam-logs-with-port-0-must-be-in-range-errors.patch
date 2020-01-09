@@ -1,0 +1,42 @@
+From 29439e6b0c89b5f201a3ecab5eff197e2b52b3d6 Mon Sep 17 00:00:00 2001
+Message-Id: <29439e6b0c89b5f201a3ecab5eff197e2b52b3d6@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 May 2014 13:43:03 +0200
+Subject: [PATCH] Don't spam logs with "port 0 must be in range" errors
+
+Whenever virPortAllocatorRelease is called with port == 0, it complains
+that the port is not in an allowed range, which is expectable as the
+port was never allocated. Let's make virPortAllocatorRelease ignore 0
+ports in a similar way free() ignores NULL pointers.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1018695
+
+(cherry picked from commit 86dba8f3de32cb4d32156f64e7f580f6c5f42a12)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_migration.c,
+	src/qemu/qemu_process.c -- not backported at all since
+	    virPortAllocator is not used there in RHEL-6
+---
+ src/util/virportallocator.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/util/virportallocator.c b/src/util/virportallocator.c
+index bbb417d..81ce167 100644
+--- a/src/util/virportallocator.c
++++ b/src/util/virportallocator.c
+@@ -173,6 +173,10 @@ int virPortAllocatorRelease(virPortAllocatorPtr pa,
+                             unsigned short port)
+ {
+     int ret = -1;
++
++    if (!port)
++        return 0;
++
+     virMutexLock(&pa->lock);
+ 
+     if (port < pa->start ||
+-- 
+1.9.3
+

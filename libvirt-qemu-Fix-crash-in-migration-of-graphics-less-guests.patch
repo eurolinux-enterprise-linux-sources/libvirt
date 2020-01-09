@@ -1,0 +1,44 @@
+From 7e3a910c45b42fa1e429ae9c67b44a013419202a Mon Sep 17 00:00:00 2001
+Message-Id: <7e3a910c45b42fa1e429ae9c67b44a013419202a.1373271641.git.jdenemar@redhat.com>
+From: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+Date: Thu, 16 May 2013 14:41:29 +0200
+Subject: [PATCH] qemu: Fix crash in migration of graphics-less guests.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=920441
+
+Commit 7f15ebc7a2b599ab10dbc15bca6f823591213e67 introduced a bug
+happening when guests without a <graphics> element are migrated.
+The initialization of listenAddress happens unconditionally
+from the cookie even if the cookie->graphics pointer was NULL.
+Moved the initialization to where it is safe.
+
+Signed-off-by: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+(cherry picked from commit 9684bb11fd3832582308d0bcdb649041fd6584e2)
+---
+ src/qemu/qemu_migration.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 2c50eaf..4a00727 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1062,7 +1062,7 @@ qemuDomainMigrateGraphicsRelocate(struct qemud_driver *driver,
+ {
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     int ret;
+-    char *listenAddress = cookie->graphics->listen;
++    char *listenAddress;
+ 
+     if (!cookie)
+         return 0;
+@@ -1076,6 +1076,7 @@ qemuDomainMigrateGraphicsRelocate(struct qemud_driver *driver,
+     if (cookie->graphics->type != VIR_DOMAIN_GRAPHICS_TYPE_SPICE)
+         return 0;
+ 
++    listenAddress = cookie->graphics->listen;
+     if (!listenAddress ||
+         STREQ(listenAddress, "0.0.0.0") ||
+         STREQ(listenAddress, "::"))
+-- 
+1.8.2.1
+

@@ -1,0 +1,35 @@
+From fafad94ef82c4a6a44c29575989986c34a9680fd Mon Sep 17 00:00:00 2001
+Message-Id: <fafad94ef82c4a6a44c29575989986c34a9680fd.1350297262.git.jdenemar@redhat.com>
+From: =?UTF-8?q?Guido=20G=C3=BCnther?= <agx@sigxcpu.org>
+Date: Mon, 15 Oct 2012 16:46:36 +0800
+Subject: [PATCH] Avoid straying </cpuset>
+
+https://bugzilla.redhat.com/show_bug.cgi?id=855218
+
+by using the same condition as for the <cpuset>.
+
+Fixes "make check" found by
+    http://honk.sigxcpu.org:8001/job/libvirt-check/160/
+(cherry picked from commit dc9d7a171c215efda1da17fca26a860030107fed)
+---
+ src/conf/domain_conf.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index cf78e22..b7c9c87 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -13672,8 +13672,8 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+         virBufferAsprintf(buf, "cpuset='%s'/>\n", cpumask);
+         VIR_FREE(cpumask);
+     }
+-
+-    if (def->cputune.shares || def->cputune.vcpupin ||
++    if (def->cputune.shares ||
++        (def->cputune.vcpupin && !virDomainIsAllVcpupinInherited(def)) ||
+         def->cputune.period || def->cputune.quota ||
+         def->cputune.emulatorpin ||
+         def->cputune.emulator_period || def->cputune.emulator_quota)
+-- 
+1.7.12.3
+

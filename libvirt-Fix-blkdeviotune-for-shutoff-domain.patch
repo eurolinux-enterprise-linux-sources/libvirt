@@ -1,0 +1,99 @@
+From 313a1cdd6fd7fd864699318b35cc6a85b5b3842c Mon Sep 17 00:00:00 2001
+Message-Id: <313a1cdd6fd7fd864699318b35cc6a85b5b3842c@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Wed, 6 Aug 2014 08:14:57 +0200
+Subject: [PATCH] Fix blkdeviotune for shutoff domain
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1122819
+
+Function qemuDomainSetBlockIoTune() was checking QEMU capabilities
+even when !(flags & VIR_DOMAIN_AFFECT_LIVE) and the domain was
+shutoff, resulting in the following problem:
+
+ virsh # domstate asdf; blkdeviotune asdf vda --write-bytes-sec 100
+ shut off
+
+ error: Unable to change block I/O throttle
+ error: unsupported configuration: block I/O throttling not supported with this QEMU binary
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=965016
+(cherry picked from commit 5af3ce827767707097affc5e001eab8cbabc28a7)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_driver.c -- BQDL, etc.
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 29 +++++++++++++----------------
+ 1 file changed, 13 insertions(+), 16 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 0f26401..3162075 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -14487,22 +14487,15 @@ qemuDomainSetBlockIoTune(virDomainPtr dom,
+                        _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+-    priv = vm->privateData;
+-    if (!qemuCapsGet(priv->caps, QEMU_CAPS_DRIVE_IOTUNE)) {
+-        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+-                       _("block I/O throttling not supported with this "
+-                         "QEMU binary"));
+-        goto cleanup;
+-    }
+-
+-    device = qemuDiskPathToAlias(vm, disk, &idx);
+-    if (!device) {
+-        goto cleanup;
+-    }
+ 
+     if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0)
+         goto cleanup;
+ 
++    priv = vm->privateData;
++
++    if (!(device = qemuDiskPathToAlias(vm, disk, &idx)))
++        goto endjob;
++
+     if (virDomainLiveConfigHelperMethod(driver->caps, vm, &flags,
+                                         &persistentDef) < 0)
+         goto endjob;
+@@ -14551,6 +14544,13 @@ qemuDomainSetBlockIoTune(virDomainPtr dom,
+     }
+ 
+     if (flags & VIR_DOMAIN_AFFECT_LIVE) {
++        if (!qemuCapsGet(priv->caps, QEMU_CAPS_DRIVE_IOTUNE)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                           _("block I/O throttling not supported with this "
++                             "QEMU binary"));
++            goto endjob;
++        }
++
+         /* If the user didn't specify bytes limits, inherit previous
+          * values; likewise if the user didn't specify iops
+          * limits.  */
+@@ -14575,9 +14575,6 @@ qemuDomainSetBlockIoTune(virDomainPtr dom,
+ 
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         sa_assert(persistentDef);
+-        idx = virDomainDiskIndexByName(persistentDef, disk, true);
+-        if (idx < 0)
+-            goto endjob;
+         oldinfo = &persistentDef->disks[idx]->blkdeviotune;
+         if (!set_bytes) {
+             info.total_bytes_sec = oldinfo->total_bytes_sec;
+@@ -14599,7 +14596,7 @@ qemuDomainSetBlockIoTune(virDomainPtr dom,
+     }
+ 
+ endjob:
+-    if (qemuDomainObjEndJob(driver, vm) == 0)
++    if (!qemuDomainObjEndJob(driver, vm))
+         vm = NULL;
+ 
+ cleanup:
+-- 
+2.0.4
+

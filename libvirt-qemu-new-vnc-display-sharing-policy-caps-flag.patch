@@ -1,0 +1,95 @@
+From c2b84d73ff7ef856935696bfa1b8dce9f62c2030 Mon Sep 17 00:00:00 2001
+Message-Id: <c2b84d73ff7ef856935696bfa1b8dce9f62c2030.1373885147.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Thu, 4 Jul 2013 22:53:04 +0800
+Subject: [PATCH] qemu: new vnc display sharing policy caps flag
+
+Resolves:https://bugzilla.redhat.com/show_bug.cgi?id=803602
+(cherry picked from commit d377d02dc400aebb34e3a12995b3aa3925c25663)
+QEMU_CAPS_VNC_SHARE_POLICY
+
+Conflicts:
+	src/qemu/qemu_capabilities.c
+	src/qemu/qemu_capabilities.h
+	tests/qemuhelptest.c
+---
+ src/qemu/qemu_capabilities.c | 9 +++++++--
+ src/qemu/qemu_capabilities.h | 1 +
+ tests/qemuhelptest.c         | 6 ++++--
+ 3 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index bada4fe..d66665b 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -198,6 +198,7 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "vmware-svga",
+               "device-video-primary",
+               "ipv6-migration",
++              "vnc-share-policy",
+     );
+ 
+ struct _qemuCaps {
+@@ -1103,8 +1104,10 @@ qemuCapsComputeCmdFlags(const char *help,
+         qemuCapsSet(caps, QEMU_CAPS_NETDEV);
+         /* IPv6 migration support was backported to RHEL qemu
+          * before dump-guest-core */
+-        if (qemuCapsGet(caps, QEMU_CAPS_DUMP_GUEST_CORE))
++        if (qemuCapsGet(caps, QEMU_CAPS_DUMP_GUEST_CORE)) {
+             qemuCapsSet(caps, QEMU_CAPS_IPV6_MIGRATION);
++            qemuCapsSet(caps, QEMU_CAPS_VNC_SHARE_POLICY);
++        }
+     }
+ #else
+     /* Starting with qemu 0.15 and newer, upstream qemu no longer
+@@ -1146,8 +1149,10 @@ qemuCapsComputeCmdFlags(const char *help,
+     if (version >= 11000)
+         qemuCapsSet(caps, QEMU_CAPS_CPU_HOST);
+ 
+-    if (version >= 1001000)
++    if (version >= 1001000) {
+         qemuCapsSet(caps, QEMU_CAPS_IPV6_MIGRATION);
++        qemuCapsSet(caps, QEMU_CAPS_VNC_SHARE_POLICY);
++    }
+ 
+     if (version >= 1002000)
+         qemuCapsSet(caps, QEMU_CAPS_DEVICE_VIDEO_PRIMARY);
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 2451a09..2809a8e 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -165,6 +165,7 @@ enum qemuCapsFlags {
+     QEMU_CAPS_DEVICE_VIDEO_PRIMARY,     /* safe to use -device XXX
+                                            for primary video device */
+     QEMU_CAPS_IPV6_MIGRATION,           /* -incoming [::] */
++    QEMU_CAPS_VNC_SHARE_POLICY,         /* set display sharing policy */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/tests/qemuhelptest.c b/tests/qemuhelptest.c
+index 0724a05..4247983 100644
+--- a/tests/qemuhelptest.c
++++ b/tests/qemuhelptest.c
+@@ -790,7 +790,8 @@ mymain(void)
+             QEMU_CAPS_DEVICE_VGA,
+             QEMU_CAPS_DEVICE_CIRRUS_VGA,
+             QEMU_CAPS_DEVICE_VMWARE_SVGA,
+-            QEMU_CAPS_IPV6_MIGRATION);
++            QEMU_CAPS_IPV6_MIGRATION,
++            QEMU_CAPS_VNC_SHARE_POLICY);
+     DO_TEST("qemu-1.2.0", 1002000, 0, 0,
+             QEMU_CAPS_VNC_COLON,
+             QEMU_CAPS_NO_REBOOT,
+@@ -879,7 +880,8 @@ mymain(void)
+             QEMU_CAPS_DEVICE_CIRRUS_VGA,
+             QEMU_CAPS_DEVICE_VMWARE_SVGA,
+             QEMU_CAPS_DEVICE_VIDEO_PRIMARY,
+-            QEMU_CAPS_IPV6_MIGRATION);
++            QEMU_CAPS_IPV6_MIGRATION,
++            QEMU_CAPS_VNC_SHARE_POLICY);
+ 
+     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+-- 
+1.8.3.2
+

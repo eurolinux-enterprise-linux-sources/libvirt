@@ -1,0 +1,349 @@
+From 8bec5b8eca672133370b2bb2eddd318bb4dc73a8 Mon Sep 17 00:00:00 2001
+Message-Id: <8bec5b8eca672133370b2bb2eddd318bb4dc73a8.1350297257.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 17 Sep 2012 15:36:47 +0200
+Subject: [PATCH] locking: Pass hypervisor driver name when acquiring locks
+
+https://bugzilla.redhat.com/show_bug.cgi?id=832156
+
+This is required in case a lock manager needs to contact libvirtd in
+case of an unexpected event.
+(cherry picked from commit d236f3fc3881c97c1655023a6a2d4e5486613569)
+---
+ docs/internals/locking.html.in |  8 ++++++++
+ src/locking/domain_lock.c      | 25 +++++++++++++++++--------
+ src/locking/domain_lock.h      |  4 ++++
+ src/locking/lock_driver.h      |  1 +
+ src/qemu/qemu_conf.h           |  1 +
+ src/qemu/qemu_driver.c         |  9 +++++----
+ src/qemu/qemu_hotplug.c        | 15 ++++++++++-----
+ src/qemu/qemu_process.c        |  4 +++-
+ 8 files changed, 49 insertions(+), 18 deletions(-)
+
+diff --git a/docs/internals/locking.html.in b/docs/internals/locking.html.in
+index e84321b..34e50c7 100644
+--- a/docs/internals/locking.html.in
++++ b/docs/internals/locking.html.in
+@@ -183,6 +183,10 @@
+           .key = "pid",
+           .value = { .i = dom->pid },
+         },
++        { .type = VIR_LOCK_MANAGER_PARAM_TYPE_CSTRING,
++          .key = "uri",
++          .value = { .cstr = driver->uri },
++        },
+       };
+       mgr = virLockManagerNew(lockPlugin,
+                               VIR_LOCK_MANAGER_TYPE_DOMAIN,
+@@ -225,6 +229,10 @@
+           .key = "pid",
+           .value = { .i = dom->pid },
+         },
++        { .type = VIR_LOCK_MANAGER_PARAM_TYPE_CSTRING,
++          .key = "uri",
++          .value = { .cstr = driver->uri },
++        },
+       };
+       mgr = virLockManagerNew(lockPlugin,
+                               VIR_LOCK_MANAGER_TYPE_DOMAIN,
+diff --git a/src/locking/domain_lock.c b/src/locking/domain_lock.c
+index 3417361..9d6fd6a 100644
+--- a/src/locking/domain_lock.c
++++ b/src/locking/domain_lock.c
+@@ -97,6 +97,7 @@ static int virDomainLockManagerAddDisk(virLockManagerPtr lock,
+ }
+ 
+ static virLockManagerPtr virDomainLockManagerNew(virLockManagerPluginPtr plugin,
++                                                 const char *uri,
+                                                  virDomainObjPtr dom,
+                                                  bool withResources)
+ {
+@@ -118,6 +119,10 @@ static virLockManagerPtr virDomainLockManagerNew(virLockManagerPluginPtr plugin,
+           .key = "pid",
+           .value = { .i = dom->pid },
+         },
++        { .type = VIR_LOCK_MANAGER_PARAM_TYPE_CSTRING,
++          .key = "uri",
++          .value = { .cstr = uri },
++        },
+     };
+     VIR_DEBUG("plugin=%p dom=%p withResources=%d",
+               plugin, dom, withResources);
+@@ -152,6 +157,7 @@ error:
+ 
+ 
+ int virDomainLockProcessStart(virLockManagerPluginPtr plugin,
++                              const char *uri,
+                               virDomainObjPtr dom,
+                               bool paused,
+                               int *fd)
+@@ -163,7 +169,7 @@ int virDomainLockProcessStart(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p paused=%d fd=%p",
+               plugin, dom, paused, fd);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, dom, true)))
++    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, true)))
+         return -1;
+ 
+     if (paused)
+@@ -186,7 +192,7 @@ int virDomainLockProcessPause(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p state=%p",
+               plugin, dom, state);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, dom, true)))
++    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, true)))
+         return -1;
+ 
+     ret = virLockManagerRelease(lock, state, 0);
+@@ -196,6 +202,7 @@ int virDomainLockProcessPause(virLockManagerPluginPtr plugin,
+ }
+ 
+ int virDomainLockProcessResume(virLockManagerPluginPtr plugin,
++                               const char *uri,
+                                virDomainObjPtr dom,
+                                const char *state)
+ {
+@@ -205,7 +212,7 @@ int virDomainLockProcessResume(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p state=%s",
+               plugin, dom, NULLSTR(state));
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, dom, true)))
++    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, true)))
+         return -1;
+ 
+     ret = virLockManagerAcquire(lock, state, 0, NULL);
+@@ -224,7 +231,7 @@ int virDomainLockProcessInquire(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p state=%p",
+               plugin, dom, state);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, dom, true)))
++    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, true)))
+         return -1;
+ 
+     ret = virLockManagerInquire(lock, state, 0);
+@@ -235,6 +242,7 @@ int virDomainLockProcessInquire(virLockManagerPluginPtr plugin,
+ 
+ 
+ int virDomainLockDiskAttach(virLockManagerPluginPtr plugin,
++                            const char *uri,
+                             virDomainObjPtr dom,
+                             virDomainDiskDefPtr disk)
+ {
+@@ -244,7 +252,7 @@ int virDomainLockDiskAttach(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p disk=%p",
+               plugin, dom, disk);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, dom, false)))
++    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, false)))
+         return -1;
+ 
+     if (virDomainLockManagerAddDisk(lock, disk) < 0)
+@@ -271,7 +279,7 @@ int virDomainLockDiskDetach(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p disk=%p",
+               plugin, dom, disk);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, dom, false)))
++    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, false)))
+         return -1;
+ 
+     if (virDomainLockManagerAddDisk(lock, disk) < 0)
+@@ -290,6 +298,7 @@ cleanup:
+ 
+ 
+ int virDomainLockLeaseAttach(virLockManagerPluginPtr plugin,
++                             const char *uri,
+                              virDomainObjPtr dom,
+                              virDomainLeaseDefPtr lease)
+ {
+@@ -299,7 +308,7 @@ int virDomainLockLeaseAttach(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p lease=%p",
+               plugin, dom, lease);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, dom, false)))
++    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, false)))
+         return -1;
+ 
+     if (virDomainLockManagerAddLease(lock, lease) < 0)
+@@ -326,7 +335,7 @@ int virDomainLockLeaseDetach(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p lease=%p",
+               plugin, dom, lease);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, dom, false)))
++    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, false)))
+         return -1;
+ 
+     if (virDomainLockManagerAddLease(lock, lease) < 0)
+diff --git a/src/locking/domain_lock.h b/src/locking/domain_lock.h
+index 3bedeb1..eefe6cd 100644
+--- a/src/locking/domain_lock.h
++++ b/src/locking/domain_lock.h
+@@ -27,6 +27,7 @@
+ # include "lock_manager.h"
+ 
+ int virDomainLockProcessStart(virLockManagerPluginPtr plugin,
++                              const char *uri,
+                               virDomainObjPtr dom,
+                               bool paused,
+                               int *fd);
+@@ -34,6 +35,7 @@ int virDomainLockProcessPause(virLockManagerPluginPtr plugin,
+                               virDomainObjPtr dom,
+                               char **state);
+ int virDomainLockProcessResume(virLockManagerPluginPtr plugin,
++                               const char *uri,
+                                virDomainObjPtr dom,
+                                const char *state);
+ int virDomainLockProcessInquire(virLockManagerPluginPtr plugin,
+@@ -41,6 +43,7 @@ int virDomainLockProcessInquire(virLockManagerPluginPtr plugin,
+                                 char **state);
+ 
+ int virDomainLockDiskAttach(virLockManagerPluginPtr plugin,
++                            const char *uri,
+                             virDomainObjPtr dom,
+                             virDomainDiskDefPtr disk);
+ int virDomainLockDiskDetach(virLockManagerPluginPtr plugin,
+@@ -48,6 +51,7 @@ int virDomainLockDiskDetach(virLockManagerPluginPtr plugin,
+                             virDomainDiskDefPtr disk);
+ 
+ int virDomainLockLeaseAttach(virLockManagerPluginPtr plugin,
++                             const char *uri,
+                              virDomainObjPtr dom,
+                              virDomainLeaseDefPtr lease);
+ int virDomainLockLeaseDetach(virLockManagerPluginPtr plugin,
+diff --git a/src/locking/lock_driver.h b/src/locking/lock_driver.h
+index c33aea7..8fe7ceb 100644
+--- a/src/locking/lock_driver.h
++++ b/src/locking/lock_driver.h
+@@ -155,6 +155,7 @@ typedef int (*virLockDriverDeinit)(void);
+  * - uuid: the domain uuid (uuid)
+  * - name: the domain name (string)
+  * - pid: process ID to own/owning the lock (unsigned int)
++ * - uri: URI for connecting to the driver the domain belongs to (string)
+  *
+  * Returns 0 if successful initialized a new context, -1 on error
+  */
+diff --git a/src/qemu/qemu_conf.h b/src/qemu/qemu_conf.h
+index 180c144..38fd749 100644
+--- a/src/qemu/qemu_conf.h
++++ b/src/qemu/qemu_conf.h
+@@ -56,6 +56,7 @@ struct qemud_driver {
+     virThreadPoolPtr workerPool;
+ 
+     int privileged;
++    const char *uri;
+ 
+     uid_t user;
+     gid_t group;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index eefb6e8..b9e38a4 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -555,7 +555,9 @@ qemudStartup(int privileged) {
+         return -1;
+     }
+     qemuDriverLock(qemu_driver);
++
+     qemu_driver->privileged = privileged;
++    qemu_driver->uri = privileged ? "qemu:///system" : "qemu:///session";
+ 
+     /* Don't have a dom0 so start from 1 */
+     qemu_driver->nextvmid = 1;
+@@ -800,9 +802,7 @@ qemudStartup(int privileged) {
+ 
+     virHashForEach(qemu_driver->domains.objs, qemuDomainNetsRestart, NULL);
+ 
+-    conn = virConnectOpen(qemu_driver->privileged ?
+-                          "qemu:///system" :
+-                          "qemu:///session");
++    conn = virConnectOpen(qemu_driver->uri);
+ 
+     qemuProcessReconnectAll(conn, qemu_driver);
+ 
+@@ -10713,7 +10713,8 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+     origdriver = disk->driverType;
+     disk->driverType = (char *) "raw"; /* Don't want to probe backing files */
+ 
+-    if (virDomainLockDiskAttach(driver->lockManager, vm, disk) < 0)
++    if (virDomainLockDiskAttach(driver->lockManager, driver->uri,
++                                vm, disk) < 0)
+         goto cleanup;
+     if (cgroup && qemuSetupDiskCgroup(driver, vm, cgroup, disk) < 0) {
+         if (virDomainLockDiskDetach(driver->lockManager, vm, disk) < 0)
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 4022c07..f66e1d0 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -88,7 +88,8 @@ int qemuDomainChangeEjectableMedia(struct qemud_driver *driver,
+         return -1;
+     }
+ 
+-    if (virDomainLockDiskAttach(driver->lockManager, vm, disk) < 0)
++    if (virDomainLockDiskAttach(driver->lockManager, driver->uri,
++                                vm, disk) < 0)
+         return -1;
+ 
+     if (virSecurityManagerSetImageLabel(driver->securityManager,
+@@ -217,7 +218,8 @@ int qemuDomainAttachPciDiskDevice(virConnectPtr conn,
+         }
+     }
+ 
+-    if (virDomainLockDiskAttach(driver->lockManager, vm, disk) < 0)
++    if (virDomainLockDiskAttach(driver->lockManager, driver->uri,
++                                vm, disk) < 0)
+         return -1;
+ 
+     if (virSecurityManagerSetImageLabel(driver->securityManager,
+@@ -449,7 +451,8 @@ int qemuDomainAttachSCSIDisk(virConnectPtr conn,
+         }
+     }
+ 
+-    if (virDomainLockDiskAttach(driver->lockManager, vm, disk) < 0)
++    if (virDomainLockDiskAttach(driver->lockManager, driver->uri,
++                                vm, disk) < 0)
+         return -1;
+ 
+     if (virSecurityManagerSetImageLabel(driver->securityManager,
+@@ -572,7 +575,8 @@ int qemuDomainAttachUsbMassstorageDevice(virConnectPtr conn,
+         }
+     }
+ 
+-    if (virDomainLockDiskAttach(driver->lockManager, vm, disk) < 0)
++    if (virDomainLockDiskAttach(driver->lockManager, driver->uri,
++                                vm, disk) < 0)
+         return -1;
+ 
+     if (virSecurityManagerSetImageLabel(driver->securityManager,
+@@ -2415,7 +2419,8 @@ int qemuDomainAttachLease(struct qemud_driver *driver,
+     if (virDomainLeaseInsertPreAlloc(vm->def) < 0)
+         return -1;
+ 
+-    if (virDomainLockLeaseAttach(driver->lockManager, vm, lease) < 0) {
++    if (virDomainLockLeaseAttach(driver->lockManager, driver->uri,
++                                 vm, lease) < 0) {
+         virDomainLeaseInsertPreAlloced(vm->def, NULL);
+         return -1;
+     }
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index ec312d1..7fc6632 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2607,6 +2607,7 @@ static int qemuProcessHook(void *data)
+     if (virSecurityManagerSetSocketLabel(h->driver->securityManager, h->vm->def) < 0)
+         goto cleanup;
+     if (virDomainLockProcessStart(h->driver->lockManager,
++                                  h->driver->uri,
+                                   h->vm,
+                                   /* QEMU is always pased initially */
+                                   true,
+@@ -2676,7 +2677,8 @@ qemuProcessStartCPUs(struct qemud_driver *driver, virDomainObjPtr vm,
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+ 
+     VIR_DEBUG("Using lock state '%s'", NULLSTR(priv->lockState));
+-    if (virDomainLockProcessResume(driver->lockManager, vm, priv->lockState) < 0) {
++    if (virDomainLockProcessResume(driver->lockManager, driver->uri,
++                                   vm, priv->lockState) < 0) {
+         /* Don't free priv->lockState on error, because we need
+          * to make sure we have state still present if the user
+          * tries to resume again
+-- 
+1.7.12.3
+

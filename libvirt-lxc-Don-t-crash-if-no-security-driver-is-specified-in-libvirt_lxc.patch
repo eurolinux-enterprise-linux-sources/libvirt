@@ -1,0 +1,47 @@
+From 879500662ab3d4e60188d44a58657511bd2c5a70 Mon Sep 17 00:00:00 2001
+Message-Id: <879500662ab3d4e60188d44a58657511bd2c5a70.1353944811.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 26 Nov 2012 15:56:26 +0100
+Subject: [PATCH] lxc: Don't crash if no security driver is specified in
+ libvirt_lxc
+
+https://bugzilla.redhat.com/show_bug.cgi?id=880064
+
+When no security driver is specified libvirt_lxc segfaults as a debug
+message tries to access security labels for the container that are not
+present.
+
+This problem was introduced in commit 6c3cf57d6cb27cf10064baf8cca0f39.
+(cherry picked from commit 99a388e612d82a6bcd3462e4b98463fb32931520)
+---
+ src/lxc/lxc_controller.c | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/src/lxc/lxc_controller.c b/src/lxc/lxc_controller.c
+index 5d69eaf..3652c86 100644
+--- a/src/lxc/lxc_controller.c
++++ b/src/lxc/lxc_controller.c
+@@ -1583,11 +1583,15 @@ int main(int argc, char *argv[])
+                                                         false, false, false)))
+         goto cleanup;
+ 
+-    VIR_DEBUG("Security model %s type %s label %s imagelabel %s",
+-              NULLSTR(ctrl->def->seclabels[0]->model),
+-              virDomainSeclabelTypeToString(ctrl->def->seclabels[0]->type),
+-              NULLSTR(ctrl->def->seclabels[0]->label),
+-              NULLSTR(ctrl->def->seclabels[0]->imagelabel));
++    if (ctrl->def->seclabels) {
++        VIR_DEBUG("Security model %s type %s label %s imagelabel %s",
++                  NULLSTR(ctrl->def->seclabels[0]->model),
++                  virDomainSeclabelTypeToString(ctrl->def->seclabels[0]->type),
++                  NULLSTR(ctrl->def->seclabels[0]->label),
++                  NULLSTR(ctrl->def->seclabels[0]->imagelabel));
++    } else {
++        VIR_DEBUG("Security model not initialized");
++    }
+ 
+     ctrl->veths = veths;
+     ctrl->nveths = nveths;
+-- 
+1.8.0
+

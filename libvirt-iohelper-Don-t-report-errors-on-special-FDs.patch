@@ -1,0 +1,39 @@
+From e46d85403482eff73d5aeb55a7bc753151ceb129 Mon Sep 17 00:00:00 2001
+Message-Id: <e46d85403482eff73d5aeb55a7bc753151ceb129.1352726474.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 5 Nov 2012 17:22:47 +0100
+Subject: [PATCH] iohelper: Don't report errors on special FDs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=866369
+
+Some FDs may not implement fdatasync() functionality,
+e.g.  pipes. In that case EINVAL or EROFS is returned.
+We don't want to fail then nor report any error.
+
+Reported-by: Christophe Fergeau <cfergeau@redhat.com>
+(cherry picked from commit 46325e51310344872597453ba5d621afa88d44c1)
+---
+ src/util/iohelper.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/iohelper.c b/src/util/iohelper.c
+index 860e14a..a9c8b4c 100644
+--- a/src/util/iohelper.c
++++ b/src/util/iohelper.c
+@@ -181,8 +181,11 @@ runIO(const char *path, int fd, int oflags, unsigned long long length)
+ 
+     /* Ensure all data is written */
+     if (fdatasync(fdout) < 0) {
+-        virReportSystemError(errno, _("unable to fsync %s"), fdoutname);
+-        goto cleanup;
++        if (errno != EINVAL && errno != EROFS) {
++            /* fdatasync() may fail on some special FDs, e.g. pipes */
++            virReportSystemError(errno, _("unable to fsync %s"), fdoutname);
++            goto cleanup;
++        }
+     }
+ 
+     ret = 0;
+-- 
+1.8.0
+

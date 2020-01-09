@@ -1,0 +1,40 @@
+From d8f3df84d7a5f8265f0644378bfb4e6a3d7b18f3 Mon Sep 17 00:00:00 2001
+Message-Id: <d8f3df84d7a5f8265f0644378bfb4e6a3d7b18f3@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 28 Apr 2014 14:46:35 -0600
+Subject: [PATCH] virsh: suppress aliases in group help
+
+RHEL 6.6: https://bugzilla.redhat.com/show_bug.cgi?id=956968
+
+'virsh help | grep nodedev-det' shows only nodedev-detach, but
+'virsh help nodedev | grep nodedev-det' also shows the old alias
+nodedev-dettach that we intentionally hid in commit af3f9aab.
+
+See also commit 787f4fe and this bug report:
+https://bugzilla.redhat.com/show_bug.cgi?id=956966
+
+* tools/virsh.c (vshCmdGrpHelp): Copy suppression of vshCmdHelp.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 117dc4cc8a8993334e8ec512fde40e3f8916da69)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tools/virsh.c b/tools/virsh.c
+index be24f41..96afec4 100644
+--- a/tools/virsh.c
++++ b/tools/virsh.c
+@@ -1122,6 +1122,8 @@ vshCmdGrpHelp(vshControl *ctl, const char *grpname)
+                  grp->keyword);
+ 
+         for (cmd = grp->commands; cmd->name; cmd++) {
++            if (cmd->flags & VSH_CMD_FLAG_ALIAS)
++                continue;
+             vshPrint(ctl, "    %-30s %s\n", cmd->name,
+                      _(vshCmddefGetInfo(cmd, "help")));
+         }
+-- 
+1.9.2
+

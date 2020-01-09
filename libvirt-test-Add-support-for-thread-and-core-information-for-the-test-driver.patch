@@ -1,0 +1,40 @@
+From c40cfdefbbc9ddc2a2e691ddc2040a2e3f5edbd4 Mon Sep 17 00:00:00 2001
+Message-Id: <c40cfdefbbc9ddc2a2e691ddc2040a2e3f5edbd4.1373271636.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 7 Feb 2013 18:28:23 +0100
+Subject: [PATCH] test: Add support for thread and core information for the
+ test driver
+
+https://bugzilla.redhat.com/show_bug.cgi?id=888503
+
+This patch adds demo processor topology information for the test driver.
+(cherry picked from commit e3818b2a9fa322a99cd98b9d076434f1de1f3480)
+---
+ src/test/test_driver.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/src/test/test_driver.c b/src/test/test_driver.c
+index d27cb14..51c6b3a 100644
+--- a/src/test/test_driver.c
++++ b/src/test/test_driver.c
+@@ -558,7 +558,16 @@ static int testOpenDefault(virConnectPtr conn) {
+         privconn->cells[u].mem = (u + 1) * 2048 * 1024;
+     }
+     for (u = 0 ; u < 16 ; u++) {
+-        privconn->cells[u % 2].cpus[(u / 2)].id = u;
++        virBitmapPtr siblings = virBitmapNew(16);
++        if (!siblings) {
++            virReportOOMError();
++            goto error;
++        }
++        ignore_value(virBitmapSetBit(siblings, u));
++        privconn->cells[u / 8].cpus[(u % 8)].id = u;
++        privconn->cells[u / 8].cpus[(u % 8)].socket_id = u / 8;
++        privconn->cells[u / 8].cpus[(u % 8)].core_id = u % 8;
++        privconn->cells[u / 8].cpus[(u % 8)].siblings = siblings;
+     }
+ 
+     if (!(privconn->caps = testBuildCapabilities(conn)))
+-- 
+1.8.2.1
+

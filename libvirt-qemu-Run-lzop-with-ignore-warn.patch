@@ -1,0 +1,104 @@
+From 38184de2dcb9d8c4b38ccaada4202843c1dc98db Mon Sep 17 00:00:00 2001
+Message-Id: <38184de2dcb9d8c4b38ccaada4202843c1dc98db.1373271636.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 25 Feb 2013 16:49:00 +0100
+Subject: [PATCH] qemu: Run lzop with '--ignore-warn'
+
+https://bugzilla.redhat.com/show_bug.cgi?id=894723
+
+Currently, if lzop decompression binary produces a warning, it
+doesn't exit with zero status but 2 instead. Terrifying, but
+true. However, warnings may be ignored using '--ignore-warn'
+command line argument.  Moreover, in which case, the exit status
+will be zero.
+(cherry picked from commit 0eeedf52e7cb6a1794796856ac077d17a7d7def4)
+
+Conflicts:
+	src/qemu/qemu_driver.c; Context, virCommandDoAsyncIO is not being
+    backported. b7aba48bcaf3 and 020a0307 are not backported neither.
+---
+ src/qemu/qemu_driver.c | 57 ++++++++++++++++++++++++++++++++------------------
+ 1 file changed, 37 insertions(+), 20 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 283758c..a01d574 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2654,6 +2654,33 @@ qemuCompressProgramName(int compress)
+             qemudSaveCompressionTypeToString(compress));
+ }
+ 
++static virCommandPtr
++qemuCompressGetCommand(enum qemud_save_formats compression)
++{
++    virCommandPtr ret = NULL;
++    const char *prog = qemudSaveCompressionTypeToString(compression);
++
++    if (!prog) {
++        virReportError(VIR_ERR_OPERATION_FAILED,
++                       _("Invalid compressed save format %d"),
++                       compression);
++        return NULL;
++    }
++
++    ret = virCommandNew(prog);
++    virCommandAddArg(ret, "-dc");
++
++    switch (compression) {
++    case QEMUD_SAVE_FORMAT_LZOP:
++        virCommandAddArg(ret, "--ignore-warn");
++        break;
++    default:
++        break;
++    }
++
++    return ret;
++}
++
+ /* Internal function to properly create or open existing files, with
+  * ownership affected by qemu driver setup.  */
+ static int
+@@ -4966,30 +4993,20 @@ qemuDomainSaveImageStartVM(virConnectPtr conn,
+     int intermediatefd = -1;
+     virCommandPtr cmd = NULL;
+ 
+-    if (header->version == 2) {
+-        const char *prog = qemudSaveCompressionTypeToString(header->compressed);
+-        if (prog == NULL) {
+-            virReportError(VIR_ERR_OPERATION_FAILED,
+-                           _("Invalid compressed save format %d"),
+-                           header->compressed);
++    if ((header->version == 2) &&
++        (header->compressed != QEMUD_SAVE_FORMAT_RAW)) {
++        if (!(cmd = qemuCompressGetCommand(header->compressed)))
+             goto out;
+-        }
+ 
+-        if (header->compressed != QEMUD_SAVE_FORMAT_RAW) {
+-            cmd = virCommandNewArgList(prog, "-dc", NULL);
+-            intermediatefd = *fd;
+-            *fd = -1;
++        intermediatefd = *fd;
++        *fd = -1;
+ 
+-            virCommandSetInputFD(cmd, intermediatefd);
+-            virCommandSetOutputFD(cmd, fd);
++        virCommandSetInputFD(cmd, intermediatefd);
++        virCommandSetOutputFD(cmd, fd);
+ 
+-            if (virCommandRunAsync(cmd, NULL) < 0) {
+-                virReportError(VIR_ERR_INTERNAL_ERROR,
+-                               _("Failed to start decompression binary %s"),
+-                               prog);
+-                *fd = intermediatefd;
+-                goto out;
+-            }
++        if (virCommandRunAsync(cmd, NULL) < 0) {
++            *fd = intermediatefd;
++            goto out;
+         }
+     }
+ 
+-- 
+1.8.2.1
+

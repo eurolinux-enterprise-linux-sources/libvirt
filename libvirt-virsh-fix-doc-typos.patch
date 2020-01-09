@@ -1,0 +1,51 @@
+From 29760124e6689bc81b012775d52e5568c17f7e32 Mon Sep 17 00:00:00 2001
+Message-Id: <29760124e6689bc81b012775d52e5568c17f7e32@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 7 Apr 2014 13:30:46 +0200
+Subject: [PATCH] virsh: fix doc typos
+
+Reported in https://bugzilla.redhat.com/show_bug.cgi?id=1022872
+
+* tools/virsh.pod: s/COMMMANDS/COMMANDS/
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 0410eb22bf45693ef7220fa80fa1bcdc9954c2a8)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh.pod | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 32aa742..5754fac 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -2565,7 +2565,7 @@ B<blockresize> for live resizing.
+ 
+ =back
+ 
+-=head1 SECRET COMMMANDS
++=head1 SECRET COMMANDS
+ 
+ The following commands manipulate "secrets" (e.g. passwords, passphrases and
+ encryption keys).  Libvirt can store secrets independently from their use, and
+@@ -2612,7 +2612,7 @@ I<--no-private> to list the non-private ones.
+ 
+ =back
+ 
+-=head1 SNAPSHOT COMMMANDS
++=head1 SNAPSHOT COMMANDS
+ 
+ The following commands manipulate domain snapshots.  Snapshots take the
+ disk, memory, and device state of a domain at a point-of-time, and save it
+@@ -2908,7 +2908,7 @@ the data contents from that point in time.
+ 
+ =back
+ 
+-=head1 NWFILTER COMMMANDS
++=head1 NWFILTER COMMANDS
+ 
+ The following commands manipulate network filters. Network filters allow
+ filtering of the network traffic coming from and going to virtual machines.
+-- 
+1.9.1
+

@@ -1,0 +1,32 @@
+From 9b1b4b434df55033fe99b812b75637790cc0de78 Mon Sep 17 00:00:00 2001
+Message-Id: <9b1b4b434df55033fe99b812b75637790cc0de78.1352118319.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 30 Oct 2012 17:29:09 +0100
+Subject: [PATCH] cpu: Fix definition of flag smap
+
+https://bugzilla.redhat.com/show_bug.cgi?id=797283
+
+A mild case of dyslexia caused that commit
+012f9b19ef3812884e207dc431571502de4cebce specifies wrong mask for the
+smap cpu feature flag. This patch fixes that mistake.
+(cherry picked from commit 7af929d065516a703e17ae80b559a46c84133a53)
+---
+ src/cpu/cpu_map.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 585f11a..35cc87d 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -270,7 +270,7 @@
+       <cpuid function='0x00000007' ebx='0x00000080'/>
+     </feature>
+     <feature name='smap'>
+-      <cpuid function='0x00000007' ebx='0x00080000'/>
++      <cpuid function='0x00000007' ebx='0x00100000'/>
+     </feature>
+ 
+     <!-- models -->
+-- 
+1.8.0
+

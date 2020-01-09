@@ -1,0 +1,51 @@
+From 8015bad740dac113baaec4aa9de3e0aba6c509be Mon Sep 17 00:00:00 2001
+Message-Id: <8015bad740dac113baaec4aa9de3e0aba6c509be.1355319681.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 11 Dec 2012 10:16:58 +0100
+Subject: [PATCH] dnsmasq: Fix parsing of the version number
+
+https://bugzilla.redhat.com/show_bug.cgi?id=885727
+
+If debugging is enabled, the debug messages are sent to stderr.
+Moreover, if a command has catching of stderr set, the messages
+gets mixed with stdout output (assuming both outputs are stored
+in the same variable). The resulting string then doesn't
+necessarily have to start with desired prefix then. This bug
+exposes itself when parsing dnsmasq output:
+
+2012-12-06 11:18:11.445+0000: 18491: error :
+dnsmasqCapsSetFromBuffer:664 : internal error cannot parse
+/usr/sbin/dnsmasq version number in '2012-12-06
+11:11:02.232+0000: 18492: debug : virFileClose:72 : Closed fd 22'
+
+We can clearly see that the output of dnsmasq --version doesn't
+start with expected "Dnsmasq version " string but a libvirt debug
+output.
+(cherry picked from commit ff33f807739dc2950e4df8c1d4007ce9f8b290c0)
+---
+ src/util/dnsmasq.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/src/util/dnsmasq.c b/src/util/dnsmasq.c
+index 4f210d2..bee3b61 100644
+--- a/src/util/dnsmasq.c
++++ b/src/util/dnsmasq.c
+@@ -715,7 +715,6 @@ dnsmasqCapsRefreshInternal(dnsmasqCapsPtr caps, bool force)
+ 
+     cmd = virCommandNewArgList(caps->binaryPath, "--version", NULL);
+     virCommandSetOutputBuffer(cmd, &version);
+-    virCommandSetErrorBuffer(cmd, &version);
+     virCommandAddEnvPassCommon(cmd);
+     virCommandClearCaps(cmd);
+     if (virCommandRun(cmd, NULL) < 0) {
+@@ -727,7 +726,6 @@ dnsmasqCapsRefreshInternal(dnsmasqCapsPtr caps, bool force)
+ 
+     cmd = virCommandNewArgList(caps->binaryPath, "--help", NULL);
+     virCommandSetOutputBuffer(cmd, &help);
+-    virCommandSetErrorBuffer(cmd, &help);
+     virCommandAddEnvPassCommon(cmd);
+     virCommandClearCaps(cmd);
+     if (virCommandRun(cmd, NULL) < 0) {
+-- 
+1.8.0
+

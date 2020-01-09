@@ -1,0 +1,52 @@
+From 31f522ab3970a3403adec1505b2ef466b0d6d2f2 Mon Sep 17 00:00:00 2001
+Message-Id: <31f522ab3970a3403adec1505b2ef466b0d6d2f2.1352118320.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 1 Nov 2012 17:00:52 +0100
+Subject: [PATCH] net-update docs: s/domain/network/
+
+https://bugzilla.redhat.com/show_bug.cgi?id=872104
+
+A leftover from copy paste.
+(cherry picked from commit d1236faa17581c8bf33ef20e71e7b7bba49423fc)
+---
+ tools/virsh-network.c | 6 +++---
+ tools/virsh.pod       | 6 +++---
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/tools/virsh-network.c b/tools/virsh-network.c
+index 6005e5b..fd9d563 100644
+--- a/tools/virsh-network.c
++++ b/tools/virsh-network.c
+@@ -755,9 +755,9 @@ static const vshCmdOptDef opts_network_update[] = {
+      N_("name of file containing xml (or, if it starts with '<', the complete "
+         "xml element itself) to add/modify, or to be matched for search")},
+     {"parent-index", VSH_OT_INT, 0, N_("which parent object to search through")},
+-    {"config", VSH_OT_BOOL, 0, N_("affect next boot")},
+-    {"live", VSH_OT_BOOL, 0, N_("affect running domain")},
+-    {"current", VSH_OT_BOOL, 0, N_("affect current domain")},
++    {"config", VSH_OT_BOOL, 0, N_("affect next network startup")},
++    {"live", VSH_OT_BOOL, 0, N_("affect running network")},
++    {"current", VSH_OT_BOOL, 0, N_("affect current state of network")},
+     {NULL, 0, 0, NULL}
+ };
+ 
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 0d9f92b..75b8f20 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -2045,9 +2045,9 @@ the network; if a parent-index isn't provided, the "most appropriate"
+ <dhcp> element), but if I<--parent-index> is given, that particular
+ instance of <ip> will get the modification.
+ 
+-If I<--live> is specified, affect a running guest.
+-If I<--config> is specified, affect the next boot of a persistent guest.
+-If I<--current> is specified, affect the current guest state.
++If I<--live> is specified, affect a running network.
++If I<--config> is specified, affect the next startup of a persistent network.
++If I<--current> is specified, affect the current network state.
+ Both I<--live> and I<--config> flags may be given, but I<--current> is
+ exclusive. Not specifying any flag is the same as specifying I<--current>.
+ 
+-- 
+1.8.0
+

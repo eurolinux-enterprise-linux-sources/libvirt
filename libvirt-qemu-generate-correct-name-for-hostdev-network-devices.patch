@@ -1,0 +1,49 @@
+From e830d8882a7ca177027bf14d87cdf85452029c74 Mon Sep 17 00:00:00 2001
+Message-Id: <e830d8882a7ca177027bf14d87cdf85452029c74.1381312399.git.jdenemar@redhat.com>
+From: Laine Stump <laine@redhat.com>
+Date: Mon, 7 Oct 2013 10:22:24 -0400
+Subject: [PATCH] qemu: generate correct name for hostdev network devices
+
+This patch resolves:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=1001881
+
+in the simplest manner possible. This problem was fixed upstream with
+commit 8cd40e7e0d92a0edbe08941fdf728a81c2e6cf15, which restructured
+the code enough to completely eliminate the erroneous passage. This
+patch instead makes a small change to that code, thus minimizing the
+possibility of inadvertant regression.
+
+The problem that is solved is that, during qemuBuildCommandline(),
+qemuAssignDeviceHostdevAlias() had been called with an index of
+"def->nhostdevs-1", when it really should have been called with
+"def->nhostdevs" (because the hostdev for which the alias was being
+created hadn't yet been added to the hostdev array). The original code
+just coincidentally worked if there was only a single interface
+defined (since the argument in that case would be "0 - 1", and an
+index of -1 means "auto-determine an appropriate index").
+
+Since the offending code has been removed upstream, this patch is
+*not* cherry picked from upstream, as it is unnecessary.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 763a265..b85d896 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -6003,7 +6003,7 @@ qemuBuildCommandLine(virConnectPtr conn,
+                      * add the newly minted hostdev to the hostdevs array.
+                      */
+                     if (qemuAssignDeviceHostdevAlias(def, hostdev,
+-                                                     (def->nhostdevs-1)) < 0) {
++                                                     def->nhostdevs) < 0) {
+                         goto error;
+                     }
+ 
+-- 
+1.8.3.2
+

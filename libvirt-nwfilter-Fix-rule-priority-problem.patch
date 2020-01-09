@@ -1,0 +1,55 @@
+From a25385d477e85f48ae8261c7c2e0af33ad0bc30e Mon Sep 17 00:00:00 2001
+Message-Id: <a25385d477e85f48ae8261c7c2e0af33ad0bc30e@dist-git>
+From: Stefan Berger <stefanb@linux.vnet.ibm.com>
+Date: Thu, 9 Apr 2015 12:05:21 -0400
+Subject: [PATCH] nwfilter: Fix rule priority problem
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1210183 (RHEL6)
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1072292 (RHEL7)
+
+Fix a problem related to rule priorities that did not allow to
+have rules applied that had a higher priority than the chain they
+were in. In this case the chain did not exist yet when the rule
+was instantiated. The solution is to adjust the priority of rules
+if the priority of the chain is of higher value. That way the chain
+will be created before the rule.
+
+Signed-off-by: Stefan Berger <stefanb@linux.vnet.ibm.com>
+
+(cherry picked from commit 5a2b17beb89c648db5d8e145615b4e8128c7bd8b)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/nwfilter/nwfilter_ebiptables_driver.c | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/src/nwfilter/nwfilter_ebiptables_driver.c b/src/nwfilter/nwfilter_ebiptables_driver.c
+index 9bff8f1..b04dcd3 100644
+--- a/src/nwfilter/nwfilter_ebiptables_driver.c
++++ b/src/nwfilter/nwfilter_ebiptables_driver.c
+@@ -3739,6 +3739,23 @@ ebiptablesApplyNewRules(const char *ifname,
+ 
+     NWFILTER_SET_EBTABLES_SHELLVAR(&buf);
+ 
++    /* walk the list of rules and increase the priority
++     * of rules in case the chain priority is of higher value;
++     * this preserves the order of the rules and ensures that
++     * the chain will be created before the chain's rules
++     * are created; don't adjust rules in the root chain
++     * example: a rule of priority -510 will be adjusted to
++     * priority -500 and the chain with priority -500 will
++     * then be created before it.
++     */
++    for (i = 0; i < nruleInstances; i++) {
++        if (inst[i]->chainPriority > inst[i]->priority &&
++            !strstr("root", inst[i]->neededProtocolChain)) {
++
++             inst[i]->priority = inst[i]->chainPriority;
++        }
++    }
++
+     /* process ebtables commands; interleave commands from filters with
+        commands for creating and connecting ebtables chains */
+     j = 0;
+-- 
+2.3.5
+

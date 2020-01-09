@@ -1,0 +1,94 @@
+From 0f10222e37240ab1a460fcb573e46289a90fca63 Mon Sep 17 00:00:00 2001
+Message-Id: <0f10222e37240ab1a460fcb573e46289a90fca63.1354720507.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Wed, 28 Nov 2012 19:22:19 +0800
+Subject: [PATCH] bitmap: fix typo to use UL type of integer constant in
+ virBitmapIsAllSet
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=876415
+(cherry picked from commit 237629d204b0674885a18ae10326938603b214d4)
+
+This bug leads to getting incorrect vcpupin information via
+qemudDomainGetVcpuPinInfo() API when the number of maximum
+cpu on a host falls into a range such as 31 < ncpus < 64.
+
+gcc warning:
+left shift count >= width of type
+---
+ src/util/bitmap.c     |  4 ++--
+ tests/virbitmaptest.c | 37 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 39 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/bitmap.c b/src/util/bitmap.c
+index 2797005..ea89eee 100644
+--- a/src/util/bitmap.c
++++ b/src/util/bitmap.c
+@@ -566,8 +566,8 @@ bool virBitmapIsAllSet(virBitmapPtr bitmap)
+             return false;
+ 
+     if (unusedBits > 0) {
+-        if ((bitmap->map[sz] & ((1U << (VIR_BITMAP_BITS_PER_UNIT - unusedBits)) - 1))
+-            != ((1U << (VIR_BITMAP_BITS_PER_UNIT - unusedBits)) - 1))
++        if ((bitmap->map[sz] & ((1UL << (VIR_BITMAP_BITS_PER_UNIT - unusedBits)) - 1))
++            != ((1UL << (VIR_BITMAP_BITS_PER_UNIT - unusedBits)) - 1))
+             return false;
+     }
+ 
+diff --git a/tests/virbitmaptest.c b/tests/virbitmaptest.c
+index 0aa28fd..37e2e17 100644
+--- a/tests/virbitmaptest.c
++++ b/tests/virbitmaptest.c
+@@ -340,6 +340,41 @@ error:
+     return ret;
+ }
+ 
++static int test7(const void *v ATTRIBUTE_UNUSED)
++{
++    virBitmapPtr bitmap;
++    size_t i;
++    size_t maxBit[] = {
++        1, 8, 31, 32, 63, 64, 95, 96, 127, 128, 159, 160
++    };
++    size_t nmaxBit = 12;
++
++    for (i = 0; i < nmaxBit; i++) {
++        bitmap = virBitmapNew(maxBit[i]);
++        if (!bitmap)
++            goto error;
++
++        if (virBitmapIsAllSet(bitmap))
++            goto error;
++
++        ignore_value(virBitmapSetBit(bitmap, 1));
++        if (virBitmapIsAllSet(bitmap))
++            goto error;
++
++        virBitmapSetAll(bitmap);
++        if (!virBitmapIsAllSet(bitmap))
++            goto error;
++
++        virBitmapFree(bitmap);
++    }
++
++    return 0;
++
++error:
++    virBitmapFree(bitmap);
++    return -1;
++}
++
+ static int
+ mymain(void)
+ {
+@@ -357,6 +392,8 @@ mymain(void)
+         ret = -1;
+     if (virtTestRun("test6", 1, test6, NULL) < 0)
+         ret = -1;
++    if (virtTestRun("test7", 1, test7, NULL) < 0)
++        ret = -1;
+ 
+ 
+     return ret;
+-- 
+1.8.0
+

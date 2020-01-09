@@ -1,0 +1,61 @@
+From e01714216668e1cf7b31aacec4ee505736c50467 Mon Sep 17 00:00:00 2001
+Message-Id: <e01714216668e1cf7b31aacec4ee505736c50467.1373271644.git.jdenemar@redhat.com>
+From: Laine Stump <laine@redhat.com>
+Date: Tue, 2 Jul 2013 03:54:36 -0400
+Subject: [PATCH] node device driver: update driver name during dumpxml
+
+This fixes:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=979330
+
+The node device driver was written with the assumption that udev would
+use a "change" event to notify libvirt of any change to device status
+(including the name of the driver it was bound to). It turns out this
+is not the case (see Comment 4 of BZ 979290). That means that a
+dumpxml for a device would always show whatever driver happened to be
+bound at the time libvirt was started (when the node device cache was
+built).
+
+There was already code in the driver (for the benefit of the HAL
+backend) that updated the driver name from sysfs each time a device's
+info was retrieved from the cache. This patch just enables that manual
+update for the udev backend as well.
+
+(cherry picked from commit 374c5e4f73577b316fed19bbcefe74b75195eb95)
+
+Conflicts:
+
+	src/node_device/node_device_driver.c - upstream libvirt now
+          uses the more correct names "WITH_HAL" and "WITH_UDEV", but
+          RHEL6 libvirt still uses "HAVE_HAL" and "HAVE_UDEV".
+---
+ src/node_device/node_device_driver.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/src/node_device/node_device_driver.c b/src/node_device/node_device_driver.c
+index 4d3e01b..9442a36 100644
+--- a/src/node_device/node_device_driver.c
++++ b/src/node_device/node_device_driver.c
+@@ -58,10 +58,15 @@ static int update_caps(virNodeDeviceObjPtr dev)
+ }
+ 
+ 
+-#if defined (__linux__) && defined (HAVE_HAL)
+-/* Under libudev changes to the driver name should be picked up as
+- * "change" events, so we don't call update driver name unless we're
+- * using the HAL backend. */
++#if defined (__linux__) && ( defined (HAVE_HAL) || defined(HAVE_UDEV))
++/* NB: It was previously believed that changes in driver name were
++ * relayed to libvirt as "change" events by udev, and the udev event
++ * notification is setup to recognize such events and effectively
++ * recreate the device entry in the cache. However, neither the kernel
++ * nor udev sends such an event, so it is necessary to manually update
++ * the driver name for a device each time its entry is used, both for
++ * udev *and* HAL backends.
++ */
+ static int update_driver_name(virNodeDeviceObjPtr dev)
+ {
+     char *driver_link = NULL;
+-- 
+1.8.2.1
+

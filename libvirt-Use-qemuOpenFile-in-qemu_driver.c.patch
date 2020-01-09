@@ -1,0 +1,59 @@
+From 50b666d38a8ec01545c0a74e99c19916cc078857 Mon Sep 17 00:00:00 2001
+Message-Id: <50b666d38a8ec01545c0a74e99c19916cc078857@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Mon, 7 Apr 2014 22:27:37 +0200
+Subject: [PATCH] Use qemuOpenFile in qemu_driver.c
+
+On two places, the usage of open() is replaced with qemuOpenFile as
+that is the preferred method in those cases.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=963881
+(cherry picked from commit b4a40dd92dc7e6f110b13f2353cb5343d1147227)
+
+Conflicts:
+	src/qemu/qemu_driver.c -- qemud_driver -> virQEMUDriver rename
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 15 ++++-----------
+ 1 file changed, 4 insertions(+), 11 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index a4ab715..0e9e0f3 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -9739,13 +9739,9 @@ qemudDomainBlockPeek (virDomainPtr dom,
+     }
+     path = actual;
+ 
+-    /* The path is correct, now try to open it and get its size. */
+-    fd = open(path, O_RDONLY);
+-    if (fd == -1) {
+-        virReportSystemError(errno,
+-                             _("%s: failed to open"), path);
++    fd = qemuOpenFile(driver, vm, path, O_RDONLY, NULL, NULL);
++    if (fd == -1)
+         goto cleanup;
+-    }
+ 
+     /* Seek and read. */
+     /* NB. Because we configure with AC_SYS_LARGEFILE, off_t should
+@@ -9914,12 +9910,9 @@ static int qemuDomainGetBlockInfo(virDomainPtr dom,
+     path = disk->src;
+ 
+     /* The path is correct, now try to open it and get its size. */
+-    fd = open(path, O_RDONLY);
+-    if (fd == -1) {
+-        virReportSystemError(errno,
+-                             _("failed to open path '%s'"), path);
++    fd = qemuOpenFile(driver, vm, path, O_RDONLY, NULL, NULL);
++    if (fd == -1)
+         goto cleanup;
+-    }
+ 
+     /* Probe for magic formats */
+     if (disk->format) {
+-- 
+1.9.1
+

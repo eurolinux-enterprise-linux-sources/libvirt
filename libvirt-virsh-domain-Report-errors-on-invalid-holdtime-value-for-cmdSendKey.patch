@@ -1,0 +1,52 @@
+From 2e4743b792493eb7c49d7b2f0befa049928ca361 Mon Sep 17 00:00:00 2001
+Message-Id: <2e4743b792493eb7c49d7b2f0befa049928ca361@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:56 +0200
+Subject: [PATCH] virsh-domain: Report errors on invalid --holdtime value for
+ cmdSendKey
+
+https://bugzilla.redhat.com/show_bug.cgi?id=952938
+
+Using of a incorrect value for the --holdtime option was silently
+ignored and 0 was used. In case a negative number was used, it
+overflowed as the API expects a unsigned int.
+
+Fix the data type and getter function type and report errors on
+incorrect values.
+
+(cherry picked from commit f78266dfc22d3887cc2444ec0316621af2b017e0)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-domain.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index e7650ae..838dfcf 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -5870,7 +5870,7 @@ cmdSendKey(vshControl *ctl, const vshCmd *cmd)
+     int ret = false;
+     const char *codeset_option;
+     int codeset;
+-    int holdtime;
++    unsigned int holdtime = 0;
+     int count = 0;
+     const vshCmdOpt *opt = NULL;
+     int keycode;
+@@ -5882,8 +5882,10 @@ cmdSendKey(vshControl *ctl, const vshCmd *cmd)
+     if (vshCommandOptString(cmd, "codeset", &codeset_option) <= 0)
+         codeset_option = "linux";
+ 
+-    if (vshCommandOptInt(cmd, "holdtime", &holdtime) <= 0)
+-        holdtime = 0;
++    if (vshCommandOptUInt(cmd, "holdtime", &holdtime) < 0) {
++        vshError(ctl, _("invalid value of --holdtime"));
++        goto cleanup;
++    }
+ 
+     codeset = virKeycodeSetTypeFromString(codeset_option);
+     if ((int)codeset < 0) {
+-- 
+1.9.2
+

@@ -1,0 +1,128 @@
+From 7f7fbccbf02f3e26092b14fae73f39e34d1cdc55 Mon Sep 17 00:00:00 2001
+Message-Id: <7f7fbccbf02f3e26092b14fae73f39e34d1cdc55@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 19 May 2014 15:33:32 +0200
+Subject: [PATCH] qemu: Ignore temporary job errors when checking migration
+ status
+
+When qemu driver is polling for migration to finish (in
+qemuMigrationWaitForCompletion), it may happen that another job allowed
+during migration is running and if it does not finish within 30 seconds,
+migration would be cancelled because of that. However, we can just
+ignore the timeout and let the waiting loop try again later.
+
+If an event fired at the end of migration is ever implemented in QEMU,
+we can just wait for the event instead of polling for migration status
+and libvirt will behave consistently, i.e., migration won't be cancelled
+in case another job started during migration takes long time to finish.
+
+For bug https://bugzilla.redhat.com/show_bug.cgi?id=1083238
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit cc4882f4ab470334b37e6dd8e65cba60c16e868a)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_domain.c - qemuDomainObjBeginNestedJob is still
+	    inlined in RHEL-6 version of
+            qemuDomainObjEnterMonitorInternal
+
+Downstream changes:
+    - one more caller of qemuDomainObjEnterMonitorAsync had to be fixed
+      to avoid propagating its return value (hunks changing
+      qemuDomainMigrateGraphicsRelocate); this change was done upstream
+      in a much larger commit d2664daf.
+---
+ src/qemu/qemu_domain.c    | 15 +++++++++------
+ src/qemu/qemu_migration.c | 14 +++++++-------
+ 2 files changed, 16 insertions(+), 13 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index caa4e78..3b4c66a 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -998,6 +998,7 @@ qemuDomainObjEnterMonitorInternal(struct qemud_driver *driver,
+     qemuDomainObjPrivatePtr priv = obj->privateData;
+ 
+     if (asyncJob != QEMU_ASYNC_JOB_NONE) {
++        int ret;
+         if (asyncJob != priv->job.asyncJob) {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+                            _("unexpected async job %d"), asyncJob);
+@@ -1006,10 +1007,11 @@ qemuDomainObjEnterMonitorInternal(struct qemud_driver *driver,
+         if (priv->job.asyncOwner != virThreadSelfID())
+             VIR_WARN("This thread doesn't seem to be the async job owner: %d",
+                      priv->job.asyncOwner);
+-        if (qemuDomainObjBeginJobInternal(driver, driver_locked, obj,
+-                                          QEMU_JOB_ASYNC_NESTED,
+-                                          QEMU_ASYNC_JOB_NONE) < 0)
+-            return -1;
++        ret = qemuDomainObjBeginJobInternal(driver, driver_locked, obj,
++                                            QEMU_JOB_ASYNC_NESTED,
++                                            QEMU_ASYNC_JOB_NONE);
++        if (ret < 0)
++            return ret;
+         if (!virDomainObjIsActive(obj)) {
+             virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+                            _("domain is no longer running"));
+@@ -1114,8 +1116,9 @@ void qemuDomainObjEnterMonitorWithDriver(struct qemud_driver *driver,
+  * with the same asyncJob.
+  *
+  * Returns 0 if job was started, in which case this must be followed with
+- * qemuDomainObjExitMonitorWithDriver(); or -1 if the job could not be
+- * started (probably because the vm exited in the meantime).
++ * qemuDomainObjExitMonitorWithDriver(); -2 if waiting for the nested job
++ * times out; or -1 if the job could not be started (probably because the
++ * vm exited in the meantime).
+  */
+ int
+ qemuDomainObjEnterMonitorAsync(struct qemud_driver *driver,
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 2f02fd3..5ebcc66 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -993,8 +993,9 @@ qemuMigrationUpdateJobStatus(struct qemud_driver *driver,
+ 
+     ret = qemuDomainObjEnterMonitorAsync(driver, vm, asyncJob);
+     if (ret < 0) {
+-        /* Guest already exited; nothing further to update.  */
+-        return -1;
++        /* Guest already exited or waiting for the job timed out; nothing
++         * further to update. */
++        return ret;
+     }
+     ret = qemuMonitorGetMigrationStatus(priv->mon,
+                                         &status,
+@@ -1082,7 +1083,7 @@ qemuMigrationWaitForCompletion(struct qemud_driver *driver, virDomainObjPtr vm,
+         /* Poll every 50ms for progress & to allow cancellation */
+         struct timespec ts = { .tv_sec = 0, .tv_nsec = 50 * 1000 * 1000ull };
+ 
+-        if (qemuMigrationUpdateJobStatus(driver, vm, job, asyncJob) < 0)
++        if (qemuMigrationUpdateJobStatus(driver, vm, job, asyncJob) == -1)
+             goto cleanup;
+ 
+         /* cancel migration if disk I/O error is emitted while migrating */
+@@ -1134,7 +1135,7 @@ qemuDomainMigrateGraphicsRelocate(struct qemud_driver *driver,
+                                   qemuMigrationCookiePtr cookie)
+ {
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+-    int ret;
++    int ret = -1;
+     char *listenAddress;
+     virSocketAddr addr;
+ 
+@@ -1157,9 +1158,8 @@ qemuDomainMigrateGraphicsRelocate(struct qemud_driver *driver,
+          virSocketAddrIsWildcard(&addr)))
+         listenAddress = cookie->remoteHostname;
+ 
+-    ret = qemuDomainObjEnterMonitorAsync(driver, vm,
+-                                         QEMU_ASYNC_JOB_MIGRATION_OUT);
+-    if (ret == 0) {
++    if (qemuDomainObjEnterMonitorAsync(driver, vm,
++                                       QEMU_ASYNC_JOB_MIGRATION_OUT) == 0) {
+         ret = qemuMonitorGraphicsRelocate(priv->mon,
+                                           cookie->graphics->type,
+                                           listenAddress,
+-- 
+1.9.3
+

@@ -1,0 +1,35 @@
+From d1cf7c072b721f944b8e612b2dd82393edf9475c Mon Sep 17 00:00:00 2001
+Message-Id: <d1cf7c072b721f944b8e612b2dd82393edf9475c.1350990678.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:33 -0600
+Subject: [PATCH] storage: don't probe non-files
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+Backing chains can end on a network protocol, such as nbd:xxx; we
+should not attempt to probe the file system in this case.
+
+* src/storage/storage_backend_fs.c (virStorageBackendProbeTarget):
+Only probe files.
+(cherry picked from commit eac74c1f4752d7311def4b2e4848f5fd218e515c)
+---
+ src/storage/storage_backend_fs.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index 1e48a51..db19b87 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -108,7 +108,8 @@ virStorageBackendProbeTarget(virStorageVolTargetPtr target,
+     if (meta->backingStore) {
+         *backingStore = meta->backingStore;
+         meta->backingStore = NULL;
+-        if (meta->backingStoreFormat == VIR_STORAGE_FILE_AUTO) {
++        if (meta->backingStoreFormat == VIR_STORAGE_FILE_AUTO &&
++            meta->backingStoreIsFile) {
+             if ((ret = virStorageFileProbeFormat(*backingStore)) < 0) {
+                 /* If the backing file is currently unavailable, only log an error,
+                  * but continue. Returning -1 here would disable the whole storage
+-- 
+1.7.12.4
+

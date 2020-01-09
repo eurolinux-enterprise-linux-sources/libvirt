@@ -1,0 +1,175 @@
+From 12f0ea8b61dedcbbf32cf228ed9c60d6f316dd72 Mon Sep 17 00:00:00 2001
+Message-Id: <12f0ea8b61dedcbbf32cf228ed9c60d6f316dd72.1350297258.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 18 Sep 2012 13:40:13 +0200
+Subject: [PATCH] locking: Add support for lock failure action
+
+https://bugzilla.redhat.com/show_bug.cgi?id=832156
+
+(cherry picked from commit 297c704a1ce2122f35871e1a1c93cad7b79afc58)
+---
+ src/Makefile.am                   |  2 +-
+ src/locking/domain_lock.c         | 11 +++++++----
+ src/locking/lock_driver.h         |  5 ++++-
+ src/locking/lock_driver_nop.c     |  1 +
+ src/locking/lock_driver_sanlock.c |  1 +
+ src/locking/lock_manager.c        |  7 ++++---
+ src/locking/lock_manager.h        |  1 +
+ 7 files changed, 19 insertions(+), 9 deletions(-)
+
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 4ae741b..df87719 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -1491,7 +1491,7 @@ lockdriverdir = $(libdir)/libvirt/lock-driver
+ lockdriver_LTLIBRARIES = sanlock.la
+ 
+ sanlock_la_SOURCES = $(LOCK_DRIVER_SANLOCK_SOURCES)
+-sanlock_la_CFLAGS = $(AM_CFLAGS)
++sanlock_la_CFLAGS = -I$(top_srcdir)/src/conf $(AM_CFLAGS)
+ sanlock_la_LDFLAGS = -module -avoid-version
+ sanlock_la_LIBADD = -lsanlock_client \
+ 		../gnulib/lib/libgnu.la
+diff --git a/src/locking/domain_lock.c b/src/locking/domain_lock.c
+index 9d6fd6a..1e3da5f 100644
+--- a/src/locking/domain_lock.c
++++ b/src/locking/domain_lock.c
+@@ -175,7 +175,8 @@ int virDomainLockProcessStart(virLockManagerPluginPtr plugin,
+     if (paused)
+         flags |= VIR_LOCK_MANAGER_ACQUIRE_REGISTER_ONLY;
+ 
+-    ret = virLockManagerAcquire(lock, NULL, flags, fd);
++    ret = virLockManagerAcquire(lock, NULL, flags,
++                                dom->def->onLockFailure, fd);
+ 
+     virLockManagerFree(lock);
+ 
+@@ -215,7 +216,7 @@ int virDomainLockProcessResume(virLockManagerPluginPtr plugin,
+     if (!(lock = virDomainLockManagerNew(plugin, uri, dom, true)))
+         return -1;
+ 
+-    ret = virLockManagerAcquire(lock, state, 0, NULL);
++    ret = virLockManagerAcquire(lock, state, 0, dom->def->onLockFailure, NULL);
+     virLockManagerFree(lock);
+ 
+     return ret;
+@@ -258,7 +259,8 @@ int virDomainLockDiskAttach(virLockManagerPluginPtr plugin,
+     if (virDomainLockManagerAddDisk(lock, disk) < 0)
+         goto cleanup;
+ 
+-    if (virLockManagerAcquire(lock, NULL, 0, NULL) < 0)
++    if (virLockManagerAcquire(lock, NULL, 0,
++                              dom->def->onLockFailure, NULL) < 0)
+         goto cleanup;
+ 
+     ret = 0;
+@@ -314,7 +316,8 @@ int virDomainLockLeaseAttach(virLockManagerPluginPtr plugin,
+     if (virDomainLockManagerAddLease(lock, lease) < 0)
+         goto cleanup;
+ 
+-    if (virLockManagerAcquire(lock, NULL, 0, NULL) < 0)
++    if (virLockManagerAcquire(lock, NULL, 0,
++                              dom->def->onLockFailure, NULL) < 0)
+         goto cleanup;
+ 
+     ret = 0;
+diff --git a/src/locking/lock_driver.h b/src/locking/lock_driver.h
+index 8fe7ceb..e8ee226 100644
+--- a/src/locking/lock_driver.h
++++ b/src/locking/lock_driver.h
+@@ -23,6 +23,7 @@
+ # define __VIR_PLUGINS_LOCK_DRIVER_H__
+ 
+ # include "internal.h"
++# include "domain_conf.h"
+ 
+ typedef struct _virLockManager virLockManager;
+ typedef virLockManager *virLockManagerPtr;
+@@ -218,12 +219,13 @@ typedef int (*virLockDriverAddResource)(virLockManagerPtr man,
+  * @manager: the lock manager context
+  * @state: the current lock state
+  * @flags: optional flags, currently unused
++ * @action: action to take when lock is lost
+  * @fd: optional return the leaked FD
+  *
+  * Start managing resources for the object. This
+  * must be called from the PID that represents the
+  * object to be managed. If the lock is lost at any
+- * time, the PID will be killed off by the lock manager.
++ * time, the specified action will be taken.
+  * The optional state contains information about the
+  * locks previously held for the object.
+  *
+@@ -237,6 +239,7 @@ typedef int (*virLockDriverAddResource)(virLockManagerPtr man,
+ typedef int (*virLockDriverAcquire)(virLockManagerPtr man,
+                                     const char *state,
+                                     unsigned int flags,
++                                    virDomainLockFailureAction action,
+                                     int *fd);
+ 
+ /**
+diff --git a/src/locking/lock_driver_nop.c b/src/locking/lock_driver_nop.c
+index 7f6cdca..c9ab806 100644
+--- a/src/locking/lock_driver_nop.c
++++ b/src/locking/lock_driver_nop.c
+@@ -69,6 +69,7 @@ static int virLockManagerNopAddResource(virLockManagerPtr lock ATTRIBUTE_UNUSED,
+ static int virLockManagerNopAcquire(virLockManagerPtr lock ATTRIBUTE_UNUSED,
+                                     const char *state ATTRIBUTE_UNUSED,
+                                     unsigned int flags_unused ATTRIBUTE_UNUSED,
++                                    virDomainLockFailureAction action ATTRIBUTE_UNUSED,
+                                     int *fd ATTRIBUTE_UNUSED)
+ {
+     return 0;
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index 113fd47..8c0ac8c 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -686,6 +686,7 @@ static int virLockManagerSanlockAddResource(virLockManagerPtr lock,
+ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
+                                         const char *state,
+                                         unsigned int flags,
++                                        virDomainLockFailureAction action ATTRIBUTE_UNUSED,
+                                         int *fd)
+ {
+     virLockManagerSanlockPrivatePtr priv = lock->privateData;
+diff --git a/src/locking/lock_manager.c b/src/locking/lock_manager.c
+index 23126c9..423997b 100644
+--- a/src/locking/lock_manager.c
++++ b/src/locking/lock_manager.c
+@@ -347,17 +347,18 @@ int virLockManagerAddResource(virLockManagerPtr lock,
+ int virLockManagerAcquire(virLockManagerPtr lock,
+                           const char *state,
+                           unsigned int flags,
++                          virDomainLockFailureAction action,
+                           int *fd)
+ {
+-    VIR_DEBUG("lock=%p state='%s' flags=%x fd=%p",
+-              lock, NULLSTR(state), flags, fd);
++    VIR_DEBUG("lock=%p state='%s' flags=%x action=%d fd=%p",
++              lock, NULLSTR(state), flags, action, fd);
+ 
+     CHECK_MANAGER(drvAcquire, -1);
+ 
+     if (fd)
+         *fd = -1;
+ 
+-    return lock->driver->drvAcquire(lock, state, flags, fd);
++    return lock->driver->drvAcquire(lock, state, flags, action, fd);
+ }
+ 
+ 
+diff --git a/src/locking/lock_manager.h b/src/locking/lock_manager.h
+index d955ee0..4fee12d 100644
+--- a/src/locking/lock_manager.h
++++ b/src/locking/lock_manager.h
+@@ -56,6 +56,7 @@ int virLockManagerAddResource(virLockManagerPtr manager,
+ int virLockManagerAcquire(virLockManagerPtr manager,
+                           const char *state,
+                           unsigned int flags,
++                          virDomainLockFailureAction action,
+                           int *fd);
+ int virLockManagerRelease(virLockManagerPtr manager,
+                           char **state,
+-- 
+1.7.12.3
+

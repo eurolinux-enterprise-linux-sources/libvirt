@@ -1,0 +1,190 @@
+From 64abd127a8226069333f52e4df871e99d1adf19a Mon Sep 17 00:00:00 2001
+Message-Id: <64abd127a8226069333f52e4df871e99d1adf19a@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 15 Apr 2014 13:13:55 +0200
+Subject: [PATCH] virSecurityLabelDefParseXML: Don't parse label on
+ model='none'
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1027096
+
+If there's the following snippet in the domain XML, the domain will be
+lost upon the daemon restart (if the domain is started prior restart):
+
+    <seclabel type='dynamic' relabel='yes'/>
+
+The problem is, the 'label', 'imagelabel' and 'baselabel' are parsed
+whenever the VIR_DOMAIN_XML_INACTIVE is *not* present or the label is
+static. The latter is not our case, obviously. So, when libvirtd starts
+up, it finds domain state xml and parse it. During parsing, many XML
+flags are enabled but VIR_DOMAIN_XML_INACTIVE. Hence, our parser tries
+to extract 'label', 'imagelabel' and 'baselabel' from the XML which
+fails for model='none'. Err, this model - even though not specified in
+XML - can be taken from qemu wide config file: /etc/libvirtd/qemu.conf.
+
+However, in order to know we are dealing with model='none' the code in
+question must be moved forward a bit. Then a new check must be
+introduced. This is what the first two chunks are doing.
+
+But this alone is not sufficient. The domain state XML won't contain the
+model attribute without slight modification. The model should be
+inserted into the XML even if equal to 'none' and the state XML is being
+generated - what if the origin (the @security_driver variable in
+qemu.conf) changes during libvirtd restarts?
+
+At the end, a test to catch this scenario is introduced.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 9fb3f9571db4bd20b8287a160e9b2680f23dde45)
+
+Conflicts:
+	tests/qemuxml2argvtest.c: Context
+	tests/qemuxml2xmltest.c:  Both are bare context conflicts,
+                              since 0f082e69 is not backported yet.
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c                             | 26 ++++++++++++++-------
+ .../qemuxml2argv-seclabel-dynamic-relabel.args     |  6 +++++
+ .../qemuxml2argv-seclabel-dynamic-relabel.xml      | 27 ++++++++++++++++++++++
+ tests/qemuxml2argvtest.c                           |  1 +
+ tests/qemuxml2xmltest.c                            |  1 +
+ 5 files changed, 53 insertions(+), 8 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-relabel.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-relabel.xml
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 4116782..ffe6638 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -3247,6 +3247,17 @@ virSecurityLabelDefParseXML(xmlXPathContextPtr ctxt,
+             def->norelabel = false;
+     }
+ 
++    /* Always parse model */
++    p = virXPathStringLimit("string(./@model)",
++                            VIR_SECURITY_MODEL_BUFLEN-1, ctxt);
++    def->model = p;
++
++    /* For the model 'none' none of the following labels is going to be
++     * present. Hence, return now. */
++
++    if (STREQ_NULLABLE(def->model, "none"))
++        return def;
++
+     /* Only parse label, if using static labels, or
+      * if the 'live' VM XML is requested
+      */
+@@ -3285,11 +3296,6 @@ virSecurityLabelDefParseXML(xmlXPathContextPtr ctxt,
+         def->baselabel = p;
+     }
+ 
+-    /* Always parse model */
+-    p = virXPathStringLimit("string(./@model)",
+-                            VIR_SECURITY_MODEL_BUFLEN-1, ctxt);
+-    def->model = p;
+-
+     return def;
+ 
+ error:
+@@ -12155,7 +12161,9 @@ virDomainEventActionDefFormat(virBufferPtr buf,
+ 
+ 
+ static void
+-virSecurityLabelDefFormat(virBufferPtr buf, virSecurityLabelDefPtr def)
++virSecurityLabelDefFormat(virBufferPtr buf,
++                          virSecurityLabelDefPtr def,
++                          unsigned flags)
+ {
+     const char *sectype = virDomainSeclabelTypeToString(def->type);
+ 
+@@ -12174,7 +12182,9 @@ virSecurityLabelDefFormat(virBufferPtr buf, virSecurityLabelDefPtr def)
+     virBufferAsprintf(buf, "<seclabel type='%s'",
+                       sectype);
+ 
+-    if (def->model && STRNEQ(def->model, "none"))
++    /* When generating state XML do include the model */
++    if (flags & VIR_DOMAIN_XML_INTERNAL_STATUS ||
++        STRNEQ_NULLABLE(def->model, "none"))
+         virBufferEscapeString(buf, " model='%s'", def->model);
+ 
+     if (def->type == VIR_DOMAIN_SECLABEL_NONE) {
+@@ -14711,7 +14721,7 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+ 
+     virBufferAdjustIndent(buf, 2);
+     for (n = 0; n < def->nseclabels; n++)
+-        virSecurityLabelDefFormat(buf, def->seclabels[n]);
++        virSecurityLabelDefFormat(buf, def->seclabels[n], flags);
+     virBufferAdjustIndent(buf, -2);
+ 
+     if (def->namespaceData && def->ns.format) {
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-relabel.args b/tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-relabel.args
+new file mode 100644
+index 0000000..c2e2fc8
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-relabel.args
+@@ -0,0 +1,6 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test \
++/usr/bin/qemu \
++-name QEMUGuest1 -S -M pc -m 214 -smp 1 -nographic -monitor \
++unix:/tmp/test-monitor,server,nowait -no-acpi -boot c \
++-hda /dev/HostVG/QEMUGuest1 -net none -serial \
++none -parallel none -usb
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-relabel.xml b/tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-relabel.xml
+new file mode 100644
+index 0000000..ebe68a0
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-relabel.xml
+@@ -0,0 +1,27 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static' cpuset='1-4,8-20,525'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='ide' index='0'/>
++    <memballoon model='virtio'/>
++  </devices>
++  <seclabel type='dynamic' relabel='yes'/>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 3e9c685..2dac536 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -827,6 +827,7 @@ mymain(void)
+     DO_TEST("seclabel-dynamic", QEMU_CAPS_NAME);
+     DO_TEST("seclabel-dynamic-baselabel", QEMU_CAPS_NAME);
+     DO_TEST("seclabel-dynamic-override", QEMU_CAPS_NAME);
++    DO_TEST("seclabel-dynamic-relabel", QEMU_CAPS_NAME);
+     DO_TEST("seclabel-static", QEMU_CAPS_NAME);
+     DO_TEST("seclabel-static-relabel", QEMU_CAPS_NAME);
+     DO_TEST("seclabel-none", QEMU_CAPS_NAME);
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 295af96..05ae41e 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -235,6 +235,7 @@ mymain(void)
+ 
+     DO_TEST_FULL("seclabel-dynamic-baselabel", false, WHEN_INACTIVE);
+     DO_TEST_FULL("seclabel-dynamic-override", false, WHEN_INACTIVE);
++    DO_TEST_FULL("seclabel-dynamic-relabel", false, WHEN_INACTIVE);
+     DO_TEST("seclabel-static");
+     DO_TEST("seclabel-none");
+     DO_TEST("numad-static-vcpu-no-numatune");
+-- 
+1.9.2
+

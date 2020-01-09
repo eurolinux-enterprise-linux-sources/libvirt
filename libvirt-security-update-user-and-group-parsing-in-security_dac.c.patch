@@ -1,0 +1,82 @@
+From bfe7b55d14fa791c2dfaa7821bb71a7e4f4344eb Mon Sep 17 00:00:00 2001
+Message-Id: <bfe7b55d14fa791c2dfaa7821bb71a7e4f4344eb.1350297259.git.jdenemar@redhat.com>
+From: Marcelo Cerri <mhcerri@linux.vnet.ibm.com>
+Date: Tue, 9 Oct 2012 11:00:20 +0200
+Subject: [PATCH] security: update user and group parsing in security_dac.c
+
+https://bugzilla.redhat.com/show_bug.cgi?id=860519
+
+The functions virGetUserID and virGetGroupID are now able to parse
+user/group names and IDs in a similar way to coreutils' chown. So, user
+and group parsing in security_dac can be simplified.
+(cherry picked from commit 7c035625f87af4badde6453461c1c40c838b0d8d)
+---
+ src/security/security_dac.c | 45 ++++++++-------------------------------------
+ 1 file changed, 8 insertions(+), 37 deletions(-)
+
+diff --git a/src/security/security_dac.c b/src/security/security_dac.c
+index 25123fb..f126aa5 100644
+--- a/src/security/security_dac.c
++++ b/src/security/security_dac.c
+@@ -69,8 +69,8 @@ static
+ int parseIds(const char *label, uid_t *uidPtr, gid_t *gidPtr)
+ {
+     int rc = -1;
+-    unsigned int theuid;
+-    unsigned int thegid;
++    uid_t theuid;
++    gid_t thegid;
+     char *tmp_label = NULL;
+     char *sep = NULL;
+     char *owner = NULL;
+@@ -94,41 +94,12 @@ int parseIds(const char *label, uid_t *uidPtr, gid_t *gidPtr)
+     owner = tmp_label;
+     group = sep + 1;
+ 
+-    /* Parse owner */
+-    if (*owner == '+') {
+-        if (virStrToLong_ui(++owner, NULL, 10, &theuid) < 0) {
+-            virReportError(VIR_ERR_INVALID_ARG,
+-                           _("Invalid uid \"%s\" in DAC label \"%s\""),
+-                           owner, label);
+-            goto cleanup;
+-        }
+-    } else {
+-        if (virGetUserID(owner, &theuid) < 0 &&
+-            virStrToLong_ui(owner, NULL, 10, &theuid) < 0) {
+-            virReportError(VIR_ERR_INVALID_ARG,
+-                           _("Invalid owner \"%s\" in DAC label \"%s\""),
+-                           owner, label);
+-            goto cleanup;
+-        }
+-    }
+-
+-    /* Parse group */
+-    if (*group == '+') {
+-        if (virStrToLong_ui(++group, NULL, 10, &thegid) < 0) {
+-            virReportError(VIR_ERR_INVALID_ARG,
+-                           _("Invalid gid \"%s\" in DAC label \"%s\""),
+-                           group, label);
+-            goto cleanup;
+-        }
+-    } else {
+-        if (virGetGroupID(group, &thegid) < 0 &&
+-            virStrToLong_ui(group, NULL, 10, &thegid) < 0) {
+-            virReportError(VIR_ERR_INVALID_ARG,
+-                           _("Invalid group \"%s\" in DAC label \"%s\""),
+-                           group, label);
+-            goto cleanup;
+-        }
+-    }
++    /* Parse owner and group, error message is defined by
++     * virGetUserID or virGetGroupID.
++     */
++    if (virGetUserID(owner, &theuid) < 0 ||
++        virGetGroupID(group, &thegid) < 0)
++        goto cleanup;
+ 
+     if (uidPtr)
+         *uidPtr = theuid;
+-- 
+1.7.12.3
+

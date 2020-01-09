@@ -1,0 +1,142 @@
+From d035d060cf768b33ceae4f8a7c5d0070c3008c5f Mon Sep 17 00:00:00 2001
+Message-Id: <d035d060cf768b33ceae4f8a7c5d0070c3008c5f.1353330051.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 13 Nov 2012 00:50:20 +0100
+Subject: [PATCH] nodeinfo: Add check and workaround to guarantee valid cpu
+ topologies
+
+https://bugzilla.redhat.com/show_bug.cgi?id=874050
+
+Lately there were a few reports of the output of the virsh nodeinfo
+command being inaccurate. This patch tries to avoid that by checking if
+the topology actually makes sense. If it doesn't we then report a
+synthetic topology that indicates to the user that the host capabilities
+should be checked for the actual topology.
+(cherry picked from commit 9576afd110b8c3edeb65f9b39448884763ca68bd)
+---
+ include/libvirt/libvirt.h.in | 24 +++++++++++++-----------
+ src/nodeinfo.c               | 37 +++++++++++++++++++++++++++++++------
+ 2 files changed, 44 insertions(+), 17 deletions(-)
+
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index ece08ca..7ca5997 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -443,17 +443,19 @@ typedef virSecurityModel *virSecurityModelPtr;
+ typedef struct _virNodeInfo virNodeInfo;
+ 
+ struct _virNodeInfo {
+-    char model[32];     /* string indicating the CPU model */
+-    unsigned long memory;/* memory size in kilobytes */
+-    unsigned int cpus;  /* the number of active CPUs */
+-    unsigned int mhz;   /* expected CPU frequency */
+-    unsigned int nodes; /* the number of NUMA cell, 1 for unusual NUMA
+-                           topologies or uniform memory access; check
+-                           capabilities XML for the actual NUMA topology */
+-    unsigned int sockets;/* number of CPU sockets per node if nodes > 1,
+-                            total number of CPU sockets otherwise */
+-    unsigned int cores; /* number of cores per socket */
+-    unsigned int threads;/* number of threads per core */
++    char model[32];       /* string indicating the CPU model */
++    unsigned long memory; /* memory size in kilobytes */
++    unsigned int cpus;    /* the number of active CPUs */
++    unsigned int mhz;     /* expected CPU frequency */
++    unsigned int nodes;   /* the number of NUMA cell, 1 for unusual NUMA
++                             topologies or uniform memory access; check
++                             capabilities XML for the actual NUMA topology */
++    unsigned int sockets; /* number of CPU sockets per node if nodes > 1,
++                             1 in case of unusual NUMA topology */
++    unsigned int cores;   /* number of cores per socket, total number of
++                             processors in case of unusual NUMA topology*/
++    unsigned int threads; /* number of threads per core, 1 in case of
++                             unusual numa topology */
+ };
+ 
+ /**
+diff --git a/src/nodeinfo.c b/src/nodeinfo.c
+index 693f91d..aaac5e3 100644
+--- a/src/nodeinfo.c
++++ b/src/nodeinfo.c
+@@ -204,7 +204,12 @@ CPU_COUNT(cpu_set_t *set)
+ static int
+ ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
+ ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4)
+-virNodeParseNode(const char *node, int *sockets, int *cores, int *threads)
++ATTRIBUTE_NONNULL(5)
++virNodeParseNode(const char *node,
++                 int *sockets,
++                 int *cores,
++                 int *threads,
++                 int *offline)
+ {
+     int ret = -1;
+     int processors = 0;
+@@ -278,8 +283,10 @@ virNodeParseNode(const char *node, int *sockets, int *cores, int *threads)
+         if ((online = virNodeGetCpuValue(node, cpu, "online", true)) < 0)
+             goto cleanup;
+ 
+-        if (!online)
++        if (!online) {
++            (*offline)++;
+             continue;
++        }
+ 
+         processors++;
+ 
+@@ -348,7 +355,7 @@ int linuxNodeInfoCPUPopulate(FILE *cpuinfo,
+     char line[1024];
+     DIR *nodedir = NULL;
+     struct dirent *nodedirent = NULL;
+-    int cpus, cores, socks, threads;
++    int cpus, cores, socks, threads, offline = 0;
+     unsigned int node;
+     int ret = -1;
+     char *sysfs_nodedir = NULL;
+@@ -448,8 +455,8 @@ int linuxNodeInfoCPUPopulate(FILE *cpuinfo,
+             goto cleanup;
+         }
+ 
+-        if ((cpus = virNodeParseNode(sysfs_cpudir, &socks,
+-                                     &cores, &threads)) < 0)
++        if ((cpus = virNodeParseNode(sysfs_cpudir, &socks, &cores,
++                                     &threads, &offline)) < 0)
+             goto cleanup;
+ 
+         VIR_FREE(sysfs_cpudir);
+@@ -484,7 +491,8 @@ fallback:
+         goto cleanup;
+     }
+ 
+-    if ((cpus = virNodeParseNode(sysfs_cpudir, &socks, &cores, &threads)) < 0)
++    if ((cpus = virNodeParseNode(sysfs_cpudir, &socks, &cores,
++                                 &threads, &offline)) < 0)
+         goto cleanup;
+ 
+     nodeinfo->nodes = 1;
+@@ -510,6 +518,23 @@ done:
+         goto cleanup;
+     }
+ 
++    /* Now check if the topology makes sense. There are machines that don't
++     * expose their real number of nodes or for example the AMD Bulldozer
++     * architecture that exposes their Clustered integer core modules as both
++     * threads and cores. This approach throws off our detection. Unfortunately
++     * the nodeinfo structure isn't designed to carry the full topology so
++     * we're going to lie about the detected topology to notify the user
++     * to check the host capabilities for the actual topology. */
++    if ((nodeinfo->nodes *
++         nodeinfo->sockets *
++         nodeinfo->cores *
++         nodeinfo->threads) != (nodeinfo->cpus + offline)) {
++        nodeinfo->nodes = 1;
++        nodeinfo->sockets = 1;
++        nodeinfo->cores = nodeinfo->cpus + offline;
++        nodeinfo->threads = 1;
++    }
++
+     ret = 0;
+ 
+ cleanup:
+-- 
+1.8.0
+

@@ -1,0 +1,31 @@
+From f6613bda2f22a0c16123cb436f252282a17fd5da Mon Sep 17 00:00:00 2001
+Message-Id: <f6613bda2f22a0c16123cb436f252282a17fd5da.1353330051.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Fri, 16 Nov 2012 10:05:27 +0100
+Subject: [PATCH] virsh: save: report an error if XML file can't be read
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=876868
+(cherry picked from commit 58110b48870b4e8efd1d833e3ecbef41b62d1877)
+---
+ tools/virsh-domain.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index a2b76ab..af38b53 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -2945,8 +2945,10 @@ doSave(void *opaque)
+         goto out;
+ 
+     if (xmlfile &&
+-        virFileReadAll(xmlfile, 8192, &xml) < 0)
++        virFileReadAll(xmlfile, 8192, &xml) < 0) {
++        vshReportError(ctl);
+         goto out;
++    }
+ 
+     if (((flags || xml)
+          ? virDomainSaveFlags(dom, to, xml, flags)
+-- 
+1.8.0
+

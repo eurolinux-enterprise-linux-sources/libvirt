@@ -1,0 +1,405 @@
+From 64d1551afb0ccb70a9da883a0e252b33003bdaa5 Mon Sep 17 00:00:00 2001
+Message-Id: <64d1551afb0ccb70a9da883a0e252b33003bdaa5.1350990680.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Mon, 22 Oct 2012 19:51:19 +0800
+Subject: [PATCH] selinux: add security selinux function to label tapfd
+
+BZ:https://bugzilla.redhat.com/show_bug.cgi?id=851981
+(cherry picked from commit ae368ebfcc4923d0b32e83d4ca96a6f599625785)
+
+When using macvtap, a character device gets first created by
+kernel with name /dev/tapN, its selinux context is:
+system_u:object_r:device_t:s0
+
+Shortly, when udev gets notification when new file is created
+in /dev, it will then jump in and relabel this file back to the
+expected default context:
+system_u:object_r:tun_tap_device_t:s0
+
+There is a time gap happened.
+Sometimes, it will have migration failed, AVC error message:
+type=AVC msg=audit(1349858424.233:42507): avc:  denied  { read write } for
+pid=19926 comm="qemu-kvm" path="/dev/tap33" dev=devtmpfs ino=131524
+scontext=unconfined_u:system_r:svirt_t:s0:c598,c908
+tcontext=system_u:object_r:device_t:s0 tclass=chr_file
+
+This patch will label the tapfd device before qemu process starts:
+system_u:object_r:tun_tap_device_t:MCS(MCS from seclabel->label)
+---
+ src/libvirt_private.syms         |   1 +
+ src/qemu/qemu_command.c          |   4 ++
+ src/security/security_apparmor.c |  10 ++++
+ src/security/security_dac.c      |   9 +++
+ src/security/security_driver.h   |   4 ++
+ src/security/security_manager.c  |  11 ++++
+ src/security/security_manager.h  |   3 +
+ src/security/security_nop.c      |   3 +-
+ src/security/security_selinux.c  | 118 +++++++++++++++++++++++++++++++--------
+ src/security/security_stack.c    |  18 ++++++
+ 10 files changed, 156 insertions(+), 25 deletions(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 31d8c45..bd6ba7a 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1066,6 +1066,7 @@ virSecurityManagerSetHostdevLabel;
+ virSecurityManagerSetProcessLabel;
+ virSecurityManagerSetSavedStateLabel;
+ virSecurityManagerSetSocketLabel;
++virSecurityManagerSetTapFDLabel;
+ virSecurityManagerStackAddNested;
+ virSecurityManagerVerify;
+ virSecurityManagerGetMountOptions;
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index e1df1fc..ac6dcf4 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -5452,6 +5452,10 @@ qemuBuildCommandLine(virConnectPtr conn,
+                     if (tapfd < 0)
+                         goto error;
+ 
++                if (virSecurityManagerSetTapFDLabel(driver->securityManager,
++                                                    def, tapfd) < 0)
++                    goto error;
++
+                     last_good_net = i;
+                     virCommandTransferFD(cmd, tapfd);
+ 
+diff --git a/src/security/security_apparmor.c b/src/security/security_apparmor.c
+index d3f9d9e..1315fe1 100644
+--- a/src/security/security_apparmor.c
++++ b/src/security/security_apparmor.c
+@@ -872,6 +872,15 @@ AppArmorSetImageFDLabel(virSecurityManagerPtr mgr,
+     return reload_profile(mgr, def, fd_path, true);
+ }
+ 
++/* TODO need code here */
++static int
++AppArmorSetTapFDLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
++                      virDomainDefPtr def ATTRIBUTE_UNUSED,
++                      int fd ATTRIBUTE_UNUSED)
++{
++    return 0;
++}
++
+ virSecurityDriver virAppArmorSecurityDriver = {
+     .privateDataLen                     = 0,
+     .name                               = SECURITY_APPARMOR_NAME,
+@@ -908,4 +917,5 @@ virSecurityDriver virAppArmorSecurityDriver = {
+     .domainRestoreSavedStateLabel       = AppArmorRestoreSavedStateLabel,
+ 
+     .domainSetSecurityImageFDLabel      = AppArmorSetImageFDLabel,
++    .domainSetSecurityTapFDLabel        = AppArmorSetTapFDLabel,
+ };
+diff --git a/src/security/security_dac.c b/src/security/security_dac.c
+index 5f11810..a67f5d6 100644
+--- a/src/security/security_dac.c
++++ b/src/security/security_dac.c
+@@ -1022,6 +1022,14 @@ virSecurityDACSetImageFDLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+     return 0;
+ }
+ 
++static int
++virSecurityDACSetTapFDLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
++                            virDomainDefPtr def ATTRIBUTE_UNUSED,
++                            int fd ATTRIBUTE_UNUSED)
++{
++    return 0;
++}
++
+ static char *virSecurityDACGetMountOptions(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+                                            virDomainDefPtr vm ATTRIBUTE_UNUSED) {
+     return NULL;
+@@ -1063,6 +1071,7 @@ virSecurityDriver virSecurityDriverDAC = {
+     .domainRestoreSavedStateLabel       = virSecurityDACRestoreSavedStateLabel,
+ 
+     .domainSetSecurityImageFDLabel      = virSecurityDACSetImageFDLabel,
++    .domainSetSecurityTapFDLabel        = virSecurityDACSetTapFDLabel,
+ 
+     .domainGetSecurityMountOptions      = virSecurityDACGetMountOptions,
+ };
+diff --git a/src/security/security_driver.h b/src/security/security_driver.h
+index 8f52ec5..d49b401 100644
+--- a/src/security/security_driver.h
++++ b/src/security/security_driver.h
+@@ -95,6 +95,9 @@ typedef int (*virSecurityDomainSecurityVerify) (virSecurityManagerPtr mgr,
+ typedef int (*virSecurityDomainSetImageFDLabel) (virSecurityManagerPtr mgr,
+                                                  virDomainDefPtr def,
+                                                  int fd);
++typedef int (*virSecurityDomainSetTapFDLabel) (virSecurityManagerPtr mgr,
++                                               virDomainDefPtr def,
++                                               int fd);
+ typedef char *(*virSecurityDomainGetMountOptions) (virSecurityManagerPtr mgr,
+                                                          virDomainDefPtr def);
+ 
+@@ -134,6 +137,7 @@ struct _virSecurityDriver {
+     virSecurityDomainRestoreSavedStateLabel domainRestoreSavedStateLabel;
+ 
+     virSecurityDomainSetImageFDLabel domainSetSecurityImageFDLabel;
++    virSecurityDomainSetTapFDLabel domainSetSecurityTapFDLabel;
+ 
+     virSecurityDomainGetMountOptions domainGetSecurityMountOptions;
+ };
+diff --git a/src/security/security_manager.c b/src/security/security_manager.c
+index 40c8b7e..d446607 100644
+--- a/src/security/security_manager.c
++++ b/src/security/security_manager.c
+@@ -469,6 +469,17 @@ int virSecurityManagerSetImageFDLabel(virSecurityManagerPtr mgr,
+     return -1;
+ }
+ 
++int virSecurityManagerSetTapFDLabel(virSecurityManagerPtr mgr,
++                                    virDomainDefPtr vm,
++                                    int fd)
++{
++    if (mgr->drv->domainSetSecurityTapFDLabel)
++        return mgr->drv->domainSetSecurityTapFDLabel(mgr, vm, fd);
++
++    virReportError(VIR_ERR_NO_SUPPORT, __FUNCTION__);
++    return -1;
++}
++
+ char *virSecurityManagerGetMountOptions(virSecurityManagerPtr mgr,
+                                         virDomainDefPtr vm)
+ {
+diff --git a/src/security/security_manager.h b/src/security/security_manager.h
+index b3bc191..1fdaf8e 100644
+--- a/src/security/security_manager.h
++++ b/src/security/security_manager.h
+@@ -105,6 +105,9 @@ int virSecurityManagerVerify(virSecurityManagerPtr mgr,
+ int virSecurityManagerSetImageFDLabel(virSecurityManagerPtr mgr,
+                                       virDomainDefPtr def,
+                                       int fd);
++int virSecurityManagerSetTapFDLabel(virSecurityManagerPtr mgr,
++                                    virDomainDefPtr vm,
++                                    int fd);
+ char *virSecurityManagerGetMountOptions(virSecurityManagerPtr mgr,
+                                               virDomainDefPtr vm);
+ virSecurityManagerPtr*
+diff --git a/src/security/security_nop.c b/src/security/security_nop.c
+index b56971c..86f644b 100644
+--- a/src/security/security_nop.c
++++ b/src/security/security_nop.c
+@@ -204,7 +204,8 @@ virSecurityDriver virSecurityDriverNop = {
+     .domainSetSavedStateLabel           = virSecurityDomainSetSavedStateLabelNop,
+     .domainRestoreSavedStateLabel       = virSecurityDomainRestoreSavedStateLabelNop,
+ 
+-    .domainSetSecurityImageFDLabel      =  virSecurityDomainSetFDLabelNop,
++    .domainSetSecurityImageFDLabel      = virSecurityDomainSetFDLabelNop,
++    .domainSetSecurityTapFDLabel        = virSecurityDomainSetFDLabelNop,
+ 
+     .domainGetSecurityMountOptions      = virSecurityDomainGetMountOptionsNop,
+ };
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index 00c34c2..5a78b16 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -237,6 +237,46 @@ cleanup:
+     return mcs;
+ }
+ 
++static char *
++virSecuritySELinuxContextAddRange(security_context_t src,
++                                  security_context_t dst)
++{
++    char *str = NULL;
++    char *ret = NULL;
++    context_t srccon = NULL;
++    context_t dstcon = NULL;
++
++    if (!src || !dst)
++        return ret;
++
++    if (!(srccon = context_new(src)) || !(dstcon = context_new(dst))) {
++        virReportSystemError(errno, "%s",
++                             _("unable to allocate security context"));
++        goto cleanup;
++    }
++
++    if (context_range_set(dstcon, context_range_get(srccon)) == -1) {
++        virReportSystemError(errno,
++                             _("unable to set security context range '%s'"), dst);
++        goto cleanup;
++    }
++
++    if (!(str = context_str(dstcon))) {
++        virReportSystemError(errno, "%s",
++                             _("Unable to format SELinux context"));
++        goto cleanup;
++    }
++
++    if (!(ret = strdup(str))) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++cleanup:
++    if (srccon) context_free(srccon);
++    if (dstcon) context_free(dstcon);
++    return ret;
++}
+ 
+ static char *
+ virSecuritySELinuxGenNewContext(const char *basecontext,
+@@ -1586,6 +1626,7 @@ virSecuritySELinuxSetSecurityDaemonSocketLabel(virSecurityManagerPtr mgr,
+     context_t execcon = NULL;
+     context_t proccon = NULL;
+     security_context_t scon = NULL;
++    char *str = NULL;
+     int rc = -1;
+ 
+     secdef = virDomainDefGetSecurityLabelDef(def, SECURITY_SELINUX_NAME);
+@@ -1604,13 +1645,6 @@ virSecuritySELinuxSetSecurityDaemonSocketLabel(virSecurityManagerPtr mgr,
+         goto done;
+     }
+ 
+-    if ( !(execcon = context_new(secdef->label)) ) {
+-        virReportSystemError(errno,
+-                             _("unable to allocate socket security context '%s'"),
+-                             secdef->label);
+-        goto done;
+-    }
+-
+     if (getcon_raw(&scon) == -1) {
+         virReportSystemError(errno,
+                              _("unable to get current process context '%s'"),
+@@ -1618,26 +1652,13 @@ virSecuritySELinuxSetSecurityDaemonSocketLabel(virSecurityManagerPtr mgr,
+         goto done;
+     }
+ 
+-    if ( !(proccon = context_new(scon)) ) {
+-        virReportSystemError(errno,
+-                             _("unable to set socket security context '%s'"),
+-                             secdef->label);
+-        goto done;
+-    }
+-
+-    if (context_range_set(proccon, context_range_get(execcon)) == -1) {
+-        virReportSystemError(errno,
+-                             _("unable to set socket security context range '%s'"),
+-                             secdef->label);
++    if (!(str = virSecuritySELinuxContextAddRange(secdef->label, scon)))
+         goto done;
+-    }
+ 
+-    VIR_DEBUG("Setting VM %s socket context %s",
+-              def->name, context_str(proccon));
+-    if (setsockcreatecon_raw(context_str(proccon)) == -1) {
++    VIR_DEBUG("Setting VM %s socket context %s", def->name, str);
++    if (setsockcreatecon_raw(str) == -1) {
+         virReportSystemError(errno,
+-                             _("unable to set socket security context '%s'"),
+-                             context_str(proccon));
++                             _("unable to set socket security context '%s'"), str);
+         goto done;
+     }
+ 
+@@ -1649,6 +1670,7 @@ done:
+     if (execcon) context_free(execcon);
+     if (proccon) context_free(proccon);
+     freecon(scon);
++    VIR_FREE(str);
+     return rc;
+ }
+ 
+@@ -1858,6 +1880,53 @@ virSecuritySELinuxSetImageFDLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+     return virSecuritySELinuxFSetFilecon(fd, secdef->imagelabel);
+ }
+ 
++static int
++virSecuritySELinuxSetTapFDLabel(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
++                                virDomainDefPtr def,
++                                int fd)
++{
++    struct stat buf;
++    security_context_t fcon = NULL;
++    virSecurityLabelDefPtr secdef;
++    char *str = NULL;
++    int rc = -1;
++
++    secdef = virDomainDefGetSecurityLabelDef(def, SECURITY_SELINUX_NAME);
++    if (secdef == NULL)
++        return rc;
++
++    if (secdef->label == NULL)
++        return 0;
++
++    if (fstat(fd, &buf) < 0) {
++        virReportSystemError(errno, _("cannot stat tap fd %d"), fd);
++        goto cleanup;
++    }
++
++    if ((buf.st_mode & S_IFMT) != S_IFCHR) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("tap fd %d is not character device"), fd);
++        goto cleanup;
++    }
++
++    if (getContext("/dev/tap.*", buf.st_mode, &fcon) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("cannot lookup default selinux label for tap fd %d"), fd);
++        goto cleanup;
++    }
++
++    if (!(str = virSecuritySELinuxContextAddRange(secdef->label, fcon))) {
++        goto cleanup;
++    } else {
++        rc = virSecuritySELinuxFSetFilecon(fd, str);
++    }
++
++cleanup:
++    freecon(fcon);
++    VIR_FREE(str);
++    return rc;
++}
++
+ static char *
+ virSecuritySELinuxGenImageLabel(virSecurityManagerPtr mgr,
+                                 virDomainDefPtr def)
+@@ -1958,6 +2027,7 @@ virSecurityDriver virSecurityDriverSELinux = {
+     .domainRestoreSavedStateLabel       = virSecuritySELinuxRestoreSavedStateLabel,
+ 
+     .domainSetSecurityImageFDLabel      = virSecuritySELinuxSetImageFDLabel,
++    .domainSetSecurityTapFDLabel        = virSecuritySELinuxSetTapFDLabel,
+ 
+     .domainGetSecurityMountOptions      = virSecuritySELinuxGetSecurityMountOptions,
+ };
+diff --git a/src/security/security_stack.c b/src/security/security_stack.c
+index 667448f..91401c6 100644
+--- a/src/security/security_stack.c
++++ b/src/security/security_stack.c
+@@ -445,6 +445,23 @@ virSecurityStackSetImageFDLabel(virSecurityManagerPtr mgr,
+     return rc;
+ }
+ 
++static int
++virSecurityStackSetTapFDLabel(virSecurityManagerPtr mgr,
++                              virDomainDefPtr vm,
++                              int fd)
++{
++    virSecurityStackDataPtr priv = virSecurityManagerGetPrivateData(mgr);
++    virSecurityStackItemPtr item = priv->itemsHead;
++    int rc = 0;
++
++    for (; item; item = item->next) {
++        if (virSecurityManagerSetTapFDLabel(item->securityManager, vm, fd) < 0)
++            rc = -1;
++    }
++
++    return rc;
++}
++
+ static char *virSecurityStackGetMountOptions(virSecurityManagerPtr mgr ATTRIBUTE_UNUSED,
+                                              virDomainDefPtr vm ATTRIBUTE_UNUSED) {
+     return NULL;
+@@ -509,6 +526,7 @@ virSecurityDriver virSecurityDriverStack = {
+     .domainRestoreSavedStateLabel       = virSecurityStackRestoreSavedStateLabel,
+ 
+     .domainSetSecurityImageFDLabel      = virSecurityStackSetImageFDLabel,
++    .domainSetSecurityTapFDLabel        = virSecurityStackSetTapFDLabel,
+ 
+     .domainGetSecurityMountOptions      = virSecurityStackGetMountOptions,
+ };
+-- 
+1.7.12.4
+

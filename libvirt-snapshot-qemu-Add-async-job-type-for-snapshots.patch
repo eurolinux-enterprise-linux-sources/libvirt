@@ -1,0 +1,106 @@
+From 25f67e28f2471240e2f91c8f89abb62148bcb4c4 Mon Sep 17 00:00:00 2001
+Message-Id: <25f67e28f2471240e2f91c8f89abb62148bcb4c4.1352118321.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Sun, 4 Nov 2012 20:47:35 +0100
+Subject: [PATCH] snapshot: qemu: Add async job type for snapshots
+
+https://bugzilla.redhat.com/show_bug.cgi?id=638512
+
+The new external system checkpoints will require an async job while the
+snapshot is taken. This patch adds QEMU_ASYNC_JOB_SNAPSHOT to track this
+job type.
+(cherry picked from commit 2a59a3d5970a3e47f54d479a6c9c48dc0dbdcd53)
+---
+ src/qemu/qemu_domain.c  |  3 +++
+ src/qemu/qemu_domain.h  |  1 +
+ src/qemu/qemu_process.c | 30 +++++++++++++++++-------------
+ 3 files changed, 21 insertions(+), 13 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index d819011..6c6f841 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -65,6 +65,7 @@ VIR_ENUM_IMPL(qemuDomainAsyncJob, QEMU_ASYNC_JOB_LAST,
+               "migration in",
+               "save",
+               "dump",
++              "snapshot",
+ );
+ 
+ 
+@@ -79,6 +80,7 @@ qemuDomainAsyncJobPhaseToString(enum qemuDomainAsyncJob job,
+ 
+     case QEMU_ASYNC_JOB_SAVE:
+     case QEMU_ASYNC_JOB_DUMP:
++    case QEMU_ASYNC_JOB_SNAPSHOT:
+     case QEMU_ASYNC_JOB_NONE:
+     case QEMU_ASYNC_JOB_LAST:
+         ; /* fall through */
+@@ -101,6 +103,7 @@ qemuDomainAsyncJobPhaseFromString(enum qemuDomainAsyncJob job,
+ 
+     case QEMU_ASYNC_JOB_SAVE:
+     case QEMU_ASYNC_JOB_DUMP:
++    case QEMU_ASYNC_JOB_SNAPSHOT:
+     case QEMU_ASYNC_JOB_NONE:
+     case QEMU_ASYNC_JOB_LAST:
+         ; /* fall through */
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 8a66f14..9c2f67c 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -92,6 +92,7 @@ enum qemuDomainAsyncJob {
+     QEMU_ASYNC_JOB_MIGRATION_IN,
+     QEMU_ASYNC_JOB_SAVE,
+     QEMU_ASYNC_JOB_DUMP,
++    QEMU_ASYNC_JOB_SNAPSHOT,
+ 
+     QEMU_ASYNC_JOB_LAST
+ };
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 78dda1c..cdc26e5 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3037,23 +3037,27 @@ qemuProcessRecoverJob(struct qemud_driver *driver,
+ 
+     case QEMU_ASYNC_JOB_SAVE:
+     case QEMU_ASYNC_JOB_DUMP:
++    case QEMU_ASYNC_JOB_SNAPSHOT:
+         qemuDomainObjEnterMonitor(driver, vm);
+         ignore_value(qemuMonitorMigrateCancel(priv->mon));
+         qemuDomainObjExitMonitor(driver, vm);
+         /* resume the domain but only if it was paused as a result of
+-         * running save/dump operation.  Although we are recovering an
+-         * async job, this function is run at startup and must resume
+-         * things using sync monitor connections.  */
+-        if (state == VIR_DOMAIN_PAUSED &&
+-            ((job->asyncJob == QEMU_ASYNC_JOB_DUMP &&
+-              reason == VIR_DOMAIN_PAUSED_DUMP) ||
+-             (job->asyncJob == QEMU_ASYNC_JOB_SAVE &&
+-              reason == VIR_DOMAIN_PAUSED_SAVE) ||
+-             reason == VIR_DOMAIN_PAUSED_UNKNOWN)) {
+-            if (qemuProcessStartCPUs(driver, vm, conn,
+-                                     VIR_DOMAIN_RUNNING_UNPAUSED,
+-                                     QEMU_ASYNC_JOB_NONE) < 0) {
+-                VIR_WARN("Could not resume domain %s after", vm->def->name);
++         * running a migration-to-file operation.  Although we are
++         * recovering an async job, this function is run at startup
++         * and must resume things using sync monitor connections.  */
++         if (state == VIR_DOMAIN_PAUSED &&
++             ((job->asyncJob == QEMU_ASYNC_JOB_DUMP &&
++               reason == VIR_DOMAIN_PAUSED_DUMP) ||
++              (job->asyncJob == QEMU_ASYNC_JOB_SAVE &&
++               reason == VIR_DOMAIN_PAUSED_SAVE) ||
++              (job->asyncJob == QEMU_ASYNC_JOB_SNAPSHOT &&
++               reason == VIR_DOMAIN_PAUSED_SNAPSHOT) ||
++              reason == VIR_DOMAIN_PAUSED_UNKNOWN)) {
++             if (qemuProcessStartCPUs(driver, vm, conn,
++                                      VIR_DOMAIN_RUNNING_UNPAUSED,
++                                      QEMU_ASYNC_JOB_NONE) < 0) {
++                 VIR_WARN("Could not resume domain '%s' after migration to file",
++                          vm->def->name);
+             }
+         }
+         break;
+-- 
+1.8.0
+

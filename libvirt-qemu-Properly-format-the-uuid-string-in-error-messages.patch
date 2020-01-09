@@ -1,0 +1,220 @@
+From a590103fabe7322e995a9d6aa3401befa3037486 Mon Sep 17 00:00:00 2001
+Message-Id: <a590103fabe7322e995a9d6aa3401befa3037486@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 24 Apr 2014 09:19:25 -0400
+Subject: [PATCH] qemu: Properly format the uuid string in error messages
+
+https://bugzilla.redhat.com/show_bug.cgi?id=947974
+
+RHEL only, but based upon upstream commit '54a99ba8' which could not
+be applied without issues since upstream commit id 'a9e97e0c' has not
+been applied.
+
+Rather than use the 'qemuDomObjFromDomain()' for each of the calls
+which need to *FindByUUID() and message the uuid based on that, this
+patch will just focus on the API's where the formatting of the UUID
+was not performed.
+
+Change all the incorrectly formatted calls to use the virUUIDFormat()
+and the same message "no domain with matching uuid '%s'".  This includes
+the following set of APIs:
+
+qemuDomainSetBlkioParameters
+qemuDomainGetBlkioParameters
+qemuDomainSetMemoryParameters
+qemuDomainGetMemoryParameters
+qemuDomainSetNumaParameters
+qemuDomainGetNumaParameters
+qemuSetSchedulerParametersFlags
+qemuGetSchedulerParametersFlags
+qemuDomainSetInterfaceParameters
+qemuDomainGetInterfaceParameters
+qemuDomainGetCPUStats
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 97 ++++++++++++++++++++++++++++----------------------
+ 1 file changed, 55 insertions(+), 42 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 3bb4038..568aa7d 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -7531,9 +7531,11 @@ qemuDomainSetBlkioParameters(virDomainPtr dom,
+     qemuDriverLock(driver);
+     vm = virDomainFindByUUID(&driver->domains, dom->uuid);
+ 
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), dom->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(dom->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+@@ -7684,10 +7686,11 @@ qemuDomainGetBlkioParameters(virDomainPtr dom,
+     flags &= ~VIR_TYPED_PARAM_STRING_OKAY;
+ 
+     vm = virDomainFindByUUID(&driver->domains, dom->uuid);
+-
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), dom->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(dom->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+@@ -7880,10 +7883,11 @@ qemuDomainSetMemoryParameters(virDomainPtr dom,
+     qemuDriverLock(driver);
+ 
+     vm = virDomainFindByUUID(&driver->domains, dom->uuid);
+-
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), dom->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(dom->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+@@ -8037,10 +8041,11 @@ qemuDomainGetMemoryParameters(virDomainPtr dom,
+     flags &= ~VIR_TYPED_PARAM_STRING_OKAY;
+ 
+     vm = virDomainFindByUUID(&driver->domains, dom->uuid);
+-
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), dom->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(dom->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+@@ -8304,10 +8309,11 @@ qemuDomainSetNumaParameters(virDomainPtr dom,
+     qemuDriverLock(driver);
+ 
+     vm = virDomainFindByUUID(&driver->domains, dom->uuid);
+-
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), dom->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(dom->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+@@ -8428,10 +8434,11 @@ qemuDomainGetNumaParameters(virDomainPtr dom,
+     flags &= ~VIR_TYPED_PARAM_STRING_OKAY;
+ 
+     vm = virDomainFindByUUID(&driver->domains, dom->uuid);
+-
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), dom->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(dom->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+@@ -8633,10 +8640,11 @@ qemuSetSchedulerParametersFlags(virDomainPtr dom,
+     qemuDriverLock(driver);
+ 
+     vm = virDomainFindByUUID(&driver->domains, dom->uuid);
+-
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), dom->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(dom->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+@@ -8928,10 +8936,11 @@ qemuGetSchedulerParametersFlags(virDomainPtr dom,
+     }
+ 
+     vm = virDomainFindByUUID(&driver->domains, dom->uuid);
+-
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), dom->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(dom->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+@@ -9482,10 +9491,11 @@ qemuDomainSetInterfaceParameters(virDomainPtr dom,
+ 
+     qemuDriverLock(driver);
+     vm = virDomainFindByUUID(&driver->domains, dom->uuid);
+-
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), dom->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(dom->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+@@ -9645,10 +9655,11 @@ qemuDomainGetInterfaceParameters(virDomainPtr dom,
+     flags &= ~VIR_TYPED_PARAM_STRING_OKAY;
+ 
+     vm = virDomainFindByUUID(&driver->domains, dom->uuid);
+-
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), dom->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(dom->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+@@ -15152,9 +15163,11 @@ qemuDomainGetCPUStats(virDomainPtr domain,
+     qemuDriverLock(driver);
+ 
+     vm = virDomainFindByUUID(&driver->domains, domain->uuid);
+-    if (vm == NULL) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("No such domain %s"), domain->uuid);
++    if (!vm) {
++        char uuidstr[VIR_UUID_STRING_BUFLEN];
++        virUUIDFormat(domain->uuid, uuidstr);
++        virReportError(VIR_ERR_NO_DOMAIN,
++                       _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
+ 
+-- 
+1.9.2
+

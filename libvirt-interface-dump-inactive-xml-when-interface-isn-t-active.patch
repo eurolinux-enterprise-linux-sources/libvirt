@@ -1,0 +1,69 @@
+From 414047b5e7d338f816f746dc2d99d2a8e5b6d0e1 Mon Sep 17 00:00:00 2001
+Message-Id: <414047b5e7d338f816f746dc2d99d2a8e5b6d0e1@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 8 May 2014 10:24:49 -0400
+Subject: [PATCH] interface: dump inactive xml when interface isn't active
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1095774
+
+Other drivers in libvirt (e.g. network, qemu) will automatically
+return the "inactive" (persistent configuration) XML of an object when
+that object is inactive. The netcf backend of the interface driver
+would always try to return the live status XML of the interface, even
+when it was down. Although netcf does return valid XML in that case,
+for bond interfaces it is missing almost all of its content, including
+the <bond> subelement itself, leading to this error message from
+"virsh iface-dumpxml" of a bond interface that is inactive:
+
+  error: XML error: bond interface misses the bond element
+
+(this is because libvirt's validation of the XML returned by netcf
+always requires a <bond> element be present).
+
+This patch modifies the interface driver netcf backend to check if the
+interface is inactive, and in that case always return the inactive XML
+(which will always have a <bond> element, thus eliminating the error
+message, as well as making operation more in line with other drivers.
+
+This fixes the following bug:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=878394
+(cherry picked from commit 7284c499e54e538fd0ab35a1f09e358f06fc23b0)
+
+Conflicts:
+
+  netcfObjIsActive() args are slightly different in RHEL6 due to
+  driverState not being a virObject.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/interface/interface_backend_netcf.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/interface/interface_backend_netcf.c b/src/interface/interface_backend_netcf.c
+index b212922..5aa8e15 100644
+--- a/src/interface/interface_backend_netcf.c
++++ b/src/interface/interface_backend_netcf.c
+@@ -505,6 +505,7 @@ static char *interfaceGetXMLDesc(virInterfacePtr ifinfo,
+     char *xmlstr = NULL;
+     virInterfaceDefPtr ifacedef = NULL;
+     char *ret = NULL;
++    bool active;
+ 
+     virCheckFlags(VIR_INTERFACE_XML_INACTIVE, NULL);
+ 
+@@ -516,7 +517,10 @@ static char *interfaceGetXMLDesc(virInterfacePtr ifinfo,
+         goto cleanup;
+     }
+ 
+-    if ((flags & VIR_INTERFACE_XML_INACTIVE)) {
++    if (netcfInterfaceObjIsActive(driver->netcf, iface, &active) < 0)
++       goto cleanup;
++
++    if ((flags & VIR_INTERFACE_XML_INACTIVE) || !active) {
+         xmlstr = ncf_if_xml_desc(iface);
+     } else {
+         xmlstr = ncf_if_xml_state(iface);
+-- 
+1.9.3
+

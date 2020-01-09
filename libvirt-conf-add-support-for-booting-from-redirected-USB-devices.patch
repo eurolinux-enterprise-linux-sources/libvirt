@@ -1,0 +1,78 @@
+From a906e112fb7b9482be2d60744dfc491b7da16abf Mon Sep 17 00:00:00 2001
+Message-Id: <a906e112fb7b9482be2d60744dfc491b7da16abf@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 14 Apr 2014 16:02:50 +0200
+Subject: [PATCH] conf: add support for booting from redirected USB devices
+
+(not really, see Conflicts)
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1035190
+
+Commit a4c19459aa8634c43b51e8138fb1d7eec4c17824 only added the
+QEMU capability flag, command line option and added the boot element
+for redirdev's in the XML schema.
+
+This patch adds support for parsing and writing the XML with redirdevs
+with the boot flag. It also ignores unknown XML elements in redirdev
+instead of failing with:
+"error: An error occurred, but the cause is unknown"
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=805414
+(cherry picked from commit cc244e24416b7785258c69995483015bbf8927dd)
+
+Conflicts:
+	src/conf/domain_conf.c
+  039a328 conf: Allow for non-contiguous device boot orders
+  was added upstream after this commit, but it's already backported.
+
+Unfortunately, the upstrem commit this is based on did
+two things at once. This is just the part ignoring unknown
+elements in virDomainRedirdevDefParseXML, letting
+virDomainDeviceInfoParseXML parse the alias.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 21 ++++++++-------------
+ 1 file changed, 8 insertions(+), 13 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index e31b1c2..28ad416 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -7614,6 +7614,7 @@ virDomainRedirdevDefParseXML(const xmlNodePtr node,
+     xmlNodePtr cur;
+     virDomainRedirdevDefPtr def;
+     char *bus, *type = NULL;
++    int remaining;
+ 
+     if (VIR_ALLOC(def) < 0) {
+         virReportOOMError();
+@@ -7645,19 +7646,13 @@ virDomainRedirdevDefParseXML(const xmlNodePtr node,
+     }
+ 
+     cur = node->children;
+-    while (cur != NULL) {
+-        if (cur->type == XML_ELEMENT_NODE) {
+-            if (xmlStrEqual(cur->name, BAD_CAST "source")) {
+-                int remaining;
+-
+-                remaining = virDomainChrSourceDefParseXML(&def->source.chr, cur, flags,
+-                                                          NULL, NULL, NULL, 0);
+-                if (remaining != 0)
+-                    goto error;
+-            }
+-        }
+-        cur = cur->next;
+-    }
++    /* boot gets parsed in virDomainDeviceInfoParseXML
++     * source gets parsed in virDomainChrSourceDefParseXML
++     * we don't know any of the elements that might remain */
++    remaining = virDomainChrSourceDefParseXML(&def->source.chr, cur, flags,
++                                              NULL, NULL, NULL, 0);
++    if (remaining < 0)
++        goto error;
+ 
+     if (def->source.chr.type == VIR_DOMAIN_CHR_TYPE_SPICEVMC) {
+         def->source.chr.data.spicevmc = VIR_DOMAIN_CHR_SPICEVMC_USBREDIR;
+-- 
+1.9.2
+

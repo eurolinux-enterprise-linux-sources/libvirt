@@ -1,0 +1,102 @@
+From 4c4b82303a105017304646b8b70aa9eca22d5142 Mon Sep 17 00:00:00 2001
+Message-Id: <4c4b82303a105017304646b8b70aa9eca22d5142.1350297262.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Oct 2012 05:08:58 -0400
+Subject: [PATCH] conf: fix virDevicePCIAddressEqual args
+
+This is a prerequisite patch for the solution to:
+
+      https://bugzilla.redhat.com/show_bug.cgi?id=805071
+
+It was cherry picked from upstream commit
+310945597c9db7f4f9b4e251e4fda7f75f6bc0e2 with no conflicts)
+
+This function really should have been taking virDevicePCIAddress*
+instead of the inefficient virDevicePCIAddress (results in copying two
+entire structs onto the stack rather than just two pointers), and
+returning a bool true/false (not matching is not necessarily a
+"failure", as a -1 return would imply, and also using "if
+(!virDevicePCIAddressEqual(x, y))" to mean "if x == y" is just a bit
+counterintuitive).
+---
+ src/conf/device_conf.c      | 21 +++++++++------------
+ src/conf/device_conf.h      |  4 ++--
+ src/network/bridge_driver.c |  8 ++++----
+ 3 files changed, 15 insertions(+), 18 deletions(-)
+
+diff --git a/src/conf/device_conf.c b/src/conf/device_conf.c
+index a852960..7b97f45 100644
+--- a/src/conf/device_conf.c
++++ b/src/conf/device_conf.c
+@@ -130,18 +130,15 @@ virDevicePCIAddressFormat(virBufferPtr buf,
+     return 0;
+ }
+ 
+-int
+-virDevicePCIAddressEqual(virDevicePCIAddress addr1,
+-                         virDevicePCIAddress addr2)
++bool
++virDevicePCIAddressEqual(virDevicePCIAddress *addr1,
++                         virDevicePCIAddress *addr2)
+ {
+-    int ret = -1;
+-
+-    if (addr1.domain == addr2.domain &&
+-        addr1.bus == addr2.bus &&
+-        addr1.slot == addr2.slot &&
+-        addr1.function == addr2.function) {
+-        ret = 0;
++    if (addr1->domain == addr2->domain &&
++        addr1->bus == addr2->bus &&
++        addr1->slot == addr2->slot &&
++        addr1->function == addr2->function) {
++        return true;
+     }
+-
+-    return ret;
++    return false;
+ }
+diff --git a/src/conf/device_conf.h b/src/conf/device_conf.h
+index 26d5637..5318738 100644
+--- a/src/conf/device_conf.h
++++ b/src/conf/device_conf.h
+@@ -59,8 +59,8 @@ int virDevicePCIAddressFormat(virBufferPtr buf,
+                               virDevicePCIAddress addr,
+                               bool includeTypeInAddr);
+ 
+-int virDevicePCIAddressEqual(virDevicePCIAddress addr1,
+-                             virDevicePCIAddress addr2);
++bool virDevicePCIAddressEqual(virDevicePCIAddress *addr1,
++                              virDevicePCIAddress *addr2);
+ 
+ 
+ VIR_ENUM_DECL(virDeviceAddressPciMulti)
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index c5b7e67..b7a7d4a 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -3800,8 +3800,8 @@ networkNotifyActualDevice(virDomainNetDefPtr iface)
+         for (ii = 0; ii < netdef->nForwardIfs; ii++) {
+             if (netdef->forwardIfs[ii].type
+                 == VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_PCI &&
+-                (virDevicePCIAddressEqual(hostdev->source.subsys.u.pci,
+-                                          netdef->forwardIfs[ii].device.pci) == 0)) {
++                virDevicePCIAddressEqual(&hostdev->source.subsys.u.pci,
++                                         &netdef->forwardIfs[ii].device.pci)) {
+                 dev = &netdef->forwardIfs[ii];
+                 break;
+             }
+@@ -3952,8 +3952,8 @@ networkReleaseActualDevice(virDomainNetDefPtr iface)
+         for (ii = 0; ii < netdef->nForwardIfs; ii++) {
+             if (netdef->forwardIfs[ii].type
+                 == VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_PCI &&
+-                (virDevicePCIAddressEqual(hostdev->source.subsys.u.pci,
+-                                          netdef->forwardIfs[ii].device.pci) == 0)) {
++                virDevicePCIAddressEqual(&hostdev->source.subsys.u.pci,
++                                          &netdef->forwardIfs[ii].device.pci)) {
+                 dev = &netdef->forwardIfs[ii];
+                 break;
+             }
+-- 
+1.7.12.3
+

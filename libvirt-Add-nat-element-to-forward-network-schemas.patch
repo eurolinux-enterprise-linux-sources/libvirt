@@ -1,0 +1,170 @@
+From 2c64a5763a8ad74a28018643d3892a0923b8ef66 Mon Sep 17 00:00:00 2001
+Message-Id: <2c64a5763a8ad74a28018643d3892a0923b8ef66.1378495587.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Thu, 5 Sep 2013 14:48:03 +0200
+Subject: [PATCH] Add '<nat>' element to '<forward>' network schemas
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1004365
+
+Commits 905629f4 and 1716e7a6 have added support for specifying
+an IPv4 range and a port range to be used by NAT:
+<forward mode='nat'>
+  <nat>
+    <address start='10.20.30.40' end='10.20.30.44'/>
+    <port start='60000' end='65432'/>
+  </nat>
+</forward>
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1004364
+(cherry picked from commit 437b7944a81b648a15c657fef184f3bcd2427dac)
+
+Conflicts:
+	docs/schemas/network.rng
+        c4f63ef (<driver name='kvm|vfio'/>) not backported
+
+A few spaces were needed in
+networkxml2xmlout/nat-network-forward-nat-address.xml
+because d8bd24a which removed them is not backported either.
+---
+ docs/schemas/network.rng                           | 26 +++++++++++++++++++++
+ docs/schemas/networkcommon.rng                     |  7 ++++++
+ .../nat-network-forward-nat-address.xml            | 26 +++++++++++++++++++++
+ .../nat-network-forward-nat-address.xml            | 27 ++++++++++++++++++++++
+ tests/networkxml2xmltest.c                         |  1 +
+ 5 files changed, 87 insertions(+)
+ create mode 100644 tests/networkxml2xmlin/nat-network-forward-nat-address.xml
+ create mode 100644 tests/networkxml2xmlout/nat-network-forward-nat-address.xml
+
+diff --git a/docs/schemas/network.rng b/docs/schemas/network.rng
+index eeedcef..2d245a8 100644
+--- a/docs/schemas/network.rng
++++ b/docs/schemas/network.rng
+@@ -139,6 +139,32 @@
+                   </attribute>
+                 </element>
+               </optional>
++              <optional>
++                <element name='nat'>
++                  <interleave>
++                    <optional>
++                      <element name='address'>
++                        <attribute name='start'>
++                          <ref name='ipv4Addr'/>
++                        </attribute>
++                        <attribute name='end'>
++                          <ref name='ipv4Addr'/>
++                        </attribute>
++                      </element>
++                    </optional>
++                    <optional>
++                      <element name='port'>
++                        <attribute name='start'>
++                          <ref name='port'/>
++                        </attribute>
++                        <attribute name='end'>
++                          <ref name='port'/>
++                        </attribute>
++                      </element>
++                    </optional>
++                  </interleave>
++                </element>
++              </optional>
+             </interleave>
+           </element>
+         </optional>
+diff --git a/docs/schemas/networkcommon.rng b/docs/schemas/networkcommon.rng
+index c7749e7..fe1594b 100644
+--- a/docs/schemas/networkcommon.rng
++++ b/docs/schemas/networkcommon.rng
+@@ -204,4 +204,11 @@
+       </oneOrMore>
+     </element>
+   </define>
++
++  <define name='port'>
++    <data type='integer'>
++      <param name='minInclusive'>1</param>
++      <param name='maxInclusive'>65535</param>
++    </data>
++  </define>
+ </grammar>
+diff --git a/tests/networkxml2xmlin/nat-network-forward-nat-address.xml b/tests/networkxml2xmlin/nat-network-forward-nat-address.xml
+new file mode 100644
+index 0000000..403d058
+--- /dev/null
++++ b/tests/networkxml2xmlin/nat-network-forward-nat-address.xml
+@@ -0,0 +1,26 @@
++<network>
++  <name>default</name>
++  <uuid>81ff0d90-c91e-6742-64da-4a736edb9a9b</uuid>
++  <bridge name="virbr0"/>
++  <forward mode="nat" dev="eth1">
++    <nat>
++      <address start='10.20.30.40' end='10.20.30.44'/>
++      <port start='60000' end='65432'/>
++    </nat>
++  </forward>
++  <ip address="192.168.122.1" netmask="255.255.255.0">
++    <dhcp>
++      <range start="192.168.122.2" end="192.168.122.254"/>
++      <host mac="00:16:3e:77:e2:ed" name="a.example.com" ip="192.168.122.10"/>
++      <host mac="00:16:3e:3e:a9:1a" name="b.example.com" ip="192.168.122.11"/>
++    </dhcp>
++  </ip>
++  <ip family="ipv4" address="192.168.123.1" netmask="255.255.255.0">
++  </ip>
++  <ip family="ipv6" address="2001:db8:ac10:fe01::1" prefix="64">
++  </ip>
++  <ip family="ipv6" address="2001:db8:ac10:fd01::1" prefix="64">
++  </ip>
++  <ip family="ipv4" address="10.24.10.1">
++  </ip>
++</network>
+diff --git a/tests/networkxml2xmlout/nat-network-forward-nat-address.xml b/tests/networkxml2xmlout/nat-network-forward-nat-address.xml
+new file mode 100644
+index 0000000..796220d
+--- /dev/null
++++ b/tests/networkxml2xmlout/nat-network-forward-nat-address.xml
+@@ -0,0 +1,27 @@
++<network>
++  <name>default</name>
++  <uuid>81ff0d90-c91e-6742-64da-4a736edb9a9b</uuid>
++  <forward dev='eth1' mode='nat'>
++    <nat>
++      <address start='10.20.30.40' end='10.20.30.44'/>
++      <port start='60000' end='65432'/>
++    </nat>
++    <interface dev='eth1'/>
++  </forward>
++  <bridge name='virbr0' stp='on' delay='0' />
++  <ip address='192.168.122.1' netmask='255.255.255.0'>
++    <dhcp>
++      <range start='192.168.122.2' end='192.168.122.254' />
++      <host mac='00:16:3e:77:e2:ed' name='a.example.com' ip='192.168.122.10' />
++      <host mac='00:16:3e:3e:a9:1a' name='b.example.com' ip='192.168.122.11' />
++    </dhcp>
++  </ip>
++  <ip family='ipv4' address='192.168.123.1' netmask='255.255.255.0'>
++  </ip>
++  <ip family='ipv6' address='2001:db8:ac10:fe01::1' prefix='64'>
++  </ip>
++  <ip family='ipv6' address='2001:db8:ac10:fd01::1' prefix='64'>
++  </ip>
++  <ip family='ipv4' address='10.24.10.1'>
++  </ip>
++</network>
+diff --git a/tests/networkxml2xmltest.c b/tests/networkxml2xmltest.c
+index ff91751..15e0e43 100644
+--- a/tests/networkxml2xmltest.c
++++ b/tests/networkxml2xmltest.c
+@@ -100,6 +100,7 @@ mymain(void)
+     DO_TEST("nat-network-dns-txt-record");
+     DO_TEST("nat-network-dns-hosts");
+     DO_TEST("nat-network-dns-forward-plain");
++    DO_TEST("nat-network-forward-nat-address");
+     DO_TEST("8021Qbh-net");
+     DO_TEST("direct-net");
+     DO_TEST("host-bridge-net");
+-- 
+1.8.3.2
+

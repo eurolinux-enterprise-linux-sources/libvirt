@@ -1,0 +1,137 @@
+From 12e5c33ba9157c5c0902564f4420c5fb54c0beb6 Mon Sep 17 00:00:00 2001
+Message-Id: <12e5c33ba9157c5c0902564f4420c5fb54c0beb6@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:54 +0100
+Subject: [PATCH] tests: Add tests for virtio-rng device handling
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+Adds XML parsing and qemu commandline tests for the VirtIO RNG device
+support.
+(cherry picked from commit e8b70ab74300245bbd84f114e60d936bbf96a33d)
+
+Conflicts:
+	tests/qemuxml2argvtest.c - virCaps changes not backported
+	tests/qemuxml2xmltest.c
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ .../qemuxml2argv-virtio-rng-egd.args               |  1 +
+ .../qemuxml2argv-virtio-rng-egd.xml                | 26 ++++++++++++++++++++++
+ .../qemuxml2argv-virtio-rng-random.args            |  1 +
+ .../qemuxml2argv-virtio-rng-random.xml             | 23 +++++++++++++++++++
+ tests/qemuxml2argvtest.c                           |  4 ++++
+ tests/qemuxml2xmltest.c                            |  3 +++
+ 6 files changed, 58 insertions(+)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd.xml
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml
+
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd.args b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd.args
+new file mode 100644
+index 0000000..d40f0b5
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd.args
+@@ -0,0 +1 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu -S -M pc -m 214 -smp 1 -nographic -nodefaults -monitor unix:/tmp/test-monitor,server,nowait -no-acpi -boot c -usb -device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3 -chardev socket,id=charrng0,host=1.2.3.4,port=1234 -object rng-egd,chardev=charrng0,id=rng0 -device virtio-rng-pci,rng=rng0,bus=pci.0,addr=0x4
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd.xml b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd.xml
+new file mode 100644
+index 0000000..4e52a32
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd.xml
+@@ -0,0 +1,26 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static' cpuset='1-4,8-20,525'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <controller type='usb' index='0'/>
++    <memballoon model='virtio'/>
++    <rng model='virtio'>
++      <backend model='egd' type='tcp'>
++        <source mode='connect' host='1.2.3.4' service='1234'/>
++        <protocol type='raw'/>
++      </backend>
++    </rng>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args
+new file mode 100644
+index 0000000..4611ae5
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args
+@@ -0,0 +1 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu -S -M pc -m 214 -smp 1 -nographic -nodefaults -monitor unix:/tmp/test-monitor,server,nowait -no-acpi -boot c -usb -device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3 -object rng-random,id=rng0,filename=/test/phile -device virtio-rng-pci,rng=rng0,bus=pci.0,addr=0x4
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml
+new file mode 100644
+index 0000000..ab1f38c
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml
+@@ -0,0 +1,23 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static' cpuset='1-4,8-20,525'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <controller type='usb' index='0'/>
++    <memballoon model='virtio'/>
++    <rng model='virtio'>
++      <backend model='random'>/test/phile</backend>
++    </rng>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 053792c..2922abd 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -860,6 +860,10 @@ mymain(void)
+     DO_TEST_FAILURE("mlock-on", NONE);
+     DO_TEST("mlock-off", QEMU_CAPS_MLOCK);
+     DO_TEST("mlock-unsupported", NONE);
++    DO_TEST("virtio-rng-random", QEMU_CAPS_DEVICE, QEMU_CAPS_DEVICE_VIRTIO_RNG,
++            QEMU_CAPS_OBJECT_RNG_RANDOM);
++    DO_TEST("virtio-rng-egd", QEMU_CAPS_DEVICE, QEMU_CAPS_DEVICE_VIRTIO_RNG,
++            QEMU_CAPS_OBJECT_RNG_EGD);
+ 
+     VIR_FREE(driver.stateDir);
+     virCapabilitiesFree(driver.caps);
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 85f44d7..295af96 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -240,6 +240,9 @@ mymain(void)
+     DO_TEST("numad-static-vcpu-no-numatune");
+     DO_TEST("disk-scsi-lun-passthrough-sgio");
+ 
++    DO_TEST("virtio-rng-random");
++    DO_TEST("virtio-rng-egd");
++
+     /* These tests generate different XML */
+     DO_TEST_DIFFERENT("balloon-device-auto");
+     DO_TEST_DIFFERENT("channel-virtio-auto");
+-- 
+1.9.1
+

@@ -1,0 +1,60 @@
+From 2e9d0e5b9fa0e032cdb15a7977784f1a7dbb4a6b Mon Sep 17 00:00:00 2001
+Message-Id: <2e9d0e5b9fa0e032cdb15a7977784f1a7dbb4a6b.1350990678.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 19 Oct 2012 14:45:27 +0200
+Subject: [PATCH] qemu: Allow migration with host USB devices
+
+https://bugzilla.redhat.com/show_bug.cgi?id=843560
+
+Recently, patches were added support for (managed)saving, restoring, and
+migrating domains with host USB devices. However, qemu driver would
+still forbid migration of such domains because qemuMigrationIsAllowed
+was not updated.
+(cherry picked from commit 9fcc5436d3d824ceb82b44852e1a8023c3810655)
+---
+ src/qemu/qemu_migration.c | 22 +++++++++++++++++++---
+ 1 file changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 65cd6ec..a2402ce 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -800,6 +800,8 @@ qemuMigrationIsAllowed(struct qemud_driver *driver, virDomainObjPtr vm,
+                        virDomainDefPtr def)
+ {
+     int nsnapshots;
++    bool forbid;
++    int i;
+ 
+     if (vm) {
+         if (qemuProcessAutoDestroyActive(driver, vm)) {
+@@ -817,9 +819,23 @@ qemuMigrationIsAllowed(struct qemud_driver *driver, virDomainObjPtr vm,
+ 
+         def = vm->def;
+     }
+-    if (def->nhostdevs > 0) {
+-        virReportError(VIR_ERR_OPERATION_INVALID,
+-                       "%s", _("Domain with assigned host devices cannot be migrated"));
++
++    /* Migration with USB host devices is allowed, all other devices are
++     * forbidden.
++     */
++    forbid = false;
++    for (i = 0; i < def->nhostdevs; i++) {
++        virDomainHostdevDefPtr hostdev = def->hostdevs[i];
++        if (hostdev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS ||
++            hostdev->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB) {
++            forbid = true;
++            break;
++        }
++    }
++    if (forbid) {
++        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
++                       _("Domain with assigned non-USB host devices "
++                         "cannot be migrated"));
+         return false;
+     }
+ 
+-- 
+1.7.12.4
+

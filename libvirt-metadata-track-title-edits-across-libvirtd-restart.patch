@@ -1,0 +1,123 @@
+From 23577906b0059d3e300446ab9b0a673db0573221 Mon Sep 17 00:00:00 2001
+Message-Id: <23577906b0059d3e300446ab9b0a673db0573221@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 2 Sep 2014 15:12:19 +0200
+Subject: [PATCH] metadata: track title edits across libvirtd restart
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1122205
+
+Although the edits were changing in-memory XML, it was not flushed
+to disk; so unless some other action changes XML, a libvirtd restart
+would lose the changed information.
+
+* src/conf/domain_conf.c (virDomainObjSetMetadata): Add parameter,
+to save live status across restarts.
+(virDomainSaveXML): Allow for test driver.
+* src/conf/domain_conf.h (virDomainObjSetMetadata): Adjust
+signature.
+* src/bhyve/bhyve_driver.c (bhyveDomainSetMetadata): Adjust caller.
+* src/lxc/lxc_driver.c (lxcDomainSetMetadata): Likewise.
+* src/qemu/qemu_driver.c (qemuDomainSetMetadata): Likewise.
+* src/test/test_driver.c (testDomainSetMetadata): Likewise.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 60e49440598b4aeb4a32bf23bfa5ed85672cbd6a)
+
+Conflicts:
+	src/bhyve/bhyve_driver.c - bhyve driver doesn't exist
+	src/conf/domain_conf.c - no need to pass xmlopts
+	src/conf/domain_conf.h - same here
+	src/lxc/lxc_driver.c - lxc driver doesn't support metadata yet
+	src/qemu/qemu_driver.c - missing post-parse callback refactoring
+	src/test/test_driver.c - missing post-parse callback refactoring
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 13 +++++++++++--
+ src/conf/domain_conf.h |  1 +
+ src/qemu/qemu_driver.c |  2 +-
+ src/test/test_driver.c |  2 +-
+ 4 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 877d262..8b20c9f 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -15155,6 +15155,9 @@ int virDomainSaveXML(const char *configDir,
+     char *configFile = NULL;
+     int ret = -1;
+ 
++    if (!configDir)
++        return 0;
++
+     if ((configFile = virDomainConfigFile(configDir, def->name)) == NULL)
+         goto cleanup;
+ 
+@@ -16745,6 +16748,7 @@ virDomainObjSetMetadata(virDomainObjPtr vm,
+                         const char *key,
+                         const char *uri,
+                         virCapsPtr caps,
++                        const char *stateDir,
+                         const char *configDir,
+                         unsigned int flags)
+ {
+@@ -16757,12 +16761,17 @@ virDomainObjSetMetadata(virDomainObjPtr vm,
+                                         &persistentDef) < 0)
+         return -1;
+ 
+-    if (flags & VIR_DOMAIN_AFFECT_LIVE)
++    if (flags & VIR_DOMAIN_AFFECT_LIVE) {
+         if (virDomainDefSetMetadata(vm->def, type, metadata, key, uri) < 0)
+             return -1;
+ 
++        if (virDomainSaveStatus(caps, stateDir, vm) < 0)
++            return -1;
++    }
++
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+-        if (virDomainDefSetMetadata(persistentDef, type, metadata, key, uri) < 0)
++        if (virDomainDefSetMetadata(persistentDef, type, metadata, key,
++                                    uri) < 0)
+             return -1;
+ 
+         if (virDomainSaveConfig(configDir, persistentDef) < 0)
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 4f70b7e..23c4bd8 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2449,6 +2449,7 @@ int virDomainObjSetMetadata(virDomainObjPtr vm,
+                             const char *key,
+                             const char *uri,
+                             virCapsPtr caps,
++                            const char *stateDir,
+                             const char *configDir,
+                             unsigned int flags);
+ 
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 3162075..5090919 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -14855,7 +14855,7 @@ qemuDomainSetMetadata(virDomainPtr dom,
+     }
+ 
+     ret = virDomainObjSetMetadata(vm, type, metadata, key, uri, driver->caps,
+-                                  driver->configDir, flags);
++                                  driver->stateDir, driver->configDir, flags);
+ 
+ cleanup:
+     if (vm)
+diff --git a/src/test/test_driver.c b/src/test/test_driver.c
+index 1d0fd44..73e7524 100644
+--- a/src/test/test_driver.c
++++ b/src/test/test_driver.c
+@@ -2573,7 +2573,7 @@ static int testDomainSetMetadata(virDomainPtr dom,
+ 
+     ret = virDomainObjSetMetadata(privdom, type, metadata, key, uri,
+                                   privconn->caps,
+-                                  NULL, flags);
++                                  NULL, NULL, flags);
+ 
+ cleanup:
+     if (privdom)
+-- 
+2.1.0
+

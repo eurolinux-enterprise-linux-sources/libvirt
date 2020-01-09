@@ -1,0 +1,141 @@
+From 44dc2dea3041bb703ef10009a9ece09c24fb1f82 Mon Sep 17 00:00:00 2001
+Message-Id: <44dc2dea3041bb703ef10009a9ece09c24fb1f82.1379450584.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 9 Sep 2013 15:08:23 -0600
+Subject: [PATCH] qemu: don't leak vm on failure
+
+https://bugzilla.redhat.com/show_bug.cgi?id=995312
+
+Failure to attach to a domain during 'virsh qemu-attach' left
+the list of domains in an odd state:
+
+$ virsh qemu-attach 4176
+error: An error occurred, but the cause is unknown
+
+$ virsh list --all
+ Id    Name                           State
+----------------------------------------------------
+ 2     foo                            shut off
+
+$ virsh qemu-attach 4176
+error: Requested operation is not valid: domain is already active as 'foo'
+
+$ virsh undefine foo
+error: Failed to undefine domain foo
+error: Requested operation is not valid: cannot undefine transient domain
+
+$ virsh shutdown foo
+error: Failed to shutdown domain foo
+error: invalid argument: monitor must not be NULL
+
+It all stems from leaving the list of domains unmodified on
+the initial failure; we should follow the lead of createXML
+which removes vm on failure (the actual initial failure still
+needs to be fixed in a later patch, but at least this patch
+gets us to the point where we aren't getting stuck with an
+unremovable "shut off" transient domain).
+
+While investigating, I also found a leak in qemuDomainCreateXML;
+the two functions should behave similarly.  Note that there are
+still two unusual paths: if dom is not allocated, the user will
+see an OOM error even though the vm remains registered (but oom
+errors already indicate tricky cleanup); and if the vm starts
+and then quits again all before the job ends, it is possible
+to return a non-NULL dom even though the dom will no longer be
+useful for anything (but this at least lets the user know their
+short-lived vm ran).
+
+* src/qemu/qemu_driver.c (qemuDomainCreateXML): Don't leak vm on
+failure to obtain job.
+(qemuDomainQemuAttach): Match cleanup of qemuDomainCreateXML.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit d047b2d9835cbe5090e9eedb11ab69e7e4522f76)
+
+Conflicts:
+
+	src/qemu/qemu_driver.c - commit a9e97e0 (lock changes) not backported
+---
+ src/qemu/qemu_driver.c | 33 ++++++++++++++++++++-------------
+ 1 file changed, 20 insertions(+), 13 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 79c3ac2..767903b 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -1600,8 +1600,11 @@ static virDomainPtr qemudDomainCreate(virConnectPtr conn, const char *xml,
+ 
+     def = NULL;
+ 
+-    if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0)
+-        goto cleanup; /* XXXX free the 'vm' we created ? */
++    if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0) {
++        qemuDomainRemoveInactive(driver, vm);
++        vm = NULL;
++        goto cleanup;
++    }
+ 
+     if (qemuProcessStart(conn, driver, vm, NULL, -1, NULL, NULL,
+                          VIR_NETDEV_VPORT_PROFILE_OP_CREATE,
+@@ -1629,10 +1632,10 @@ static virDomainPtr qemudDomainCreate(virConnectPtr conn, const char *xml,
+     virDomainAuditStart(vm, "booted", true);
+ 
+     dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
+-    if (dom) dom->id = vm->def->id;
++    if (dom)
++        dom->id = vm->def->id;
+ 
+-    if (vm &&
+-        qemuDomainObjEndJob(driver, vm) == 0)
++    if (qemuDomainObjEndJob(driver, vm) == 0)
+         vm = NULL;
+ 
+ cleanup:
+@@ -13230,32 +13233,36 @@ static virDomainPtr qemuDomainAttach(virConnectPtr conn,
+ 
+     def = NULL;
+ 
+-    if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0)
++    if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0) {
++        qemuDomainRemoveInactive(driver, vm);
++        vm = NULL;
+         goto cleanup;
++    }
+ 
+     if (qemuProcessAttach(conn, driver, vm, pid,
+                           pidfile, monConfig, monJSON) < 0) {
++        if (qemuDomainObjEndJob(driver, vm) > 0)
++            qemuDomainRemoveInactive(driver, vm);
++        vm = NULL;
+         monConfig = NULL;
+-        goto endjob;
++        goto cleanup;
+     }
+ 
+     monConfig = NULL;
+ 
+     dom = virGetDomain(conn, vm->def->name, vm->def->uuid);
+-    if (dom) dom->id = vm->def->id;
++    if (dom)
++        dom->id = vm->def->id;
+ 
+-endjob:
+-    if (qemuDomainObjEndJob(driver, vm) == 0) {
++    if (qemuDomainObjEndJob(driver, vm) == 0)
+         vm = NULL;
+-        goto cleanup;
+-    }
+ 
+ cleanup:
+     virDomainDefFree(def);
+-    virObjectUnref(caps);
+     virDomainChrSourceDefFree(monConfig);
+     if (vm)
+         virDomainObjUnlock(vm);
++    virObjectUnref(caps);
+     qemuDriverUnlock(driver);
+     VIR_FREE(pidfile);
+     return dom;
+-- 
+1.8.3.2
+

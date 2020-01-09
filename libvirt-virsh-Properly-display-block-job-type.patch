@@ -1,0 +1,77 @@
+From 15669ee387d78764a25592199bd8e81baf25601e Mon Sep 17 00:00:00 2001
+Message-Id: <15669ee387d78764a25592199bd8e81baf25601e@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 22 Sep 2016 15:35:27 +0200
+Subject: [PATCH] virsh: Properly display block job type
+
+RHEL-only
+https://bugzilla.redhat.com/show_bug.cgi?id=1326653
+
+'virsh blockjob' was not updated after adding the _COMMIT block job
+type which resulted into displaying "Unknown job" rather than the actual
+block job type.
+
+Upstream fixed this accidentaly in 466b12ab797f3dc1b37005f5501ebec3549
+This picks and fixes the two relevant hunks from the original commit so
+that this can be properly applied on the rhel-6.9 tree.
+---
+ tools/virsh-domain.c | 31 +++++++++++++++++--------------
+ 1 file changed, 17 insertions(+), 14 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 66f0afe..92bc7d4 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -1682,12 +1682,26 @@ static const vshCmdOptDef opts_block_job[] = {
+     {NULL, 0, 0, NULL}
+ };
+ 
++VIR_ENUM_DECL(vshDomainBlockJob)
++VIR_ENUM_IMPL(vshDomainBlockJob,
++              VIR_DOMAIN_BLOCK_JOB_TYPE_LAST,
++              N_("Unknown job"),
++              N_("Block Pull"),
++              N_("Block Copy"),
++              N_("Block Commit"))
++
++static const char *
++vshDomainBlockJobToString(int type)
++{
++    const char *str = vshDomainBlockJobTypeToString(type);
++    return str ? _(str) : _("Unknown job");
++}
++
+ static bool
+ cmdBlockJob(vshControl *ctl, const vshCmd *cmd)
+ {
+     int mode;
+     virDomainBlockJobInfo info;
+-    const char *type;
+     int ret;
+     bool abortMode = (vshCommandOptBool(cmd, "abort") ||
+                       vshCommandOptBool(cmd, "async") ||
+@@ -1715,19 +1729,8 @@ cmdBlockJob(vshControl *ctl, const vshCmd *cmd)
+     if (ret == 0 || mode != VSH_CMD_BLOCK_JOB_INFO)
+         return true;
+ 
+-    switch (info.type) {
+-    case VIR_DOMAIN_BLOCK_JOB_TYPE_PULL:
+-        type = _("Block Pull");
+-        break;
+-    case VIR_DOMAIN_BLOCK_JOB_TYPE_COPY:
+-        type = _("Block Copy");
+-        break;
+-    default:
+-        type = _("Unknown job");
+-        break;
+-    }
+-
+-    print_job_progress(type, info.end - info.cur, info.end);
++    print_job_progress(vshDomainBlockJobToString(info.type),
++                       info.end - info.cur, info.end);
+     if (info.bandwidth != 0)
+         vshPrint(ctl, _("    Bandwidth limit: %lu MiB/s\n"), info.bandwidth);
+     return true;
+-- 
+2.10.1
+

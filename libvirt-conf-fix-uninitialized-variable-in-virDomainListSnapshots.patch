@@ -1,0 +1,30 @@
+From c0972fb817075bbf319ae7879816d1a7d0f2cc30 Mon Sep 17 00:00:00 2001
+Message-Id: <c0972fb817075bbf319ae7879816d1a7d0f2cc30.1354720508.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 3 Dec 2012 15:20:22 +0100
+Subject: [PATCH] conf: fix uninitialized variable in virDomainListSnapshots
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=878376
+
+If allocation of names fails, list is uninitialized.
+(cherry picked from commit 892582f9deb1a4c4200a3d0bdfe6a2a94b039ef2)
+---
+ src/conf/snapshot_conf.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index e2bdf82..5766031 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -1025,7 +1025,7 @@ virDomainListSnapshots(virDomainSnapshotObjListPtr snapshots,
+                        unsigned int flags)
+ {
+     int count = virDomainSnapshotObjListNum(snapshots, from, flags);
+-    virDomainSnapshotPtr *list;
++    virDomainSnapshotPtr *list = NULL;
+     char **names;
+     int ret = -1;
+     int i;
+-- 
+1.8.0
+

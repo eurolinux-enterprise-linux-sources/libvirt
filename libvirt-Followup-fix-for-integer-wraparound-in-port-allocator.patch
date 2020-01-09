@@ -1,0 +1,32 @@
+From 71d78c8ee6dcd8880a40247ffc7b296340f63016 Mon Sep 17 00:00:00 2001
+Message-Id: <71d78c8ee6dcd8880a40247ffc7b296340f63016@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Fri, 16 May 2014 13:43:02 +0200
+Subject: [PATCH] Followup fix for integer wraparound in port allocator
+
+Change iterator variable datatype to int
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1018695
+
+(cherry picked from commit 55599102b46ef351521d9b7ee833d01219faad26)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virportallocator.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/util/virportallocator.c b/src/util/virportallocator.c
+index 224369f..bbb417d 100644
+--- a/src/util/virportallocator.c
++++ b/src/util/virportallocator.c
+@@ -105,7 +105,7 @@ int virPortAllocatorAcquire(virPortAllocatorPtr pa,
+                             unsigned short *port)
+ {
+     int ret = -1;
+-    unsigned short i;
++    int i;
+     int fd = -1;
+ 
+     *port = 0;
+-- 
+1.9.3
+

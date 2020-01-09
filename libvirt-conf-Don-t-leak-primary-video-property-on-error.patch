@@ -1,0 +1,35 @@
+From 688ae623c47ec2c1361a1107a1bfda73420103c5 Mon Sep 17 00:00:00 2001
+Message-Id: <688ae623c47ec2c1361a1107a1bfda73420103c5.1373271639.git.jdenemar@redhat.com>
+From: Christophe Fergeau <cfergeau@redhat.com>
+Date: Tue, 12 Mar 2013 12:16:17 +0100
+Subject: [PATCH] conf: Don't leak 'primary' video property on error
+
+https://bugzilla.redhat.com/show_bug.cgi?id=896604
+
+It's only freed on normal returns from virDomainVideoDefParseXML,
+but not when erroring out.
+(cherry picked from commit 9879fce9f6bc291469a04b9b19e72014fd660c07)
+---
+ src/conf/domain_conf.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index e61c73d..3fc1eab 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -7255,9 +7255,11 @@ virDomainVideoDefParseXML(const xmlNodePtr node,
+                 vram = virXMLPropString(cur, "vram");
+                 heads = virXMLPropString(cur, "heads");
+ 
+-                if ((primary = virXMLPropString(cur, "primary")) != NULL)
++                if ((primary = virXMLPropString(cur, "primary")) != NULL) {
+                     if (STREQ(primary, "yes"))
+                         def->primary = 1;
++                    VIR_FREE(primary);
++                }
+ 
+                 def->accel = virDomainVideoAccelDefParseXML(cur);
+             }
+-- 
+1.8.2.1
+

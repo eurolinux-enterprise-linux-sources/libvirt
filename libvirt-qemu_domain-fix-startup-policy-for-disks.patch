@@ -1,0 +1,46 @@
+From 754adc7a295ad157ff3c2a4869292241361b5323 Mon Sep 17 00:00:00 2001
+Message-Id: <754adc7a295ad157ff3c2a4869292241361b5323@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Fri, 27 Jun 2014 16:34:07 +0200
+Subject: [PATCH] qemu_domain: fix startup policy for disks
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1086121
+https://bugzilla.redhat.com/show_bug.cgi?id=1203542
+
+We now support startupPolicy='optional' for disks, but this
+should work only for cold boot, not for restore or migrate.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 5098f671f0dfaddb8788a959906c47b0cb4c87cc)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_domain.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index ee59fa7..c50fec8 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -1989,11 +1989,19 @@ qemuDomainCheckDiskStartupPolicy(struct qemud_driver *driver,
+ {
+     char uuid[VIR_UUID_STRING_BUFLEN];
+     int startupPolicy = vm->def->disks[diskIndex]->startupPolicy;
++    int device = vm->def->disks[diskIndex]->device;
+ 
+     virUUIDFormat(vm->def->uuid, uuid);
+ 
+     switch ((enum virDomainStartupPolicy) startupPolicy) {
+         case VIR_DOMAIN_STARTUP_POLICY_OPTIONAL:
++            /* Once started with an optional disk, qemu saves its section
++             * in the migration stream, so later, when restoring from it
++             * we must make sure the sections match. */
++            if (!cold_boot &&
++                device != VIR_DOMAIN_DISK_DEVICE_FLOPPY &&
++                device != VIR_DOMAIN_DISK_DEVICE_CDROM)
++                goto error;
+             break;
+ 
+         case VIR_DOMAIN_STARTUP_POLICY_MANDATORY:
+-- 
+2.3.5
+

@@ -1,0 +1,37 @@
+From 8165aee6b26ac0a4749ce7242c139732624c503f Mon Sep 17 00:00:00 2001
+Message-Id: <8165aee6b26ac0a4749ce7242c139732624c503f@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 7 Jul 2014 13:14:59 +0200
+Subject: [PATCH] conf: net: Fix helper for applying new network definition
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1116754
+
+When there's no new definition the helper overwrote the old one with
+NULL.
+
+(cherry picked from commit 947230fb56325c86d318215a3e6c9cdb379dc966)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/network_conf.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index 26d1d57..359912e 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -366,7 +366,7 @@ virNetworkObjSetDefTransient(virNetworkObjPtr network, bool live)
+ void
+ virNetworkObjUnsetDefTransient(virNetworkObjPtr network)
+ {
+-    if (network->def) {
++    if (network->newDef) {
+         virNetworkDefFree(network->def);
+         network->def = network->newDef;
+         network->newDef = NULL;
+-- 
+2.0.0
+

@@ -1,0 +1,118 @@
+From 4a74c223d5bb454d201e3e45b2d997d50d9926dd Mon Sep 17 00:00:00 2001
+Message-Id: <4a74c223d5bb454d201e3e45b2d997d50d9926dd@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Fri, 3 Apr 2015 18:50:10 +0200
+Subject: [PATCH] cgroup: Add accessors for cpuset.memory_migrate
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1198497
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit ba1dfc5b6a65914ec8ceadbcfbe16c17e83cc760)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+ Conflicts:
+	src/libvirt_private.syms -- cgroup -> vircgroup rename
+	src/util/vircgroup.c     --        ditto
+	src/util/vircgroup.h     --        ditto
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms |  2 ++
+ src/util/cgroup.c        | 38 ++++++++++++++++++++++++++++++++++++++
+ src/util/cgroup.h        |  3 +++
+ 3 files changed, 43 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 640bd99..927d155 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -98,6 +98,7 @@ virCgroupGetCpuacctPercpuUsage;
+ virCgroupGetCpuacctStat;
+ virCgroupGetCpuacctUsage;
+ virCgroupGetCpusetCpus;
++virCgroupGetCpusetMemoryMigrate;
+ virCgroupGetCpusetMems;
+ virCgroupGetFreezerState;
+ virCgroupGetMemSwapHardLimit;
+@@ -117,6 +118,7 @@ virCgroupSetCpuCfsPeriod;
+ virCgroupSetCpuCfsQuota;
+ virCgroupSetCpuShares;
+ virCgroupSetCpusetCpus;
++virCgroupSetCpusetMemoryMigrate;
+ virCgroupSetCpusetMems;
+ virCgroupSetFreezerState;
+ virCgroupSetMemSwapHardLimit;
+diff --git a/src/util/cgroup.c b/src/util/cgroup.c
+index 69e581f..e7775b3 100644
+--- a/src/util/cgroup.c
++++ b/src/util/cgroup.c
+@@ -464,6 +464,7 @@ static int virCgroupCpuSetInherit(virCgroupPtr parent, virCgroupPtr group)
+     const char *inherit_values[] = {
+         "cpuset.cpus",
+         "cpuset.mems",
++        "cpuset.memory_migrate",
+     };
+ 
+     VIR_DEBUG("Setting up inheritance %s -> %s", parent->path, group->path);
+@@ -1403,6 +1404,43 @@ int virCgroupGetCpusetMems(virCgroupPtr group, char **mems)
+ }
+ 
+ /**
++ * virCgroupSetCpusetMemoryMigrate:
++ *
++ * @group: The cgroup to set cpuset.memory_migrate for
++ * @migrate: Whether to migrate the memory on change or not
++ *
++ * Returns: 0 on success
++ */
++int
++virCgroupSetCpusetMemoryMigrate(virCgroupPtr group, bool migrate)
++{
++    return virCgroupSetValueStr(group,
++                                VIR_CGROUP_CONTROLLER_CPUSET,
++                                "cpuset.memory_migrate",
++                                migrate ? "1" : "0");
++}
++
++/**
++ * virCgroupGetCpusetMemoryMigrate:
++ *
++ * @group: The cgroup to get cpuset.memory_migrate for
++ * @migrate: Migration setting
++ *
++ * Returns: 0 on success
++ */
++int
++virCgroupGetCpusetMemoryMigrate(virCgroupPtr group, bool *migrate)
++{
++    unsigned long long value = 0;
++    int ret = virCgroupGetValueU64(group,
++                                   VIR_CGROUP_CONTROLLER_CPUSET,
++                                   "cpuset.memory_migrate",
++                                   &value);
++    *migrate = !!value;
++    return ret;
++}
++
++/**
+  * virCgroupSetCpusetCpus:
+  *
+  * @group: The cgroup to set cpuset.cpus for
+diff --git a/src/util/cgroup.h b/src/util/cgroup.h
+index 38fa4b7..d9c3abf 100644
+--- a/src/util/cgroup.h
++++ b/src/util/cgroup.h
+@@ -149,6 +149,9 @@ int virCgroupGetFreezerState(virCgroupPtr group, char **state);
+ int virCgroupSetCpusetMems(virCgroupPtr group, const char *mems);
+ int virCgroupGetCpusetMems(virCgroupPtr group, char **mems);
+ 
++int virCgroupSetCpusetMemoryMigrate(virCgroupPtr group, bool migrate);
++int virCgroupGetCpusetMemoryMigrate(virCgroupPtr group, bool *migrate);
++
+ int virCgroupSetCpusetCpus(virCgroupPtr group, const char *cpus);
+ int virCgroupGetCpusetCpus(virCgroupPtr group, char **cpus);
+ 
+-- 
+2.3.5
+

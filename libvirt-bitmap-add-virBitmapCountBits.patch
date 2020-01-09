@@ -1,0 +1,156 @@
+From b85c7f88ca7cd01f4cd41d3e4110b85be409b398 Mon Sep 17 00:00:00 2001
+Message-Id: <b85c7f88ca7cd01f4cd41d3e4110b85be409b398.1377097597.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 16 Aug 2013 15:34:10 +0200
+Subject: [PATCH] bitmap: add virBitmapCountBits
+
+https://bugzilla.redhat.com/show_bug.cgi?id=997367
+
+Sometimes it's handy to know how many bits are set.
+
+* src/util/bitmap.h (virBitmapCountBits): New prototype.
+(virBitmapNextSetBit): Use correct type.
+* src/util/bitmap.c (virBitmapNextSetBit): Likewise.
+(virBitmapSetAll): Maintain invariant of clear tail bits.
+(virBitmapCountBits): New function.
+* src/libvirt_private.syms (bitmap.h): Export it.
+* tests/virbitmaptest.c (test2): Test it.
+
+(cherry picked from commit 0711c4b74d1f0e83b06c5b15a50f99d780478566)
+---
+ src/libvirt_private.syms |  1 +
+ src/util/bitmap.c        | 27 ++++++++++++++++++++++++---
+ src/util/bitmap.h        |  6 +++++-
+ tests/virbitmaptest.c    |  7 +++++++
+ 4 files changed, 37 insertions(+), 4 deletions(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 497ba41..7d15e5a 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -9,6 +9,7 @@
+ virBitmapClearAll;
+ virBitmapClearBit;
+ virBitmapCopy;
++virBitmapCountBits;
+ virBitmapEqual;
+ virBitmapFormat;
+ virBitmapFree;
+diff --git a/src/util/bitmap.c b/src/util/bitmap.c
+index 01926b5..4a6b567 100644
+--- a/src/util/bitmap.c
++++ b/src/util/bitmap.c
+@@ -35,6 +35,7 @@
+ #include "buf.h"
+ #include "util.h"
+ #include "c-ctype.h"
++#include "count-one-bits.h"
+ 
+ 
+ struct _virBitmap {
+@@ -528,8 +529,15 @@ size_t virBitmapSize(virBitmapPtr bitmap)
+  */
+ void virBitmapSetAll(virBitmapPtr bitmap)
+ {
++    int tail = bitmap->max_bit % VIR_BITMAP_BITS_PER_UNIT;
++
+     memset(bitmap->map, 0xff,
+            bitmap->map_len * (VIR_BITMAP_BITS_PER_UNIT / CHAR_BIT));
++
++    /* Ensure tail bits are clear.  */
++    if (tail)
++        bitmap->map[bitmap->map_len - 1] &=
++            -1UL >> (VIR_BITMAP_BITS_PER_UNIT - tail);
+ }
+ 
+ /**
+@@ -586,10 +594,10 @@ bool virBitmapIsAllSet(virBitmapPtr bitmap)
+  *
+  * returns the position of the found bit, or -1 if no bit found.
+  */
+-int virBitmapNextSetBit(virBitmapPtr bitmap, int pos)
++ssize_t virBitmapNextSetBit(virBitmapPtr bitmap, ssize_t pos)
+ {
+-    int nl;
+-    int nb;
++    size_t nl;
++    size_t nb;
+     unsigned long bits;
+ 
+     if (pos < 0)
+@@ -614,3 +622,16 @@ int virBitmapNextSetBit(virBitmapPtr bitmap, int pos)
+ 
+     return ffsl(bits) - 1 + nl * VIR_BITMAP_BITS_PER_UNIT;
+ }
++
++/* Return the number of bits currently set in the map.  */
++size_t
++virBitmapCountBits(virBitmapPtr bitmap)
++{
++    size_t i;
++    size_t ret = 0;
++
++    for (i = 0; i < bitmap->map_len; i++)
++        ret += count_one_bits_l(bitmap->map[i]);
++
++    return ret;
++}
+diff --git a/src/util/bitmap.h b/src/util/bitmap.h
+index 7755a17..346a1fb 100644
+--- a/src/util/bitmap.h
++++ b/src/util/bitmap.h
+@@ -1,6 +1,7 @@
+ /*
+  * bitmap.h: Simple bitmap operations
+  *
++ * Copyright (C) 2012 Red Hat, Inc.
+  * Copyright (C) 2010 Novell, Inc.
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -99,7 +100,10 @@ void virBitmapClearAll(virBitmapPtr bitmap)
+ bool virBitmapIsAllSet(virBitmapPtr bitmap)
+     ATTRIBUTE_NONNULL(1);
+ 
+-int virBitmapNextSetBit(virBitmapPtr bitmap, int pos)
++ssize_t virBitmapNextSetBit(virBitmapPtr bitmap, ssize_t pos)
++    ATTRIBUTE_NONNULL(1);
++
++size_t virBitmapCountBits(virBitmapPtr bitmap)
+     ATTRIBUTE_NONNULL(1);
+ 
+ #endif
+diff --git a/tests/virbitmaptest.c b/tests/virbitmaptest.c
+index 37e2e17..af94dab 100644
+--- a/tests/virbitmaptest.c
++++ b/tests/virbitmaptest.c
+@@ -99,6 +99,9 @@ static int test2(const void *data ATTRIBUTE_UNUSED)
+     if (testBit(bitmap, 100, 1020, false) < 0)
+         goto error;
+ 
++    if (virBitmapCountBits(bitmap) != 48)
++        goto error;
++
+     bitsString2 = virBitmapFormat(bitmap);
+     if (strcmp(bitsString1, bitsString2))
+         goto error;
+@@ -106,6 +109,8 @@ static int test2(const void *data ATTRIBUTE_UNUSED)
+     virBitmapSetAll(bitmap);
+     if (testBit(bitmap, 0, size - 1, true) < 0)
+         goto error;
++    if (virBitmapCountBits(bitmap) != size)
++        goto error;
+ 
+     if (!virBitmapIsAllSet(bitmap))
+         goto error;
+@@ -113,6 +118,8 @@ static int test2(const void *data ATTRIBUTE_UNUSED)
+     virBitmapClearAll(bitmap);
+     if (testBit(bitmap, 0, size - 1, false) < 0)
+         goto error;
++    if (virBitmapCountBits(bitmap) != 0)
++        goto error;
+ 
+     ret = 0;
+ 
+-- 
+1.8.3.2
+

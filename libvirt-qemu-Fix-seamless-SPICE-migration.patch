@@ -1,0 +1,53 @@
+From 62fdca77cab6f46b0a2b4bd6f76cdb34e223f037 Mon Sep 17 00:00:00 2001
+Message-Id: <62fdca77cab6f46b0a2b4bd6f76cdb34e223f037.1380098599.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Fri, 20 Sep 2013 18:09:58 +0200
+Subject: [PATCH] qemu: Fix seamless SPICE migration
+
+Since the wait is done during migration (still inside
+QEMU_ASYNC_JOB_MIGRATION_OUT), the code should enter the monitor as such
+in order to prohibit all other jobs from interfering in the meantime.
+This patch fixes bug #1009886 in which qemuDomainGetBlockInfo was
+waiting on the monitor condition and after GetSpiceMigrationStatus
+mangled its internal data, the daemon crashed.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1009886
+(cherry picked from commit 484cc3217b73b865f00bf42a9c12187b37200699)
+
+Conflicts:
+	src/qemu/qemu_migration.c -- a9e97e0c
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_migration.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 19191cd..8fb5435 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1,7 +1,7 @@
+ /*
+  * qemu_migration.c: QEMU migration handling
+  *
+- * Copyright (C) 2006-2012 Red Hat, Inc.
++ * Copyright (C) 2006-2013 Red Hat, Inc.
+  *
+  * This library is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU Lesser General Public
+@@ -960,7 +960,10 @@ qemuMigrationWaitForSpice(struct qemud_driver *driver,
+         /* Poll every 50ms for progress & to allow cancellation */
+         struct timespec ts = { .tv_sec = 0, .tv_nsec = 50 * 1000 * 1000ull };
+ 
+-        qemuDomainObjEnterMonitorWithDriver(driver, vm);
++        if (qemuDomainObjEnterMonitorAsync(driver, vm,
++                                           QEMU_ASYNC_JOB_MIGRATION_OUT) < 0)
++            return -1;
++
+         if (qemuMonitorGetSpiceMigrationStatus(priv->mon,
+                                                &spice_migrated) < 0) {
+             qemuDomainObjExitMonitorWithDriver(driver, vm);
+-- 
+1.8.3.2
+

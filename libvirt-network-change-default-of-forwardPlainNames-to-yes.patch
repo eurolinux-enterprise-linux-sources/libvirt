@@ -1,0 +1,324 @@
+From e0f62749642b88be9a9b401802e7232b3cd557d6 Mon Sep 17 00:00:00 2001
+Message-Id: <e0f62749642b88be9a9b401802e7232b3cd557d6@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 10 Feb 2014 06:59:51 -0500
+Subject: [PATCH] network: change default of forwardPlainNames to 'yes'
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1062708 (RHEL6.5.z)
+https://bugzilla.redhat.com/show_bug.cgi?id=1037741 (RHEL6.6)
+https://bugzilla.redhat.com/show_bug.cgi?id=928638  (RHEL6.5)
+
+The previous patch fixed "forwardPlainNames" so that it really is
+doing only what is intended, but left the default to be
+"forwardPlainNames='no'". Discussion around the initial version of
+that patch led to the decision that the default should instead be
+"forwardPlainNames='yes'" (i.e. the original behavior before commit
+f3886825). This patch makes that change to the default.
+
+cherry-picked from upstream commit
+66f75925ebc4c37a9fa7cde3de5a6188cc64ef16, but required considerable
+modification due to:
+
+1) bridge driver adding line items to a conf file upstream, but
+   commandline args in RHEL6.x
+
+2) dns object is contained in the network object upstream, but is
+   *pointed to* by the network object in RHEL6.x
+
+3) a few other dns options were added upstream but not backported to
+   RHEL6.x (e.g. <forwarder>)
+
+4) several new tests were added upstream,
+
+Conflicts:
+  src/conf/network_conf.c
+  src/conf/network_conf.h
+  src/network/bridge_driver.c
+   - see reasons 1, 2, 3 above
+
+  tests/networkxml2xmlout/nat-network-dns-hosts.xml
+   - minor change in whitespace of <domain> element
+
+  tests/networkxml2argvdata/isolated-network.argv - added
+  tests/networkxml2confdata/isolated-network.conf - removed
+  tests/networkxml2argvdata/nat-network-dns-srv-record-minimal.argv - added
+  tests/networkxml2confdata/nat-network-dns-srv-record-minimal.conf - removed
+   - upstream uses .conf files, not .argv files
+
+  tests/networkxml2confdata/dhcp6-nat-network.conf
+  tests/networkxml2confdata/dhcp6-network.conf
+  tests/networkxml2confdata/dhcp6host-routed-network.conf
+  tests/networkxml2confdata/nat-network-dns-forwarders.conf
+  tests/networkxml2confdata/nat-network-dns-srv-record.conf
+  tests/networkxml2confdata/nat-network-dns-txt-record.conf
+  tests/networkxml2confdata/nat-network.conf
+  tests/networkxml2confdata/netboot-network.conf
+  tests/networkxml2confdata/netboot-proxy-network.conf
+  tests/networkxml2confdata/routed-network.conf
+  tests/networkxml2xmlupdateout/nat-network-dns-more-hosts.xml
+  tests/networkxml2xmlupdateout/nat-network-no-hosts.xml
+   - these files are for tests that exist only upstream
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/network_conf.c                            | 37 +++++++++++++++-------
+ src/conf/network_conf.h                            | 17 ++++++++--
+ src/network/bridge_driver.c                        | 11 +++++--
+ tests/networkxml2argvdata/isolated-network.argv    |  2 +-
+ .../nat-network-dns-srv-record-minimal.argv        |  2 +-
+ .../nat-network-dns-srv-record.argv                |  2 +-
+ .../nat-network-dns-txt-record.argv                |  2 +-
+ tests/networkxml2argvdata/nat-network.argv         |  2 +-
+ tests/networkxml2argvdata/netboot-network.argv     |  2 +-
+ .../networkxml2argvdata/netboot-proxy-network.argv |  2 +-
+ tests/networkxml2argvdata/routed-network.argv      |  2 +-
+ tests/networkxml2xmlout/nat-network-dns-hosts.xml  |  2 +-
+ 12 files changed, 57 insertions(+), 26 deletions(-)
+
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index 46ff7ef..a3e7279 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -1,7 +1,7 @@
+ /*
+  * network_conf.c: network XML handling
+  *
+- * Copyright (C) 2006-2012 Red Hat, Inc.
++ * Copyright (C) 2006-2014 Red Hat, Inc.
+  * Copyright (C) 2006-2008 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -57,6 +57,12 @@ VIR_ENUM_IMPL(virNetworkForwardHostdevDevice,
+               VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_LAST,
+               "none", "pci", "netdev")
+ 
++VIR_ENUM_IMPL(virNetworkDNSForwardPlainNames,
++              VIR_NETWORK_DNS_FORWARD_PLAIN_NAMES_LAST,
++              "default",
++              "yes",
++              "no")
++
+ virNetworkObjPtr virNetworkFindByUUID(const virNetworkObjListPtr nets,
+                                       const unsigned char *uuid)
+ {
+@@ -957,9 +963,9 @@ virNetworkDNSDefParseXML(const char *networkName,
+ 
+     forwardPlainNames = virXPathString("string(./@forwardPlainNames)", ctxt);
+     if (forwardPlainNames) {
+-        if (STREQ(forwardPlainNames, "yes")) {
+-            def->forwardPlainNames = true;
+-        } else if (STRNEQ(forwardPlainNames, "no")) {
++        def->forwardPlainNames
++            = virNetworkDNSForwardPlainNamesTypeFromString(forwardPlainNames);
++        if (def->forwardPlainNames <= 0) {
+             virReportError(VIR_ERR_XML_ERROR,
+                            _("Invalid dns forwardPlainNames setting '%s' "
+                              "in network '%s'"),
+@@ -1809,18 +1815,26 @@ static int
+ virNetworkDNSDefFormat(virBufferPtr buf,
+                        virNetworkDNSDefPtr def)
+ {
+-    int result = 0;
+-    int i;
++    size_t i;
+ 
+-    if (def == NULL)
+-        goto out;
++    if (!def || !(def->forwardPlainNames ||
++                  def->nhosts || def->nsrvrecords || def->ntxtrecords))
++        return 0;
+ 
+     virBufferAddLit(buf, "<dns");
+     if (def->forwardPlainNames) {
+-        virBufferAddLit(buf, " forwardPlainNames='yes'");
++        const char *fwd = virNetworkDNSForwardPlainNamesTypeToString(def->forwardPlainNames);
++
++        if (!fwd) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("Unknown forwardPlainNames type %d in network"),
++                           def->forwardPlainNames);
++            return -1;
++        }
++        virBufferAsprintf(buf, " forwardPlainNames='%s'", fwd);
+         if (!(def->nhosts || def->nsrvrecords || def->ntxtrecords)) {
+             virBufferAddLit(buf, "/>\n");
+-            goto out;
++            return 0;
+         }
+     }
+ 
+@@ -1873,8 +1887,7 @@ virNetworkDNSDefFormat(virBufferPtr buf,
+     }
+     virBufferAdjustIndent(buf, -2);
+     virBufferAddLit(buf, "</dns>\n");
+-out:
+-    return result;
++    return 0;
+ }
+ 
+ static int
+diff --git a/src/conf/network_conf.h b/src/conf/network_conf.h
+index 68bd008..fbac6d6 100644
+--- a/src/conf/network_conf.h
++++ b/src/conf/network_conf.h
+@@ -1,7 +1,7 @@
+ /*
+  * network_conf.h: network XML handling
+  *
+- * Copyright (C) 2006-2008, 2012 Red Hat, Inc.
++ * Copyright (C) 2006-2014 Red Hat, Inc.
+  * Copyright (C) 2006-2008 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -101,10 +101,23 @@ struct _virNetworkDNSHostsDef {
+     char **names;
+ };
+ 
++/* If forwardPlainNames is 0 (default), that is equivalent to "yes",
++ * but won't be encoded in newly formatted XML.
++ */
++typedef enum {
++    VIR_NETWORK_DNS_FORWARD_PLAIN_NAMES_DEFAULT = 0, /* silent "yes" */
++    VIR_NETWORK_DNS_FORWARD_PLAIN_NAMES_YES,
++    VIR_NETWORK_DNS_FORWARD_PLAIN_NAMES_NO,
++
++    VIR_NETWORK_DNS_FORWARD_PLAIN_NAMES_LAST,
++} virNetworkDNSForwardPlainNamesType;
++
++VIR_ENUM_DECL(virNetworkDNSForwardPlainNames)
++
+ typedef struct _virNetworkDNSHostsDef *virNetworkDNSHostsDefPtr;
+ 
+ struct _virNetworkDNSDef {
+-    bool forwardPlainNames;
++    int forwardPlainNames; /* enum virNetworkDNSForwardPlainNamesType */
+     unsigned int ntxtrecords;
+     virNetworkDNSTxtRecordsDefPtr txtrecords;
+     unsigned int nhosts;
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 0c493ad..e915aa7 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -607,9 +607,14 @@ networkBuildDnsmasqArgv(virNetworkObjPtr network,
+ 
+     if (network->def->domain)
+         virCommandAddArgPair(cmd, "--domain", network->def->domain);
+-    /* need to specify local even if no domain specified */
+-    if (!(network->def->dns && network->def->dns->forwardPlainNames))
+-       virCommandAddArgList(cmd, "--local=//", "--domain-needed", NULL);
++    if (network->def->dns && network->def->dns->forwardPlainNames
++        == VIR_NETWORK_DNS_FORWARD_PLAIN_NAMES_NO) {
++        /* need to specify local=// whether or not a domain is
++         * specified, unless the config says we should forward "plain"
++         * names (i.e. not fully qualified, no '.' characters)
++         */
++        virCommandAddArgList(cmd, "--local=//", "--domain-needed", NULL);
++    }
+ 
+     if (pidfile)
+         virCommandAddArgPair(cmd, "--pid-file", pidfile);
+diff --git a/tests/networkxml2argvdata/isolated-network.argv b/tests/networkxml2argvdata/isolated-network.argv
+index 861fd74..292327a 100644
+--- a/tests/networkxml2argvdata/isolated-network.argv
++++ b/tests/networkxml2argvdata/isolated-network.argv
+@@ -1,5 +1,5 @@
+ @DNSMASQ@ --strict-order \
+---local=// --domain-needed --conf-file= \
++--conf-file= \
+ --except-interface lo --bind-interfaces \
+ --listen-address 192.168.152.1 \
+ --dhcp-option=3 --no-resolv \
+diff --git a/tests/networkxml2argvdata/nat-network-dns-srv-record-minimal.argv b/tests/networkxml2argvdata/nat-network-dns-srv-record-minimal.argv
+index 24d88ad..a4075b0 100644
+--- a/tests/networkxml2argvdata/nat-network-dns-srv-record-minimal.argv
++++ b/tests/networkxml2argvdata/nat-network-dns-srv-record-minimal.argv
+@@ -1,6 +1,6 @@
+ @DNSMASQ@ \
+ --strict-order \
+---local=// --domain-needed --conf-file= \
++--conf-file= \
+ --except-interface lo --bind-interfaces \
+ --listen-address 192.168.122.1 \
+ --listen-address 192.168.123.1 \
+diff --git a/tests/networkxml2argvdata/nat-network-dns-srv-record.argv b/tests/networkxml2argvdata/nat-network-dns-srv-record.argv
+index f417af8..4cca757 100644
+--- a/tests/networkxml2argvdata/nat-network-dns-srv-record.argv
++++ b/tests/networkxml2argvdata/nat-network-dns-srv-record.argv
+@@ -1,6 +1,6 @@
+ @DNSMASQ@ \
+ --strict-order \
+---local=// --domain-needed --conf-file= \
++--conf-file= \
+ --except-interface lo --bind-dynamic --interface virbr0 \
+ --srv-host=name.tcp.test-domain-name,.,1024,10,10 \
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+diff --git a/tests/networkxml2argvdata/nat-network-dns-txt-record.argv b/tests/networkxml2argvdata/nat-network-dns-txt-record.argv
+index 86b7ba3..0500fc0 100644
+--- a/tests/networkxml2argvdata/nat-network-dns-txt-record.argv
++++ b/tests/networkxml2argvdata/nat-network-dns-txt-record.argv
+@@ -1,5 +1,5 @@
+ @DNSMASQ@ --strict-order \
+---local=// --domain-needed --conf-file= \
++--conf-file= \
+ --except-interface lo --bind-dynamic --interface virbr0 \
+ '--txt-record=example,example value' \
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+diff --git a/tests/networkxml2argvdata/nat-network.argv b/tests/networkxml2argvdata/nat-network.argv
+index 8a540d5..4cfbfa6 100644
+--- a/tests/networkxml2argvdata/nat-network.argv
++++ b/tests/networkxml2argvdata/nat-network.argv
+@@ -1,5 +1,5 @@
+ @DNSMASQ@ --strict-order \
+---local=// --domain-needed --conf-file= \
++--conf-file= \
+ --except-interface lo --bind-dynamic --interface virbr0 \
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+ --dhcp-leasefile=/var/lib/libvirt/dnsmasq/default.leases \
+diff --git a/tests/networkxml2argvdata/netboot-network.argv b/tests/networkxml2argvdata/netboot-network.argv
+index 0b3d441..e6890dc 100644
+--- a/tests/networkxml2argvdata/netboot-network.argv
++++ b/tests/networkxml2argvdata/netboot-network.argv
+@@ -1,5 +1,5 @@
+ @DNSMASQ@ --strict-order --domain=example.com \
+---local=// --domain-needed --conf-file= \
++--conf-file= \
+ --except-interface lo --bind-interfaces --listen-address 192.168.122.1 \
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+ --dhcp-leasefile=/var/lib/libvirt/dnsmasq/netboot.leases \
+diff --git a/tests/networkxml2argvdata/netboot-proxy-network.argv b/tests/networkxml2argvdata/netboot-proxy-network.argv
+index 5916955..e8ad586 100644
+--- a/tests/networkxml2argvdata/netboot-proxy-network.argv
++++ b/tests/networkxml2argvdata/netboot-proxy-network.argv
+@@ -1,5 +1,5 @@
+ @DNSMASQ@ --strict-order --domain=example.com \
+---local=// --domain-needed --conf-file= \
++--conf-file= \
+ --except-interface lo --bind-interfaces \
+ --listen-address 192.168.122.1 \
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+diff --git a/tests/networkxml2argvdata/routed-network.argv b/tests/networkxml2argvdata/routed-network.argv
+index 3221f65..d970ea2 100644
+--- a/tests/networkxml2argvdata/routed-network.argv
++++ b/tests/networkxml2argvdata/routed-network.argv
+@@ -1,4 +1,4 @@
+ @DNSMASQ@ --strict-order \
+---local=// --domain-needed --conf-file= \
++--conf-file= \
+ --except-interface lo --bind-dynamic --interface virbr1 \
+ --addn-hosts=/var/lib/libvirt/dnsmasq/local.addnhosts\
+diff --git a/tests/networkxml2xmlout/nat-network-dns-hosts.xml b/tests/networkxml2xmlout/nat-network-dns-hosts.xml
+index b26fa03..b4d1e64 100644
+--- a/tests/networkxml2xmlout/nat-network-dns-hosts.xml
++++ b/tests/networkxml2xmlout/nat-network-dns-hosts.xml
+@@ -5,7 +5,7 @@
+     <interface dev='eth0'/>
+   </forward>
+   <bridge name='virbr0' stp='on' delay='0' />
+-  <dns>
++  <dns forwardPlainNames='no'>
+     <host ip='192.168.122.1'>
+       <hostname>host</hostname>
+       <hostname>gateway</hostname>
+-- 
+1.9.1
+

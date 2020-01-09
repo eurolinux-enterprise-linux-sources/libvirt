@@ -1,0 +1,30 @@
+From e5e271441715c9a39f827a45b7b12a4fb8edbadb Mon Sep 17 00:00:00 2001
+Message-Id: <e5e271441715c9a39f827a45b7b12a4fb8edbadb.1374158623.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 15 Jul 2013 22:25:39 +0200
+Subject: [PATCH] qemu: Check for -realtime mlock=on|off support
+
+https://bugzilla.redhat.com/show_bug.cgi?id=947118
+
+RHEL-6 only, upstream uses QMP probing for this.
+---
+ src/qemu/qemu_capabilities.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 345198d..f77e481 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1054,6 +1054,9 @@ qemuCapsComputeCmdFlags(const char *help,
+     if (strstr(help, "dump-guest-core=on|off"))
+         qemuCapsSet(caps, QEMU_CAPS_DUMP_GUEST_CORE);
+ 
++    if (strstr(help, "mlock=on|off"))
++        qemuCapsSet(caps, QEMU_CAPS_MLOCK);
++
+     /*
+      * Handling of -incoming arg with varying features
+      *  -incoming tcp    (kvm >= 79, qemu >= 0.10.0)
+-- 
+1.8.3.2
+

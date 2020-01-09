@@ -1,0 +1,41 @@
+From 2aa2a15501909b1916bde2b13378f170499bdb91 Mon Sep 17 00:00:00 2001
+Message-Id: <2aa2a15501909b1916bde2b13378f170499bdb91@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 7 Mar 2016 15:29:53 +0100
+Subject: [PATCH] qemu: Always format model for host-model CPUs
+
+Restoring a domain with a host-model CPU crashes after
+qemuDomainSaveImageGetXMLDesc followed by qemuDomainSaveImageDefineXML.
+This is caused by a bug in CPU formating code which does not format CPU
+model for host-model mode unless UPDATE_CPU flag is used. The bug has
+always been there, but libvirtd didn't crash until recently because the
+operation failed on ABI check (which was wrong, but at least it didn't
+crash).
+
+This patch is a small portion of an unrelated upstream commit
+
+addce06c PowerPC : Add support for launching VM in 'compat' mode.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1307094
+https://bugzilla.redhat.com/show_bug.cgi?id=1310747
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/cpu_conf.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/conf/cpu_conf.c b/src/conf/cpu_conf.c
+index 8cb54a3..3e675b7 100644
+--- a/src/conf/cpu_conf.c
++++ b/src/conf/cpu_conf.c
+@@ -585,6 +585,7 @@ virCPUDefFormatBuf(virBufferPtr buf,
+         return 0;
+ 
+     formatModel = (def->mode == VIR_CPU_MODE_CUSTOM ||
++                   def->mode == VIR_CPU_MODE_HOST_MODEL ||
+                    (flags & VIR_DOMAIN_XML_UPDATE_CPU));
+     formatFallback = (def->type == VIR_CPU_TYPE_GUEST &&
+                       (def->mode == VIR_CPU_MODE_HOST_MODEL ||
+-- 
+2.7.2
+

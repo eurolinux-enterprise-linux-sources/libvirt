@@ -1,0 +1,74 @@
+From 16c41ca3543f7da12373e79264667f57f4af396b Mon Sep 17 00:00:00 2001
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 15 Aug 2011 10:50:25 -0600
+Subject: [PATCH] Support seamless migration of SPICE graphics clients
+To: libvir-list@redhat.com
+
+https://bugzilla.redhat.com/show_bug.cgi?id=730753
+
+RHEL-6 only remain of the patch which is now upstream since 0.9.2
+(https://bugzilla.redhat.com/show_bug.cgi?id=589989)
+We just need to add the exception for __com.redhat_spice_migrate_info
+monitor command which is RHEL-6 only
+
+Signed-off-by: Daniel Veillard <veillard@redhat.com>
+---
+ src/qemu/qemu_monitor_json.c | 39 +++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 67bc2c1..694ee04 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -2618,11 +2618,46 @@ int qemuMonitorJSONGraphicsRelocate(qemuMonitorPtr mon,
+     if (!cmd)
+         return -1;
+ 
+-    ret = qemuMonitorJSONCommand(mon, cmd, &reply);
++    if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply)) < 0)
++        goto cleanup;
+ 
+-    if (ret == 0)
++    if (qemuMonitorJSONHasError(reply, "CommandNotFound")) {
++        virJSONValueFree(cmd);
++        virJSONValueFree(reply);
++        VIR_DEBUG("client_migrate_info command not found,"
++                  " trying RHEL-specific way");
++    } else {
+         ret = qemuMonitorJSONCheckError(cmd, reply);
++        goto cleanup;
++    }
++
++    /*
++     * Try the RHEL specific way if the upstream command is not found
++     * but it's limited to spice graphics
++     */
++    if (type != VIR_DOMAIN_GRAPHICS_TYPE_SPICE) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                        _("only spice graphics support client relocation"));
++        return -1;
++    }
++
++    reply = NULL;
++    cmd = qemuMonitorJSONMakeCommand("__com.redhat_spice_migrate_info",
++                                     "s:hostname", hostname,
++                                     "i:port", port,
++                                     "i:tls-port", tlsPort,
++                                     (tlsSubject ? "s:cert-subject" : NULL),
++                                     (tlsSubject ? tlsSubject : NULL),
++                                     NULL);
++    if (!cmd)
++        return -1;
+ 
++    if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply)) < 0)
++        goto cleanup;
++
++    ret = qemuMonitorJSONCheckError(cmd, reply);
++
++cleanup:
+     virJSONValueFree(cmd);
+     virJSONValueFree(reply);
+     return ret;
+-- 
+1.7.11.4
+

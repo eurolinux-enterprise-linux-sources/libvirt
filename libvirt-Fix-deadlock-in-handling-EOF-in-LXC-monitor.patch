@@ -1,0 +1,180 @@
+From a504a22b3aafc1fdbe8d7a47a09182bfd379f72a Mon Sep 17 00:00:00 2001
+Message-Id: <a504a22b3aafc1fdbe8d7a47a09182bfd379f72a.1350297261.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 10 Oct 2012 15:38:49 +0100
+Subject: [PATCH] Fix deadlock in handling EOF in LXC monitor
+
+https://bugzilla.redhat.com/show_bug.cgi?id=864336
+
+Depending on the scenario in which LXC containers exit, it is
+possible for the EOF callback of the LXC monitor to deadlock
+the driver.
+
+  #0  0x00000038a0a0de4d in __lll_lock_wait () from /lib64/libpthread.so.0
+  #1  0x00000038a0a09ca6 in _L_lock_840 () from /lib64/libpthread.so.0
+  #2  0x00000038a0a09ba8 in pthread_mutex_lock () from /lib64/libpthread.so.0
+  #3  0x00007f4bd9579d55 in virMutexLock (m=<optimized out>) at util/threads-pthread.c:85
+  #4  0x00007f4bcacc7597 in lxcDriverLock (driver=0x7f4bc40c8290) at lxc/lxc_conf.h:81
+  #5  virLXCProcessMonitorEOFNotify (mon=<optimized out>, vm=0x7f4bb4000b00) at lxc/lxc_process.c:581
+  #6  0x00007f4bd9645c91 in virNetClientCloseLocked (client=client@entry=0x7f4bb4009e60)
+      at rpc/virnetclient.c:554
+  #7  0x00007f4bd96460f8 in virNetClientIOEventLoopPassTheBuck (thiscall=0x0, client=0x7f4bb4009e60)
+      at rpc/virnetclient.c:1306
+  #8  virNetClientIOEventLoopPassTheBuck (client=0x7f4bb4009e60, thiscall=0x0)
+      at rpc/virnetclient.c:1287
+  #9  0x00007f4bd96467a2 in virNetClientCloseInternal (reason=3, client=0x7f4bb4009e60)
+      at rpc/virnetclient.c:589
+  #10 virNetClientCloseInternal (client=0x7f4bb4009e60, reason=3) at rpc/virnetclient.c:561
+  #11 0x00007f4bcacc4a82 in virLXCMonitorClose (mon=0x7f4bb4000a00) at lxc/lxc_monitor.c:201
+  #12 0x00007f4bcacc55ac in virLXCProcessCleanup (reason=<optimized out>, vm=0x7f4bb4000b00,
+      driver=0x7f4bc40c8290) at lxc/lxc_process.c:240
+  #13 virLXCProcessStop (driver=0x7f4bc40c8290, vm=vm@entry=0x7f4bb4000b00,
+      reason=reason@entry=VIR_DOMAIN_SHUTOFF_DESTROYED) at lxc/lxc_process.c:735
+  #14 0x00007f4bcacc5bd2 in virLXCProcessAutoDestroyDom (payload=<optimized out>,
+      name=0x7f4bb4003c80, opaque=0x7fff41af2df0) at lxc/lxc_process.c:94
+  #15 0x00007f4bd9586649 in virHashForEach (table=0x7f4bc409b270,
+      iter=iter@entry=0x7f4bcacc5ab0 <virLXCProcessAutoDestroyDom>, data=data@entry=0x7fff41af2df0)
+      at util/virhash.c:514
+  #16 0x00007f4bcacc52d7 in virLXCProcessAutoDestroyRun (driver=driver@entry=0x7f4bc40c8290,
+      conn=conn@entry=0x7f4bb8000ab0) at lxc/lxc_process.c:120
+  #17 0x00007f4bcacca628 in lxcClose (conn=0x7f4bb8000ab0) at lxc/lxc_driver.c:128
+  #18 0x00007f4bd95e67ab in virReleaseConnect (conn=conn@entry=0x7f4bb8000ab0) at datatypes.c:114
+
+When the driver calls virLXCMonitorClose, there is really no
+need for the EOF callback to be invoked in this case, since
+the caller can easily handle events itself. In changing this,
+the monitor needs to take a deep copy of the callback list,
+not merely a reference.
+
+Also adds debug statements in various places to aid
+troubleshooting
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 36c1fc189d0a04b3ea916dd3533dfa6f5bc3b8ba)
+---
+ src/lxc/lxc_monitor.c | 32 ++++++++++++++++++++++----------
+ src/lxc/lxc_process.c |  6 +++++-
+ 2 files changed, 27 insertions(+), 11 deletions(-)
+
+diff --git a/src/lxc/lxc_monitor.c b/src/lxc/lxc_monitor.c
+index 772c613..3e00751 100644
+--- a/src/lxc/lxc_monitor.c
++++ b/src/lxc/lxc_monitor.c
+@@ -40,7 +40,7 @@ struct _virLXCMonitor {
+     virMutex lock;
+ 
+     virDomainObjPtr vm;
+-    virLXCMonitorCallbacksPtr cb;
++    virLXCMonitorCallbacks cb;
+ 
+     virNetClientPtr client;
+     virNetClientProgramPtr program;
+@@ -83,8 +83,8 @@ virLXCMonitorHandleEventExit(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
+     virLXCProtocolExitEventMsg *msg = evdata;
+ 
+     VIR_DEBUG("Event exit %d", msg->status);
+-    if (mon->cb->exitNotify)
+-        mon->cb->exitNotify(mon, msg->status, mon->vm);
++    if (mon->cb.exitNotify)
++        mon->cb.exitNotify(mon, msg->status, mon->vm);
+ }
+ 
+ 
+@@ -96,20 +96,25 @@ static void virLXCMonitorEOFNotify(virNetClientPtr client ATTRIBUTE_UNUSED,
+     virLXCMonitorCallbackEOFNotify eofNotify;
+     virDomainObjPtr vm;
+ 
+-    VIR_DEBUG("EOF notify");
++    VIR_DEBUG("EOF notify mon=%p", mon);
+     virLXCMonitorLock(mon);
+-    eofNotify = mon->cb->eofNotify;
++    eofNotify = mon->cb.eofNotify;
+     vm = mon->vm;
+     virLXCMonitorUnlock(mon);
+ 
+-    eofNotify(mon, vm);
++    if (eofNotify) {
++        VIR_DEBUG("EOF callback mon=%p vm=%p", mon, vm);
++        eofNotify(mon, vm);
++    } else {
++        VIR_DEBUG("No EOF callback");
++    }
+ }
+ 
+ 
+ static void virLXCMonitorCloseFreeCallback(void *opaque)
+ {
+     virLXCMonitorPtr mon = opaque;
+-    virObjectUnref(mon);;
++    virObjectUnref(mon);
+ }
+ 
+ 
+@@ -155,7 +160,7 @@ virLXCMonitorPtr virLXCMonitorNew(virDomainObjPtr vm,
+         goto error;
+ 
+     mon->vm = vm;
+-    mon->cb = cb;
++    memcpy(&mon->cb, cb, sizeof(mon->cb));
+ 
+     virObjectRef(mon);
+     virNetClientSetCloseCallback(mon->client, virLXCMonitorEOFNotify, mon,
+@@ -179,8 +184,8 @@ static void virLXCMonitorDispose(void *opaque)
+     virLXCMonitorPtr mon = opaque;
+ 
+     VIR_DEBUG("mon=%p", mon);
+-    if (mon->cb && mon->cb->destroy)
+-        (mon->cb->destroy)(mon, mon->vm);
++    if (mon->cb.destroy)
++        (mon->cb.destroy)(mon, mon->vm);
+     virMutexDestroy(&mon->lock);
+     virObjectUnref(mon->program);
+ }
+@@ -188,7 +193,14 @@ static void virLXCMonitorDispose(void *opaque)
+ 
+ void virLXCMonitorClose(virLXCMonitorPtr mon)
+ {
++    VIR_DEBUG("mon=%p", mon);
+     if (mon->client) {
++        /* When manually closing the monitor, we don't
++         * want to have callbacks back into us, since
++         * the caller is not re-entrant safe
++         */
++        VIR_DEBUG("Clear EOF callback mon=%p", mon);
++        mon->cb.eofNotify = NULL;
+         virNetClientClose(mon->client);
+         virObjectUnref(mon->client);
+         mon->client = NULL;
+diff --git a/src/lxc/lxc_process.c b/src/lxc/lxc_process.c
+index b9cff85..079bc3a 100644
+--- a/src/lxc/lxc_process.c
++++ b/src/lxc/lxc_process.c
+@@ -169,6 +169,8 @@ virLXCProcessReboot(virLXCDriverPtr driver,
+     int ret = -1;
+     virDomainDefPtr savedDef;
+ 
++    VIR_DEBUG("Faking reboot");
++
+     if (conn) {
+         virConnectRef(conn);
+         autodestroy = true;
+@@ -555,13 +557,15 @@ cleanup:
+ 
+ 
+ extern virLXCDriverPtr lxc_driver;
+-static void virLXCProcessMonitorEOFNotify(virLXCMonitorPtr mon ATTRIBUTE_UNUSED,
++static void virLXCProcessMonitorEOFNotify(virLXCMonitorPtr mon,
+                                           virDomainObjPtr vm)
+ {
+     virLXCDriverPtr driver = lxc_driver;
+     virDomainEventPtr event = NULL;
+     virLXCDomainObjPrivatePtr priv;
+ 
++    VIR_DEBUG("mon=%p vm=%p", mon, vm);
++
+     lxcDriverLock(driver);
+     virDomainObjLock(vm);
+     lxcDriverUnlock(driver);
+-- 
+1.7.12.3
+

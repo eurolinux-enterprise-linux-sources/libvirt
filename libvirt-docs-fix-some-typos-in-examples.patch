@@ -1,0 +1,48 @@
+From e5146b38c606f7db9eed81a52197f92430201104 Mon Sep 17 00:00:00 2001
+Message-Id: <e5146b38c606f7db9eed81a52197f92430201104.1355928878.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 14 Dec 2012 09:12:40 -0700
+Subject: [PATCH] docs: fix some typos in examples
+
+As detected in https://bugzilla.redhat.com/show_bug.cgi?id=887187
+
+* docs/formatdomain.html.in: Fix XML typos.
+(cherry picked from commit 9821f8f6cfc49cb7ebcf707f2e40894d8f6c80af)
+---
+ docs/formatdomain.html.in | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index c566c13..8f43f87 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -1057,7 +1057,7 @@
+     &lt;hap/&gt;
+     &lt;privnet/&gt;
+     &lt;hyperv&gt;
+-      &lt;relaxed state='on'&gt;
++      &lt;relaxed state='on'/&gt;
+     &lt;/hyperv&gt;
+ 
+   &lt;/features&gt;
+@@ -2560,7 +2560,7 @@
+     &lt;/interface&gt;
+     &lt;interface type='bridge'&gt;
+       &lt;source bridge='ovsbr'/&gt;
+-      &lt;virtualport type='openvswitch'/&gt;
++      &lt;virtualport type='openvswitch'&gt;
+         &lt;parameters profileid='menial' interfaceid='09b11c53-8b5c-4eeb-8f00-d84eaa0aaa4f'/&gt;
+       &lt;/virtualport&gt;
+     &lt;/interface&gt;
+@@ -3832,7 +3832,7 @@ qemu-kvm -net nic,model=? /dev/null
+     &lt;serial type="dev"&gt;
+       &lt;source path="/dev/ttyS0"/&gt;
+       &lt;target port="1"/&gt;
+-  &lt;/serial&gt;
++    &lt;/serial&gt;
+   &lt;/devices&gt;
+   ...</pre>
+ 
+-- 
+1.8.0.2
+

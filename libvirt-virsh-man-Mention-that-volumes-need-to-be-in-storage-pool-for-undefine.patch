@@ -1,0 +1,37 @@
+From ebb8ac3121b4dbf3b685285a58a0689fe7550ecf Mon Sep 17 00:00:00 2001
+Message-Id: <ebb8ac3121b4dbf3b685285a58a0689fe7550ecf@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:58 +0200
+Subject: [PATCH] virsh: man: Mention that volumes need to be in storage pool
+ for undefine
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1044790
+
+When undefining a VM with storage the man page doesn't explicitly
+mention that the volumes need to be a part of the storage pool otherwise
+it won't work.
+
+(cherry picked from commit 878b8fa4298a4eefefded1d65a3bac5081b52444)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh.pod | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 6ed2509..198c223 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -1647,7 +1647,8 @@ on inactive domains. Volume deletion is only attempted after the domain is
+ undefined; if not all of the requested volumes could be deleted, the
+ error message indicates what still remains behind. If a volume path is not
+ found in the domain definition, it's treated as if the volume was successfully
+-deleted.
++deleted. Only volumes managed by libvirt in storage pools can be removed this
++way.
+ (See B<domblklist> for list of target names associated to a domain).
+ Example: --storage vda,/path/to/storage.img
+ 
+-- 
+1.9.2
+

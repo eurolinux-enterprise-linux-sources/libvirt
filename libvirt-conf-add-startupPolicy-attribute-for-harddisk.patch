@@ -1,0 +1,152 @@
+From 6658460fe49b16042a1af6ba75509e875a7a0a24 Mon Sep 17 00:00:00 2001
+Message-Id: <6658460fe49b16042a1af6ba75509e875a7a0a24@dist-git>
+From: Guannan Ren <gren@redhat.com>
+Date: Fri, 11 Apr 2014 16:34:02 +0200
+Subject: [PATCH] conf: add startupPolicy attribute for harddisk
+
+Add startupPolicy attribute for harddisk with type "file",
+"block" and "dir". 'requisite' is not supported currently for
+harddisk.
+
+(cherry picked from commit 93319da42cd1a23245577dda244998f1ff725703)
+
+(https://bugzilla.redhat.com/show_bug.cgi?id=1014730)
+
+Conflicts:
+	docs/formatdomain.html.in
+	src/conf/domain_conf.c
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in     |  9 ++++++---
+ docs/schemas/domaincommon.rng |  6 ++++++
+ src/conf/domain_conf.c        | 30 +++++++++++++++++++++++-------
+ 3 files changed, 35 insertions(+), 10 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 2cd5a1a..6023d32 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -1466,8 +1466,8 @@
+         For a "file" disk type which represents a cdrom or floppy
+         (the <code>device</code> attribute), it is possible to define
+         policy what to do with the disk if the source file is not accessible.
+-        This is done by the <code>startupPolicy</code> attribute, accepting
+-        these values:
++        This is done by the <code>startupPolicy</code> attribute
++        (<span class="since">Since 0.9.7</span>), accepting these values:
+         <table class="top_table">
+           <tr>
+             <td> mandatory </td>
+@@ -1483,7 +1483,10 @@
+             <td> drop if missing at any start attempt </td>
+           </tr>
+         </table>
+-        <span class="since">Since 0.9.7</span>
++        <span class="since">Since 1.1.2</span> the <code>startupPolicy</code> is extended
++        to support hard disks besides cdrom and floppy. On guest cold bootup, if a certain disk
++        is not accessible or its disk chain is broken, with startupPolicy 'optional' the guest
++        will drop this disk. This feature doesn't support migration currently.
+         </dd>
+       <dt><code>mirror</code></dt>
+       <dd>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index f19449e..44db05b 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -1041,6 +1041,9 @@
+                   <ref name="absFilePath"/>
+                 </attribute>
+                 <optional>
++                  <ref name="startupPolicy"/>
++                </optional>
++                <optional>
+                   <ref name='devSeclabel'/>
+                 </optional>
+               </element>
+@@ -1058,6 +1061,9 @@
+                 <attribute name="dir">
+                   <ref name="absFilePath"/>
+                 </attribute>
++                <optional>
++                  <ref name="startupPolicy"/>
++                </optional>
+                 <empty/>
+               </element>
+             </optional>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 3774b74..dda140b 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -3724,7 +3724,6 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+                 switch (def->type) {
+                 case VIR_DOMAIN_DISK_TYPE_FILE:
+                     source = virXMLPropString(cur, "file");
+-                    startupPolicy = virXMLPropString(cur, "startupPolicy");
+                     break;
+                 case VIR_DOMAIN_DISK_TYPE_BLOCK:
+                     source = virXMLPropString(cur, "dev");
+@@ -3817,6 +3816,8 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+                     goto error;
+                 }
+ 
++                startupPolicy = virXMLPropString(cur, "startupPolicy");
++
+                 /* People sometimes pass a bogus '' source path
+                    when they mean to omit the source element
+                    completely. eg CDROM without media. This is
+@@ -4324,14 +4325,22 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+             goto error;
+         }
+ 
+-        if (def->device != VIR_DOMAIN_DISK_DEVICE_CDROM &&
+-            def->device != VIR_DOMAIN_DISK_DEVICE_FLOPPY) {
+-            virReportError(VIR_ERR_INVALID_ARG,
+-                           _("Setting disk %s is allowed only for "
+-                             "cdrom or floppy"),
++        if (def->type == VIR_DOMAIN_DISK_TYPE_NETWORK) {
++            virReportError(VIR_ERR_XML_ERROR,
++                           _("Setting disk %s is not allowed for "
++                             "disk of network type"),
+                            startupPolicy);
+             goto error;
+         }
++
++        if (def->device != VIR_DOMAIN_DISK_DEVICE_CDROM &&
++            def->device != VIR_DOMAIN_DISK_DEVICE_FLOPPY &&
++            i == VIR_DOMAIN_STARTUP_POLICY_REQUISITE) {
++            virReportError(VIR_ERR_XML_ERROR, "%s",
++                           _("Setting disk 'requisite' is allowed only for "
++                             "cdrom or floppy"));
++            goto error;
++        }
+         def->startupPolicy = i;
+     }
+ 
+@@ -12563,6 +12572,9 @@ virDomainDiskDefFormat(virBufferPtr buf,
+         case VIR_DOMAIN_DISK_TYPE_BLOCK:
+             virBufferEscapeString(buf, "      <source dev='%s'",
+                                   def->src);
++            if (def->startupPolicy)
++                virBufferEscapeString(buf, " startupPolicy='%s'",
++                                      startupPolicy);
+             if (def->nseclabels) {
+                 virBufferAddLit(buf, ">\n");
+                 virBufferAdjustIndent(buf, 8);
+@@ -12575,8 +12587,12 @@ virDomainDiskDefFormat(virBufferPtr buf,
+             }
+             break;
+         case VIR_DOMAIN_DISK_TYPE_DIR:
+-            virBufferEscapeString(buf, "      <source dir='%s'/>\n",
++            virBufferEscapeString(buf, "      <source dir='%s'",
+                                   def->src);
++            if (def->startupPolicy)
++                virBufferEscapeString(buf, " startupPolicy='%s'",
++                                      startupPolicy);
++            virBufferAddLit(buf, "/>\n");
+             break;
+         case VIR_DOMAIN_DISK_TYPE_NETWORK:
+             virBufferAsprintf(buf, "      <source protocol='%s'",
+-- 
+1.9.2
+

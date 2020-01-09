@@ -1,0 +1,28 @@
+From a761b269a9670951f848caa8af85b5a57ae63178 Mon Sep 17 00:00:00 2001
+Message-Id: <a761b269a9670951f848caa8af85b5a57ae63178.1373271639.git.jdenemar@redhat.com>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 14 Mar 2013 11:19:08 -0400
+Subject: [PATCH] interface: Resolve resource leak wth 'tmp_iface_objs'
+
+https://bugzilla.redhat.com/show_bug.cgi?id=906299
+
+(cherry picked from commit c6248f04842dfb71824727ca596d12bb7c55594e)
+---
+ src/interface/interface_backend_netcf.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/interface/interface_backend_netcf.c b/src/interface/interface_backend_netcf.c
+index fdc28ea..e0d8e89 100644
+--- a/src/interface/interface_backend_netcf.c
++++ b/src/interface/interface_backend_netcf.c
+@@ -399,6 +399,7 @@ cleanup:
+             if (tmp_iface_objs[i])
+                 virInterfaceFree(tmp_iface_objs[i]);
+         }
++        VIR_FREE(tmp_iface_objs);
+     }
+ 
+     interfaceDriverUnlock(driver);
+-- 
+1.8.2.1
+

@@ -1,0 +1,369 @@
+From 1a2b6ffa3daf04681771e89af0d574c31916792a Mon Sep 17 00:00:00 2001
+Message-Id: <1a2b6ffa3daf04681771e89af0d574c31916792a@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Wed, 14 May 2014 16:12:27 +0200
+Subject: [PATCH] conf: output actual netdev status in <interface> XML
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+Until now, the "live" XML status of an <interface type='network'>
+device would always show the network information, rather than the
+exact hardware device that was used. It would also show the name of
+any portgroup the interface belonged to, rather than providing the
+configuration that was derived from that portgroup. As an example,
+given the following network definition:
+
+[A]
+  <network>
+    <name>testnet</name>
+    <forward type='bridge' dev='p4p1_0'>
+      <interface dev='p4p1_0'/>
+      <interface dev='p4p1_1'/>
+      <interface dev='p4p1_2'/>
+      <interface dev='p4p1_3'/>
+    </forward>
+    <portgroup name='admin'>
+      <bandwidth>
+          <inbound average='1000' peak='5000' burst='1024'/>
+          <outbound average='128' peak='256' burst='256'/>
+      </bandwidth>
+    </portgroup>
+  </network>
+
+and the following domain <interface>:
+
+[B]
+  <interface type='network'>
+    <source network='testnet' portgroup='admin'/>
+  </interface>
+
+the output of "virsh dumpxml $domain" while the domain was running
+would yield something like this:
+
+[C]
+  <interface type='network'>
+    <source network='testnet' portgroup='admin'/>
+    <target dev='macvtap0'/>
+    <alias name='net0'/>
+    <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+  </interface>
+
+In order to learn the exact bandwidth information of the interface, a
+management application would need to retrieve the XML for testnet,
+then search for the portgroup named "admin". Even worse, there was no
+simple and standard way to learn which host physdev the macvtap0
+device is attached to.
+
+Internally, libvirt has always kept this information in the
+virDomainDef that is held in memory, as well as storing it in the
+(libvirt-internal-only) domain status XML (in
+/var/run/libvirt/qemu/$domain.xml). In order to not confuse the runtime
+"actual state" with the config of the device, it's internally stored
+like this:
+
+[D]
+  <interface type='network'>
+    <source network='testnet' portgroup='admin'/>
+    <actual type='direct'>
+      <source dev='p4p1_0' mode='bridge'/>
+      <bandwidth>
+          <inbound average='1000' peak='5000' burst='1024'/>
+          <outbound average='128' peak='256' burst='256'/>
+      </bandwidth>
+    </actual>
+    <target dev='macvtap0'/>
+    <alias name='net0'/>
+    <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+  </interface>
+
+This was never exposed outside of libvirt though, because I thought it
+would be too awkward for a management application to need to look in
+two places for the same information, but I also wasn't sure that it
+would be okay to overwrite the config info (in this case "<source
+network='testnet' portgroup='admin'/>") with the actual runtime info
+(everything inside <actual> above).
+
+Now we have a need for this information to be made available to
+management applications (in particular, so that a network "plugged"
+hook will have full information about the device that is being plugged
+in), so it's time to take the leap and decide that it is acceptable
+for the config info to be replaced with actual runtime state (but
+*only* when reporting domain live status, *not* when saving state in
+/var/run/libvirt/qemu/$domain.xml - that remains the same so that
+there is no loss of information). That is what this patch does - once
+applied, the output of "virsh dumpxml $domain" when the domain is
+running will contain something like this:
+
+[E]
+  <interface type='direct'>
+    <source dev='p4p1_0' mode='bridge'/>
+    <bandwidth>
+        <inbound average='1000' peak='5000' burst='1024'/>
+        <outbound average='128' peak='256' burst='256'/>
+    </bandwidth>
+    <target dev='macvtap0'/>
+    <alias name='net0'/>
+    <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+  </interface>
+
+In effect, everything that is internally stored within <actual> is
+moved up a level to where a management application will expect
+it. This means that the management application will only look in a
+single place to learn - the type of interface in use, the name of the
+physdev (if relevant), the <bandwidth>, <vlan>, and <virtualport>
+settings in use.
+
+The potential downside is that a management app looking at this output
+will not see that the physdev 'p4p1_0' was actually allocated from the
+network named 'testnet', or that the bandwidth numbers were taken from
+the portgroup 'admin'. However, if they are interested in that info,
+they can always get the "inactive" XML for the domain.
+
+An example of where this could cause problems is in virt-manager's
+network device display, which shows the status of the device, but
+allows you to edit that status info and save it as the new
+config. Previously virt-manager would always display the information
+in example [C] above, and allow editing that. With this patch, it will
+instead display what is in [E] and allow editing it directly, which
+could lead to some confusion. I would suggest that virt-manager have
+an "edit" button which would change the display from the "live" xml to
+the "inactive" xml, so that editing would be done on that; such a
+change would both handle the new situation, and also be compatible
+with older releases.
+
+(cherry picked from commit 7d5bf484747979ce842fea9ae3ae673ab09bf935)
+
+Conflicts:
+	src/conf/domain_conf.c: Context
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 189 +++++++++++++++++++++++++++++--------------------
+ 1 file changed, 114 insertions(+), 75 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 2283fbb..0690377 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -13120,19 +13120,39 @@ virDomainNetDefFormat(virBufferPtr buf,
+                       virDomainNetDefPtr def,
+                       unsigned int flags)
+ {
+-    const char *type = virDomainNetTypeToString(def->type);
++    /* publicActual is true if we should report the current state in
++     * def->data.network.actual *instead of* the config (*not* in
++     * addition to)
++     */
++    unsigned int actualType = virDomainNetGetActualType(def);
++    bool publicActual
++       = (def->type == VIR_DOMAIN_NET_TYPE_NETWORK && def->data.network.actual &&
++          !(flags & (VIR_DOMAIN_XML_INACTIVE | VIR_DOMAIN_XML_INTERNAL_ACTUAL_NET)));
++    const char *typeStr;
++    virDomainHostdevDefPtr hostdef = NULL;
+ 
+-    if (!type) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("unexpected net type %d"), def->type);
+-        return -1;
++
++    if (publicActual) {
++        if (!(typeStr = virDomainNetTypeToString(actualType))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("unexpected actual net type %d"), actualType);
++            return -1;
++        }
++        if (actualType == VIR_DOMAIN_NET_TYPE_HOSTDEV)
++            hostdef = virDomainNetGetActualHostdev(def);
++    } else {
++        if (!(typeStr = virDomainNetTypeToString(def->type))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("unexpected net type %d"), def->type);
++            return -1;
++        }
++        if (def->type == VIR_DOMAIN_NET_TYPE_HOSTDEV)
++            hostdef = &def->data.hostdev.def;
+     }
+ 
+-    virBufferAsprintf(buf, "    <interface type='%s'", type);
+-    if (def->type == VIR_DOMAIN_NET_TYPE_HOSTDEV &&
+-        def->data.hostdev.def.managed) {
++    virBufferAsprintf(buf, "    <interface type='%s'", typeStr);
++    if (hostdef && hostdef->managed)
+         virBufferAddLit(buf, " managed='yes'");
+-    }
+     virBufferAddLit(buf, ">\n");
+ 
+     virBufferAdjustIndent(buf, 6);
+@@ -13141,84 +13161,103 @@ virDomainNetDefFormat(virBufferPtr buf,
+                       def->mac.addr[0], def->mac.addr[1], def->mac.addr[2],
+                       def->mac.addr[3], def->mac.addr[4], def->mac.addr[5]);
+ 
+-    switch (def->type) {
+-    case VIR_DOMAIN_NET_TYPE_NETWORK:
+-        virBufferEscapeString(buf, "<source network='%s'",
+-                              def->data.network.name);
+-        virBufferEscapeString(buf, " portgroup='%s'",
+-                              def->data.network.portgroup);
+-        virBufferAddLit(buf, "/>\n");
+-
+-        /* ONLY for internal status storage - format the ActualNetDef
+-         * as a subelement of <interface> so that no persistent config
+-         * data is overwritten.
++    if (publicActual) {
++        /* when there is a virDomainActualNetDef, and we haven't been
++         * asked to 1) report the domain's inactive XML, or 2) give
++         * the internal version of the ActualNetDef separately in an
++         * <actual> subelement, we can just put the ActualDef data in
++         * the standard place...  (this is for public reporting of
++         * interface status)
+          */
+-        if ((flags & VIR_DOMAIN_XML_INTERNAL_ACTUAL_NET) &&
+-            (virDomainActualNetDefFormat(buf, def, flags) < 0))
++        if (virDomainActualNetDefContentsFormat(buf, def, typeStr, false, flags) < 0)
+             return -1;
+-        break;
++    } else {
++        /* ...but if we've asked for the inactive XML (rather than
++         * status), or to report the ActualDef as a separate <actual>
++         * subelement (this is how we privately store interface
++         * status), or there simply *isn't* any ActualNetDef, then
++         * format the NetDef's data here, and optionally format the
++         * ActualNetDef as an <actual> subelement of this element.
++         */
++        switch (def->type) {
++        case VIR_DOMAIN_NET_TYPE_NETWORK:
++            virBufferEscapeString(buf, "<source network='%s'",
++                                  def->data.network.name);
++            virBufferEscapeString(buf, " portgroup='%s'",
++                                  def->data.network.portgroup);
++            virBufferAddLit(buf, "/>\n");
+ 
+-    case VIR_DOMAIN_NET_TYPE_ETHERNET:
+-        virBufferEscapeString(buf, "<source dev='%s'/>\n",
+-                              def->data.ethernet.dev);
+-        if (def->data.ethernet.ipaddr)
+-            virBufferAsprintf(buf, "<ip address='%s'/>\n",
+-                              def->data.ethernet.ipaddr);
+-        break;
++            /* ONLY for internal status storage - format the ActualNetDef
++             * as a subelement of <interface> so that no persistent config
++             * data is overwritten.
++             */
++            if ((flags & VIR_DOMAIN_XML_INTERNAL_ACTUAL_NET) &&
++                (virDomainActualNetDefFormat(buf, def, flags) < 0))
++                return -1;
++            break;
+ 
+-    case VIR_DOMAIN_NET_TYPE_BRIDGE:
+-        virBufferEscapeString(buf, "<source bridge='%s'/>\n",
+-                              def->data.bridge.brname);
+-        if (def->data.bridge.ipaddr) {
+-            virBufferAsprintf(buf, "<ip address='%s'/>\n",
+-                              def->data.bridge.ipaddr);
+-        }
+-        break;
++        case VIR_DOMAIN_NET_TYPE_ETHERNET:
++            virBufferEscapeString(buf, "<source dev='%s'/>\n",
++                                  def->data.ethernet.dev);
++            if (def->data.ethernet.ipaddr)
++                virBufferAsprintf(buf, "<ip address='%s'/>\n",
++                                  def->data.ethernet.ipaddr);
++            break;
+ 
+-    case VIR_DOMAIN_NET_TYPE_SERVER:
+-    case VIR_DOMAIN_NET_TYPE_CLIENT:
+-    case VIR_DOMAIN_NET_TYPE_MCAST:
+-        if (def->data.socket.address) {
+-            virBufferAsprintf(buf, "<source address='%s' port='%d'/>\n",
+-                              def->data.socket.address, def->data.socket.port);
+-        } else {
+-            virBufferAsprintf(buf, "<source port='%d'/>\n",
+-                              def->data.socket.port);
+-        }
+-        break;
++        case VIR_DOMAIN_NET_TYPE_BRIDGE:
++            virBufferEscapeString(buf, "<source bridge='%s'/>\n",
++                                  def->data.bridge.brname);
++            if (def->data.bridge.ipaddr) {
++                virBufferAsprintf(buf, "<ip address='%s'/>\n",
++                                  def->data.bridge.ipaddr);
++            }
++            break;
+ 
+-    case VIR_DOMAIN_NET_TYPE_INTERNAL:
+-        virBufferEscapeString(buf, "<source name='%s'/>\n",
+-                              def->data.internal.name);
+-        break;
++        case VIR_DOMAIN_NET_TYPE_SERVER:
++        case VIR_DOMAIN_NET_TYPE_CLIENT:
++        case VIR_DOMAIN_NET_TYPE_MCAST:
++            if (def->data.socket.address) {
++                virBufferAsprintf(buf, "<source address='%s' port='%d'/>\n",
++                                  def->data.socket.address, def->data.socket.port);
++            } else {
++                virBufferAsprintf(buf, "<source port='%d'/>\n",
++                                  def->data.socket.port);
++            }
++            break;
+ 
+-    case VIR_DOMAIN_NET_TYPE_DIRECT:
+-        virBufferEscapeString(buf, "<source dev='%s'",
+-                              def->data.direct.linkdev);
+-        virBufferAsprintf(buf, " mode='%s'",
+-                          virNetDevMacVLanModeTypeToString(def->data.direct.mode));
+-        virBufferAddLit(buf, "/>\n");
+-        break;
++        case VIR_DOMAIN_NET_TYPE_INTERNAL:
++            virBufferEscapeString(buf, "<source name='%s'/>\n",
++                                  def->data.internal.name);
++            break;
+ 
+-    case VIR_DOMAIN_NET_TYPE_HOSTDEV:
+-        if (virDomainHostdevDefFormatSubsys(buf, &def->data.hostdev.def,
+-                                            flags, true) < 0) {
+-            return -1;
++        case VIR_DOMAIN_NET_TYPE_DIRECT:
++            virBufferEscapeString(buf, "<source dev='%s'",
++                                  def->data.direct.linkdev);
++            virBufferAsprintf(buf, " mode='%s'",
++                              virNetDevMacVLanModeTypeToString(def->data.direct.mode));
++            virBufferAddLit(buf, "/>\n");
++            break;
++
++        case VIR_DOMAIN_NET_TYPE_HOSTDEV:
++            if (virDomainHostdevDefFormatSubsys(buf, &def->data.hostdev.def,
++                                                flags, true) < 0) {
++                return -1;
++            }
++            break;
++
++        case VIR_DOMAIN_NET_TYPE_USER:
++        case VIR_DOMAIN_NET_TYPE_LAST:
++            break;
+         }
+-        break;
+ 
+-    case VIR_DOMAIN_NET_TYPE_USER:
+-    case VIR_DOMAIN_NET_TYPE_LAST:
+-        break;
++        if (virNetDevVlanFormat(&def->vlan, buf) < 0)
++            return -1;
++        if (virNetDevVPortProfileFormat(def->virtPortProfile, buf) < 0)
++            return -1;
++        if (virNetDevBandwidthFormat(def->bandwidth, buf) < 0)
++            return -1;
+     }
+ 
+-    if (virNetDevVlanFormat(&def->vlan, buf) < 0)
+-        return -1;
+-    if (virNetDevVPortProfileFormat(def->virtPortProfile, buf) < 0)
+-        return -1;
+-    if (virNetDevBandwidthFormat(def->bandwidth, buf) < 0)
+-        return -1;
+-
+     virBufferEscapeString(buf, "<script path='%s'/>\n",
+                           def->script);
+     if (def->ifname &&
+-- 
+1.9.3
+

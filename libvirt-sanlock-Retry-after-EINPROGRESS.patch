@@ -1,0 +1,123 @@
+From f33dce97e3b2179814850dce362b1709dcd56e13 Mon Sep 17 00:00:00 2001
+Message-Id: <f33dce97e3b2179814850dce362b1709dcd56e13.1353944811.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 23 Nov 2012 09:11:02 +0100
+Subject: [PATCH] sanlock: Retry after EINPROGRESS
+
+https://bugzilla.redhat.com/show_bug.cgi?id=820173
+
+It may take some time for sanlock to add a lockspace. And if user
+restart libvirtd service meanwhile, the fresh daemon can fail adding
+the same lockspace with EINPROGRESS. Recent sanlock has
+sanlock_inq_lockspace() function which should block until lockspace
+changes state. If we are building against older sanlock we should
+retry a few times before claiming an error. This issue can be easily
+reproduced:
+
+for i in {1..1000} ; do echo $i; service libvirtd restart; sleep 2; done
+20
+Stopping libvirtd daemon:                                  [FAILED]
+Starting libvirtd daemon:                                  [  OK  ]
+21
+Stopping libvirtd daemon:                                  [  OK  ]
+Starting libvirtd daemon:                                  [  OK  ]
+22
+Stopping libvirtd daemon:                                  [  OK  ]
+Starting libvirtd daemon:                                  [  OK  ]
+
+ error : virLockManagerSanlockSetupLockspace:334 : Unable to add
+ lockspace /var/lib/libvirt/sanlock/__LIBVIRT__DISKS__: Operation now in
+ progress
+(cherry picked from commit 96a02703daad4dc6663165adbc0feade9900cebd)
+
+Conflicts:
+
+	configure.ac: just context, 5ce6d95e is not backported
+---
+ configure.ac                      |  7 +++++++
+ src/locking/lock_driver_sanlock.c | 35 ++++++++++++++++++++++++++++++++---
+ 2 files changed, 39 insertions(+), 3 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 9958654..a8f7222 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1212,6 +1212,13 @@ if test "x$with_sanlock" != "xno"; then
+   if test "x$with_sanlock" = "xyes" ; then
+     AC_DEFINE_UNQUOTED([HAVE_SANLOCK], 1,
+       [whether Sanlock plugin for lock management is available])
++
++    AC_CHECK_LIB([sanlock_client], [sanlock_inq_lockspace],
++                 [sanlock_inq_lockspace=yes], [sanlock_inq_lockspace=no])
++    if test "x$sanlock_inq_lockspace" = "xyes" ; then
++      AC_DEFINE_UNQUOTED([HAVE_SANLOCK_INQ_LOCKSPACE], 1,
++        [whether sanlock supports sanlock_inq_lockspace])
++    fi
+   fi
+ fi
+ AM_CONDITIONAL([HAVE_SANLOCK], [test "x$with_sanlock" = "xyes"])
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index 9d2bd9a..54c9597 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -184,6 +184,11 @@ static int virLockManagerSanlockLoadConfig(const char *configFile)
+     return 0;
+ }
+ 
++/* How much ms sleep before retrying to add a lockspace? */
++#define LOCKSPACE_SLEEP 100
++/* How many times try adding a lockspace? */
++#define LOCKSPACE_RETRIES 10
++
+ static int virLockManagerSanlockSetupLockspace(void)
+ {
+     int fd = -1;
+@@ -192,6 +197,9 @@ static int virLockManagerSanlockSetupLockspace(void)
+     struct sanlk_lockspace ls;
+     char *path = NULL;
+     char *dir = NULL;
++#ifndef HAVE_SANLOCK_INQ_LOCKSPACE
++    int retries = LOCKSPACE_RETRIES;
++#endif
+ 
+     if (virAsprintf(&path, "%s/%s",
+                     driver->autoDiskLeasePath,
+@@ -318,11 +326,32 @@ static int virLockManagerSanlockSetupLockspace(void)
+     }
+ 
+     ls.host_id = driver->hostID;
+-    /* Stage 2: Try to register the lockspace with the daemon.
+-     * If the lockspace is already registered, we should get EEXIST back
+-     * in which case we can just carry on with life
++    /* Stage 2: Try to register the lockspace with the daemon.  If the lockspace
++     * is already registered, we should get EEXIST back in which case we can
++     * just carry on with life. If EINPROGRESS is returned, we have two options:
++     * either call a sanlock API that blocks us until lockspace changes state,
++     * or we can fallback to polling.
+      */
++#ifndef HAVE_SANLOCK_INQ_LOCKSPACE
++retry:
++#endif
+     if ((rv = sanlock_add_lockspace(&ls, 0)) < 0) {
++        if (-rv == EINPROGRESS) {
++#ifdef HAVE_SANLOCK_INQ_LOCKSPACE
++            /* we have this function which blocks until lockspace change the
++             * state. It returns 0 if lockspace has been added, -ENOENT if it
++             * hasn't. XXX should we goto retry? */
++            VIR_DEBUG("Inquiring lockspace");
++            rv = sanlock_inq_lockspace(&ls, SANLK_INQ_WAIT);
++#else
++            /* fall back to polling */
++            if (retries--) {
++                usleep(LOCKSPACE_SLEEP * 1000);
++                VIR_DEBUG("Retrying to add lockspace (left %d)", retries);
++                goto retry;
++            }
++#endif
++        }
+         if (-rv != EEXIST) {
+             if (rv <= -200)
+                 virReportError(VIR_ERR_INTERNAL_ERROR,
+-- 
+1.8.0
+

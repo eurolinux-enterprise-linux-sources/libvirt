@@ -1,0 +1,35 @@
+From a2b7465cffbf0676e077ffa87497bd682f0ded50 Mon Sep 17 00:00:00 2001
+Message-Id: <a2b7465cffbf0676e077ffa87497bd682f0ded50.1354720508.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 3 Dec 2012 21:16:35 +0800
+Subject: [PATCH] node_memory: Improve the docs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=872656
+
+To declare that it's not recommended to use the tuning API while
+the outside tuning program (such as ksmtuned under Linux) is running.
+(cherry picked from commit bb1457012d04186ff7ffc6d5ee9a22b399e71be9)
+---
+ src/libvirt.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 8921886..3ca251b 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -6801,6 +6801,12 @@ error:
+  * @flags: extra flags; not used yet, so callers should always pass 0
+  *
+  * Change all or a subset of the node memory tunables.
++ *
++ * Note that it's not recommended to use this function while the
++ * outside tuning program is running (such as ksmtuned under Linux),
++ * as they could change the tunables in parallel, which could cause
++ * conflicts.
++ *
+  * This function may require privileged access to the hypervisor.
+  *
+  * Returns 0 in case of success, -1 in case of failure.
+-- 
+1.8.0
+

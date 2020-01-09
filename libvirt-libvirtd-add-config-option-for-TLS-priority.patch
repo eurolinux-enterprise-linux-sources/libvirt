@@ -1,0 +1,140 @@
+From 8ce7944e1d0248cd7841f8cbed068b94016f53bf Mon Sep 17 00:00:00 2001
+Message-Id: <8ce7944e1d0248cd7841f8cbed068b94016f53bf@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 27 Sep 2016 13:45:58 +0200
+Subject: [PATCH] libvirtd: add config option for TLS priority
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1333415
+
+Add a "tls_priority" config option to /etc/libvirt/libvirtd.conf
+to allow the administrator to override the built-in default
+setting. This only affects the server side configuration.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit c7d0fbe62b0f59b08d0f140e58e48f9837fe8476)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+ Conflicts:
+	daemon/libvirtd.aug
+	daemon/test_libvirtd.aug.in
+    different config options have been added in the meantime
+---
+ daemon/libvirtd-config.c    | 2 ++
+ daemon/libvirtd-config.h    | 1 +
+ daemon/libvirtd.aug         | 1 +
+ daemon/libvirtd.c           | 4 ++--
+ daemon/libvirtd.conf        | 9 ++++++++-
+ daemon/test_libvirtd.aug.in | 1 +
+ 6 files changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/daemon/libvirtd-config.c b/daemon/libvirtd-config.c
+index f835b15..6ba9a6e 100644
+--- a/daemon/libvirtd-config.c
++++ b/daemon/libvirtd-config.c
+@@ -348,6 +348,7 @@ daemonConfigFree(struct daemonConfig *data)
+         tmp++;
+     }
+     VIR_FREE(data->sasl_allowed_username_list);
++    VIR_FREE(data->tls_priority);
+ 
+     VIR_FREE(data->key_file);
+     VIR_FREE(data->ca_file);
+@@ -419,6 +420,7 @@ daemonConfigLoadOptions(struct daemonConfig *data,
+                                   &data->sasl_allowed_username_list, filename) < 0)
+         goto error;
+ 
++    GET_CONF_STR(conf, filename, tls_priority);
+ 
+     GET_CONF_INT (conf, filename, min_workers);
+     GET_CONF_INT (conf, filename, max_workers);
+diff --git a/daemon/libvirtd-config.h b/daemon/libvirtd-config.h
+index 07118de..1c82e10 100644
+--- a/daemon/libvirtd-config.h
++++ b/daemon/libvirtd-config.h
+@@ -52,6 +52,7 @@ struct daemonConfig {
+     int tls_no_sanity_certificate;
+     char **tls_allowed_dn_list;
+     char **sasl_allowed_username_list;
++    char *tls_priority;
+ 
+     char *key_file;
+     char *cert_file;
+diff --git a/daemon/libvirtd.aug b/daemon/libvirtd.aug
+index f32b3a1..79a59e0 100644
+--- a/daemon/libvirtd.aug
++++ b/daemon/libvirtd.aug
+@@ -51,6 +51,7 @@ module Libvirtd =
+                            | bool_entry "tls_no_sanity_certificate"
+                            | str_array_entry "tls_allowed_dn_list"
+                            | str_array_entry "sasl_allowed_username_list"
++                           | str_entry "tls_priority"
+ 
+    let processing_entry = int_entry "min_workers"
+                         | int_entry "max_workers"
+diff --git a/daemon/libvirtd.c b/daemon/libvirtd.c
+index e4b7003..83c9533 100644
+--- a/daemon/libvirtd.c
++++ b/daemon/libvirtd.c
+@@ -511,7 +511,7 @@ static int daemonSetupNetworking(virNetServerPtr srv,
+                                                        config->cert_file,
+                                                        config->key_file,
+                                                        (const char *const*)config->tls_allowed_dn_list,
+-                                                       NULL,
++                                                       config->tls_priority,
+                                                        config->tls_no_sanity_certificate ? false : true,
+                                                        config->tls_no_verify_certificate ? false : true)))
+                     goto error;
+@@ -519,7 +519,7 @@ static int daemonSetupNetworking(virNetServerPtr srv,
+                 if (!(ctxt = virNetTLSContextNewServerPath(NULL,
+                                                            !privileged,
+                                                            (const char *const*)config->tls_allowed_dn_list,
+-                                                           NULL,
++                                                           config->tls_priority,
+                                                            config->tls_no_sanity_certificate ? false : true,
+                                                            config->tls_no_verify_certificate ? false : true)))
+                     goto error;
+diff --git a/daemon/libvirtd.conf b/daemon/libvirtd.conf
+index 3d296cd..91613ca 100644
+--- a/daemon/libvirtd.conf
++++ b/daemon/libvirtd.conf
+@@ -221,7 +221,7 @@
+ #tls_allowed_dn_list = ["DN1", "DN2"]
+ 
+ 
+-# A whitelist of allowed SASL usernames. The format for usernames
++# A whitelist of allowed SASL usernames. The format for username
+ # depends on the SASL authentication mechanism. Kerberos usernames
+ # look like username@REALM
+ #
+@@ -238,6 +238,13 @@
+ #sasl_allowed_username_list = ["joe@EXAMPLE.COM", "fred@EXAMPLE.COM" ]
+ 
+ 
++# Override the compile time default TLS priority string. The
++# default is usually "NORMAL" unless overridden at build time.
++# Only set this is it is desired for libvirt to deviate from
++# the global default settings.
++#
++#tls_priority="NORMAL"
++
+ 
+ #################################################################
+ #
+diff --git a/daemon/test_libvirtd.aug.in b/daemon/test_libvirtd.aug.in
+index 455b74a..4704674 100644
+--- a/daemon/test_libvirtd.aug.in
++++ b/daemon/test_libvirtd.aug.in
+@@ -31,6 +31,7 @@ module Test_libvirtd =
+              { "1" = "joe@EXAMPLE.COM" }
+              { "2" = "fred@EXAMPLE.COM" }
+         }
++        { "tls_priority" = "NORMAL" }
+         { "max_clients" = "20" }
+         { "min_workers" = "5" }
+         { "max_workers" = "20" }
+-- 
+2.10.1
+

@@ -1,0 +1,93 @@
+From f87ffdef2af0c8ddc93acd2e932954b851d2f494 Mon Sep 17 00:00:00 2001
+Message-Id: <f87ffdef2af0c8ddc93acd2e932954b851d2f494.1350990678.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 16 Oct 2012 21:11:29 +0200
+Subject: [PATCH] qemu: Always format CPU topology
+
+https://bugzilla.redhat.com/show_bug.cgi?id=866999
+
+When libvirt cannot find a suitable CPU model for host CPU (easily
+reproducible by running libvirt in a guest), it would not provide CPU
+topology in capabilities XML either. Even though CPU topology is known
+and can be queried by virNodeGetInfo. With this patch, CPU topology will
+always be provided in capabilities XML regardless on the presence of CPU
+model.
+(cherry picked from commit f1c70100409562c3f402392aa667732e5f89a2c4)
+---
+ src/qemu/qemu_capabilities.c | 6 +++---
+ src/qemu/qemu_command.c      | 1 +
+ src/qemu/qemu_domain.c       | 4 +++-
+ src/qemu/qemu_driver.c       | 3 ++-
+ 4 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index b18bbd5..bb0bcbc 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -691,6 +691,7 @@ qemuCapsInitGuest(virCapsPtr caps,
+     nmachines = 0;
+ 
+     if (caps->host.cpu &&
++        caps->host.cpu->model &&
+         qemuCapsGetCPUDefinitions(qemubinCaps, NULL) > 0 &&
+         !virCapabilitiesAddGuestFeature(guest, "cpuselection", 1, 0))
+         goto error;
+@@ -787,12 +788,11 @@ qemuCapsInitCPU(virCapsPtr caps,
+     cpu->sockets = nodeinfo.sockets;
+     cpu->cores = nodeinfo.cores;
+     cpu->threads = nodeinfo.threads;
++    caps->host.cpu = cpu;
+ 
+     if (!(data = cpuNodeData(arch))
+         || cpuDecode(cpu, data, NULL, 0, NULL) < 0)
+-        goto error;
+-
+-    caps->host.cpu = cpu;
++        goto cleanup;
+ 
+     ret = 0;
+ 
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index e4ac288..f64047b 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4108,6 +4108,7 @@ qemuBuildCpuArgStr(const struct qemud_driver *driver,
+         int hasSVM;
+ 
+         if (!host ||
++            !host->model ||
+             (ncpus = qemuCapsGetCPUDefinitions(caps, &cpus)) == 0) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                            _("CPU specification not supported by hypervisor"));
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 249fbc4..65a85cd 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -1228,7 +1228,9 @@ qemuDomainDefFormatBuf(struct qemud_driver *driver,
+     if ((flags & VIR_DOMAIN_XML_UPDATE_CPU) &&
+         def_cpu &&
+         (def_cpu->mode != VIR_CPU_MODE_CUSTOM || def_cpu->model)) {
+-        if (!driver->caps || !driver->caps->host.cpu) {
++        if (!driver->caps ||
++            !driver->caps->host.cpu ||
++            !driver->caps->host.cpu->model) {
+             virReportError(VIR_ERR_OPERATION_FAILED,
+                            "%s", _("cannot get host CPU capabilities"));
+             goto cleanup;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index b6cc4a9..84c76e5 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -10119,7 +10119,8 @@ qemuCPUCompare(virConnectPtr conn,
+     if (!driver->caps) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        "%s", _("cannot get host capabilities"));
+-    } else if (!driver->caps->host.cpu) {
++    } else if (!driver->caps->host.cpu ||
++               !driver->caps->host.cpu->model) {
+         VIR_WARN("cannot get host CPU capabilities");
+         ret = VIR_CPU_COMPARE_INCOMPATIBLE;
+     } else {
+-- 
+1.7.12.4
+

@@ -1,0 +1,43 @@
+From 69e74c342d6a8d91939169adc7a414359257ca29 Mon Sep 17 00:00:00 2001
+Message-Id: <69e74c342d6a8d91939169adc7a414359257ca29.1373271641.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 2 May 2013 09:36:44 -0600
+Subject: [PATCH] Don't try to add non-existant devices to ACL
+
+6.5: https://bugzilla.redhat.com/show_bug.cgi?id=922153
+6.4.z: https://bugzilla.redhat.com/show_bug.cgi?id=958837
+
+The QEMU driver has a list of devices nodes that are whitelisted
+for all guests. The kernel has recently started returning an
+error if you try to whitelist a device which does not exist.
+This causes a warning in libvirt logs and an audit error for
+any missing devices. eg
+
+2013-02-27 16:08:26.515+0000: 29625: warning : virDomainAuditCgroup:451 : success=no virt=kvm resrc=cgroup reason=allow vm="vm031714" uuid=9d8f1de0-44f4-a0b1-7d50-e41ee6cd897b cgroup="/sys/fs/cgroup/devices/libvirt/qemu/vm031714/" class=path path=/dev/kqemu rdev=? acl=rw
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 7f544a4c8f0353e4ff9ca08aafbb86ff8f60da0a)
+---
+ src/qemu/qemu_cgroup.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 9859253..ea2c1c0 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -258,6 +258,12 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+         }
+ 
+         for (i = 0; deviceACL[i] != NULL ; i++) {
++            if (access(deviceACL[i], F_OK) < 0) {
++                VIR_DEBUG("Ignoring non-existant device %s",
++                          deviceACL[i]);
++                continue;
++            }
++
+             rc = virCgroupAllowDevicePath(cgroup, deviceACL[i],
+                                           VIR_CGROUP_DEVICE_RW);
+             virDomainAuditCgroupPath(vm, cgroup, "allow", deviceACL[i], "rw", rc);
+-- 
+1.8.2.1
+

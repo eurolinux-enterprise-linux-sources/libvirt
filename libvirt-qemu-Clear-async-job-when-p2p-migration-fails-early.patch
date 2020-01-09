@@ -1,0 +1,40 @@
+From 9d49ed492653fda651258cb0386cc5357d57b90a Mon Sep 17 00:00:00 2001
+Message-Id: <9d49ed492653fda651258cb0386cc5357d57b90a.1350990677.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 17 Oct 2012 16:00:58 +0200
+Subject: [PATCH] qemu: Clear async job when p2p migration fails early
+
+https://bugzilla.redhat.com/show_bug.cgi?id=867412
+
+When p2p migration fails early because qemuMigrationIsAllowed or
+qemuMigrationIsSafe say migration should be cancelled, we fail to clear
+the migration-out async job. As a result of that, further APIs called
+for the same domain may fail with Timed out during operation: cannot
+acquire state change lock.
+
+Reported by Guido Winkelmann.
+(cherry picked from commit 837993d845a32bb222959a84d1c03a0c47f785be)
+---
+ src/qemu/qemu_migration.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 68d614d..65cd6ec 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -2641,10 +2641,10 @@ qemuMigrationPerformJob(struct qemud_driver *driver,
+     }
+ 
+     if (!qemuMigrationIsAllowed(driver, vm, NULL))
+-        goto cleanup;
++        goto endjob;
+ 
+     if (!(flags & VIR_MIGRATE_UNSAFE) && !qemuMigrationIsSafe(vm->def))
+-        goto cleanup;
++        goto endjob;
+ 
+     resume = virDomainObjGetState(vm, NULL) == VIR_DOMAIN_RUNNING;
+ 
+-- 
+1.7.12.4
+

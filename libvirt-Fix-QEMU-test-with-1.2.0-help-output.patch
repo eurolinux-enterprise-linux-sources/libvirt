@@ -1,0 +1,35 @@
+From 8916704894c36ffc2edf3d615fc3277cc36826df Mon Sep 17 00:00:00 2001
+Message-Id: <8916704894c36ffc2edf3d615fc3277cc36826df.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:48 -0600
+Subject: [PATCH] Fix QEMU test with 1.2.0 help output
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+The help output for QEMU 1.2.0 changed 'pci-assign' to 'kvm-pci-assign'.
+Since the new capabilities code does exact device name matching
+instead of substring matching, this caused the capabilities to go
+missing.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 72574808d6ab06d7093f3695c0ba6e14616adea5)
+---
+ src/qemu/qemu_capabilities.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index dc4547f..d8247ed 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1334,6 +1334,8 @@ static struct qemuCapsObjectTypeProps qemuCapsObjectProps[] = {
+       ARRAY_CARDINALITY(qemuCapsObjectPropsVirtioNet) },
+     { "pci-assign", qemuCapsObjectPropsPciAssign,
+       ARRAY_CARDINALITY(qemuCapsObjectPropsPciAssign) },
++    { "kvm-pci-assign", qemuCapsObjectPropsPciAssign,
++      ARRAY_CARDINALITY(qemuCapsObjectPropsPciAssign) },
+     { "scsi-disk", qemuCapsObjectPropsScsiDisk,
+       ARRAY_CARDINALITY(qemuCapsObjectPropsScsiDisk) },
+     { "ide-drive", qemuCapsObjectPropsIDEDrive,
+-- 
+1.7.12.3
+

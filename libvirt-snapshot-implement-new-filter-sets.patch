@@ -1,0 +1,92 @@
+From 42108ced044fa85568452c36043e01f7da851dc0 Mon Sep 17 00:00:00 2001
+Message-Id: <42108ced044fa85568452c36043e01f7da851dc0.1353944811.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 19 Nov 2012 15:22:30 -0700
+Subject: [PATCH] snapshot: implement new filter sets
+
+https://bugzilla.redhat.com/show_bug.cgi?id=876817
+
+Relatively straight-forward.  And since qemu was already using
+VIR_DOMAIN_SNAPSHOT_FILTERS_ALL, with 6 different APIs all calling
+into this common code, I've instantly added all 5 flags to 6 APIs.
+
+* src/conf/snapshot_conf.h (VIR_DOMAIN_SNAPSHOT_FILTERS_ALL):
+Enable new filters.
+* src/conf/snapshot_conf.c (virDomainSnapshotObjListGetNames):
+Prep the new flags.
+(virDomainSnapshotObjListCopyNames): Actually do the filtering.
+(cherry picked from commit 62711817db9f16e4e844d6e060ec89ace26fd6d2)
+---
+ src/conf/snapshot_conf.c | 30 ++++++++++++++++++++++++++++--
+ src/conf/snapshot_conf.h |  4 +++-
+ 2 files changed, 31 insertions(+), 3 deletions(-)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index c581d14..e61d7cd 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -749,6 +749,26 @@ static void virDomainSnapshotObjListCopyNames(void *payload,
+     if ((data->flags & VIR_DOMAIN_SNAPSHOT_LIST_NO_LEAVES) && !obj->nchildren)
+         return;
+ 
++    if (data->flags & VIR_DOMAIN_SNAPSHOT_FILTERS_STATUS) {
++        if (!(data->flags & VIR_DOMAIN_SNAPSHOT_LIST_INACTIVE) &&
++            obj->def->state == VIR_DOMAIN_SHUTOFF)
++            return;
++        if (!(data->flags & VIR_DOMAIN_SNAPSHOT_LIST_DISK_ONLY) &&
++            obj->def->state == VIR_DOMAIN_DISK_SNAPSHOT)
++            return;
++        if (!(data->flags & VIR_DOMAIN_SNAPSHOT_LIST_ACTIVE) &&
++            obj->def->state != VIR_DOMAIN_SHUTOFF &&
++            obj->def->state != VIR_DOMAIN_DISK_SNAPSHOT)
++            return;
++    }
++
++    if ((data->flags & VIR_DOMAIN_SNAPSHOT_LIST_INTERNAL) &&
++        virDomainSnapshotIsExternal(obj))
++        return;
++    if ((data->flags & VIR_DOMAIN_SNAPSHOT_LIST_EXTERNAL) &&
++        !virDomainSnapshotIsExternal(obj))
++        return;
++
+     if (data->names && data->count < data->maxnames &&
+         !(data->names[data->count] = strdup(obj->def->name))) {
+         data->error = true;
+@@ -790,11 +810,17 @@ virDomainSnapshotObjListGetNames(virDomainSnapshotObjListPtr snapshots,
+         return 0;
+     data.flags &= ~VIR_DOMAIN_SNAPSHOT_FILTERS_METADATA;
+ 
+-    /* For ease of coding the visitor, it is easier to zero the LEAVES
+-     * group if both bits are set.  */
++    /* For ease of coding the visitor, it is easier to zero each group
++     * where all of the bits are set.  */
+     if ((data.flags & VIR_DOMAIN_SNAPSHOT_FILTERS_LEAVES) ==
+         VIR_DOMAIN_SNAPSHOT_FILTERS_LEAVES)
+         data.flags &= ~VIR_DOMAIN_SNAPSHOT_FILTERS_LEAVES;
++    if ((data.flags & VIR_DOMAIN_SNAPSHOT_FILTERS_STATUS) ==
++        VIR_DOMAIN_SNAPSHOT_FILTERS_STATUS)
++        data.flags &= ~VIR_DOMAIN_SNAPSHOT_FILTERS_STATUS;
++    if ((data.flags & VIR_DOMAIN_SNAPSHOT_FILTERS_LOCATION) ==
++        VIR_DOMAIN_SNAPSHOT_FILTERS_LOCATION)
++        data.flags &= ~VIR_DOMAIN_SNAPSHOT_FILTERS_LOCATION;
+ 
+     if (flags & VIR_DOMAIN_SNAPSHOT_LIST_DESCENDANTS) {
+         if (from->def)
+diff --git a/src/conf/snapshot_conf.h b/src/conf/snapshot_conf.h
+index e291ddd..b0f8760 100644
+--- a/src/conf/snapshot_conf.h
++++ b/src/conf/snapshot_conf.h
+@@ -156,7 +156,9 @@ void virDomainSnapshotDropParent(virDomainSnapshotObjPtr snapshot);
+ 
+ # define VIR_DOMAIN_SNAPSHOT_FILTERS_ALL                \
+                (VIR_DOMAIN_SNAPSHOT_FILTERS_METADATA  | \
+-                VIR_DOMAIN_SNAPSHOT_FILTERS_LEAVES)
++                VIR_DOMAIN_SNAPSHOT_FILTERS_LEAVES    | \
++                VIR_DOMAIN_SNAPSHOT_FILTERS_STATUS    | \
++                VIR_DOMAIN_SNAPSHOT_FILTERS_LOCATION)
+ 
+ int virDomainListSnapshots(virDomainSnapshotObjListPtr snapshots,
+                            virDomainSnapshotObjPtr from,
+-- 
+1.8.0
+

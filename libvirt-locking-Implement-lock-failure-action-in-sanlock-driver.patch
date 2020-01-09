@@ -1,0 +1,417 @@
+From 0d6d5016e9e6aaf17cdc4120bdff9f7f7fb8f458 Mon Sep 17 00:00:00 2001
+Message-Id: <0d6d5016e9e6aaf17cdc4120bdff9f7f7fb8f458.1350297258.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 18 Sep 2012 13:41:26 +0200
+Subject: [PATCH] locking: Implement lock failure action in sanlock driver
+
+https://bugzilla.redhat.com/show_bug.cgi?id=832156
+
+While the changes to sanlock driver should be stable, the actual
+implementation of sanlock_helper is supposed to be replaced in the
+future. However, before we can implement a better sanlock_helper, we
+need an administrative interface to libvirtd so that the helper can just
+pass a "leases lost" event to the particular libvirt driver and
+everything else will be taken care of internally. This approach will
+also allow libvirt to pass such event to applications and use
+appropriate reasons when changing domain states.
+
+The temporary implementation handles all actions directly by calling
+appropriate libvirt APIs (which among other things means that it needs
+to know the credentials required to connect to libvirtd).
+(cherry picked from commit 893647671b052cba67f2241bb910df56f3191f2e)
+---
+ docs/locking.html.in              |  24 +++++++
+ libvirt.spec.in                   |   1 +
+ po/POTFILES.in                    |   1 +
+ src/Makefile.am                   |  11 +++
+ src/locking/lock_driver_sanlock.c | 115 +++++++++++++++++++++++++++----
+ src/locking/sanlock_helper.c      | 138 ++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 277 insertions(+), 13 deletions(-)
+ create mode 100644 src/locking/sanlock_helper.c
+
+diff --git a/docs/locking.html.in b/docs/locking.html.in
+index 0d039da..6d7b517 100644
+--- a/docs/locking.html.in
++++ b/docs/locking.html.in
+@@ -208,5 +208,29 @@
+ &lt;/pool&gt;
+     </pre>
+ 
++    <h2><a name="domainconfig">Domain configuration</a></h2>
++
++    <p>
++      In case sanlock loses access to disk locks for some reason, it will
++      kill all domains that lost their locks. This default behavior may
++      be changed using
++      <a href="formatdomain.html#elementsEvents">on_lockfailure
++      element</a> in domain XML. When this element is present, sanlock
++      will call <code>sanlock_helper</code> (provided by libvirt) with
++      the specified action. This helper binary will connect to libvirtd
++      and thus it may need to authenticate if libvirtd was configured to
++      require that on the read-write UNIX socket. To provide the
++      appropriate credentials to sanlock_helper, a
++      <a href="auth.html#Auth_client_config">client authentication
++      file</a> needs to contain something like the following:
++    </p>
++    <pre>
++[auth-libvirt-localhost]
++credentials=sanlock
++
++[credentials-sanlock]
++authname=login
++password=password
++    </pre>
+   </body>
+ </html>
+diff --git a/po/POTFILES.in b/po/POTFILES.in
+index 12a2b25..82f5105 100644
+--- a/po/POTFILES.in
++++ b/po/POTFILES.in
+@@ -46,6 +46,7 @@ src/libvirt.c
+ src/libvirt-qemu.c
+ src/locking/lock_driver_sanlock.c
+ src/locking/lock_manager.c
++src/locking/sanlock_helper.c
+ src/lxc/lxc_cgroup.c
+ src/lxc/lxc_container.c
+ src/lxc/lxc_conf.c
+diff --git a/src/Makefile.am b/src/Makefile.am
+index df87719..f75ae9b 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -141,6 +141,8 @@ DRIVER_SOURCES =							\
+ LOCK_DRIVER_SANLOCK_SOURCES = \
+ 		locking/lock_driver_sanlock.c
+ 
++LOCK_DRIVER_SANLOCK_HELPER_SOURCES = \
++		locking/sanlock_helper.c
+ 
+ NETDEV_CONF_SOURCES =						\
+ 		conf/netdev_bandwidth_conf.h conf/netdev_bandwidth_conf.c \
+@@ -1638,6 +1640,15 @@ endif
+ EXTRA_DIST += $(STORAGE_HELPER_DISK_SOURCES)
+ 
+ 
++if HAVE_SANLOCK
++libexec_PROGRAMS += libvirt_sanlock_helper
++
++libvirt_sanlock_helper_SOURCES = $(LOCK_DRIVER_SANLOCK_HELPER_SOURCES)
++libvirt_sanlock_helper_CFLAGS = -I$(top_srcdir)/src/conf $(AM_CFLAGS)
++libvirt_sanlock_helper_LDFLAGS = $(WARN_LDFLAGS) $(AM_LDFLAGS)
++libvirt_sanlock_helper_LDADD = libvirt.la
++endif
++
+ if WITH_LXC
+ if WITH_LIBVIRTD
+ libexec_PROGRAMS += libvirt_lxc
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index 8c0ac8c..a218432f 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -50,6 +50,7 @@
+ #define VIR_FROM_THIS VIR_FROM_LOCKING
+ 
+ #define VIR_LOCK_MANAGER_SANLOCK_AUTO_DISK_LOCKSPACE "__LIBVIRT__DISKS__"
++#define VIR_LOCK_MANAGER_SANLOCK_KILLPATH LIBEXECDIR "/libvirt_sanlock_helper"
+ 
+ /*
+  * temporary fix for the case where the sanlock devel package is
+@@ -75,8 +76,9 @@ struct _virLockManagerSanlockDriver {
+ static virLockManagerSanlockDriver *driver = NULL;
+ 
+ struct _virLockManagerSanlockPrivate {
++    const char *vm_uri;
+     char vm_name[SANLK_NAME_LEN];
+-    char vm_uuid[VIR_UUID_BUFLEN];
++    unsigned char vm_uuid[VIR_UUID_BUFLEN];
+     unsigned int vm_id;
+     unsigned int vm_pid;
+     unsigned int flags;
+@@ -383,6 +385,8 @@ static int virLockManagerSanlockNew(virLockManagerPtr lock,
+             priv->vm_pid = param->value.ui;
+         } else if (STREQ(param->key, "id")) {
+             priv->vm_id = param->value.ui;
++        } else if (STREQ(param->key, "uri")) {
++            priv->vm_uri = param->value.cstr;
+         }
+     }
+ 
+@@ -683,10 +687,86 @@ static int virLockManagerSanlockAddResource(virLockManagerPtr lock,
+     return 0;
+ }
+ 
++static int
++virLockManagerSanlockRegisterKillscript(int sock,
++                                        const char *vmuri,
++                                        const char *uuidstr,
++                                        virDomainLockFailureAction action)
++{
++    virBuffer buf = VIR_BUFFER_INITIALIZER;
++    char *path;
++    char *args = NULL;
++    int ret = -1;
++    int rv;
++
++    if (action > VIR_DOMAIN_LOCK_FAILURE_IGNORE) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("Failure action %s is not supported by sanlock"),
++                       virDomainLockFailureTypeToString(action));
++        goto cleanup;
++    }
++
++    virBufferEscape(&buf, '\\', "\\ ", "%s", vmuri);
++    virBufferAddLit(&buf, " ");
++    virBufferEscape(&buf, '\\', "\\ ", "%s", uuidstr);
++    virBufferAddLit(&buf, " ");
++    virBufferEscape(&buf, '\\', "\\ ", "%s",
++                    virDomainLockFailureTypeToString(action));
++
++    if (virBufferError(&buf)) {
++        virBufferFreeAndReset(&buf);
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    /* Unfortunately, sanlock_killpath() does not use const for either
++     * path or args even though it will just copy them into its own
++     * buffers.
++     */
++    path = (char *) VIR_LOCK_MANAGER_SANLOCK_KILLPATH;
++    args = virBufferContentAndReset(&buf);
++
++    VIR_DEBUG("Register sanlock killpath: %s %s", path, args);
++
++    /* sanlock_killpath() would just crop the strings */
++    if (strlen(path) >= SANLK_HELPER_PATH_LEN) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("Sanlock helper path is longer than %d: '%s'"),
++                       SANLK_HELPER_PATH_LEN - 1, path);
++        goto cleanup;
++    }
++    if (strlen(args) >= SANLK_HELPER_ARGS_LEN) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("Sanlock helper arguments are longer than %d:"
++                         " '%s'"),
++                       SANLK_HELPER_ARGS_LEN - 1, args);
++        goto cleanup;
++    }
++
++    if ((rv = sanlock_killpath(sock, 0, path, args)) < 0) {
++        if (rv <= -200) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("Failed to register lock failure action:"
++                             " error %d"), rv);
++        } else {
++            virReportSystemError(-rv, "%s",
++                                 _("Failed to register lock failure"
++                                   " action"));
++        }
++        goto cleanup;
++    }
++
++    ret = 0;
++
++cleanup:
++    VIR_FREE(args);
++    return ret;
++}
++
+ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
+                                         const char *state,
+                                         unsigned int flags,
+-                                        virDomainLockFailureAction action ATTRIBUTE_UNUSED,
++                                        virDomainLockFailureAction action,
+                                         int *fd)
+ {
+     virLockManagerSanlockPrivatePtr priv = lock->privateData;
+@@ -741,23 +821,32 @@ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
+         res_count = priv->res_count;
+     }
+ 
+-    VIR_DEBUG("Register sanlock %d", flags);
+     /* We only initialize 'sock' if we are in the real
+      * child process and we need it to be inherited
+      *
+      * If sock==-1, then sanlock auto-open/closes a
+      * temporary sock
+      */
+-    if (priv->vm_pid == getpid() &&
+-        (sock = sanlock_register()) < 0) {
+-        if (sock <= -200)
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("Failed to open socket to sanlock daemon: error %d"),
+-                           sock);
+-        else
+-            virReportSystemError(-sock, "%s",
+-                                 _("Failed to open socket to sanlock daemon"));
+-        goto error;
++    if (priv->vm_pid == getpid()) {
++        VIR_DEBUG("Register sanlock %d", flags);
++        if ((sock = sanlock_register()) < 0) {
++            if (sock <= -200)
++                virReportError(VIR_ERR_INTERNAL_ERROR,
++                               _("Failed to open socket to sanlock daemon: error %d"),
++                               sock);
++            else
++                virReportSystemError(-sock, "%s",
++                                     _("Failed to open socket to sanlock daemon"));
++            goto error;
++        }
++
++        if (action != VIR_DOMAIN_LOCK_FAILURE_DEFAULT) {
++            char uuidstr[VIR_UUID_STRING_BUFLEN];
++            virUUIDFormat(priv->vm_uuid, uuidstr);
++            if (virLockManagerSanlockRegisterKillscript(sock, priv->vm_uri,
++                                                        uuidstr, action) < 0)
++                goto error;
++        }
+     }
+ 
+     if (!(flags & VIR_LOCK_MANAGER_ACQUIRE_REGISTER_ONLY)) {
+diff --git a/src/locking/sanlock_helper.c b/src/locking/sanlock_helper.c
+new file mode 100644
+index 0000000..a73b49c
+--- /dev/null
++++ b/src/locking/sanlock_helper.c
+@@ -0,0 +1,138 @@
++#include <config.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <locale.h>
++
++#include "configmake.h"
++#include "internal.h"
++#include "conf.h"
++#include "memory.h"
++#include "domain_conf.h"
++
++
++static int
++getArgs(int argc,
++        char **argv,
++        const char **uri,
++        const char **uuid,
++        virDomainLockFailureAction *action)
++{
++    int act;
++
++    if (argc != 4) {
++        fprintf(stderr, _("%s uri uuid action\n"), argv[0]);
++        return -1;
++    }
++
++    *uri = argv[1];
++    *uuid = argv[2];
++
++    act = virDomainLockFailureTypeFromString(argv[3]);
++    if (act < 0) {
++        fprintf(stderr, _("invalid failure action: '%s'\n"), argv[3]);
++        return -1;
++    }
++    *action = act;
++
++    return 0;
++}
++
++
++static int
++authCallback(virConnectCredentialPtr cred ATTRIBUTE_UNUSED,
++             unsigned int ncred ATTRIBUTE_UNUSED,
++             void *cbdata ATTRIBUTE_UNUSED)
++{
++    return -1;
++}
++
++
++int
++main(int argc, char **argv)
++{
++    const char *uri;
++    const char *uuid;
++    virDomainLockFailureAction action;
++    char *xml = NULL;
++    virConnectPtr conn = NULL;
++    virDomainPtr dom = NULL;
++    int ret = EXIT_FAILURE;
++
++    int authTypes[] = {
++        VIR_CRED_AUTHNAME,
++        VIR_CRED_ECHOPROMPT,
++        VIR_CRED_PASSPHRASE,
++        VIR_CRED_NOECHOPROMPT,
++    };
++    virConnectAuth auth = {
++        .credtype = authTypes,
++        .ncredtype = ARRAY_CARDINALITY(authTypes),
++        .cb = authCallback,
++    };
++
++    if (setlocale(LC_ALL, "") == NULL ||
++        bindtextdomain(PACKAGE, LOCALEDIR) == NULL ||
++        textdomain(PACKAGE) == NULL) {
++        fprintf(stderr, _("%s: initialization failed\n"), argv[0]);
++        exit(EXIT_FAILURE);
++    }
++
++    if (getArgs(argc, argv, &uri, &uuid, &action) < 0)
++        goto cleanup;
++
++    if (!(conn = virConnectOpenAuth(uri, &auth, 0)) ||
++        !(dom = virDomainLookupByUUIDString(conn, uuid)))
++        goto cleanup;
++
++    switch (action) {
++    case VIR_DOMAIN_LOCK_FAILURE_POWEROFF:
++        if (virDomainDestroy(dom) == 0 ||
++            virDomainIsActive(dom) == 0)
++            ret = EXIT_SUCCESS;
++        break;
++
++    case VIR_DOMAIN_LOCK_FAILURE_RESTART:
++        if (virDomainIsPersistent(dom)) {
++            if ((virDomainDestroy(dom) == 0 ||
++                 virDomainIsActive(dom) == 0) &&
++                virDomainCreate(dom) == 0)
++                ret = EXIT_SUCCESS;
++        } else {
++            xml = virDomainGetXMLDesc(dom,
++                                      VIR_DOMAIN_XML_SECURE |
++                                      VIR_DOMAIN_XML_INACTIVE);
++
++            if (!xml ||
++                (virDomainDestroy(dom) < 0 &&
++                 virDomainIsActive(dom) != 0))
++                goto cleanup;
++            virDomainFree(dom);
++            if ((dom = virDomainCreateXML(conn, xml, 0)))
++                ret = EXIT_SUCCESS;
++        }
++        break;
++
++    case VIR_DOMAIN_LOCK_FAILURE_PAUSE:
++        if (virDomainSuspend(dom) == 0)
++            ret = EXIT_SUCCESS;
++        break;
++
++    case VIR_DOMAIN_LOCK_FAILURE_IGNORE:
++        ret = EXIT_SUCCESS;
++        break;
++
++    default:
++        fprintf(stderr, _("unsupported failure action: '%s'\n"),
++                virDomainLockFailureTypeToString(action));
++        break;
++    }
++
++cleanup:
++    if (dom)
++        virDomainFree(dom);
++    if (conn)
++        virConnectClose(conn);
++    VIR_FREE(xml);
++
++    return ret;
++}
+-- 
+1.7.12.3
+

@@ -1,0 +1,44 @@
+From 5ffc25a31f05e493d987e26363e81cf666bae700 Mon Sep 17 00:00:00 2001
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Fri, 17 Dec 2010 14:55:29 +0100
+Subject: [PATCH] Emit graphics events when a SPICE client
+ connects/disconnects
+To: libvir-list@redhat.com
+
+RHEL-6 only, no upstream
+
+Wire up the domain graphics event notifications for SPICE. This
+uses the custom __com.redhat_SPICE_INITIALIZED and
+__com.redhat_SPICE_DISCONNECTED events. Since there is no explicit
+CONNECTED event available, we fake one when getting the INITIALIZED
+event
+
+* src/qemu/qemu_monitor_json.c: Wire up SPICE graphics events
+
+Conflicts:
+
+	src/qemu/qemu_monitor_json.c: most SPICE graphics events are
+        upstream so most of the patch is removed but we still need to
+        register the __com.redhat events
+
+Signed-off-by: Daniel Veillard <veillard@redhat.com>
+---
+ src/qemu/qemu_monitor_json.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 694ee04..e266534 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -96,6 +96,8 @@ static qemuEventHandler eventHandlers[] = {
+     { "VNC_INITIALIZED", qemuMonitorJSONHandleVNCInitialize, },
+     { "WAKEUP", qemuMonitorJSONHandlePMWakeup, },
+     { "WATCHDOG", qemuMonitorJSONHandleWatchdog, },
++    { "__com.redhat_SPICE_INITIALIZED", qemuMonitorJSONHandleSPICEInitialize, },
++    { "__com.redhat_SPICE_DISCONNECTED", qemuMonitorJSONHandleSPICEDisconnect, },
+     /* We use bsearch, so keep this list sorted.  */
+ };
+ 
+-- 
+1.7.11.4
+

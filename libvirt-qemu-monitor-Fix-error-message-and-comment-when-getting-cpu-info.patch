@@ -1,0 +1,46 @@
+From b01102f19df2ecd70f5f567c96c4941214ac75bc Mon Sep 17 00:00:00 2001
+Message-Id: <b01102f19df2ecd70f5f567c96c4941214ac75bc@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 4 Mar 2014 15:01:49 +0100
+Subject: [PATCH] qemu: monitor: Fix error message and comment when getting cpu
+ info
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1066473
+
+In qemuMonitorJSONExtractCPUInfo an error message hinted on missing
+character device data which is wrong.
+
+Also a comment states that only qemu-kvm tree includes the thread_id
+field. This is no longer true.
+
+(cherry picked from commit a31bd18f43b70882942bddcced67adf5fa892f9a)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_monitor_json.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index bb5e738..de31665 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -1219,13 +1219,13 @@ qemuMonitorJSONExtractCPUInfo(virJSONValuePtr reply,
+         int thread;
+         if (!entry) {
+             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-                           _("character device information was missing array element"));
++                           _("cpu information was missing an array element"));
+             goto cleanup;
+         }
+ 
+         if (virJSONValueObjectGetNumberInt(entry, "thread_id", &thread) < 0) {
+-            /* Only qemu-kvm tree includs thread_id, so treat this as
+-               non-fatal, simply returning no data */
++            /* Some older qemu versions don't report the thread_id,
++             * so treat this as non-fatal, simply returning no data */
+             ret = 0;
+             goto cleanup;
+         }
+-- 
+1.9.1
+

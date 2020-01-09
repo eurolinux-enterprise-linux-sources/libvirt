@@ -1,0 +1,31 @@
+From 2f1c6bd39979afee572baeba01f264edf46e2216 Mon Sep 17 00:00:00 2001
+Message-Id: <2f1c6bd39979afee572baeba01f264edf46e2216.1373271642.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 13 Jun 2013 11:12:20 +0200
+Subject: [PATCH] qemu: Remove managed save flag from VM when starting with
+ --force-boot
+
+https://bugzilla.redhat.com/show_bug.cgi?id=917510
+
+At the start of the guest after the image is unlinked the state wasn't
+touched up to match the state on disk.
+(cherry picked from commit 9933a6b2fa8182d8ec676f7f7f00af7063a387f9)
+---
+ src/qemu/qemu_driver.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 7a9d14a..04b9e51 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5615,6 +5615,7 @@ qemuDomainObjStart(virConnectPtr conn,
+                                      managed_save);
+                 goto cleanup;
+             }
++            vm->hasManagedSave = false;
+         } else {
+             ret = qemuDomainObjRestore(conn, driver, vm, managed_save,
+                                        start_paused, bypass_cache);
+-- 
+1.8.2.1
+

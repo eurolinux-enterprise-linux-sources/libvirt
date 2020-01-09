@@ -1,0 +1,172 @@
+From b9e6a8c8d099af814fe89c36a4beef1f1a9a060d Mon Sep 17 00:00:00 2001
+Message-Id: <b9e6a8c8d099af814fe89c36a4beef1f1a9a060d@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Wed, 14 May 2014 16:12:28 +0200
+Subject: [PATCH] network: include plugged interface XML in "plugged" network
+ hook
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+The network hook script gets called whenever an interface is plugged
+into or unplugged from a network, but even though the full XML of both
+the network and the domain is included, there is no reasonable way to
+determine what exact resources the plugged interface is using:
+
+1) Prior to a recent patch which modified the status XML of interfaces
+to include the information about actual hardware resources used, it
+would be possible to scan through the domain XML output sent to the
+hook, and from there find the correct interface, but that interface
+definition would not include any runtime info (e.g. bandwidth or vlan
+taken from a portgroup, or which physdev was used in case of a macvtap
+network).
+
+2) After the patch modifying the status XML of interfaces, the network
+name would no longer be included in the domain XML, so it would be
+completely impossible to determine which interface was the one being
+plugged.
+
+To solve that problem, this patch includes a single <interface>
+element at the beginning of the XML sent to the network hook for
+"plugged" and "unplugged" (just inside <hookData>) that is the status
+XML of the interface being plugged. This XML will include all info
+gathered from the chosen network and portgroup.
+
+NB: due to hardcoded spaces in all of the device *Format() functions,
+the <interface> element inside the <hookData> will be indented by 6
+spaces rather than 2. I had intended to fix this, but it turns out
+that to make virDomainNetDefFormat() indentation relative, I would
+have to do the same to virDomainDeviceInfoFormat(), and that function
+is called from 19 places - making that a prerequisite of this patch
+would cause too many merge difficulties if we needed to backport
+network hooks, so I chose to ignore the problem here and fix the
+problem for *all* devices in a followup later.
+
+(cherry picked from commit 2122cf397965875d91b6e01b69dd157f4e79e737)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 48 ++++++++++++++++++++++++++++++---------------
+ 1 file changed, 32 insertions(+), 16 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 822a4b6..508c8b0 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -126,6 +126,7 @@ static struct network_driver *driverState = NULL;
+ static int
+ networkRunHook(virNetworkObjPtr network,
+                virDomainDefPtr dom,
++               virDomainNetDefPtr iface,
+                int op,
+                int sub_op)
+ {
+@@ -143,6 +144,8 @@ networkRunHook(virNetworkObjPtr network,
+ 
+         virBufferAddLit(&buf, "<hookData>\n");
+         virBufferAdjustIndent(&buf, 2);
++        if (iface && virDomainNetDefFormat(&buf, iface, 0) < 0)
++            goto cleanup;
+         if (virNetworkDefFormatBuf(&buf, network->def, 0) < 0)
+             goto cleanup;
+         if (dom && virDomainDefFormatInternal(dom, 0, &buf) < 0)
+@@ -2463,7 +2466,7 @@ networkStartNetwork(struct network_driver *driver,
+ 
+     /* Run an early hook to set-up missing devices.
+      * If the script raised an error abort the launch. */
+-    if (networkRunHook(network, NULL,
++    if (networkRunHook(network, NULL, NULL,
+                        VIR_HOOK_NETWORK_OP_START,
+                        VIR_HOOK_SUBOP_BEGIN) < 0)
+         goto cleanup;
+@@ -2488,7 +2491,7 @@ networkStartNetwork(struct network_driver *driver,
+     }
+ 
+     /* finally we can call the 'started' hook script if any */
+-    if (networkRunHook(network, NULL,
++    if (networkRunHook(network, NULL, NULL,
+                        VIR_HOOK_NETWORK_OP_STARTED,
+                        VIR_HOOK_SUBOP_BEGIN) < 0)
+         goto cleanup;
+@@ -2553,7 +2556,7 @@ static int networkShutdownNetwork(struct network_driver *driver,
+     }
+ 
+     /* now that we know it's stopped call the hook if present */
+-    networkRunHook(network, NULL, VIR_HOOK_NETWORK_OP_STOPPED,
++    networkRunHook(network, NULL, NULL, VIR_HOOK_NETWORK_OP_STOPPED,
+                    VIR_HOOK_SUBOP_END);
+ 
+     network->active = 0;
+@@ -3917,14 +3920,8 @@ validate:
+         }
+     }
+ 
+-    /* finally we can call the 'plugged' hook script if any */
+-    if (networkRunHook(network, dom,
+-                       VIR_HOOK_NETWORK_OP_IFACE_PLUGGED,
+-                       VIR_HOOK_SUBOP_BEGIN) < 0)
+-        goto error;
+-
+     if (dev) {
+-        /* we are now assured of success, so mark the allocation */
++        /* mark the allocation */
+         dev->connections++;
+         if (actualType != VIR_DOMAIN_NET_TYPE_HOSTDEV) {
+             VIR_DEBUG("Using physical device %s, %d connections",
+@@ -3942,6 +3939,19 @@ validate:
+         VIR_DEBUG("Using network %s, %d connections",
+                   netdef->name, netdef->connections);
+     }
++
++    /* finally we can call the 'plugged' hook script if any */
++    if (networkRunHook(network, dom, iface,
++                       VIR_HOOK_NETWORK_OP_IFACE_PLUGGED,
++                       VIR_HOOK_SUBOP_BEGIN) < 0) {
++        /* adjust for failure */
++        if (dev)
++            dev->connections--;
++        if (netdef)
++            netdef->connections--;
++        goto error;
++    }
++
+     ret = 0;
+ 
+ cleanup:
+@@ -4122,14 +4132,20 @@ networkNotifyActualDevice(virDomainDefPtr dom,
+     }
+ 
+ success:
+-    /* finally we can call the 'plugged' hook script if any */
+-    if (networkRunHook(network, dom, VIR_HOOK_NETWORK_OP_IFACE_PLUGGED,
+-                       VIR_HOOK_SUBOP_BEGIN) < 0)
+-        goto error;
+-
+     netdef->connections++;
+     VIR_DEBUG("Using network %s, %d connections",
+               netdef->name, netdef->connections);
++
++    /* finally we can call the 'plugged' hook script if any */
++    if (networkRunHook(network, dom, iface, VIR_HOOK_NETWORK_OP_IFACE_PLUGGED,
++                       VIR_HOOK_SUBOP_BEGIN) < 0) {
++        /* adjust for failure */
++        if (dev)
++            dev->connections--;
++        netdef->connections--;
++        goto error;
++    }
++
+     ret = 0;
+ cleanup:
+     if (network)
+@@ -4267,7 +4283,7 @@ success:
+     netdef->connections--;
+ 
+     /* finally we can call the 'unplugged' hook script if any */
+-    networkRunHook(network, dom, VIR_HOOK_NETWORK_OP_IFACE_UNPLUGGED,
++    networkRunHook(network, dom, iface, VIR_HOOK_NETWORK_OP_IFACE_UNPLUGGED,
+                    VIR_HOOK_SUBOP_BEGIN);
+ 
+     VIR_DEBUG("Releasing network %s, %d connections",
+-- 
+1.9.3
+

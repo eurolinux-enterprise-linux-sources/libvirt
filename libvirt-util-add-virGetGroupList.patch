@@ -1,0 +1,149 @@
+From 20cb874e5ce3fdb1bbaafd7170f4eb7ce9ad4b29 Mon Sep 17 00:00:00 2001
+Message-Id: <20cb874e5ce3fdb1bbaafd7170f4eb7ce9ad4b29.1376483448.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 23 Jul 2013 11:09:53 -0600
+Subject: [PATCH] util: add virGetGroupList
+
+https://bugzilla.redhat.com/show_bug.cgi?id=964359
+
+Since neither getpwuid_r() nor initgroups() are safe to call in
+between fork and exec (they obtain a mutex, but if some other
+thread in the parent also held the mutex at the time of the fork,
+the child will deadlock), we have to split out the functionality
+that is unsafe.  At least glibc's initgroups() uses getgrouplist
+under the hood, so the ideal split is to expose getgrouplist for
+use before a fork.  Gnulib already gives us a nice wrapper via
+mgetgroups; we wrap it once more to look up by uid instead of name.
+
+* bootstrap.conf (gnulib_modules): Add mgetgroups.
+* src/util/virutil.h (virGetGroupList): New declaration.
+* src/util/virutil.c (virGetGroupList): New function.
+* src/libvirt_private.syms (virutil.h): Export it.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 75c125641ac73473ba4b0542524d67a184769c8e)
+
+Conflicts:
+	bootstrap.conf - not updating gnulib submodule...
+	configure.ac - ...so checking for getgrouplist by hand...
+	src/util/virutil.c - ...and copying only the getgrouplist implementation rather than calling the gnulib function; also, file still named util.c
+	src/libvirt_private.syms - context
+---
+ configure.ac             |  2 +-
+ src/libvirt_private.syms |  1 +
+ src/util/util.c          | 60 ++++++++++++++++++++++++++++++++++++++++++++++++
+ src/util/util.h          |  2 ++
+ 4 files changed, 64 insertions(+), 1 deletion(-)
+
+diff --git a/configure.ac b/configure.ac
+index 22e3ade..52eb453 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -171,7 +171,7 @@ AC_CHECK_SIZEOF([long])
+ 
+ dnl Availability of various common functions (non-fatal if missing),
+ dnl and various less common threadsafe functions
+-AC_CHECK_FUNCS_ONCE([cfmakeraw geteuid getgid getgrnam_r getmntent_r \
++AC_CHECK_FUNCS_ONCE([cfmakeraw geteuid getgid getgrnam_r getgrouplist getmntent_r \
+   getpwuid_r getuid initgroups kill mmap newlocale posix_fallocate \
+   posix_memalign prlimit regexec sched_getaffinity setrlimit])
+ 
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index a842d8a..d03a777 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1288,6 +1288,7 @@ virFindFileInPath;
+ virGetDeviceID;
+ virGetDeviceUnprivSGIO;
+ virGetGroupID;
++virGetGroupList;
+ virGetGroupName;
+ virGetHostname;
+ virGetUnprivSGIOSysfsPath;
+diff --git a/src/util/util.c b/src/util/util.c
+index 3fbb9bf..982bbff 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -2705,6 +2705,66 @@ virGetGroupID(const char *group, gid_t *gid)
+     return 0;
+ }
+ 
++/* Compute the list of supplementary groups associated with @uid, and
++ * including @gid in the list (unless it is -1), storing a malloc'd
++ * result into @list.  Return the size of the list on success, or -1
++ * on failure with error reported and errno set. May not be called
++ * between fork and exec. */
++int
++virGetGroupList(uid_t uid, gid_t gid, gid_t **list)
++{
++    int ret = -1;
++    char *user = NULL;
++
++    *list = NULL;
++    if (uid == (uid_t)-1)
++        return 0;
++
++    if (virGetUserEnt(uid, &user,
++                      gid == (gid_t)-1 ? &gid : NULL, NULL) < 0)
++        return -1;
++
++# if HAVE_GETGROUPLIST
++    /* Borrowing from gnulib's LGPLv2+ mgetgroups.c as of July 2013. */
++    /* Avoid a bug in older glibc with size 0, by pre-allocating a
++     * list size and then enlarging if needed.  */
++    int max = 10;
++    if (VIR_ALLOC_N(*list, max) < 0)
++        goto no_memory;
++    while (1)
++    {
++        int ngroups;
++        int last = max;
++
++        ngroups = getgrouplist(user, gid, *list, &max);
++
++        /* Avoid a bug in Darwin where max is not increased.  */
++        if (ngroups < 0 && last == max)
++            max *= 2;
++        if (VIR_REALLOC_N(*list, max) < 0) {
++            VIR_FREE(*list);
++            goto no_memory;
++        }
++        if (0 <= ngroups) {
++            ret = ngroups;
++            break;
++        }
++    }
++# else
++    if (VIR_ALLOC_N(*list, 1) < 0)
++        goto no_memory;
++    (*list)[0] = gid;
++    ret = 1;
++# endif
++
++cleanup:
++    VIR_FREE(user);
++    return ret;
++no_memory:
++    virReportOOMError();
++    goto cleanup;
++}
++
+ /* Set the real and effective uid and gid to the given values, and call
+  * initgroups so that the process has all the assumed group membership of
+  * that uid. return 0 on success, -1 on failure (the original system error
+diff --git a/src/util/util.h b/src/util/util.h
+index 95f69a1..cf411b6 100644
+--- a/src/util/util.h
++++ b/src/util/util.h
+@@ -263,6 +263,8 @@ char *virGetUserCacheDirectory(void);
+ char *virGetUserRuntimeDirectory(void);
+ char *virGetUserName(uid_t uid);
+ char *virGetGroupName(gid_t gid);
++int virGetGroupList(uid_t uid, gid_t group, gid_t **groups)
++    ATTRIBUTE_NONNULL(3);
+ int virGetUserID(const char *name,
+                  uid_t *uid) ATTRIBUTE_RETURN_CHECK;
+ int virGetGroupID(const char *name,
+-- 
+1.8.3.2
+

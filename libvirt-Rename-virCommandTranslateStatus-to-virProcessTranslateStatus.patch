@@ -1,0 +1,140 @@
+From d5fa767fe47593a8ecd3be8544ae2f70abebabd8 Mon Sep 17 00:00:00 2001
+Message-Id: <d5fa767fe47593a8ecd3be8544ae2f70abebabd8.1379585483.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 12 Sep 2013 17:00:02 +0100
+Subject: [PATCH] Rename virCommandTranslateStatus to virProcessTranslateStatus
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1006266
+
+The virCommand prefix was inappropriate because the API
+does not use any virCommandPtr object instance. This
+API closely related to waitpid/exit, so use virProcess
+as the prefix
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 49ecf8b41fd1c606703d01792701ce46352b7669)
+---
+ daemon/remote.c          |  2 +-
+ src/libvirt_private.syms |  2 +-
+ src/util/command.c       | 16 ++++++++--------
+ src/util/command.h       |  2 +-
+ 4 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/daemon/remote.c b/daemon/remote.c
+index 715dca8..449e89e 100644
+--- a/daemon/remote.c
++++ b/daemon/remote.c
+@@ -2857,7 +2857,7 @@ remoteDispatchAuthPolkit(virNetServerPtr server ATTRIBUTE_UNUSED,
+ 
+     authdismissed = (pkout && strstr(pkout, "dismissed=true"));
+     if (status != 0) {
+-        char *tmp = virCommandTranslateStatus(status);
++        char *tmp = virProcessTranslateStatus(status);
+         VIR_ERROR(_("Policy kit denied action %s from pid %lld, uid %d: %s"),
+                   action, (long long) callerPid, callerUid, NULLSTR(tmp));
+         VIR_FREE(tmp);
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index ac5b099..9114ed2 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -167,7 +167,7 @@ virCommandSetPreExecHook;
+ virCommandSetWorkingDirectory;
+ virCommandToString;
+ virCommandTransferFD;
+-virCommandTranslateStatus;
++virProcessTranslateStatus;
+ virCommandWait;
+ virCommandWriteArgLog;
+ virFork;
+diff --git a/src/util/command.c b/src/util/command.c
+index 909c435..e7ef8e1 100644
+--- a/src/util/command.c
++++ b/src/util/command.c
+@@ -1716,7 +1716,7 @@ virCommandToString(virCommandPtr cmd)
+ 
+ 
+ /**
+- * virCommandTranslateStatus:
++ * virProcessTranslateStatus:
+  * @status: child exit status to translate
+  *
+  * Translate an exit status into a malloc'd string.  Generic helper
+@@ -1724,7 +1724,7 @@ virCommandToString(virCommandPtr cmd)
+  * status argument, as well as raw waitpid().
+  */
+ char *
+-virCommandTranslateStatus(int status)
++virProcessTranslateStatus(int status)
+ {
+     char *buf;
+     if (WIFEXITED(status)) {
+@@ -2061,7 +2061,7 @@ virCommandRun(virCommandPtr cmd, int *exitstatus)
+     if (virCommandWait(cmd, exitstatus) < 0)
+         ret = -1;
+ 
+-    str = (exitstatus ? virCommandTranslateStatus(*exitstatus)
++    str = (exitstatus ? virProcessTranslateStatus(*exitstatus)
+            : (char *) "status 0");
+     VIR_DEBUG("Result %s, stdout: '%s' stderr: '%s'",
+               NULLSTR(str),
+@@ -2323,7 +2323,7 @@ virProcessWait(pid_t pid, int *exitstatus)
+ 
+     if (exitstatus == NULL) {
+         if (status != 0) {
+-            char *st = virCommandTranslateStatus(status);
++            char *st = virProcessTranslateStatus(status);
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+                            _("Child process (%lld) unexpected %s"),
+                            (long long) pid, NULLSTR(st));
+@@ -2382,7 +2382,7 @@ virCommandWait(virCommandPtr cmd, int *exitstatus)
+         cmd->reap = false;
+         if (status) {
+             char *str = virCommandToString(cmd);
+-            char *st = virCommandTranslateStatus(status);
++            char *st = virProcessTranslateStatus(status);
+             bool haveErrMsg = cmd->errbuf && *cmd->errbuf && (*cmd->errbuf)[0];
+ 
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+@@ -2430,7 +2430,7 @@ virProcessAbort(pid_t pid)
+     while ((ret = waitpid(pid, &status, WNOHANG)) == -1 &&
+            errno == EINTR);
+     if (ret == pid) {
+-        tmp = virCommandTranslateStatus(status);
++        tmp = virProcessTranslateStatus(status);
+         VIR_DEBUG("process has ended: %s", tmp);
+         goto cleanup;
+     } else if (ret == 0) {
+@@ -2440,7 +2440,7 @@ virProcessAbort(pid_t pid)
+         while ((ret = waitpid(pid, &status, WNOHANG)) == -1 &&
+                errno == EINTR);
+         if (ret == pid) {
+-            tmp = virCommandTranslateStatus(status);
++            tmp = virProcessTranslateStatus(status);
+             VIR_DEBUG("process has ended: %s", tmp);
+             goto cleanup;
+         } else if (ret == 0) {
+@@ -2449,7 +2449,7 @@ virProcessAbort(pid_t pid)
+             while ((ret = waitpid(pid, &status, 0)) == -1 &&
+                    errno == EINTR);
+             if (ret == pid) {
+-                tmp = virCommandTranslateStatus(status);
++                tmp = virProcessTranslateStatus(status);
+                 VIR_DEBUG("process has ended: %s", tmp);
+                 goto cleanup;
+             }
+diff --git a/src/util/command.h b/src/util/command.h
+index 5b25ab0..68bedf7 100644
+--- a/src/util/command.h
++++ b/src/util/command.h
+@@ -145,7 +145,7 @@ void virCommandWriteArgLog(virCommandPtr cmd,
+ char *virCommandToString(virCommandPtr cmd) ATTRIBUTE_RETURN_CHECK;
+ 
+ 
+-char *virCommandTranslateStatus(int exitstatus) ATTRIBUTE_RETURN_CHECK;
++char *virProcessTranslateStatus(int exitstatus) ATTRIBUTE_RETURN_CHECK;
+ 
+ int virCommandExec(virCommandPtr cmd) ATTRIBUTE_RETURN_CHECK;
+ 
+-- 
+1.8.3.2
+

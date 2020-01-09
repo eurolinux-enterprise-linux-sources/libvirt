@@ -1,0 +1,34 @@
+From a66e30c5a60d4c7dd93d17c0210e9215e295ce6f Mon Sep 17 00:00:00 2001
+Message-Id: <a66e30c5a60d4c7dd93d17c0210e9215e295ce6f.1373271642.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 13 Jun 2013 11:12:19 +0200
+Subject: [PATCH] virsh: Fix docs for "virsh setmaxmem"
+
+https://bugzilla.redhat.com/show_bug.cgi?id=924648
+
+The docs assumed the command works always for QEMU and other
+hypervisors. As this is done using the balloon mechainism live increase
+of the maximum memory limit isn't supported. Fix the docs to mention
+this limitation.
+(cherry picked from commit b88831f75185bb5d9e1a8f389a3af0892990f072)
+---
+ tools/virsh.pod | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 2eb6941..4c561e7 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -1398,7 +1398,8 @@ Both I<--live> and I<--config> flags may be given, but I<--current> is
+ exclusive. If no flag is specified, behavior is different depending
+ on hypervisor.
+ 
+-This command works for at least the Xen, QEMU/KVM and vSphere/ESX hypervisors.
++Some hypervisors such as QEMU/KVM don't support live changes (especially
++increasing) of the maximum memory limit.
+ 
+ I<size> is a scaled integer (see B<NOTES> above); it defaults to kibibytes
+ (blocks of 1024 bytes) unless you provide a suffix (and the older option
+-- 
+1.8.2.1
+

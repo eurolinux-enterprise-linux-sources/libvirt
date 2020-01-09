@@ -1,0 +1,197 @@
+From 53c7c2830bd88079efe6b1a6fcc18fd02a4ab3d2 Mon Sep 17 00:00:00 2001
+Message-Id: <53c7c2830bd88079efe6b1a6fcc18fd02a4ab3d2@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Thu, 15 Oct 2015 11:09:14 +0200
+Subject: [PATCH] qemu: fix hotplugging cpus with strict memory pinning
+
+6.8: https://bugzilla.redhat.com/show_bug.cgi?id=1263263
+6.7.z: https://bugzilla.redhat.com/show_bug.cgi?id=1265970
+
+RHEL-only.
+
+A change in the kernel prohibits KVM from allocating memory for a new
+CPU when cpuset.mems do not include the right NUMA node. Work around it
+by temporarily relaxing cpuset.mems when needed.
+
+The upstream fix (commit e3435caf) requires leaving the cpuset.mems
+in the parent cgroup alone (commit af2a1f0). This downstream patch
+instead alters both the parent and the emulator cgroup to use all
+available NUMA nodes for the duration of plugging in the CPUs.
+
+Unlike upstream, it does not error out when the emulator cgroup is not
+found. It also includes the following upstream fixes for e3435caf:
+commit e105dc9 - for offline domains
+commit 0df2f04 - correctly end the job in the above fix
+commit 6cf1e11 - for hosts without NUMA
+commit 1439eb3 - for disabled cgroups
+Commit 4d1e394 freeing the saved error was not needed, since the
+downstream virCgroupSetCpusetMems APIs do not set an error.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 93 ++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 91 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 371dcbe..8bd2898 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -45,6 +45,9 @@
+ #include <sys/un.h>
+ #include <byteswap.h>
+ 
++/* RHEL-only: shamelessly assume numa_bitmask_isbitset availability */
++#define NUMA_VERSION1_COMPATIBILITY 1
++#include <numa.h>
+ 
+ #include "qemu_driver.h"
+ #include "qemu_agent.h"
+@@ -4008,7 +4011,8 @@ static void qemuProcessEventHandler(void *data, void *opaque)
+ 
+ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+                                    virDomainObjPtr vm,
+-                                   unsigned int nvcpus)
++                                   unsigned int nvcpus,
++                                   const char *mem_mask)
+ {
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     int i, rc = 1;
+@@ -4100,6 +4104,13 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+                     goto cleanup;
+                 }
+ 
++                if (mem_mask &&
++                    virCgroupSetCpusetMems(cgroup_vcpu, mem_mask) < 0) {
++                    virReportSystemError(-rc, _("Failed to set cpuset.mems to %s"),
++                                         mem_mask);
++                    goto cleanup;
++                }
++
+                 /* Add vcpu thread to the cgroup */
+                 rv = virCgroupAddTask(cgroup_vcpu, cpupids[i]);
+                 if (rv < 0) {
+@@ -4267,6 +4278,40 @@ qemuDomainPrepareAgentVCPUs(unsigned int nvcpus,
+ }
+ 
+ 
++static virBitmapPtr
++qemuDomainNumaGetHostNodeset(void)
++{
++    int maxnode = numa_max_node();
++    size_t i = 0;
++    virBitmapPtr nodeset = NULL;
++
++    if (maxnode < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("Unable to get max numa node"));
++        return NULL;
++    }
++
++    if (!(nodeset = virBitmapNew(maxnode + 1))) {
++        virReportOOMError();
++        return NULL;
++    }
++
++    for (i = 0; i <= maxnode; i++) {
++        if (!numa_bitmask_isbitset(numa_nodes_ptr, i))
++            continue;
++
++        if (virBitmapSetBit(nodeset, i) < 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("Problem setting bit in bitmap"));
++            virBitmapFree(nodeset);
++            return NULL;
++        }
++    }
++
++    return nodeset;
++}
++
++
+ static int
+ qemuDomainSetVcpusFlags(virDomainPtr dom, unsigned int nvcpus,
+                         unsigned int flags)
+@@ -4281,6 +4326,12 @@ qemuDomainSetVcpusFlags(virDomainPtr dom, unsigned int nvcpus,
+     qemuAgentCPUInfoPtr cpuinfo = NULL;
+     int ncpuinfo;
+     qemuDomainObjPrivatePtr priv;
++    virCgroupPtr parent_cgroup = NULL, emulator_cgroup = NULL;
++    char *parent_mem_mask = NULL;
++    char *emulator_mem_mask = NULL;
++    char *all_nodes_str = NULL;
++    virBitmapPtr all_nodes = NULL;
++    int rc;
+ 
+     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                   VIR_DOMAIN_AFFECT_CONFIG |
+@@ -4317,6 +4368,34 @@ qemuDomainSetVcpusFlags(virDomainPtr dom, unsigned int nvcpus,
+                                         &persistentDef) < 0)
+         goto endjob;
+ 
++    /* RHEL-only, assumes we compile with NUMA */
++    if (flags & VIR_DOMAIN_AFFECT_LIVE && !(flags & VIR_DOMAIN_VCPU_GUEST) &&
++        numa_available() != -1 &&
++        qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_CPUSET) &&
++        virCgroupForDomain(driver->cgroup, vm->def->name, &parent_cgroup, 0) == 0 &&
++        virCgroupForEmulator(parent_cgroup, &emulator_cgroup, 0) == 0) {
++        if (!(all_nodes = qemuDomainNumaGetHostNodeset()))
++            goto endjob;
++
++        if (!(all_nodes_str = virBitmapFormat(all_nodes))) {
++            virReportOOMError();
++            goto endjob;
++        }
++
++        if ((rc = virCgroupGetCpusetMems(parent_cgroup, &parent_mem_mask)) < 0 ||
++            (rc = virCgroupGetCpusetMems(emulator_cgroup, &emulator_mem_mask)) < 0) {
++            virReportSystemError(-rc, "%s", _("unable to read cpuset.mems"));
++            goto endjob;
++        }
++
++        if ((rc = virCgroupSetCpusetMems(parent_cgroup, all_nodes_str)) < 0 ||
++            (rc = virCgroupSetCpusetMems(emulator_cgroup, all_nodes_str)) < 0) {
++            virReportSystemError(-rc, _("Failed to set cpuset.mems to %s"),
++                                 all_nodes_str);
++            goto endjob;
++        }
++    }
++
+     /* MAXIMUM cannot be mixed with LIVE.  */
+     if (maximum && (flags & VIR_DOMAIN_AFFECT_LIVE)) {
+         virReportError(VIR_ERR_INVALID_ARG, "%s",
+@@ -4403,7 +4482,7 @@ qemuDomainSetVcpusFlags(virDomainPtr dom, unsigned int nvcpus,
+         }
+     } else {
+         if (flags & VIR_DOMAIN_AFFECT_LIVE) {
+-            if (qemudDomainHotplugVcpus(driver, vm, nvcpus) < 0)
++            if (qemudDomainHotplugVcpus(driver, vm, nvcpus, parent_mem_mask) < 0)
+                 goto endjob;
+ 
+             if (virDomainSaveStatus(driver->caps, driver->stateDir, vm) < 0)
+@@ -4427,6 +4506,10 @@ qemuDomainSetVcpusFlags(virDomainPtr dom, unsigned int nvcpus,
+     ret = 0;
+ 
+ endjob:
++    if (emulator_mem_mask) {
++        virCgroupSetCpusetMems(emulator_cgroup, emulator_mem_mask);
++        virCgroupSetCpusetMems(parent_cgroup, parent_mem_mask);
++    }
+     if (qemuDomainObjEndJob(driver, vm) == 0)
+         vm = NULL;
+ 
+@@ -4434,6 +4517,12 @@ cleanup:
+     if (vm)
+         virDomainObjUnlock(vm);
+     VIR_FREE(cpuinfo);
++    VIR_FREE(parent_mem_mask);
++    VIR_FREE(emulator_mem_mask);
++    VIR_FREE(all_nodes_str);
++    virBitmapFree(all_nodes);
++    virCgroupFree(&emulator_cgroup);
++    virCgroupFree(&parent_cgroup);
+     return ret;
+ }
+ 
+-- 
+2.6.2
+

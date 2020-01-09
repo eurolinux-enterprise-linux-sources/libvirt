@@ -1,0 +1,86 @@
+From 1c985a86c6f4922cdb039cf4cbb265015af55b6d Mon Sep 17 00:00:00 2001
+Message-Id: <1c985a86c6f4922cdb039cf4cbb265015af55b6d@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 27 Sep 2016 13:45:56 +0200
+Subject: [PATCH] configure: allow setting default TLS priority string
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1333415
+
+Currently libvirt calls gnutls_set_default_priority()
+which on old systems resolves to "NORMAL" while new
+systems it resolves to "@SYSTEM". Either way, this
+is a global default that is identical across all apps.
+
+We want to allow distros to flexibility to define a
+custom default string for libvirt priority, so add
+a --tls-priority=STRING  flag to configure to enable
+this to be set.
+
+It is expected that distros would use this when creating
+RPM/Deb/etc packages, according to their preferred crypto
+handling policies.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit cbb2e91ecc56d218ca20c1a9ba345eaf754d6c5d)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+Conflicts:
+	configure.ac - different fields in configure summary
+---
+ configure.ac               | 11 +++++++++++
+ src/rpc/virnettlscontext.c |  6 +++---
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index fb6e404..271132a 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1292,6 +1292,16 @@ fi
+ AM_CONDITIONAL([HAVE_DBUS], [test "$have_dbus" = "yes"])
+ 
+ 
++AC_ARG_WITH([tls-priority],
++  [AS_HELP_STRING([--with-tls-priority],
++    [set the default TLS session priority string @<:@default=NORMAL@:>@])],
++  [],
++  [with_tls_priority=NORMAL])
++
++AC_DEFINE_UNQUOTED([TLS_PRIORITY], ["$with_tls_priority"],
++		   [TLS default priority string])
++
++
+ dnl PolicyKit library
+ POLKIT_CFLAGS=
+ POLKIT_LIBS=
+@@ -3277,6 +3287,7 @@ AC_MSG_NOTICE([        numad: $with_numad])
+ AC_MSG_NOTICE([  XML Catalog: $XML_CATALOG_FILE])
+ AC_MSG_NOTICE([  Init script: $with_init_script])
+ AC_MSG_NOTICE([Console locks: $with_console_lock_files])
++AC_MSG_NOTICE([      TLS priority: $with_tls_priority])
+ AC_MSG_NOTICE([])
+ AC_MSG_NOTICE([Privileges])
+ AC_MSG_NOTICE([])
+diff --git a/src/rpc/virnettlscontext.c b/src/rpc/virnettlscontext.c
+index 4768fec..c8730f1 100644
+--- a/src/rpc/virnettlscontext.c
++++ b/src/rpc/virnettlscontext.c
+@@ -1214,10 +1214,10 @@ virNetTLSSessionPtr virNetTLSSessionNew(virNetTLSContextPtr ctxt,
+     /* avoid calling all the priority functions, since the defaults
+      * are adequate.
+      */
+-    if ((err = gnutls_set_default_priority(sess->session)) != 0) {
++    if ((err = gnutls_priority_set_direct(sess->session, TLS_PRIORITY, NULL)) != 0) {
+         virReportError(VIR_ERR_SYSTEM_ERROR,
+-                       _("Failed to set TLS session priority %s"),
+-                       gnutls_strerror(err));
++                       _("Failed to set TLS session priority to %s: %s"),
++                       TLS_PRIORITY, gnutls_strerror(err));
+         goto error;
+     }
+ 
+-- 
+2.10.1
+

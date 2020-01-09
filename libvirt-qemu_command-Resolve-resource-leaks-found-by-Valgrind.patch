@@ -1,0 +1,187 @@
+From 5259368bb3dda94f02e5541aa133ca1bb64e9abe Mon Sep 17 00:00:00 2001
+Message-Id: <5259368bb3dda94f02e5541aa133ca1bb64e9abe.1373271640.git.jdenemar@redhat.com>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 14 Mar 2013 11:19:13 -0400
+Subject: [PATCH] qemu_command: Resolve resource leaks found by Valgrind
+
+https://bugzilla.redhat.com/show_bug.cgi?id=906299
+
+(cherry picked from commit 890b6b351f2efee3dd2462eeed305416367399a8)
+---
+ src/qemu/qemu_command.c | 52 +++++++++++++++++++++++--------------------------
+ 1 file changed, 24 insertions(+), 28 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 6ea239b..83c5efb 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -5053,6 +5053,7 @@ qemuBuildCommandLine(virConnectPtr conn,
+                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                                _("reboot timeout is not supported "
+                                  "by this QEMU binary"));
++                virBufferFreeAndReset(&boot_buf);
+                 goto error;
+             }
+ 
+@@ -5070,9 +5071,11 @@ qemuBuildCommandLine(virConnectPtr conn,
+             if (boot_nparams < 2 || emitBootindex) {
+                 virCommandAddArgBuffer(cmd, &boot_buf);
+             } else {
++                char *str = virBufferContentAndReset(&boot_buf);
+                 virCommandAddArgFormat(cmd,
+                                        "order=%s",
+-                                       virBufferContentAndReset(&boot_buf));
++                                       str);
++                VIR_FREE(str);
+             }
+         }
+ 
+@@ -7063,24 +7066,23 @@ qemuParseCommandLineDisk(virCapsPtr caps,
+                         virReportError(VIR_ERR_INTERNAL_ERROR,
+                                        _("cannot parse nbd filename '%s'"),
+                                        def->src);
+-                        def = NULL;
+-                        goto cleanup;
++                        goto error;
+                     }
+                     *port++ = '\0';
+                     if (VIR_ALLOC(def->hosts) < 0) {
+                         virReportOOMError();
+-                        goto cleanup;
++                        goto error;
+                     }
+                     def->nhosts = 1;
+                     def->hosts->name = strdup(host);
+                     if (!def->hosts->name) {
+                         virReportOOMError();
+-                        goto cleanup;
++                        goto error;
+                     }
+                     def->hosts->port = strdup(port);
+                     if (!def->hosts->port) {
+                         virReportOOMError();
+-                        goto cleanup;
++                        goto error;
+                     }
+ 
+                     VIR_FREE(def->src);
+@@ -7093,7 +7095,7 @@ qemuParseCommandLineDisk(virCapsPtr caps,
+                     def->src = strdup(p + strlen("rbd:"));
+                     if (!def->src) {
+                         virReportOOMError();
+-                        goto cleanup;
++                        goto error;
+                     }
+                     /* old-style CEPH_ARGS env variable is parsed later */
+                     if (!old_style_ceph_args && qemuParseRBDString(def) < 0)
+@@ -7109,7 +7111,7 @@ qemuParseCommandLineDisk(virCapsPtr caps,
+                     def->src = strdup(p + strlen("sheepdog:"));
+                     if (!def->src) {
+                         virReportOOMError();
+-                        goto cleanup;
++                        goto error;
+                     }
+ 
+                     /* def->src must be [vdiname] or [host]:[port]:[vdiname] */
+@@ -7121,24 +7123,24 @@ qemuParseCommandLineDisk(virCapsPtr caps,
+                             def = NULL;
+                             virReportError(VIR_ERR_INTERNAL_ERROR,
+                                            _("cannot parse sheepdog filename '%s'"), p);
+-                            goto cleanup;
++                            goto error;
+                         }
+                         *vdi++ = '\0';
+                         if (VIR_ALLOC(def->hosts) < 0) {
+                             virReportOOMError();
+-                            goto cleanup;
++                            goto error;
+                         }
+                         def->nhosts = 1;
+                         def->hosts->name = def->src;
+                         def->hosts->port = strdup(port);
+                         if (!def->hosts->port) {
+                             virReportOOMError();
+-                            goto cleanup;
++                            goto error;
+                         }
+                         def->src = strdup(vdi);
+                         if (!def->src) {
+                             virReportOOMError();
+-                            goto cleanup;
++                            goto error;
+                         }
+                     }
+ 
+@@ -7166,13 +7168,10 @@ qemuParseCommandLineDisk(virCapsPtr caps,
+         } else if (STREQ(keywords[i], "format")) {
+             def->driverName = strdup("qemu");
+             if (!def->driverName) {
+-                virDomainDiskDefFree(def);
+-                def = NULL;
+                 virReportOOMError();
+-                goto cleanup;
++                goto error;
+             }
+             def->format = virStorageFileFormatTypeFromString(values[i]);
+-            values[i] = NULL;
+         } else if (STREQ(keywords[i], "cache")) {
+             if (STREQ(values[i], "off") ||
+                 STREQ(values[i], "none"))
+@@ -7204,27 +7203,21 @@ qemuParseCommandLineDisk(virCapsPtr caps,
+                 def->rerror_policy = VIR_DOMAIN_DISK_ERROR_POLICY_IGNORE;
+         } else if (STREQ(keywords[i], "index")) {
+             if (virStrToLong_i(values[i], NULL, 10, &idx) < 0) {
+-                virDomainDiskDefFree(def);
+-                def = NULL;
+                 virReportError(VIR_ERR_INTERNAL_ERROR,
+                                _("cannot parse drive index '%s'"), val);
+-                goto cleanup;
++                goto error;
+             }
+         } else if (STREQ(keywords[i], "bus")) {
+             if (virStrToLong_i(values[i], NULL, 10, &busid) < 0) {
+-                virDomainDiskDefFree(def);
+-                def = NULL;
+                 virReportError(VIR_ERR_INTERNAL_ERROR,
+                                _("cannot parse drive bus '%s'"), val);
+-                goto cleanup;
++                goto error;
+             }
+         } else if (STREQ(keywords[i], "unit")) {
+             if (virStrToLong_i(values[i], NULL, 10, &unitid) < 0) {
+-                virDomainDiskDefFree(def);
+-                def = NULL;
+                 virReportError(VIR_ERR_INTERNAL_ERROR,
+                                _("cannot parse drive unit '%s'"), val);
+-                goto cleanup;
++                goto error;
+             }
+         } else if (STREQ(keywords[i], "readonly")) {
+             if ((values[i] == NULL) || STREQ(values[i], "on"))
+@@ -7332,10 +7325,8 @@ qemuParseCommandLineDisk(virCapsPtr caps,
+     }
+ 
+     if (!def->dst) {
+-        virDomainDiskDefFree(def);
+-        def = NULL;
+         virReportOOMError();
+-        goto cleanup;
++        goto error;
+     }
+     if (STREQ(def->dst, "xvda"))
+         def->dst[3] = 'a' + idx;
+@@ -7358,6 +7349,11 @@ cleanup:
+     VIR_FREE(keywords);
+     VIR_FREE(values);
+     return def;
++
++error:
++    virDomainDiskDefFree(def);
++    def = NULL;
++    goto cleanup;
+ }
+ 
+ /*
+-- 
+1.8.2.1
+

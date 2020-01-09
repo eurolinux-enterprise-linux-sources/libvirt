@@ -1,0 +1,38 @@
+From 298da36f2db1716cd0317113379f3e9b2577388d Mon Sep 17 00:00:00 2001
+Message-Id: <298da36f2db1716cd0317113379f3e9b2577388d.1349722366.git.jdenemar@redhat.com>
+From: Kyle Mestery <kmestery@cisco.com>
+Date: Mon, 8 Oct 2012 12:08:55 -0400
+Subject: [PATCH] Correct checking of virStrcpyStatic() return value
+
+This patch resolves:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=864122
+
+(cherry picked from upstream commit
+83aebf6de4e2902c621edcba65de1d1556bee454 with no conflicts)
+
+Correct the check for the return value of virStrcpyStatic()
+when copying port-profile names. Fixes Open vSwitch ports
+which utilize port-profiles from network definitions.
+
+Signed-off-by: Kyle Mestery <kmestery@cisco.com>
+---
+ src/util/virnetdevvportprofile.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/util/virnetdevvportprofile.c b/src/util/virnetdevvportprofile.c
+index d774fb1..ac7aa5f 100644
+--- a/src/util/virnetdevvportprofile.c
++++ b/src/util/virnetdevvportprofile.c
+@@ -374,7 +374,7 @@ virNetDevVPortProfileMerge(virNetDevVPortProfilePtr orig,
+                            orig->profileID, mods->profileID);
+             return -1;
+         }
+-        if (virStrcpyStatic(orig->profileID, mods->profileID)) {
++        if (virStrcpyStatic(orig->profileID, mods->profileID) == NULL) {
+             /* this should never happen - it indicates mods->profileID
+              * isn't properly null terminated. */
+             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-- 
+1.7.12
+

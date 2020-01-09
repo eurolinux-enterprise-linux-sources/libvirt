@@ -1,0 +1,34 @@
+From 49ffa8175f1fe80ef21a6e4214f00656bcd911cd Mon Sep 17 00:00:00 2001
+Message-Id: <49ffa8175f1fe80ef21a6e4214f00656bcd911cd@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Tue, 6 May 2014 11:09:05 +0200
+Subject: [PATCH] qemu_caps: detect if qemu can disable file transfer for spice
+
+https://bugzilla.redhat.com/show_bug.cgi?id=983018
+
+RHEL-only
+
+Enable the capability if it's supported by qemu-kvm.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 3875a41..c6fd395 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -980,6 +980,8 @@ qemuCapsComputeCmdFlags(const char *help,
+         qemuCapsSet(caps, QEMU_CAPS_SPICE);
+     if (strstr(help, "seamless-migration="))
+         qemuCapsSet(caps, QEMU_CAPS_SEAMLESS_MIGRATION);
++    if (strstr(help, "disable-agent-file-xfer"))
++        qemuCapsSet(caps, QEMU_CAPS_SPICE_FILE_XFER_DISABLE);
+     if (strstr(help, "boot=on"))
+         qemuCapsSet(caps, QEMU_CAPS_DRIVE_BOOT);
+     if (strstr(help, "serial=s"))
+-- 
+1.9.2
+

@@ -1,0 +1,341 @@
+From 3e099bb9cab088102b76bf00e4ab28b6cd845616 Mon Sep 17 00:00:00 2001
+Message-Id: <3e099bb9cab088102b76bf00e4ab28b6cd845616@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 9 Jul 2013 23:43:22 +0200
+Subject: [PATCH] qemu: Separate disk device removal into a standalone function
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit a22ae222eeb4a764d6d791a06c6368e38a41d720)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_driver.c,
+	src/qemu/qemu_hotplug.c,
+	src/qemu/qemu_hotplug.h: no size_t changes; old spelling of
+	    virQEMUDriverPtr; slightly different cgroup APIs; missing
+	    aeda1ff1
+---
+ src/qemu/qemu_driver.c  |  33 +++++++---
+ src/qemu/qemu_hotplug.c | 161 ++++++++++++++++--------------------------------
+ src/qemu/qemu_hotplug.h |   4 +-
+ 3 files changed, 82 insertions(+), 116 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 8d4d808..dd1f73a 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -6561,22 +6561,44 @@ qemuDomainAttachDeviceLive(virDomainObjPtr vm,
+ }
+ 
+ static int
++qemuFindDisk(virDomainDefPtr def, const char *dst)
++{
++    int i;
++
++    for (i = 0; i < def->ndisks; i++) {
++        if (STREQ(def->disks[i]->dst, dst)) {
++            return i;
++        }
++    }
++
++    return -1;
++}
++
++static int
+ qemuDomainDetachDeviceDiskLive(struct qemud_driver *driver,
+                                virDomainObjPtr vm,
+                                virDomainDeviceDefPtr dev)
+ {
+-    virDomainDiskDefPtr disk = dev->data.disk;
++    virDomainDiskDefPtr disk;
+     int ret = -1;
++    int idx;
++
++    if ((idx = qemuFindDisk(vm->def, dev->data.disk->dst)) < 0) {
++        virReportError(VIR_ERR_OPERATION_FAILED,
++                       _("disk %s not found"), dev->data.disk->dst);
++        return -1;
++    }
++    disk = vm->def->disks[idx];
+ 
+     switch (disk->device) {
+     case VIR_DOMAIN_DISK_DEVICE_DISK:
+     case VIR_DOMAIN_DISK_DEVICE_LUN:
+         if (disk->bus == VIR_DOMAIN_DISK_BUS_VIRTIO)
+-            ret = qemuDomainDetachPciDiskDevice(driver, vm, dev);
++            ret = qemuDomainDetachPciDiskDevice(driver, vm, disk);
+         else if (disk->bus == VIR_DOMAIN_DISK_BUS_SCSI)
+-            ret = qemuDomainDetachDiskDevice(driver, vm, dev);
++            ret = qemuDomainDetachDiskDevice(driver, vm, disk);
+         else if (dev->data.disk->bus == VIR_DOMAIN_DISK_BUS_USB)
+-            ret = qemuDomainDetachDiskDevice(driver, vm, dev);
++            ret = qemuDomainDetachDiskDevice(driver, vm, disk);
+         else
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                            _("This type of disk cannot be hot unplugged"));
+@@ -6588,9 +6610,6 @@ qemuDomainDetachDeviceDiskLive(struct qemud_driver *driver,
+         break;
+     }
+ 
+-    if (ret == 0)
+-        ignore_value(qemuRemoveSharedDisk(driver->sharedDisks, disk, vm->def->name));
+-
+     return ret;
+ }
+ 
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 7785700..4121822 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1890,19 +1890,6 @@ qemuDomainChangeGraphics(struct qemud_driver *driver,
+ }
+ 
+ 
+-static inline int qemuFindDisk(virDomainDefPtr def, const char *dst)
+-{
+-    int i;
+-
+-    for (i = 0 ; i < def->ndisks ; i++) {
+-        if (STREQ(def->disks[i]->dst, dst)) {
+-            return i;
+-        }
+-    }
+-
+-    return -1;
+-}
+-
+ static int qemuComparePCIDevice(virDomainDefPtr def ATTRIBUTE_UNUSED,
+                                 virDomainDeviceDefPtr device ATTRIBUTE_UNUSED,
+                                 virDomainDeviceInfoPtr info1,
+@@ -1929,42 +1916,67 @@ static bool qemuIsMultiFunctionDevice(virDomainDefPtr def,
+ }
+ 
+ 
++static void
++qemuDomainRemoveDiskDevice(struct qemud_driver *driver,
++                           virDomainObjPtr vm,
++                           virDomainDiskDefPtr disk)
++{
++    size_t i;
++
++    VIR_DEBUG("Removing disk %s from domain %p %s",
++              disk->info.alias, vm, vm->def->name);
++
++    virDomainAuditDisk(vm, disk->src, NULL, "detach", true);
++
++    for (i = 0; i < vm->def->ndisks; i++) {
++        if (vm->def->disks[i] == disk) {
++            virDomainDiskRemove(vm->def, i);
++            break;
++        }
++    }
++
++    qemuDomainReleaseDeviceAddress(vm, &disk->info, disk->src);
++
++    if (virSecurityManagerRestoreImageLabel(driver->securityManager,
++                                            vm->def, disk) < 0)
++        VIR_WARN("Unable to restore security label on %s", disk->src);
++
++    if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_DEVICES)) {
++        virCgroupPtr cgroup = NULL;
++
++        if (virCgroupForDomain(driver->cgroup, vm->def->name, &cgroup, 0) != 0)
++            VIR_WARN("Unable to find cgroup for %s", vm->def->name);
++
++        if (cgroup && qemuTeardownDiskCgroup(vm, cgroup, disk) < 0)
++            VIR_WARN("Failed to tear down cgroup for disk path %s", disk->src);
++
++        virCgroupFree(&cgroup);
++    }
++
++    if (virDomainLockDiskDetach(driver->lockManager, vm, disk) < 0)
++        VIR_WARN("Unable to release lock on %s", disk->src);
++
++    ignore_value(qemuRemoveSharedDisk(driver->sharedDisks, disk, vm->def->name));
++
++    virDomainDiskDefFree(disk);
++}
++
++
+ int qemuDomainDetachPciDiskDevice(struct qemud_driver *driver,
+                                   virDomainObjPtr vm,
+-                                  virDomainDeviceDefPtr dev)
++                                  virDomainDiskDefPtr detach)
+ {
+-    int i, ret = -1;
+-    virDomainDiskDefPtr detach = NULL;
++    int ret = -1;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+-    virCgroupPtr cgroup = NULL;
+     char *drivestr = NULL;
+ 
+-    i = qemuFindDisk(vm->def, dev->data.disk->dst);
+-
+-    if (i < 0) {
+-        virReportError(VIR_ERR_OPERATION_FAILED,
+-                       _("disk %s not found"), dev->data.disk->dst);
+-        goto cleanup;
+-    }
+-
+-    detach = vm->def->disks[i];
+-
+     if (qemuIsMultiFunctionDevice(vm->def, &detach->info)) {
+         virReportError(VIR_ERR_OPERATION_FAILED,
+                        _("cannot hot unplug multifunction PCI device: %s"),
+-                       dev->data.disk->dst);
++                       detach->dst);
+         goto cleanup;
+     }
+ 
+-    if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_DEVICES)) {
+-        if (virCgroupForDomain(driver->cgroup, vm->def->name, &cgroup, 0) != 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("Unable to find cgroup for %s"),
+-                           vm->def->name);
+-            goto cleanup;
+-        }
+-    }
+-
+     if (!virDomainDeviceAddressIsValid(&detach->info,
+                                        VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI)) {
+         virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+@@ -2001,64 +2013,29 @@ int qemuDomainDetachPciDiskDevice(struct qemud_driver *driver,
+ 
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+ 
+-    virDomainAuditDisk(vm, detach->src, NULL, "detach", true);
+-
+-    qemuDomainReleaseDeviceAddress(vm, &detach->info, dev->data.disk->src);
+-
+-    virDomainDiskRemove(vm->def, i);
+-
+-    dev->data.disk->backingChain = detach->backingChain;
+-    detach->backingChain = NULL;
+-    virDomainDiskDefFree(detach);
+-
+-    if (virSecurityManagerRestoreImageLabel(driver->securityManager,
+-                                            vm->def, dev->data.disk) < 0)
+-        VIR_WARN("Unable to restore security label on %s", dev->data.disk->src);
+-
+-    if (cgroup != NULL) {
+-        if (qemuTeardownDiskCgroup(vm, cgroup, dev->data.disk) < 0)
+-            VIR_WARN("Failed to teardown cgroup for disk path %s",
+-                     NULLSTR(dev->data.disk->src));
+-    }
+-
+-    if (virDomainLockDiskDetach(driver->lockManager, vm, dev->data.disk) < 0)
+-        VIR_WARN("Unable to release lock on %s", dev->data.disk->src);
+-
++    qemuDomainRemoveDiskDevice(driver, vm, detach);
+     ret = 0;
+ 
+ cleanup:
+-    virCgroupFree(&cgroup);
+     VIR_FREE(drivestr);
+     return ret;
+ }
+ 
+ int qemuDomainDetachDiskDevice(struct qemud_driver *driver,
+                                virDomainObjPtr vm,
+-                               virDomainDeviceDefPtr dev)
++                               virDomainDiskDefPtr detach)
+ {
+-    int i, ret = -1;
+-    virDomainDiskDefPtr detach = NULL;
++    int ret = -1;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+-    virCgroupPtr cgroup = NULL;
+     char *drivestr = NULL;
+ 
+-    i = qemuFindDisk(vm->def, dev->data.disk->dst);
+-
+-    if (i < 0) {
+-        virReportError(VIR_ERR_OPERATION_FAILED,
+-                       _("disk %s not found"), dev->data.disk->dst);
+-        goto cleanup;
+-    }
+-
+     if (!qemuCapsGet(priv->caps, QEMU_CAPS_DEVICE)) {
+         virReportError(VIR_ERR_OPERATION_FAILED,
+                        _("Underlying qemu does not support %s disk removal"),
+-                       virDomainDiskBusTypeToString(dev->data.disk->bus));
++                       virDomainDiskBusTypeToString(detach->bus));
+         goto cleanup;
+     }
+ 
+-    detach = vm->def->disks[i];
+-
+     if (detach->mirror) {
+         virReportError(VIR_ERR_BLOCK_COPY_ACTIVE,
+                        _("disk '%s' is in an active block copy job"),
+@@ -2066,15 +2043,6 @@ int qemuDomainDetachDiskDevice(struct qemud_driver *driver,
+         goto cleanup;
+     }
+ 
+-    if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_DEVICES)) {
+-        if (virCgroupForDomain(driver->cgroup, vm->def->name, &cgroup, 0) != 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("Unable to find cgroup for %s"),
+-                           vm->def->name);
+-            goto cleanup;
+-        }
+-    }
+-
+     /* build the actual drive id string as the disk->info.alias doesn't
+      * contain the QEMU_DRIVE_HOST_PREFIX that is passed to qemu */
+     if (virAsprintf(&drivestr, "%s%s",
+@@ -2095,32 +2063,11 @@ int qemuDomainDetachDiskDevice(struct qemud_driver *driver,
+ 
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+ 
+-    virDomainAuditDisk(vm, detach->src, NULL, "detach", true);
+-
+-    virDomainDiskRemove(vm->def, i);
+-
+-    dev->data.disk->backingChain = detach->backingChain;
+-    detach->backingChain = NULL;
+-    virDomainDiskDefFree(detach);
+-
+-    if (virSecurityManagerRestoreImageLabel(driver->securityManager,
+-                                            vm->def, dev->data.disk) < 0)
+-        VIR_WARN("Unable to restore security label on %s", dev->data.disk->src);
+-
+-    if (cgroup != NULL) {
+-        if (qemuTeardownDiskCgroup(vm, cgroup, dev->data.disk) < 0)
+-            VIR_WARN("Failed to teardown cgroup for disk path %s",
+-                     NULLSTR(dev->data.disk->src));
+-    }
+-
+-    if (virDomainLockDiskDetach(driver->lockManager, vm, dev->data.disk) < 0)
+-        VIR_WARN("Unable to release lock on disk %s", dev->data.disk->src);
+-
++    qemuDomainRemoveDiskDevice(driver, vm, detach);
+     ret = 0;
+ 
+ cleanup:
+     VIR_FREE(drivestr);
+-    virCgroupFree(&cgroup);
+     return ret;
+ }
+ 
+diff --git a/src/qemu/qemu_hotplug.h b/src/qemu/qemu_hotplug.h
+index 92dcae2..ab6f7da 100644
+--- a/src/qemu/qemu_hotplug.h
++++ b/src/qemu/qemu_hotplug.h
+@@ -85,10 +85,10 @@ int qemuDomainChangeNetLinkState(struct qemud_driver *driver,
+                                  int linkstate);
+ int qemuDomainDetachPciDiskDevice(struct qemud_driver *driver,
+                                   virDomainObjPtr vm,
+-                                  virDomainDeviceDefPtr dev);
++                                  virDomainDiskDefPtr disk);
+ int qemuDomainDetachDiskDevice(struct qemud_driver *driver,
+                                virDomainObjPtr vm,
+-                               virDomainDeviceDefPtr dev);
++                               virDomainDiskDefPtr disk);
+ int qemuDomainDetachPciControllerDevice(struct qemud_driver *driver,
+                                         virDomainObjPtr vm,
+                                         virDomainDeviceDefPtr dev);
+-- 
+2.0.0
+

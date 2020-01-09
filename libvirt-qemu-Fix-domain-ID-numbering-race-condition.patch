@@ -1,0 +1,97 @@
+From db188d70b42c79843942fd869b40d69236308a0e Mon Sep 17 00:00:00 2001
+Message-Id: <db188d70b42c79843942fd869b40d69236308a0e.1352726475.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 9 Nov 2012 00:19:05 +0100
+Subject: [PATCH] qemu: Fix domain ID numbering race condition
+
+https://bugzilla.redhat.com/show_bug.cgi?id=874330
+
+When the libvirt daemon is restarted it tries to reconnect to running
+qemu domains. Since commit d38897a5d4b1880e1998394b2a37bba979bbdff1 the
+re-connection code runs in separate threads. In the original
+implementation the maximum of domain ID's (that is used as an
+initializer for numbering guests created next) while libvirt was
+reconnecting to the guest.
+
+With the threaded implementation this opens a possibility for race
+conditions with the thread that is autostarting guests. When there's a
+guest running with id 1 and the daemon is restarted. The autostart code
+is reached first and spawns the first guest that should be autostarted
+as id 1. This results into the following unwanted situation:
+
+ # virsh list
+   Id    Name                           State
+  ----------------------------------------------------
+   1     guest1                         running
+   1     guest2                         running
+
+This patch extracts the detection code before the re-connection threads
+are started so that the maximum id of the guests being reconnected to is
+known.
+
+The only semantic change created by this is if the guest with greatest ID
+quits before we are able to reconnect it's ID is used anyway as the
+greatest one as without this patch the greatest ID of a process we could
+successfuly reconnect to would be used.
+(cherry picked from commit 02cf57c0d0d2333dceadb7f84b08ec28a35ef540)
+---
+ src/qemu/qemu_driver.c  | 21 +++++++++++++++++++++
+ src/qemu/qemu_process.c |  3 ---
+ 2 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 8cc652c..a986640 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -587,6 +587,20 @@ static void qemuDomainNetsRestart(void *payload,
+     virDomainObjUnlock(vm);
+ }
+ 
++
++static void
++qemuDomainFindMaxID(void *payload,
++                    const void *name ATTRIBUTE_UNUSED,
++                    void *data)
++{
++    virDomainObjPtr vm = payload;
++    int *driver_maxid = data;
++
++    if (vm->def->id >= *driver_maxid)
++        *driver_maxid = vm->def->id + 1;
++}
++
++
+ /**
+  * qemudStartup:
+  *
+@@ -844,6 +858,13 @@ qemudStartup(int privileged) {
+                                 NULL, NULL) < 0)
+         goto error;
+ 
++    /* find the maximum ID from active and transient configs to initialize
++     * the driver with. This is to avoid race between autostart and reconnect
++     * threads */
++    virHashForEach(qemu_driver->domains.objs,
++                   qemuDomainFindMaxID,
++                   &qemu_driver->nextvmid);
++
+     virHashForEach(qemu_driver->domains.objs, qemuDomainNetsRestart, NULL);
+ 
+     conn = virConnectOpen(qemu_driver->uri);
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index cdc26e5..e810b05 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3242,9 +3242,6 @@ qemuProcessReconnect(void *opaque)
+             goto error;
+     }
+ 
+-    if (obj->def->id >= driver->nextvmid)
+-        driver->nextvmid = obj->def->id + 1;
+-
+ endjob:
+     if (!qemuDomainObjEndJob(driver, obj))
+         obj = NULL;
+-- 
+1.8.0
+

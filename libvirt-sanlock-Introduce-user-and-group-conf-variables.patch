@@ -1,0 +1,246 @@
+From 2dd060ea4e2ad3db2a931b19648668ae235a290f Mon Sep 17 00:00:00 2001
+Message-Id: <2dd060ea4e2ad3db2a931b19648668ae235a290f.1352118319.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 30 Oct 2012 10:31:58 +0100
+Subject: [PATCH] sanlock: Introduce 'user' and 'group' conf variables
+
+https://bugzilla.redhat.com/show_bug.cgi?id=820173
+
+through which user set under what permissions does sanlock
+daemon run so libvirt will set the same permissions for
+files exposed to it.
+(cherry picked from commit 9af1b30da32db25961b511b3ff301dce2506d523)
+
+Conflicts:
+
+	libvirt.spec.in: outdated spec file
+---
+ docs/locking.html.in                    | 22 ++++++++++
+ libvirt.spec.in                         |  7 +++
+ src/locking/libvirt_sanlock.aug         |  2 +
+ src/locking/lock_driver_sanlock.c       | 76 ++++++++++++++++++++++++++++++++-
+ src/locking/sanlock.conf                | 11 ++++-
+ src/locking/test_libvirt_sanlock.aug.in |  2 +
+ 6 files changed, 118 insertions(+), 2 deletions(-)
+
+diff --git a/docs/locking.html.in b/docs/locking.html.in
+index 6d7b517..19dd6a3 100644
+--- a/docs/locking.html.in
++++ b/docs/locking.html.in
+@@ -121,6 +121,28 @@
+     </pre>
+ 
+     <p>
++      If your sanlock daemon happen to run under non-root
++      privileges, you need to tell this to libvirt so it
++      chowns created files correctly. This can be done by
++      setting <code>user</code> and/or <code>group</code>
++      variables in the configuration file. Accepted values
++      range is specified in description to the same
++      variables in <code>/etc/libvirt/qemu.conf</code>. For
++      example:
++    </p>
++
++    <pre>
++      augtool -s set /files/etc/libvirt/qemu-sanlock.conf/user sanlock
++      augtool -s set /files/etc/libvirt/qemu-sanlock.conf/group sanlock
++    </pre>
++
++    <p>
++      But remember, that if this is NFS share, you need a
++      no_root_squash-ed one for chown (and chmod possibly)
++      to succeed.
++    </p>
++
++    <p>
+       In terms of storage requirements, if the filesystem
+       uses 512 byte sectors, you need to allow for <code>1MB</code>
+       of storage for each guest disk. So if you have a network
+diff --git a/src/locking/libvirt_sanlock.aug b/src/locking/libvirt_sanlock.aug
+index d65b002..a78a444 100644
+--- a/src/locking/libvirt_sanlock.aug
++++ b/src/locking/libvirt_sanlock.aug
+@@ -22,6 +22,8 @@ module Libvirt_sanlock =
+              | int_entry "host_id"
+              | bool_entry "require_lease_for_disks"
+              | bool_entry "ignore_readonly_and_shared_disks"
++             | str_entry "user"
++             | str_entry "group"
+    let comment = [ label "#comment" . del /#[ \t]*/ "# " .  store /([^ \t\n][^\n]*)?/ . del /\n/ "\n" ]
+    let empty = [ label "#empty" . eol ]
+ 
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index a218432f..9d2bd9a 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -71,6 +71,10 @@ struct _virLockManagerSanlockDriver {
+     int hostID;
+     bool autoDiskLease;
+     char *autoDiskLeasePath;
++
++    /* under which permissions does sanlock run */
++    uid_t user;
++    gid_t group;
+ };
+ 
+ static virLockManagerSanlockDriver *driver = NULL;
+@@ -94,6 +98,7 @@ static int virLockManagerSanlockLoadConfig(const char *configFile)
+ {
+     virConfPtr conf;
+     virConfValuePtr p;
++    char *tmp;
+ 
+     if (access(configFile, R_OK) == -1) {
+         if (errno != ENOENT) {
+@@ -142,6 +147,39 @@ static int virLockManagerSanlockLoadConfig(const char *configFile)
+     else
+         driver->requireLeaseForDisks = !driver->autoDiskLease;
+ 
++    p = virConfGetValue(conf, "user");
++    CHECK_TYPE("user", VIR_CONF_STRING);
++    if (p) {
++        if (!(tmp = strdup(p->str))) {
++            virReportOOMError();
++            virConfFree(conf);
++            return -1;
++        }
++
++        if (virGetUserID(tmp, &driver->user) < 0) {
++            VIR_FREE(tmp);
++            virConfFree(conf);
++            return -1;
++        }
++        VIR_FREE(tmp);
++    }
++
++    p = virConfGetValue (conf, "group");
++    CHECK_TYPE ("group", VIR_CONF_STRING);
++    if (p) {
++        if (!(tmp = strdup(p->str))) {
++            virReportOOMError();
++            virConfFree(conf);
++            return -1;
++        }
++        if (virGetGroupID(tmp, &driver->group) < 0) {
++            VIR_FREE(tmp);
++            virConfFree(conf);
++            return -1;
++        }
++        VIR_FREE(tmp);
++    }
++
+     virConfFree(conf);
+     return 0;
+ }
+@@ -177,6 +215,7 @@ static int virLockManagerSanlockSetupLockspace(void)
+      * space allocated for it and is initialized with lease
+      */
+     if (stat(path, &st) < 0) {
++        int perms = 0600;
+         VIR_DEBUG("Lockspace %s does not yet exist", path);
+ 
+         if (!(dir = mdir_name(path))) {
+@@ -191,7 +230,10 @@ static int virLockManagerSanlockSetupLockspace(void)
+             goto error;
+         }
+ 
+-        if ((fd = open(path, O_WRONLY|O_CREAT|O_EXCL, 0600)) < 0) {
++        if (driver->group != -1)
++            perms |= 0060;
++
++        if ((fd = open(path, O_WRONLY|O_CREAT|O_EXCL, perms)) < 0) {
+             if (errno != EEXIST) {
+                 virReportSystemError(errno,
+                                      _("Unable to create lockspace %s"),
+@@ -200,6 +242,17 @@ static int virLockManagerSanlockSetupLockspace(void)
+             }
+             VIR_DEBUG("Someone else just created lockspace %s", path);
+         } else {
++            /* chown() the path to make sure sanlock can access it */
++            if ((driver->user != -1 || driver->group != -1) &&
++                (fchown(fd, driver->user, driver->group) < 0)) {
++                virReportSystemError(errno,
++                                     _("cannot chown '%s' to (%u, %u)"),
++                                     path,
++                                     (unsigned int) driver->user,
++                                     (unsigned int) driver->group);
++                goto error_unlink;
++            }
++
+             if ((rv = sanlock_align(&ls.host_id_disk)) < 0) {
+                 if (rv <= -200)
+                     virReportError(VIR_ERR_INTERNAL_ERROR,
+@@ -242,6 +295,26 @@ static int virLockManagerSanlockSetupLockspace(void)
+             }
+             VIR_DEBUG("Lockspace %s has been initialized", path);
+         }
++    } else if (S_ISREG(st.st_mode)) {
++        /* okay, the lease file exists. Check the permissions */
++        if (((driver->user != -1 && driver->user != st.st_uid) ||
++             (driver->group != -1 && driver->group != st.st_gid)) &&
++            (chown(path, driver->user, driver->group) < 0)) {
++            virReportSystemError(errno,
++                                 _("cannot chown '%s' to (%u, %u)"),
++                                 path,
++                                 (unsigned int) driver->user,
++                                 (unsigned int) driver->group);
++            goto error;
++        }
++
++        if ((driver->group != -1 && (st.st_mode & 0060) != 0060) &&
++            chmod(path, 0660) < 0) {
++            virReportSystemError(errno,
++                                 _("cannot chmod '%s' to 0660"),
++                                 path);
++            goto error;
++        }
+     }
+ 
+     ls.host_id = driver->hostID;
+@@ -299,6 +372,7 @@ static int virLockManagerSanlockInit(unsigned int version,
+     driver->requireLeaseForDisks = true;
+     driver->hostID = 0;
+     driver->autoDiskLease = false;
++    driver->user = driver->group = -1;
+     if (!(driver->autoDiskLeasePath = strdup(LOCALSTATEDIR "/lib/libvirt/sanlock"))) {
+         VIR_FREE(driver);
+         virReportOOMError();
+diff --git a/src/locking/sanlock.conf b/src/locking/sanlock.conf
+index efc35ee..40ece65 100644
+--- a/src/locking/sanlock.conf
++++ b/src/locking/sanlock.conf
+@@ -29,7 +29,8 @@
+ #
+ # Recommendation is to just mount this default location as
+ # an NFS volume. Uncomment this, if you would prefer the mount
+-# point to be somewhere else.
++# point to be somewhere else. Moreover, please make sure
++# sanlock daemon can access the specified path.
+ #
+ #disk_lease_dir = "/var/lib/libvirt/sanlock"
+ 
+@@ -52,3 +53,11 @@
+ # to enabled, otherwise it defaults to disabled.
+ #
+ #require_lease_for_disks = 1
++
++#
++# The combination of user and group under which the sanlock
++# daemon runs. Libvirt will chown created files (like
++# content of disk_lease_dir) to make sure sanlock daemon can
++# access them. Accepted values are described in qemu.conf.
++#user = "root"
++#group = "root"
+diff --git a/src/locking/test_libvirt_sanlock.aug.in b/src/locking/test_libvirt_sanlock.aug.in
+index 288f329..ef98ea6 100644
+--- a/src/locking/test_libvirt_sanlock.aug.in
++++ b/src/locking/test_libvirt_sanlock.aug.in
+@@ -6,3 +6,5 @@ module Test_libvirt_sanlock =
+ { "disk_lease_dir" = "/var/lib/libvirt/sanlock" }
+ { "host_id" = "1" }
+ { "require_lease_for_disks" = "1" }
++{ "user" = "root" }
++{ "group" = "root" }
+-- 
+1.8.0
+

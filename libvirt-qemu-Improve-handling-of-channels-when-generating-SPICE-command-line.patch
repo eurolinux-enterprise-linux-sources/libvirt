@@ -1,0 +1,135 @@
+From 399bd214a7ddceaf358b5fb583749720f9933bcf Mon Sep 17 00:00:00 2001
+Message-Id: <399bd214a7ddceaf358b5fb583749720f9933bcf@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 24 Apr 2014 15:21:43 +0200
+Subject: [PATCH] qemu: Improve handling of channels when generating SPICE
+ command line
+
+Improve error reporting and generating of SPICE command line arguments
+according to the need to enable TLS. If TLS is disabled, there's no need
+to pass the certificate dir to qemu.
+
+This patch resolves:
+https://bugzilla.redhat.com/show_bug.cgi?id=953126
+
+(cherry picked from commit 20cb7f3a41daf8252d9a2109112fb59e0d42356d)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_command.c -- driver->cfg
+	tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-timeout.args
+                                                      -- "-usb" movement
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c                            | 45 ++++++++++++++++++----
+ .../qemuxml2argv-controller-order.args             |  2 +-
+ .../qemuxml2argv-graphics-spice-timeout.args       |  2 +-
+ 3 files changed, 40 insertions(+), 9 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index b286c5a..7460e02 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4832,9 +4832,8 @@ qemuBuildGraphicsSPICECommandLine(struct qemud_driver *driver,
+         !driver->spicePassword)
+         virBufferAddLit(&opt, ",disable-ticketing");
+ 
+-    if (driver->spiceTLS)
+-        virBufferAsprintf(&opt, ",x509-dir=%s",
+-                          driver->spiceTLSx509certdir);
++    if (tlsPort > 0)
++        virBufferAsprintf(&opt, ",x509-dir=%s", driver->spiceTLSx509certdir);
+ 
+     switch (defaultMode) {
+     case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_SECURE:
+@@ -4849,24 +4848,56 @@ qemuBuildGraphicsSPICECommandLine(struct qemud_driver *driver,
+     }
+ 
+     for (i = 0 ; i < VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_LAST ; i++) {
+-        int mode = graphics->data.spice.channels[i];
+-        switch (mode) {
++        switch (graphics->data.spice.channels[i]) {
+         case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_SECURE:
+-            if (!driver->spiceTLS) {
++            if (tlsPort <= 0) {
+                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                                _("spice secure channels set in XML configuration, "
+-                                 "but TLS is disabled in qemu.conf"));
++                                 "but TLS port is not provided"));
+                 goto error;
+             }
+             virBufferAsprintf(&opt, ",tls-channel=%s",
+                               virDomainGraphicsSpiceChannelNameTypeToString(i));
+             break;
++
+         case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_INSECURE:
++            if (port <= 0) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                               _("spice insecure channels set in XML "
++                                 "configuration, but plain port is not provided"));
++                goto error;
++            }
+             virBufferAsprintf(&opt, ",plaintext-channel=%s",
+                               virDomainGraphicsSpiceChannelNameTypeToString(i));
+             break;
++
++        case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_ANY:
++            switch (defaultMode) {
++            case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_SECURE:
++                if (tlsPort <= 0) {
++                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                                   _("spice defaultMode secure requested in XML "
++                                     "configuration but TLS port not provided"));
++                    goto error;
++                }
++                break;
++
++            case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_INSECURE:
++                if (port <= 0) {
++                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                                   _("spice defaultMode insecure requested in XML "
++                                     "configuration but plain port not provided"));
++                    goto error;
++                }
++                break;
++
++            case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_ANY:
++                /* don't care */
++            break;
++            }
+         }
+     }
++
+     if (graphics->data.spice.image)
+         virBufferAsprintf(&opt, ",image-compression=%s",
+                           virDomainGraphicsSpiceImageCompressionTypeToString(graphics->data.spice.image));
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-controller-order.args b/tests/qemuxml2argvdata/qemuxml2argv-controller-order.args
+index ec70c87..e6ed47f 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-controller-order.args
++++ b/tests/qemuxml2argvdata/qemuxml2argv-controller-order.args
+@@ -21,7 +21,7 @@ isa-serial,chardev=charserial0,id=serial0 -chardev \
+ spicevmc,id=charchannel0,name=vdagent -device \
+ virtserialport,bus=virtio-serial0.0,nr=1,chardev=charchannel0,id=channel0,name=com.redhat.spice.0 \
+ -device usb-tablet,id=input0 -spice \
+-port=0,addr=0.0.0.0,x509-dir=/etc/pki/libvirt-spice -device \
++port=0,addr=0.0.0.0 -device \
+ intel-hda,id=sound0,bus=pci.0,addr=0x4 -device \
+ hda-duplex,id=sound0-codec0,bus=sound0.0,cad=0 -device \
+ usb-host,hostbus=14,hostaddr=6,id=hostdev0 -device \
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-timeout.args b/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-timeout.args
+index 453805a..ece1a18 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-timeout.args
++++ b/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-timeout.args
+@@ -10,6 +10,6 @@ LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test QEMU_AUDIO_DRV=spice \
+ -device rtl8139,vlan=0,id=net0,mac=52:54:00:71:70:89,bus=pci.0,addr=0x7 \
+ -net tap,script=/etc/qemu-ifup,vlan=0,name=hostnet0 -serial pty \
+ -usb -device usb-tablet,id=input0 \
+--spice port=5900,x509-dir=/etc/pki/libvirt-spice -vga std \
++-spice port=5900 -vga std \
+ -device AC97,id=sound0,bus=pci.0,addr=0x3 \
+ -device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x5
+-- 
+1.9.2
+

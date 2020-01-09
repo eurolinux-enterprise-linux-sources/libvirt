@@ -1,0 +1,56 @@
+From e779cd8dadede26ee558f05e5c661c2a7e94332c Mon Sep 17 00:00:00 2001
+Message-Id: <e779cd8dadede26ee558f05e5c661c2a7e94332c@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 10 Apr 2014 18:23:11 +0200
+Subject: [PATCH] selinux: Don't mask errors of virSecuritySELinuxGenNewContext
+
+https://bugzilla.redhat.com/show_bug.cgi?id=954245
+
+Since cbe67ff9b0a5a94911afd4d12388bf182bcca86c
+virSecuritySELinuxGenNewContext reports good error messages. Fix callers
+that mask the errors by generic error message.
+
+(cherry picked from commit 4165ea96630995af7110016f02a7c67ca11678d6)
+
+Conflicts:
+	src/security/security_selinux.c - context
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/security/security_selinux.c | 11 +++--------
+ 1 file changed, 3 insertions(+), 8 deletions(-)
+
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index df9126d..a030701 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -572,11 +572,9 @@ virSecuritySELinuxGenSecurityLabel(virSecurityManagerPtr mgr,
+             virSecuritySELinuxGenNewContext(seclabel->baselabel ?
+                                  seclabel->baselabel :
+                                  data->domain_context, mcs, false);
+-        if (!seclabel->label)  {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("cannot generate selinux context for %s"), mcs);
++        if (!seclabel->label)
+             goto cleanup;
+-        }
++
+         break;
+ 
+     case VIR_DOMAIN_SECLABEL_NONE:
+@@ -594,11 +592,8 @@ virSecuritySELinuxGenSecurityLabel(virSecurityManagerPtr mgr,
+         seclabel->imagelabel = virSecuritySELinuxGenNewContext(data->file_context,
+                                                                mcs,
+                                                                true);
+-        if (!seclabel->imagelabel)  {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("cannot generate selinux context for %s"), mcs);
++        if (!seclabel->imagelabel)
+             goto cleanup;
+-        }
+     }
+ 
+     if (!seclabel->model &&
+-- 
+1.9.2
+

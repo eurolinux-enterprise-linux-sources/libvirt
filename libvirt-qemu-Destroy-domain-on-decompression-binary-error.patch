@@ -1,0 +1,36 @@
+From 80fe76ef95efc6b6e94c5ebd3e89f9c93c51d94e Mon Sep 17 00:00:00 2001
+Message-Id: <80fe76ef95efc6b6e94c5ebd3e89f9c93c51d94e.1373271636.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 25 Feb 2013 16:48:59 +0100
+Subject: [PATCH] qemu: Destroy domain on decompression binary error
+
+https://bugzilla.redhat.com/show_bug.cgi?id=894723
+
+Currently, if qemuProcessStart() succeeds, but it's decompression
+binary that returns nonzero status, we don't kill the qemu process,
+but remove it from internal domain list, leaving the qemu process
+hanging around totally uncontrolled.
+(cherry picked from commit 93e5a1432d1304fafde4b2186cef63692f171c57)
+---
+ src/qemu/qemu_driver.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index ae657f2..283758c 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5008,8 +5008,10 @@ qemuDomainSaveImageStartVM(virConnectPtr conn,
+             VIR_FORCE_CLOSE(*fd);
+         }
+ 
+-        if (virCommandWait(cmd, NULL) < 0)
++        if (virCommandWait(cmd, NULL) < 0) {
++            qemuProcessStop(driver, vm, VIR_DOMAIN_SHUTOFF_FAILED, 0);
+             ret = -1;
++        }
+     }
+     VIR_FORCE_CLOSE(intermediatefd);
+ 
+-- 
+1.8.2.1
+

@@ -1,0 +1,33 @@
+From 77ac5d23d1d99b74c5a6d9d8bfc2c79918555aca Mon Sep 17 00:00:00 2001
+Message-Id: <77ac5d23d1d99b74c5a6d9d8bfc2c79918555aca.1373271638.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 12 Mar 2013 09:10:41 +0100
+Subject: [PATCH] qemu: Avoid NULL dereference in qemuSharedDiskEntryFree
+
+https://bugzilla.redhat.com/show_bug.cgi?id=908073
+
+At least one caller may call qemuSharedDiskEntryFree with NULL as the
+first argument. Let's make the function similar to other *Free functions
+and do nothing in such case.
+(cherry picked from commit 57bb725acaf3f04f5fe4570d811a2ca840a4960c)
+---
+ src/qemu/qemu_conf.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/qemu/qemu_conf.c b/src/qemu/qemu_conf.c
+index 575553c..78cd528 100644
+--- a/src/qemu/qemu_conf.c
++++ b/src/qemu/qemu_conf.c
+@@ -865,6 +865,9 @@ qemuSharedDiskEntryFree(void *payload, const void *name ATTRIBUTE_UNUSED)
+     qemuSharedDiskEntryPtr entry = payload;
+     size_t i;
+ 
++    if (!entry)
++        return;
++
+     for (i = 0; i < entry->ref; i++) {
+         VIR_FREE(entry->domains[i]);
+     }
+-- 
+1.8.2.1
+

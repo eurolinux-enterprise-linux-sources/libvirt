@@ -1,0 +1,98 @@
+From e1c6e053dea8d5c5da0cf8f374b881433470288f Mon Sep 17 00:00:00 2001
+Message-Id: <e1c6e053dea8d5c5da0cf8f374b881433470288f.1373271639.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 6 Mar 2013 21:15:37 +0100
+Subject: [PATCH] storage: Cleanup logical volume creation code
+
+https://bugzilla.redhat.com/show_bug.cgi?id=912179
+
+This patch plugs two memory leaks, removes some useless and confusing
+constructs and renames renames "cleanup" label as "error" since it is
+only used for error path rather then being common for both success and
+error paths.
+(cherry picked from commit 4b0cb4a7454aa1d5fffb2e2aca4bd5d0db2f744c)
+---
+ src/storage/storage_backend_logical.c | 24 +++++++++++++-----------
+ 1 file changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/src/storage/storage_backend_logical.c b/src/storage/storage_backend_logical.c
+index c21cb45..7e141ad 100644
+--- a/src/storage/storage_backend_logical.c
++++ b/src/storage/storage_backend_logical.c
+@@ -697,7 +697,7 @@ virStorageBackendLogicalCreateVol(virConnectPtr conn,
+                                   virStoragePoolObjPtr pool,
+                                   virStorageVolDefPtr vol)
+ {
+-    int fdret, fd = -1;
++    int fd = -1;
+     virCommandPtr cmd = NULL;
+     virErrorPtr err;
+ 
+@@ -738,11 +738,13 @@ virStorageBackendLogicalCreateVol(virConnectPtr conn,
+         virCommandAddArg(cmd, pool->def->source.name);
+ 
+     if (virCommandRun(cmd, NULL) < 0)
+-        goto cleanup;
++        goto error;
+ 
+-    if ((fdret = virStorageBackendVolOpen(vol->target.path)) < 0)
+-        goto cleanup;
+-    fd = fdret;
++    virCommandFree(cmd);
++    cmd = NULL;
++
++    if ((fd = virStorageBackendVolOpen(vol->target.path)) < 0)
++        goto error;
+ 
+     /* We can only chown/grp if root */
+     if (getuid() == 0) {
+@@ -750,40 +752,40 @@ virStorageBackendLogicalCreateVol(virConnectPtr conn,
+             virReportSystemError(errno,
+                                  _("cannot set file owner '%s'"),
+                                  vol->target.path);
+-            goto cleanup;
++            goto error;
+         }
+     }
+     if (fchmod(fd, vol->target.perms.mode) < 0) {
+         virReportSystemError(errno,
+                              _("cannot set file mode '%s'"),
+                              vol->target.path);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (VIR_CLOSE(fd) < 0) {
+         virReportSystemError(errno,
+                              _("cannot close file '%s'"),
+                              vol->target.path);
+-        goto cleanup;
++        goto error;
+     }
+-    fd = -1;
+ 
+     /* Fill in data about this new vol */
+     if (virStorageBackendLogicalFindLVs(pool, vol) < 0) {
+         virReportSystemError(errno,
+                              _("cannot find newly created volume '%s'"),
+                              vol->target.path);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     return 0;
+ 
+- cleanup:
++ error:
+     err = virSaveLastError();
+     VIR_FORCE_CLOSE(fd);
+     virStorageBackendLogicalDeleteVol(conn, pool, vol, 0);
+     virCommandFree(cmd);
+     virSetError(err);
++    virFreeError(err);
+     return -1;
+ }
+ 
+-- 
+1.8.2.1
+

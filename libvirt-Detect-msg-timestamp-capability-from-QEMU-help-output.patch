@@ -1,0 +1,35 @@
+From 6706ca1fece28885a701a8f49fd3edd32b24640b Mon Sep 17 00:00:00 2001
+Message-Id: <6706ca1fece28885a701a8f49fd3edd32b24640b@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 7 May 2014 11:45:17 +0200
+Subject: [PATCH] Detect -msg-timestamp capability from QEMU help output
+
+https://bugzilla.redhat.com/show_bug.cgi?id=997010
+
+RHEL only:
+
+The capability was only added to upstream QEMU
+versions for which we only do QMP caps probing.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 740c215..fb50b82 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1097,6 +1097,9 @@ qemuCapsComputeCmdFlags(const char *help,
+         qemuCapsSet(caps, QEMU_CAPS_OBJECT_RNG_EGD);
+     }
+ 
++    if (strstr(help, "-msg timestamp"))
++        qemuCapsSet(caps, QEMU_CAPS_MSG_TIMESTAMP);
++
+     /*
+      * Handling of -incoming arg with varying features
+      *  -incoming tcp    (kvm >= 79, qemu >= 0.10.0)
+-- 
+1.9.3
+

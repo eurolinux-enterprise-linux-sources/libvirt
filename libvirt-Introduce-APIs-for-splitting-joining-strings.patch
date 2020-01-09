@@ -1,0 +1,475 @@
+From ad731f0e9460a07c504f900a7845ebe28fd910ee Mon Sep 17 00:00:00 2001
+Message-Id: <ad731f0e9460a07c504f900a7845ebe28fd910ee.1379585483.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 12 Sep 2013 16:59:59 +0100
+Subject: [PATCH] Introduce APIs for splitting/joining strings
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1006266
+
+This introduces a few new APIs for dealing with strings.
+One to split a char * into a char **, another to join a
+char ** into a char *, and finally one to free a char **
+
+There is a simple test suite to validate the edge cases
+too. No more need to use the horrible strtok_r() API,
+or hand-written code for splitting strings.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 76c1fd33c8093d6a7173a85486e1e6f51a832135)
+
+Conflicts:
+	tests/Makefile.am - commit eca72d4 not backported
+---
+ .gitignore               |   1 +
+ src/Makefile.am          |   1 +
+ src/libvirt_private.syms |   6 ++
+ src/util/virstring.c     | 168 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/util/virstring.h     |  38 +++++++++++
+ tests/Makefile.am        |   6 ++
+ tests/virstringtest.c    | 161 +++++++++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 381 insertions(+)
+ create mode 100644 src/util/virstring.c
+ create mode 100644 src/util/virstring.h
+ create mode 100644 tests/virstringtest.c
+
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 3a43df2..f67cf57 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -110,6 +110,7 @@ UTIL_SOURCES =							\
+ 		util/virnetlink.c util/virnetlink.h		\
+ 		util/virrandom.h util/virrandom.c		\
+ 		util/virsocketaddr.h util/virsocketaddr.c \
++		util/virstring.h util/virstring.c \
+ 		util/virtime.h util/virtime.c \
+ 		util/viruri.h util/viruri.c
+ 
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index ce40425..f66ccd9 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1803,6 +1803,12 @@ virSetErrorLogPriorityFunc;
+ virStrerror;
+ 
+ 
++# virstring.h
++virStringSplit;
++virStringJoin;
++virStringFreeList;
++
++
+ # virtime.h
+ virTimeFieldsNow;
+ virTimeFieldsNowRaw;
+diff --git a/src/util/virstring.c b/src/util/virstring.c
+new file mode 100644
+index 0000000..1917e9a
+--- /dev/null
++++ b/src/util/virstring.c
+@@ -0,0 +1,168 @@
++/*
++ * Copyright (C) 2012 Red Hat, Inc.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library.  If not, see
++ * <http://www.gnu.org/licenses/>.
++ *
++ * Authors:
++ *     Daniel P. Berrange <berrange@redhat.com>
++ */
++
++#include <config.h>
++
++#include "virstring.h"
++#include "memory.h"
++#include "buf.h"
++#include "virterror_internal.h"
++
++#define VIR_FROM_THIS VIR_FROM_NONE
++
++/*
++ * The following virStringSplit & virStringJoin methods
++ * are derived from g_strsplit / g_strjoin in glib2,
++ * also available under the LGPLv2+ license terms
++ */
++
++/**
++ * virStringSplit:
++ * @string: a string to split
++ * @delim: a string which specifies the places at which to split
++ *     the string. The delimiter is not included in any of the resulting
++ *     strings, unless @max_tokens is reached.
++ * @max_tokens: the maximum number of pieces to split @string into.
++ *     If this is 0, the string is split completely.
++ *
++ * Splits a string into a maximum of @max_tokens pieces, using the given
++ * @delim. If @max_tokens is reached, the remainder of @string is
++ * appended to the last token.
++ *
++ * As a special case, the result of splitting the empty string "" is an empty
++ * vector, not a vector containing a single string. The reason for this
++ * special case is that being able to represent a empty vector is typically
++ * more useful than consistent handling of empty elements. If you do need
++ * to represent empty elements, you'll need to check for the empty string
++ * before calling virStringSplit().
++ *
++ * Return value: a newly-allocated NULL-terminated array of strings. Use
++ *    virStringFreeList() to free it.
++ */
++char **virStringSplit(const char *string,
++                      const char *delim,
++                      size_t max_tokens)
++{
++    char **tokens = NULL;
++    size_t ntokens = 0;
++    size_t maxtokens = 0;
++    const char *remainder = string;
++    char *tmp;
++    size_t i;
++
++    if (max_tokens == 0)
++        max_tokens = INT_MAX;
++
++    tmp = strstr(remainder, delim);
++    if (tmp) {
++        size_t delimlen = strlen(delim);
++
++        while (--max_tokens && tmp) {
++            size_t len = tmp - remainder;
++
++            if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
++                goto no_memory;
++
++            if (!(tokens[ntokens] = strndup(remainder, len)))
++                goto no_memory;
++            ntokens++;
++            remainder = tmp + delimlen;
++            tmp = strstr(remainder, delim);
++        }
++    }
++    if (*string) {
++        if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
++            goto no_memory;
++
++        if (!(tokens[ntokens] = strdup(remainder)))
++            goto no_memory;
++        ntokens++;
++    }
++
++    if (VIR_RESIZE_N(tokens, maxtokens, ntokens, 1) < 0)
++        goto no_memory;
++    tokens[ntokens++] = NULL;
++
++    return tokens;
++
++no_memory:
++    virReportOOMError();
++    for (i = 0 ; i < ntokens ; i++)
++        VIR_FREE(tokens[i]);
++    VIR_FREE(tokens);
++    return NULL;
++}
++
++
++/**
++ * virStringJoin:
++ * @strings: a NULL-terminated array of strings to join
++ * @delim: a string to insert between each of the strings
++ *
++ * Joins a number of strings together to form one long string, with the
++ * @delim inserted between each of them. The returned string
++ * should be freed with VIR_FREE().
++ *
++ * Returns: a newly-allocated string containing all of the strings joined
++ *     together, with @delim between them
++ */
++char *virStringJoin(const char **strings,
++                    const char *delim)
++{
++    char *ret;
++    virBuffer buf = VIR_BUFFER_INITIALIZER;
++    while (*strings) {
++        virBufferAdd(&buf, *strings, -1);
++        if (*(strings+1))
++            virBufferAdd(&buf, delim, -1);
++        strings++;
++    }
++    if (virBufferError(&buf)) {
++        virReportOOMError();
++        return NULL;
++    }
++    ret = virBufferContentAndReset(&buf);
++    if (!ret) {
++        if (!(ret = strdup(""))) {
++            virReportOOMError();
++            return NULL;
++        }
++    }
++    return ret;
++}
++
++
++/**
++ * virStringFreeList:
++ * @str_array: a NULL-terminated array of strings to free
++ *
++ * Frees a NULL-terminated array of strings, and the array itself.
++ * If called on a NULL value, virStringFreeList() simply returns.
++ */
++void virStringFreeList(char **strings)
++{
++    char **tmp = strings;
++    while (tmp && *tmp) {
++        VIR_FREE(*tmp);
++        tmp++;
++    }
++    VIR_FREE(strings);
++}
+diff --git a/src/util/virstring.h b/src/util/virstring.h
+new file mode 100644
+index 0000000..a569fe0
+--- /dev/null
++++ b/src/util/virstring.h
+@@ -0,0 +1,38 @@
++/*
++ * Copyright (C) 2007-2012 Red Hat, Inc.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library.  If not, see
++ * <http://www.gnu.org/licenses/>.
++ *
++ * Authors:
++ *     Daniel P. Berrange <berrange@redhat.com>
++ */
++
++#ifndef __VIR_STRING_H__
++# define __VIR_STRING_H__
++
++# include "internal.h"
++
++char **virStringSplit(const char *string,
++                      const char *delim,
++                      size_t max_tokens)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
++
++char *virStringJoin(const char **strings,
++                    const char *delim)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
++
++void virStringFreeList(char **strings);
++
++#endif /* __VIR_STRING_H__ */
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index 3fba426..d9a58c6 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -95,6 +95,7 @@ test_programs = virshtest sockettest \
+ 	virauthconfigtest \
+ 	virbitmaptest virendiantest \
+ 	virstoragetest \
++	virstringtest \
+ 	$(NULL)
+ 
+ if WITH_SECDRIVER_SELINUX
+@@ -554,6 +555,11 @@ virstoragetest_SOURCES = \
+ virstoragetest_CFLAGS = -Dabs_builddir="\"$(abs_builddir)\"" $(AM_CFLAGS)
+ virstoragetest_LDADD = $(LDADDS)
+ 
++virstringtest_SOURCES = \
++	virstringtest.c testutils.h testutils.c
++virstringtest_CFLAGS = -Dabs_builddir="\"$(abs_builddir)\"" $(AM_CFLAGS)
++virstringtest_LDADD = $(LDADDS)
++
+ viruritest_SOURCES = \
+ 	viruritest.c testutils.h testutils.c
+ viruritest_CFLAGS = -Dabs_builddir="\"$(abs_builddir)\"" $(AM_CFLAGS)
+diff --git a/tests/virstringtest.c b/tests/virstringtest.c
+new file mode 100644
+index 0000000..7e726c6
+--- /dev/null
++++ b/tests/virstringtest.c
+@@ -0,0 +1,161 @@
++/*
++ * Copyright (C) 2012 Red Hat, Inc.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library.  If not, see
++ * <http://www.gnu.org/licenses/>.
++ *
++ * Author: Daniel P. Berrange <berrange@redhat.com>
++ */
++
++#include <config.h>
++
++#include <stdlib.h>
++
++#include "testutils.h"
++#include "util.h"
++#include "virterror_internal.h"
++#include "memory.h"
++#include "logging.h"
++
++#include "virstring.h"
++
++#define VIR_FROM_THIS VIR_FROM_NONE
++
++struct testSplitData {
++    const char *string;
++    const char *delim;
++    size_t max_tokens;
++    const char **tokens;
++};
++
++
++struct testJoinData {
++    const char *string;
++    const char *delim;
++    const char **tokens;
++};
++
++static int testSplit(const void *args)
++{
++    const struct testSplitData *data = args;
++    char **got;
++    char **tmp1;
++    const char **tmp2;
++    int ret = -1;
++
++    if (!(got = virStringSplit(data->string, data->delim, data->max_tokens))) {
++        VIR_DEBUG("Got no tokens at all");
++        return -1;
++    }
++
++    tmp1 = got;
++    tmp2 = data->tokens;
++    while (*tmp1 && *tmp2) {
++        if (STRNEQ(*tmp1, *tmp2)) {
++            fprintf(stderr, "Mismatch '%s' vs '%s'\n", *tmp1, *tmp2);
++            goto cleanup;
++        }
++        tmp1++;
++        tmp2++;
++    }
++    if (*tmp1) {
++        fprintf(stderr, "Too many pieces returned\n");
++        goto cleanup;
++    }
++    if (*tmp2) {
++        fprintf(stderr, "Too few pieces returned\n");
++        goto cleanup;
++    }
++
++    ret = 0;
++cleanup:
++    virStringFreeList(got);
++
++    return ret;
++}
++
++
++static int testJoin(const void *args)
++{
++    const struct testJoinData *data = args;
++    char *got;
++    int ret = -1;
++
++    if (!(got = virStringJoin(data->tokens, data->delim))) {
++        VIR_DEBUG("Got no result");
++        return -1;
++    }
++    if (STRNEQ(got, data->string)) {
++        fprintf(stderr, "Mismatch '%s' vs '%s'\n", got, data->string);
++        goto cleanup;
++    }
++
++    ret = 0;
++cleanup:
++    VIR_FREE(got);
++
++    return ret;
++}
++
++
++static int
++mymain(void)
++{
++    int ret = 0;
++
++#define TEST_SPLIT(str, del, max, toks)                                 \
++    do {                                                                \
++        struct testSplitData splitData = {                              \
++            .string = str,                                              \
++            .delim = del,                                               \
++            .max_tokens = max,                                          \
++            .tokens = toks,                                             \
++        };                                                              \
++        struct testJoinData joinData = {                                \
++            .string = str,                                              \
++            .delim = del,                                               \
++            .tokens = toks,                                             \
++        };                                                              \
++        if (virtTestRun("Split " #str, 1, testSplit, &splitData) < 0)   \
++            ret = -1;                                                   \
++        if (virtTestRun("Join " #str, 1, testJoin, &joinData) < 0)      \
++            ret = -1;                                                   \
++    } while (0)
++
++    const char *tokens1[] = { NULL };
++    TEST_SPLIT("", " ", 0, tokens1);
++
++    const char *tokens2[] = { "", "", NULL };
++    TEST_SPLIT(" ", " ", 0, tokens2);
++
++    const char *tokens3[] = { "", "", "", NULL };
++    TEST_SPLIT("  ", " ", 0, tokens3);
++
++    const char *tokens4[] = { "The", "quick", "brown", "fox", NULL };
++    TEST_SPLIT("The quick brown fox", " ", 0, tokens4);
++
++    const char *tokens5[] = { "The quick ", " fox", NULL };
++    TEST_SPLIT("The quick brown fox", "brown", 0, tokens5);
++
++    const char *tokens6[] = { "", "The", "quick", "brown", "fox", NULL };
++    TEST_SPLIT(" The quick brown fox", " ", 0, tokens6);
++
++    const char *tokens7[] = { "The", "quick", "brown", "fox", "", NULL };
++    TEST_SPLIT("The quick brown fox ", " ", 0, tokens7);
++
++
++    return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
++}
++
++VIRT_TEST_MAIN(mymain)
+-- 
+1.8.3.2
+

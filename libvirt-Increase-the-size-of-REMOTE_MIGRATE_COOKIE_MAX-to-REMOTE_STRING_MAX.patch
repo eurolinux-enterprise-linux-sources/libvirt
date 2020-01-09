@@ -1,0 +1,37 @@
+From 003da1e05c425b3a5a46f3b5c3c7d108e2b4d433 Mon Sep 17 00:00:00 2001
+Message-Id: <003da1e05c425b3a5a46f3b5c3c7d108e2b4d433@dist-git>
+From: Shivaprasad G Bhat <shivaprasadbhat@gmail.com>
+Date: Fri, 8 Aug 2014 14:19:51 +0200
+Subject: [PATCH] Increase the size of REMOTE_MIGRATE_COOKIE_MAX to
+ REMOTE_STRING_MAX
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1126393
+
+During guest migration, if the domain xml is bigger than 16384 which is
+easily possible for a guest with good number of disks, message encode fails
+for xdr_remote_domain_migrate_perform3_ret().
+So, Increase the COOKIE_MAX to STRING_MAX value.
+
+Signed-off-by: Shivaprasad G Bhat <shivaprasadbhat@gmail.com>
+(cherry picked from commit eb104e6255c4e69176d3732f6613e18a65c7622e)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/remote/remote_protocol.x | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/remote/remote_protocol.x b/src/remote/remote_protocol.x
+index 7bf2891..b93b758 100644
+--- a/src/remote/remote_protocol.x
++++ b/src/remote/remote_protocol.x
+@@ -91,7 +91,7 @@ const REMOTE_VCPUINFO_MAX = 16384;
+ const REMOTE_CPUMAPS_MAX = 8388608;
+ 
+ /* Upper limit on migrate cookie. */
+-const REMOTE_MIGRATE_COOKIE_MAX = 16384;
++const REMOTE_MIGRATE_COOKIE_MAX = 4194304;
+ 
+ /* Upper limit on lists of network names. */
+ const REMOTE_NETWORK_NAME_LIST_MAX = 16384;
+-- 
+2.0.4
+

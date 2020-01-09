@@ -1,0 +1,75 @@
+From fba5e94136d7c5c892889475efd6f39afa2a4f8b Mon Sep 17 00:00:00 2001
+Message-Id: <fba5e94136d7c5c892889475efd6f39afa2a4f8b.1373271641.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Apr 2013 21:59:58 -0600
+Subject: [PATCH] Avoid use of free'd memory in auto destroy callback
+
+https://bugzilla.redhat.com/show_bug.cgi?id=950286
+
+The autodestroy callback code has the following function
+called from a hash iterator
+
+  qemuDriverCloseCallbackRun(void *payload,
+                             const void *name,
+                             void *opaque)
+  {
+    ...
+    char *uuidstr = name
+    ...
+
+    dom = closeDef->cb(data->driver, dom, data->conn);
+    if (dom)
+        virObjectUnlock(dom);
+
+    virHashRemoveEntry(data->driver->closeCallbacks, uuidstr);
+  }
+
+The closeDef->cb function may well cause the current callback
+to be removed, if it shuts down 'dom'. As such the use of
+'uuidstr' in virHashRemoveEntry is accessing free'd memory.
+We must make a copy of the uuid str before invoking the
+callback to be safe.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 4e4c6620e2e2937da03d37720d39368d297f5743)
+---
+ src/qemu/qemu_conf.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_conf.c b/src/qemu/qemu_conf.c
+index 78cd528..2e10b17 100644
+--- a/src/qemu/qemu_conf.c
++++ b/src/qemu/qemu_conf.c
+@@ -707,20 +707,25 @@ qemuDriverCloseCallbackRun(void *payload,
+ {
+     struct qemuDriverCloseCallbackData *data = opaque;
+     qemuDriverCloseDefPtr closeDef = payload;
+-    const char *uuidstr = name;
+     unsigned char uuid[VIR_UUID_BUFLEN];
++    char uuidstr[VIR_UUID_STRING_BUFLEN];
+     virDomainObjPtr dom;
+ 
+     VIR_DEBUG("conn=%p, thisconn=%p, uuid=%s, cb=%p",
+-              closeDef->conn, data->conn, uuidstr, closeDef->cb);
++              closeDef->conn, data->conn, (const char *)name, closeDef->cb);
+ 
+     if (data->conn != closeDef->conn || !closeDef->cb)
+         return;
+ 
+-    if (virUUIDParse(uuidstr, uuid) < 0) {
+-        VIR_WARN("Failed to parse %s", uuidstr);
++    if (virUUIDParse(name, uuid) < 0) {
++        VIR_WARN("Failed to parse %s", (const char *)name);
+         return;
+     }
++    /* We need to reformat uuidstr, because closeDef->cb
++     * might cause the current hash entry to be removed,
++     * which means 'name' will have been free()d
++     */
++    virUUIDFormat(uuid, uuidstr);
+ 
+     if (!(dom = virDomainFindByUUID(&data->driver->domains, uuid))) {
+         VIR_DEBUG("No domain object with UUID %s", uuidstr);
+-- 
+1.8.2.1
+

@@ -1,0 +1,103 @@
+From 25aa656890eec13bdc17f8b0942c57b9817dbde0 Mon Sep 17 00:00:00 2001
+Message-Id: <25aa656890eec13bdc17f8b0942c57b9817dbde0@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Tue, 29 Sep 2015 14:26:20 -0400
+Subject: [PATCH] util: make virNetDev(Replace|Restore)MacAddress public
+ functions
+
+These functions were made static as a part of commit cb3fe38 since
+they were no longer called from outside virnetdev.c. We once again
+need to call them from another file, so this patch makes them once
+again public.
+
+Part of the fix for:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=1251532
+
+(cherry-picked from commit 3ce08fab8477da2c76918329523a5e6a312cef06)
+
+Conflicts: virMacAddrPtr was changed upstream to virMacAddr *.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms |  2 ++
+ src/util/virnetdev.c     |  6 ++----
+ src/util/virnetdev.h     | 10 ++++++++++
+ 3 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 6276010..927d155 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1504,7 +1504,9 @@ virNetDevGetVirtualFunctions;
+ virNetDevIsOnline;
+ virNetDevIsVirtualFunction;
+ virNetDevLinkDump;
++virNetDevReplaceMacAddress;
+ virNetDevReplaceNetConfig;
++virNetDevRestoreMacAddress;
+ virNetDevRestoreNetConfig;
+ virNetDevSetIPv4Address;
+ virNetDevSetMAC;
+diff --git a/src/util/virnetdev.c b/src/util/virnetdev.c
+index 5dda6b2..815d4ac 100644
+--- a/src/util/virnetdev.c
++++ b/src/util/virnetdev.c
+@@ -232,7 +232,6 @@ int virNetDevGetMAC(const char *ifname,
+ #endif
+ 
+ 
+-
+ /**
+  * virNetDevReplaceMacAddress:
+  * @macaddress: new MAC address for interface
+@@ -242,7 +241,7 @@ int virNetDevGetMAC(const char *ifname,
+  * Returns 0 on success, -1 on failure
+  *
+  */
+-static int
++int
+ virNetDevReplaceMacAddress(const char *linkdev,
+                            const virMacAddrPtr macaddress,
+                            const char *stateDir)
+@@ -272,7 +271,6 @@ virNetDevReplaceMacAddress(const char *linkdev,
+         goto cleanup;
+ 
+     ret = 0;
+-
+  cleanup:
+     VIR_FREE(path);
+     return ret;
+@@ -286,7 +284,7 @@ virNetDevReplaceMacAddress(const char *linkdev,
+  * Returns 0 on success, -errno on failure.
+  *
+  */
+-static int
++int
+ virNetDevRestoreMacAddress(const char *linkdev,
+                            const char *stateDir)
+ {
+diff --git a/src/util/virnetdev.h b/src/util/virnetdev.h
+index fc8d49f..ea0987c 100644
+--- a/src/util/virnetdev.h
++++ b/src/util/virnetdev.h
+@@ -57,6 +57,16 @@ int virNetDevGetMAC(const char *ifname,
+                     virMacAddrPtr macaddr)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+ 
++int virNetDevReplaceMacAddress(const char *linkdev,
++                               const virMacAddrPtr macaddress,
++                               const char *stateDir)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3)
++    ATTRIBUTE_RETURN_CHECK;
++
++int virNetDevRestoreMacAddress(const char *linkdev,
++                               const char *stateDir)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
++
+ int virNetDevSetMTU(const char *ifname,
+                     int mtu)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+-- 
+2.6.2
+

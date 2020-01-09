@@ -1,0 +1,40 @@
+From 6031d160ffa659ef1018e65661942ccf1775c295 Mon Sep 17 00:00:00 2001
+Message-Id: <6031d160ffa659ef1018e65661942ccf1775c295@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 14 Apr 2014 17:49:42 +0200
+Subject: [PATCH] virDomainReboot: Document that migration might be unsafe
+
+https://bugzilla.redhat.com/show_bug.cgi?id=744967
+
+If a domain is rebooting and a migrate API is called meanwhile we would
+have to transfer the fakeReboot attribute to the destination in order to
+prevent domain doing plain shutdown over there. We shouldn't try to do
+anything clever about it other than documenting this as a known
+limitation.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit cc38d68dc1d580fd9acc648e11057b1903ddb247)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 3a4e78a..c4730e0 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -3279,6 +3279,11 @@ error:
+  * To use guest agent (VIR_DOMAIN_REBOOT_GUEST_AGENT) the domain XML
+  * must have <channel> configured.
+  *
++ * Due to implementation limitations in some drivers (the qemu driver,
++ * for instance) it is not advised to migrate or save a guest that is
++ * rebooting as a result of this API. Migrating such a guest can lead
++ * to a plain shutdown on the destination.
++ *
+  * Returns 0 in case of success and -1 in case of failure.
+  */
+ int
+-- 
+1.9.2
+

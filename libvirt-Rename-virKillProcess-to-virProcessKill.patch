@@ -1,0 +1,103 @@
+From 61ff0d44535fc2e0f8bc18a22d24c17a86f66423 Mon Sep 17 00:00:00 2001
+Message-Id: <61ff0d44535fc2e0f8bc18a22d24c17a86f66423.1379585483.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 12 Sep 2013 17:00:00 +0100
+Subject: [PATCH] Rename virKillProcess to virProcessKill
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1006266
+
+Changing naming to follow the convention of "object" followed
+by "action"
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit cf470068a114fc7aab5e5de37d3f4fe3545bdc81)
+---
+ src/qemu/qemu_agent.c   | 2 +-
+ src/qemu/qemu_monitor.c | 2 +-
+ src/qemu/qemu_process.c | 2 +-
+ src/uml/uml_driver.c    | 2 +-
+ src/util/util.c         | 2 +-
+ src/util/util.h         | 2 +-
+ 6 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_agent.c b/src/qemu/qemu_agent.c
+index a24ea20..7f3fa76 100644
+--- a/src/qemu/qemu_agent.c
++++ b/src/qemu/qemu_agent.c
+@@ -219,7 +219,7 @@ qemuAgentOpenUnix(const char *monitor, pid_t cpid, bool *inProgress)
+             break;
+ 
+         if ((errno == ENOENT || errno == ECONNREFUSED) &&
+-            virKillProcess(cpid, 0) == 0) {
++            virProcessKill(cpid, 0) == 0) {
+             /* ENOENT       : Socket may not have shown up yet
+              * ECONNREFUSED : Leftover socket hasn't been removed yet */
+             continue;
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index d0f4370..eff21f7 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -282,7 +282,7 @@ qemuMonitorOpenUnix(const char *monitor, pid_t cpid)
+             break;
+ 
+         if ((errno == ENOENT || errno == ECONNREFUSED) &&
+-            virKillProcess(cpid, 0) == 0) {
++            virProcessKill(cpid, 0) == 0) {
+             /* ENOENT       : Socket may not have shown up yet
+              * ECONNREFUSED : Leftover socket hasn't been removed yet */
+             continue;
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 4785e5d..a0d231a 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -4177,7 +4177,7 @@ qemuProcessKill(struct qemud_driver *driver,
+             signum = 0; /* Just check for existence */
+         }
+ 
+-        if (virKillProcess(vm->pid, signum) < 0) {
++        if (virProcessKill(vm->pid, signum) < 0) {
+             if (errno != ESRCH) {
+                 char ebuf[1024];
+                 VIR_WARN("Failed to terminate process %d with SIG%s: %s",
+diff --git a/src/uml/uml_driver.c b/src/uml/uml_driver.c
+index e07974e..1777069 100644
+--- a/src/uml/uml_driver.c
++++ b/src/uml/uml_driver.c
+@@ -1128,7 +1128,7 @@ static void umlShutdownVMDaemon(struct uml_driver *driver,
+     if (!virDomainObjIsActive(vm))
+         return;
+ 
+-    virKillProcess(vm->pid, SIGTERM);
++    virProcessKill(vm->pid, SIGTERM);
+ 
+     VIR_FORCE_CLOSE(priv->monitor);
+ 
+diff --git a/src/util/util.c b/src/util/util.c
+index d1dba78..e4d8f0e 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -2318,7 +2318,7 @@ check_and_return:
+ }
+ 
+ /* send signal to a single process */
+-int virKillProcess(pid_t pid, int sig)
++int virProcessKill(pid_t pid, int sig)
+ {
+     if (pid <= 1) {
+         errno = ESRCH;
+diff --git a/src/util/util.h b/src/util/util.h
+index 75c5b69..7c201ce 100644
+--- a/src/util/util.h
++++ b/src/util/util.h
+@@ -255,7 +255,7 @@ static inline int getgid (void) { return 0; }
+ 
+ char *virGetHostname(virConnectPtr conn);
+ 
+-int virKillProcess(pid_t pid, int sig);
++int virProcessKill(pid_t pid, int sig);
+ 
+ char *virGetUserDirectory(void);
+ char *virGetUserConfigDirectory(void);
+-- 
+1.8.3.2
+

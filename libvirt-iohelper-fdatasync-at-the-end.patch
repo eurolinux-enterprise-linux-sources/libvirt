@@ -1,0 +1,46 @@
+From 970bdd6201806cc6a72544ad7202a400ac1913be Mon Sep 17 00:00:00 2001
+Message-Id: <970bdd6201806cc6a72544ad7202a400ac1913be.1352118320.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 1 Nov 2012 17:00:51 +0100
+Subject: [PATCH] iohelper: fdatasync() at the end
+
+https://bugzilla.redhat.com/show_bug.cgi?id=866369
+
+Currently, when we are doing (managed) save, we insert the
+iohelper between the qemu and OS. The pipe is created, the
+writing end is passed to qemu and the reading end to the
+iohelper. It reads data and write them into given file. However,
+with write() being asynchronous data may still be in OS
+caches and hence in some (corner) cases, all migration data
+may have been read and written (not physically though). So
+qemu will report success, as well as iohelper. However, with
+some non local filesystems, where ENOSPACE is polled every X
+time units, we may get into situation where all operations
+succeeded but data hasn't reached the disk. And in fact will
+never do. Therefore we ought sync caches to make sure data
+has reached the block device on remote host.
+(cherry picked from commit f32e3a2dd686f3692cd2bd3147c03e90f82df987)
+---
+ src/util/iohelper.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/util/iohelper.c b/src/util/iohelper.c
+index c6542ed..860e14a 100644
+--- a/src/util/iohelper.c
++++ b/src/util/iohelper.c
+@@ -179,6 +179,12 @@ runIO(const char *path, int fd, int oflags, unsigned long long length)
+         }
+     }
+ 
++    /* Ensure all data is written */
++    if (fdatasync(fdout) < 0) {
++        virReportSystemError(errno, _("unable to fsync %s"), fdoutname);
++        goto cleanup;
++    }
++
+     ret = 0;
+ 
+ cleanup:
+-- 
+1.8.0
+

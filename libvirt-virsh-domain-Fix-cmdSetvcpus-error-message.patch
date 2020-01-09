@@ -1,0 +1,42 @@
+From 0cfc261233b148ea75ed6aa38b57588f7c10ee4b Mon Sep 17 00:00:00 2001
+Message-Id: <0cfc261233b148ea75ed6aa38b57588f7c10ee4b@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Fri, 2 May 2014 10:41:27 -0400
+Subject: [PATCH] virsh-domain: Fix cmdSetvcpus error message
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1092412
+
+RHEL only
+
+Commit '81ef3997' merged in upstream changes from commit 'c2093b2a';
+however, the upstream code used the "VSH_EXCLUSIVE_OPTIONS_VAR(guest,
+config)" from commit '7e437ee7' which isn't in the downstream code.
+The merge missed the error message incorrectly supplying "--current"
+for the check of the guest && config options being exclusive. The
+macro would have correctly supplied the error message.
+
+This patch just adjusts the error message to use '--config' instead
+of '--current'.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-domain.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index ffa66cc..ff1fd3d 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -5098,7 +5098,7 @@ cmdSetvcpus(vshControl *ctl, const vshCmd *cmd)
+     }
+ 
+     if (guest && config) {
+-        vshError(ctl, "%s", _("--guest and --current are exclusive"));
++        vshError(ctl, "%s", _("--guest and --config are exclusive"));
+         return false;
+     }
+ 
+-- 
+1.9.2
+

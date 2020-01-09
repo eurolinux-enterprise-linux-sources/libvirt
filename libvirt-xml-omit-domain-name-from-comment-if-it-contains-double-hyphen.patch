@@ -1,0 +1,49 @@
+From 30a498985cde51678e028d9fdd896a527f4a7807 Mon Sep 17 00:00:00 2001
+Message-Id: <30a498985cde51678e028d9fdd896a527f4a7807.1351526125.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Tue, 23 Oct 2012 15:30:57 +0200
+Subject: [PATCH] xml: omit domain name from comment if it contains double
+ hyphen
+
+https://bugzilla.redhat.com/show_bug.cgi?id=868692
+
+We put a comment containing "virsh edit <domain_name>" at the start of
+the XML. W3C recommendation forbids the use of "--" in comments [1] and
+libvirt can't parse it either. This patch omits the domain name if it
+contains a double hyphen.
+
+[1] http://www.w3.org/TR/REC-xml/#sec-comments
+(cherry picked from commit 9b704ab8235af010b1fda4886201aab02098b969)
+---
+ src/util/xml.c | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/src/util/xml.c b/src/util/xml.c
+index 39bc111..f3dc256 100644
+--- a/src/util/xml.c
++++ b/src/util/xml.c
+@@ -807,12 +807,16 @@ or other application using the libvirt API.\n\
+     if (safewrite(fd, cmd, len) != len)
+         return -1;
+ 
+-    if (safewrite(fd, " ", 1) != 1)
+-        return -1;
++    /* Omit the domain name if it contains a double hyphen
++     * because they aren't allowed in XML comments */
++    if (!strstr(name, "--")) {
++        if (safewrite(fd, " ", 1) != 1)
++            return -1;
+ 
+-    len = strlen(name);
+-    if (safewrite(fd, name, len) != len)
+-        return -1;
++        len = strlen(name);
++        if (safewrite(fd, name, len) != len)
++            return -1;
++    }
+ 
+     len = strlen(epilogue);
+     if (safewrite(fd, epilogue, len) != len)
+-- 
+1.7.12.4
+

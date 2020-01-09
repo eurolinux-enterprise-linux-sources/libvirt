@@ -1,0 +1,73 @@
+From 463e76f9bce822b6e76902f258bde524d276d289 Mon Sep 17 00:00:00 2001
+Message-Id: <463e76f9bce822b6e76902f258bde524d276d289.1353944810.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Fri, 23 Nov 2012 10:21:04 +0000
+Subject: [PATCH] Fix exiting of libvirt_lxc program on container quit
+
+For
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=879360
+
+The virLXCControllerClientCloseHook method was mistakenly
+assuming that the private data associated with the network
+client was the virLXCControllerPtr. In fact it was just a
+dummy int, so we were derefencing a bogus struct. The
+frequent result of this was that we would never quit, because
+we tried to arm a non-existant timer.
+
+Fix the code by removing the dummy private data and just
+using the virLXCControllerPtr instance as private data
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 37db3f5dfe713b978732a9b84982892da857813a)
+
+Conflicts:
+	src/lxc/lxc_controller.c
+---
+ src/lxc/lxc_controller.c | 13 ++++---------
+ 1 file changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/src/lxc/lxc_controller.c b/src/lxc/lxc_controller.c
+index cd2eb81..5d69eaf 100644
+--- a/src/lxc/lxc_controller.c
++++ b/src/lxc/lxc_controller.c
+@@ -575,24 +575,19 @@ static void virLXCControllerClientCloseHook(virNetServerClientPtr client)
+ 
+ static void virLXCControllerClientPrivateFree(void *data)
+ {
+-    VIR_FREE(data);
++    virLXCControllerPtr ctrl = data;
++    VIR_DEBUG("Got private data free %p", ctrl);
+ }
+ 
+ static void *virLXCControllerClientPrivateNew(virNetServerClientPtr client,
+                                               void *opaque)
+ {
+     virLXCControllerPtr ctrl = opaque;
+-    int *dummy;
+-
+-    if (VIR_ALLOC(dummy) < 0) {
+-        virReportOOMError();
+-        return NULL;
+-    }
+ 
+     virNetServerClientSetCloseHook(client, virLXCControllerClientCloseHook);
+     VIR_DEBUG("Got new client %p", client);
+     ctrl->client = client;
+-    return dummy;
++    return ctrl;
+ }
+ 
+ 
+@@ -1316,7 +1311,7 @@ virLXCControllerEventSendExit(virLXCControllerPtr ctrl,
+ {
+     virLXCProtocolExitEventMsg msg;
+ 
+-    VIR_DEBUG("Exit status %d", exitstatus);
++    VIR_DEBUG("Exit status %d (client=%p)", exitstatus, ctrl->client);
+     memset(&msg, 0, sizeof(msg));
+     switch (exitstatus) {
+     case 0:
+-- 
+1.8.0
+

@@ -1,0 +1,58 @@
+From c5254d642359564859afe766d3ac522123de92e6 Mon Sep 17 00:00:00 2001
+Message-Id: <c5254d642359564859afe766d3ac522123de92e6.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 10 Oct 2012 15:38:44 +0100
+Subject: [PATCH] Fix potential deadlock when agent is closed
+
+https://bugzilla.redhat.com/show_bug.cgi?id=859712
+
+If the qemuAgentClose method is called from a place which holds
+the domain lock, it is theoretically possible to get a deadlock
+in the agent destroy callback. This has not been observed, but
+the equivalent code in the QEMU monitor destroy callback has seen
+a deadlock.
+
+Remove the redundant locking while unrefing the object and the
+bogus assignment
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 362d04779ce925725125a4eaa660c89d7313725f)
+---
+ src/qemu/qemu_process.c | 12 +++---------
+ 1 file changed, 3 insertions(+), 9 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 429ba8f..127906e 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -128,7 +128,8 @@ qemuProcessHandleAgentEOF(qemuAgentPtr agent,
+     virDomainObjLock(vm);
+ 
+     priv = vm->privateData;
+-    priv->agent = NULL;
++    if (priv->agent == agent)
++        priv->agent = NULL;
+ 
+     virDomainObjUnlock(vm);
+     qemuDriverUnlock(driver);
+@@ -166,16 +167,9 @@ qemuProcessHandleAgentError(qemuAgentPtr agent ATTRIBUTE_UNUSED,
+ static void qemuProcessHandleAgentDestroy(qemuAgentPtr agent,
+                                           virDomainObjPtr vm)
+ {
+-    qemuDomainObjPrivatePtr priv;
+-
+     VIR_DEBUG("Received destroy agent=%p vm=%p", agent, vm);
+ 
+-    virDomainObjLock(vm);
+-    priv = vm->privateData;
+-    if (priv->agent == agent)
+-        priv->agent = NULL;
+-    if (virObjectUnref(vm))
+-        virDomainObjUnlock(vm);
++    virObjectUnref(vm);
+ }
+ 
+ 
+-- 
+1.7.12.3
+

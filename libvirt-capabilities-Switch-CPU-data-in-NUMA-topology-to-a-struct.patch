@@ -1,0 +1,337 @@
+From aaca8fc3c2f3f683759f907ac1e86367a15233ff Mon Sep 17 00:00:00 2001
+Message-Id: <aaca8fc3c2f3f683759f907ac1e86367a15233ff.1373271636.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 7 Feb 2013 18:28:21 +0100
+Subject: [PATCH] capabilities: Switch CPU data in NUMA topology to a struct
+
+https://bugzilla.redhat.com/show_bug.cgi?id=888503
+
+This will allow storing additional topology data in the NUMA topology
+definition.
+
+This patch changes the storage type and fixes fallout of the change
+across the drivers using it.
+
+This patch also changes semantics of adding new NUMA cell information.
+Until now the data were re-allocated and copied to the topology
+definition. This patch changes the addition function to steal the
+pointer to a pre-allocated structure to simplify the code.
+(cherry picked from commit 87b4c10c6cf02251dd8c29b5b895bebc6ec297f9)
+---
+ src/conf/capabilities.c  | 32 +++++++++++++++++++++-----------
+ src/conf/capabilities.h  | 16 ++++++++++++++--
+ src/libvirt_private.syms |  1 +
+ src/nodeinfo.c           | 15 ++++++---------
+ src/qemu/qemu_process.c  |  2 +-
+ src/test/test_driver.c   | 15 ++++++++++++---
+ src/xen/xend_internal.c  | 21 +++++++++++----------
+ 7 files changed, 66 insertions(+), 36 deletions(-)
+
+diff --git a/src/conf/capabilities.c b/src/conf/capabilities.c
+index 5d034d5..0c46a4e 100644
+--- a/src/conf/capabilities.c
++++ b/src/conf/capabilities.c
+@@ -70,12 +70,29 @@ virCapabilitiesNew(const char *arch,
+     return NULL;
+ }
+ 
++void
++virCapabilitiesClearHostNUMACellCPUTopology(virCapsHostNUMACellCPUPtr cpus,
++                                            size_t ncpus)
++{
++    size_t i;
++
++    if (!cpus)
++        return;
++
++    for (i = 0; i < ncpus; i++) {
++        virBitmapFree(cpus[i].siblings);
++        cpus[i].siblings = NULL;
++    }
++}
++
+ static void
+ virCapabilitiesFreeHostNUMACell(virCapsHostNUMACellPtr cell)
+ {
+     if (cell == NULL)
+         return;
+ 
++    virCapabilitiesClearHostNUMACellCPUTopology(cell->cpus, cell->ncpus);
++
+     VIR_FREE(cell->cpus);
+     VIR_FREE(cell);
+ }
+@@ -244,7 +261,7 @@ virCapabilitiesAddHostMigrateTransport(virCapsPtr caps,
+  * @caps: capabilities to extend
+  * @num: ID number of NUMA cell
+  * @ncpus: number of CPUs in cell
+- * @cpus: array of CPU ID numbers for cell
++ * @cpus: array of CPU definition structures, the pointer is stolen
+  *
+  * Registers a new NUMA cell for a host, passing in a
+  * array of CPU IDs belonging to the cell
+@@ -253,7 +270,7 @@ int
+ virCapabilitiesAddHostNUMACell(virCapsPtr caps,
+                                int num,
+                                int ncpus,
+-                               const int *cpus)
++                               virCapsHostNUMACellCPUPtr cpus)
+ {
+     virCapsHostNUMACellPtr cell;
+ 
+@@ -264,16 +281,9 @@ virCapabilitiesAddHostNUMACell(virCapsPtr caps,
+     if (VIR_ALLOC(cell) < 0)
+         return -1;
+ 
+-    if (VIR_ALLOC_N(cell->cpus, ncpus) < 0) {
+-        VIR_FREE(cell);
+-        return -1;
+-    }
+-    memcpy(cell->cpus,
+-           cpus,
+-           ncpus * sizeof(*cpus));
+-
+     cell->ncpus = ncpus;
+     cell->num = num;
++    cell->cpus = cpus;
+ 
+     caps->host.numaCell[caps->host.nnumaCell++] = cell;
+ 
+@@ -695,7 +705,7 @@ virCapabilitiesFormatNUMATopology(virBufferPtr xml,
+         virBufferAsprintf(xml, "          <cpus num='%d'>\n", cells[i]->ncpus);
+         for (j = 0; j < cells[i]->ncpus; j++)
+             virBufferAsprintf(xml, "            <cpu id='%d'/>\n",
+-                              cells[i]->cpus[j]);
++                              cells[i]->cpus[j].id);
+         virBufferAddLit(xml, "          </cpus>\n");
+         virBufferAddLit(xml, "        </cell>\n");
+     }
+diff --git a/src/conf/capabilities.h b/src/conf/capabilities.h
+index 99056f8..f5be157 100644
+--- a/src/conf/capabilities.h
++++ b/src/conf/capabilities.h
+@@ -83,12 +83,21 @@ struct _virCapsGuest {
+     virCapsGuestFeaturePtr *features;
+ };
+ 
++typedef struct _virCapsHostNUMACellCPU virCapsHostNUMACellCPU;
++typedef virCapsHostNUMACellCPU *virCapsHostNUMACellCPUPtr;
++struct _virCapsHostNUMACellCPU {
++    unsigned int id;
++    unsigned int socket_id;
++    unsigned int core_id;
++    virBitmapPtr siblings;
++};
++
+ typedef struct _virCapsHostNUMACell virCapsHostNUMACell;
+ typedef virCapsHostNUMACell *virCapsHostNUMACellPtr;
+ struct _virCapsHostNUMACell {
+     int num;
+     int ncpus;
+-    int *cpus;
++    virCapsHostNUMACellCPUPtr cpus;
+ };
+ 
+ typedef struct _virCapsHostSecModel virCapsHostSecModel;
+@@ -200,7 +209,7 @@ extern int
+ virCapabilitiesAddHostNUMACell(virCapsPtr caps,
+                                int num,
+                                int ncpus,
+-                               const int *cpus);
++                               virCapsHostNUMACellCPUPtr cpus);
+ 
+ 
+ extern int
+@@ -250,6 +259,9 @@ virCapabilitiesSupportsGuestOSTypeArch(virCapsPtr caps,
+                                        const char *ostype,
+                                        const char *arch);
+ 
++void
++virCapabilitiesClearHostNUMACellCPUTopology(virCapsHostNUMACellCPUPtr cpu,
++                                            size_t ncpus);
+ 
+ extern const char *
+ virCapabilitiesDefaultGuestArch(virCapsPtr caps,
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 58438bd..ea4d1a8 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -55,6 +55,7 @@ virCapabilitiesAddHostFeature;
+ virCapabilitiesAddHostMigrateTransport;
+ virCapabilitiesAddHostNUMACell;
+ virCapabilitiesAllocMachines;
++virCapabilitiesClearHostNUMACellCPUTopology;
+ virCapabilitiesDefaultGuestArch;
+ virCapabilitiesDefaultGuestEmulator;
+ virCapabilitiesDefaultGuestMachine;
+diff --git a/src/nodeinfo.c b/src/nodeinfo.c
+index 9f510e6..b6fcb2f 100644
+--- a/src/nodeinfo.c
++++ b/src/nodeinfo.c
+@@ -1285,9 +1285,10 @@ nodeCapsInitNUMA(virCapsPtr caps)
+     int n;
+     unsigned long *mask = NULL;
+     unsigned long *allonesmask = NULL;
+-    int *cpus = NULL;
++    virCapsHostNUMACellCPUPtr cpus = NULL;
+     int ret = -1;
+     int max_n_cpus = NUMA_MAX_N_CPUS;
++    int ncpus = 0;
+ 
+     if (numa_available() < 0)
+         return 0;
+@@ -1301,7 +1302,6 @@ nodeCapsInitNUMA(virCapsPtr caps)
+ 
+     for (n = 0 ; n <= numa_max_node() ; n++) {
+         int i;
+-        int ncpus;
+         /* The first time this returns -1, ENOENT if node doesn't exist... */
+         if (numa_node_to_cpus(n, mask, mask_n_bytes) < 0) {
+             VIR_WARN("NUMA topology for cell %d of %d not available, ignoring",
+@@ -1324,20 +1324,17 @@ nodeCapsInitNUMA(virCapsPtr caps)
+ 
+         for (ncpus = 0, i = 0 ; i < max_n_cpus ; i++)
+             if (MASK_CPU_ISSET(mask, i))
+-                cpus[ncpus++] = i;
++                cpus[ncpus++].id = i;
+ 
+-        if (virCapabilitiesAddHostNUMACell(caps,
+-                                           n,
+-                                           ncpus,
+-                                           cpus) < 0)
++        if (virCapabilitiesAddHostNUMACell(caps, n, ncpus, cpus) < 0)
+             goto cleanup;
+-
+-        VIR_FREE(cpus);
++        cpus = NULL;
+     }
+ 
+     ret = 0;
+ 
+ cleanup:
++    virCapabilitiesClearHostNUMACellCPUTopology(cpus, ncpus);
+     VIR_FREE(cpus);
+     VIR_FREE(mask);
+     VIR_FREE(allonesmask);
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 7d41234..8ebb67d 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1990,7 +1990,7 @@ qemuPrepareCpumap(struct qemud_driver *driver,
+             if (result) {
+                 for (j = 0; j < cur_ncpus; j++)
+                     ignore_value(virBitmapSetBit(cpumap,
+-                                                 driver->caps->host.numaCell[i]->cpus[j]));
++                                                 driver->caps->host.numaCell[i]->cpus[j].id));
+             }
+         }
+     }
+diff --git a/src/test/test_driver.c b/src/test/test_driver.c
+index c9f9115..d27cb14 100644
+--- a/src/test/test_driver.c
++++ b/src/test/test_driver.c
+@@ -69,7 +69,7 @@ typedef struct _testDomainObjPrivate *testDomainObjPrivatePtr;
+ struct _testCell {
+     unsigned long mem;
+     int numCpus;
+-    int cpus[MAX_CPUS];
++    virCapsHostNUMACellCPU cpus[MAX_CPUS];
+ };
+ typedef struct _testCell testCell;
+ typedef struct _testCell *testCellPtr;
+@@ -173,8 +173,17 @@ testBuildCapabilities(virConnectPtr conn) {
+         goto no_memory;
+ 
+     for (i = 0; i < privconn->numCells; i++) {
++        virCapsHostNUMACellCPUPtr cpu_cells;
++
++        if (VIR_ALLOC_N(cpu_cells, privconn->cells[i].numCpus) < 0)
++            goto no_memory;
++
++        memcpy(cpu_cells, privconn->cells[i].cpus,
++               sizeof(*cpu_cells) * privconn->cells[i].numCpus);
++
++
+         if (virCapabilitiesAddHostNUMACell(caps, i, privconn->cells[i].numCpus,
+-                                           privconn->cells[i].cpus) < 0)
++                                           cpu_cells) < 0)
+             goto no_memory;
+     }
+ 
+@@ -549,7 +558,7 @@ static int testOpenDefault(virConnectPtr conn) {
+         privconn->cells[u].mem = (u + 1) * 2048 * 1024;
+     }
+     for (u = 0 ; u < 16 ; u++) {
+-        privconn->cells[u % 2].cpus[(u / 2)] = u;
++        privconn->cells[u % 2].cpus[(u / 2)].id = u;
+     }
+ 
+     if (!(privconn->caps = testBuildCapabilities(conn)))
+diff --git a/src/xen/xend_internal.c b/src/xen/xend_internal.c
+index da9bf32..fb964a7 100644
+--- a/src/xen/xend_internal.c
++++ b/src/xen/xend_internal.c
+@@ -1113,7 +1113,7 @@ sexpr_to_xend_topology(const struct sexpr *root,
+ {
+     const char *nodeToCpu;
+     const char *cur;
+-    int *cpuNums = NULL;
++    virCapsHostNUMACellCPUPtr cpuInfo = NULL;
+     int cell, cpu, nb_cpus;
+     int n = 0;
+     int numCpus;
+@@ -1125,9 +1125,6 @@ sexpr_to_xend_topology(const struct sexpr *root,
+     numCpus = sexpr_int(root, "node/nr_cpus");
+ 
+ 
+-    if (VIR_ALLOC_N(cpuNums, numCpus) < 0)
+-        goto memory_error;
+-
+     cur = nodeToCpu;
+     while (*cur != 0) {
+         virBitmapPtr cpuset = NULL;
+@@ -1156,31 +1153,35 @@ sexpr_to_xend_topology(const struct sexpr *root,
+                 goto error;
+         }
+ 
++        if (VIR_ALLOC_N(cpuInfo, numCpus) < 0)
++            goto memory_error;
++
+         for (n = 0, cpu = 0; cpu < numCpus; cpu++) {
+             bool used;
+ 
+             ignore_value(virBitmapGetBit(cpuset, cpu, &used));
+             if (used)
+-                cpuNums[n++] = cpu;
++                cpuInfo[n++].id = cpu;
+         }
+         virBitmapFree(cpuset);
+ 
+-        if (virCapabilitiesAddHostNUMACell(caps, cell, nb_cpus, cpuNums) < 0)
++        if (virCapabilitiesAddHostNUMACell(caps, cell, nb_cpus, cpuInfo) < 0)
+             goto memory_error;
++        cpuInfo = NULL;
+     }
+-    VIR_FREE(cpuNums);
++
+     return 0;
+ 
+   parse_error:
+     virReportError(VIR_ERR_XEN_CALL, "%s", _("topology syntax error"));
+   error:
+-    VIR_FREE(cpuNums);
++    virCapabilitiesClearHostNUMACellCPUTopology(cpuInfo, nb_cpus);
++    VIR_FREE(cpuInfo);
+     return -1;
+ 
+   memory_error:
+-    VIR_FREE(cpuNums);
+     virReportOOMError();
+-    return -1;
++    goto error;
+ }
+ 
+ 
+-- 
+1.8.2.1
+

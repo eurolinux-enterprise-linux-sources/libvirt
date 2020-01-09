@@ -1,0 +1,32 @@
+From 98b03482b101ec93276e3dd5d79b9ef4c60da86d Mon Sep 17 00:00:00 2001
+Message-Id: <98b03482b101ec93276e3dd5d79b9ef4c60da86d.1373271641.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 17 Apr 2013 15:19:45 +0200
+Subject: [PATCH] daemon: fix leak after listing volumes
+
+CVE-2013-1962
+
+remoteDispatchStoragePoolListAllVolumes wasn't freeing the pool.
+The pool also held a reference to the connection, preventing it from
+getting freed and closing the netcf interface driver, which held two
+sockets open.
+---
+ daemon/remote.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/daemon/remote.c b/daemon/remote.c
+index 642ad78..68f7120 100644
+--- a/daemon/remote.c
++++ b/daemon/remote.c
+@@ -4235,6 +4235,8 @@ cleanup:
+             virStorageVolFree(vols[i]);
+         VIR_FREE(vols);
+     }
++    if (pool)
++        virStoragePoolFree(pool);
+     return rv;
+ }
+ 
+-- 
+1.8.2.1
+

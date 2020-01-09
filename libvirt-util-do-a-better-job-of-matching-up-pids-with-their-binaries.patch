@@ -1,0 +1,195 @@
+From cc55f9565bdda2ab0309765a4c97cdc64112d749 Mon Sep 17 00:00:00 2001
+Message-Id: <cc55f9565bdda2ab0309765a4c97cdc64112d749.1352118319.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Tue, 30 Oct 2012 14:43:42 -0400
+Subject: [PATCH] util: do a better job of matching up pids with their
+ binaries
+
+This patch resolves: https://bugzilla.redhat.com/show_bug.cgi?id=871201
+
+If libvirt is restarted after updating the dnsmasq or radvd packages,
+a subsequent "virsh net-destroy" will fail to kill the dnsmasq/radvd
+process.
+
+The problem is that when libvirtd restarts, it re-reads the dnsmasq
+and radvd pidfiles, then does a sanity check on each pid it finds,
+including checking that the symbolic link in /proc/$pid/exe actually
+points to the same file as the path used by libvirt to execute the
+binary in the first place. If this fails, libvirt assumes that the
+process is no longer alive.
+
+But if the original binary has been replaced, the link in /proc is set
+to "$binarypath (deleted)" (it literally has the string " (deleted)"
+appended to the link text stored in the filesystem), so even if a new
+binary exists in the same location, attempts to resolve the link will
+fail.
+
+In the end, not only is the old dnsmasq/radvd not terminated when the
+network is stopped, but a new dnsmasq can't be started when the
+network is later restarted (because the original process is still
+listening on the ports that the new process wants).
+
+The solution is, when the initial "use stat to check for identical
+inodes" check for identity between /proc/$pid/exe and $binpath fails,
+to check /proc/$pid/exe for a link ending with " (deleted)" and if so,
+truncate that part of the link and compare what's left with the
+original binarypath.
+
+A twist to this problem is that on systems with "merged" /sbin and
+/usr/sbin (i.e. /sbin is really just a symlink to /usr/sbin; Fedora
+17+ is an example of this), libvirt may have started the process using
+one path, but /proc/$pid/exe lists a different path (indeed, on F17
+this is the case - libvirtd uses /sbin/dnsmasq, but /proc/$pid/exe
+shows "/usr/sbin/dnsmasq"). The further bit of code to resolve this is
+to call virFileResolveAllLinks() on both the original binarypath and
+on the truncated link we read from /proc/$pid/exe, and compare the
+results.
+
+The resulting code still succeeds in all the same cases it did before,
+but also succeeds if the binary was deleted or replaced after it was
+started.
+(cherry picked from commit 7bafe009d93f8b26330d52dc3289643699cf74f0)
+---
+ cfg.mk                |  2 +-
+ src/util/virpidfile.c | 92 ++++++++++++++++++++++++++++++++++++++++-----------
+ 2 files changed, 74 insertions(+), 20 deletions(-)
+
+diff --git a/cfg.mk b/cfg.mk
+index bbfd4a2..6ad8378 100644
+--- a/cfg.mk
++++ b/cfg.mk
+@@ -387,7 +387,7 @@ sc_prohibit_sprintf:
+ 	  $(_sc_search_regexp)
+ 
+ sc_prohibit_readlink:
+-	@prohibit='readlink *\('					\
++	@prohibit='\<readlink *\('					\
+ 	halt='use virFileResolveLink, not readlink'			\
+ 	  $(_sc_search_regexp)
+ 
+diff --git a/src/util/virpidfile.c b/src/util/virpidfile.c
+index e8434c1..0fff8ae 100644
+--- a/src/util/virpidfile.c
++++ b/src/util/virpidfile.c
+@@ -35,6 +35,7 @@
+ #include "logging.h"
+ #include "virterror_internal.h"
+ #include "c-ctype.h"
++#include "areadlink.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_NONE
+ 
+@@ -203,38 +204,91 @@ int virPidFileRead(const char *dir,
+  */
+ int virPidFileReadPathIfAlive(const char *path,
+                               pid_t *pid,
+-                              const char *binpath)
++                              const char *binPath)
+ {
+-    int rc;
+-    char *procpath = NULL;
++    int ret, retPid;
++    bool isLink;
++    char *procPath = NULL;
++    char *procLink = NULL;
++    size_t procLinkLen;
++    char *resolvedBinPath = NULL;
++    char *resolvedProcLink = NULL;
++    const char deletedText[] = " (deleted)";
++    size_t deletedTextLen = strlen(deletedText);
++
+ 
+-    rc = virPidFileReadPath(path, pid);
+-    if (rc < 0)
+-        return rc;
++    /* only set this at the very end on success */
++    *pid = -1;
++
++    if ((ret = virPidFileReadPath(path, &retPid)) < 0)
++        goto cleanup;
+ 
+ #ifndef WIN32
+     /* Check that it's still alive.  Safe to skip this sanity check on
+      * mingw, which lacks kill().  */
+-    if (kill(*pid, 0) < 0) {
+-        *pid = -1;
+-        return 0;
++    if (kill(retPid, 0) < 0) {
++        ret = 0;
++        retPid = -1;
++        goto cleanup;
+     }
+ #endif
+ 
+-    if (binpath) {
+-        if (virAsprintf(&procpath, "/proc/%lld/exe", (long long)*pid) < 0) {
+-            *pid = -1;
+-            return -1;
+-        }
++    if (!binPath) {
++        /* we only knew the pid, and that pid is alive, so we can
++         * return it.
++         */
++        ret = 0;
++        goto cleanup;
++    }
++
++    if (virAsprintf(&procPath, "/proc/%lld/exe", (long long)retPid) < 0) {
++        ret = -ENOMEM;
++        goto cleanup;
++    }
+ 
+-        if (virFileIsLink(procpath) &&
+-            virFileLinkPointsTo(procpath, binpath) == 0)
+-            *pid = -1;
++    if ((ret = virFileIsLink(procPath)) < 0)
++        goto cleanup;
++    isLink = ret;
+ 
+-        VIR_FREE(procpath);
++    if (isLink && virFileLinkPointsTo(procPath, binPath)) {
++        /* the link in /proc/$pid/exe is a symlink to a file
++         * that has the same inode as the file at binpath.
++         */
++        ret = 0;
++        goto cleanup;
+     }
+ 
+-    return 0;
++    /* Even if virFileLinkPointsTo returns a mismatch, it could be
++     * that the binary was deleted/replaced after it was executed. In
++     * that case the link in /proc/$pid/exe will contain
++     * "$procpath (deleted)".  Read that link, remove the " (deleted)"
++     * part, and see if it has the same canonicalized name as binpath.
++     */
++    if (!(procLink = areadlink(procPath))) {
++        ret = -errno;
++        goto cleanup;
++    }
++    procLinkLen = strlen(procLink);
++    if (procLinkLen > deletedTextLen)
++        procLink[procLinkLen - deletedTextLen] = 0;
++
++    if ((ret = virFileResolveAllLinks(binPath, &resolvedBinPath)) < 0)
++        goto cleanup;
++    if ((ret = virFileResolveAllLinks(procLink, &resolvedProcLink)) < 0)
++        goto cleanup;
++
++    ret = STREQ(resolvedBinPath, resolvedProcLink) ? 0 : -1;
++
++cleanup:
++    VIR_FREE(procPath);
++    VIR_FREE(procLink);
++    VIR_FREE(resolvedProcLink);
++    VIR_FREE(resolvedBinPath);
++
++    /* return the originally set pid of -1 unless we proclaim success */
++    if (ret == 0)
++        *pid = retPid;
++    return ret;
+ }
+ 
+ 
+-- 
+1.8.0
+

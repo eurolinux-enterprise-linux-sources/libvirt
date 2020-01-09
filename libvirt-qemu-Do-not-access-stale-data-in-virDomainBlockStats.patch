@@ -1,0 +1,80 @@
+From b72a32a1bb492f622b4af5461bf631e0db70a1c1 Mon Sep 17 00:00:00 2001
+Message-Id: <b72a32a1bb492f622b4af5461bf631e0db70a1c1@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 17 Jan 2014 16:06:00 -0700
+Subject: [PATCH] qemu: Do not access stale data in virDomainBlockStats
+
+CVE-2013-6458
+https://bugzilla.redhat.com/show_bug.cgi?id=1043069
+
+When virDomainDetachDeviceFlags is called concurrently to
+virDomainBlockStats: libvirtd may crash because qemuDomainBlockStats
+finds a disk in vm->def before getting a job on a domain and uses the
+disk pointer after getting the job. However, the domain in unlocked
+while waiting on a job condition and thus data behind the disk pointer
+may disappear. This happens when thread 1 runs
+virDomainDetachDeviceFlags and enters monitor to actually remove the
+disk. Then another thread starts running virDomainBlockStats, finds the
+disk in vm->def, and while it's waiting on the job condition (owned by
+the first thread), the first thread finishes the disk removal. When the
+second thread gets the job, the memory pointed to be the disk pointer is
+already gone.
+
+That said, every API that is going to begin a job should do that before
+fetching data from vm->def.
+
+(cherry picked from commit db86da5ca2109e4006c286a09b6c75bfe10676ad)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 17 ++++++-----------
+ 1 file changed, 6 insertions(+), 11 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 0adbf63..740d7cb 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -9026,34 +9026,29 @@ qemuDomainBlockStats(virDomainPtr dom,
+         goto cleanup;
+     }
+ 
++    if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_QUERY) < 0)
++        goto cleanup;
++
+     if (!virDomainObjIsActive(vm)) {
+         virReportError(VIR_ERR_OPERATION_INVALID,
+                        "%s", _("domain is not running"));
+-        goto cleanup;
++        goto endjob;
+     }
+ 
+     if ((i = virDomainDiskIndexByName(vm->def, path, false)) < 0) {
+         virReportError(VIR_ERR_INVALID_ARG,
+                        _("invalid path: %s"), path);
+-        goto cleanup;
++        goto endjob;
+     }
+     disk = vm->def->disks[i];
+ 
+     if (!disk->info.alias) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("missing disk device alias name for %s"), disk->dst);
+-        goto cleanup;
++        goto endjob;
+     }
+ 
+     priv = vm->privateData;
+-    if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_QUERY) < 0)
+-        goto cleanup;
+-
+-    if (!virDomainObjIsActive(vm)) {
+-        virReportError(VIR_ERR_OPERATION_INVALID,
+-                       "%s", _("domain is not running"));
+-        goto endjob;
+-    }
+ 
+     qemuDomainObjEnterMonitor(driver, vm);
+     ret = qemuMonitorGetBlockStatsInfo(priv->mon,
+-- 
+1.9.1
+

@@ -1,0 +1,149 @@
+From a0ceb4c26b2458a6170ce2c99436f064e40f83be Mon Sep 17 00:00:00 2001
+Message-Id: <a0ceb4c26b2458a6170ce2c99436f064e40f83be@dist-git>
+From: Guannan Ren <gren@redhat.com>
+Date: Fri, 11 Apr 2014 16:33:59 +0200
+Subject: [PATCH] qemu: refactor qemuDomainCheckDiskPresence for only disk
+ presence check
+
+Refactor this function to make it focus on disk presence checking,
+including diskchain checking, and not only for CDROM and Floppy.
+This change is good for the following patches.
+
+(cherry picked from commit e2ccc96cf0ea53aa6198efdfba79996c360567d7)
+
+(https://bugzilla.redhat.com/show_bug.cgi?id=1014730)
+
+Conflicts:
+	src/qemu/qemu_domain.c
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_domain.c | 98 +++++++++++++++++++++++++++++---------------------
+ 1 file changed, 58 insertions(+), 40 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 5c577c5..3b91a71 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -1863,6 +1863,61 @@ qemuDomainSetFakeReboot(struct qemud_driver *driver,
+         VIR_WARN("Failed to save status on vm %s", vm->def->name);
+ }
+ 
++static int
++qemuDomainCheckDiskStartupPolicy(struct qemud_driver *driver,
++                                 virDomainObjPtr vm,
++                                 virDomainDiskDefPtr disk,
++                                 bool cold_boot)
++{
++    char uuid[VIR_UUID_STRING_BUFLEN];
++    virDomainEventPtr event = NULL;
++    int startupPolicy = disk->startupPolicy;
++
++    virUUIDFormat(vm->def->uuid, uuid);
++
++    switch ((enum virDomainStartupPolicy) startupPolicy) {
++        case VIR_DOMAIN_STARTUP_POLICY_OPTIONAL:
++            break;
++
++        case VIR_DOMAIN_STARTUP_POLICY_MANDATORY:
++            virReportSystemError(errno,
++                                 _("cannot access file '%s'"),
++                                 disk->src);
++            goto error;
++            break;
++
++        case VIR_DOMAIN_STARTUP_POLICY_REQUISITE:
++            if (cold_boot) {
++                virReportSystemError(errno,
++                                     _("cannot access file '%s'"),
++                                     disk->src);
++                goto error;
++            }
++            break;
++
++        case VIR_DOMAIN_STARTUP_POLICY_DEFAULT:
++        case VIR_DOMAIN_STARTUP_POLICY_LAST:
++            /* this should never happen */
++            break;
++    }
++
++    VIR_DEBUG("Dropping disk '%s' on domain '%s' (UUID '%s') "
++              "due to inaccessible source '%s'",
++              disk->dst, vm->def->name, uuid, disk->src);
++
++    event = virDomainEventDiskChangeNewFromObj(vm, disk->src, NULL, disk->info.alias,
++                                               VIR_DOMAIN_EVENT_DISK_CHANGE_MISSING_ON_START);
++    if (event)
++        qemuDomainEventQueue(driver, event);
++
++    VIR_FREE(disk->src);
++
++    return 0;
++
++error:
++    return -1;
++}
++
+ int
+ qemuDomainCheckDiskPresence(struct qemud_driver *driver,
+                             virDomainObjPtr vm,
+@@ -1871,10 +1926,6 @@ qemuDomainCheckDiskPresence(struct qemud_driver *driver,
+     int ret = -1;
+     int i;
+     virDomainDiskDefPtr disk;
+-    char uuid[VIR_UUID_STRING_BUFLEN];
+-    virDomainEventPtr event = NULL;
+-
+-    virUUIDFormat(vm->def->uuid, uuid);
+ 
+     for (i = 0; i < vm->def->ndisks; i++) {
+         disk = vm->def->disks[i];
+@@ -1889,42 +1940,9 @@ qemuDomainCheckDiskPresence(struct qemud_driver *driver,
+             continue;
+         }
+ 
+-        switch ((enum virDomainStartupPolicy) disk->startupPolicy) {
+-            case VIR_DOMAIN_STARTUP_POLICY_OPTIONAL:
+-                break;
+-
+-            case VIR_DOMAIN_STARTUP_POLICY_MANDATORY:
+-                virReportSystemError(errno,
+-                                     _("cannot access file '%s'"),
+-                                     disk->src);
+-                goto cleanup;
+-                break;
+-
+-            case VIR_DOMAIN_STARTUP_POLICY_REQUISITE:
+-                if (cold_boot) {
+-                    virReportSystemError(errno,
+-                                         _("cannot access file '%s'"),
+-                                         disk->src);
+-                    goto cleanup;
+-                }
+-                break;
+-
+-            case VIR_DOMAIN_STARTUP_POLICY_DEFAULT:
+-            case VIR_DOMAIN_STARTUP_POLICY_LAST:
+-                /* this should never happen */
+-                break;
+-        }
+-
+-        VIR_DEBUG("Dropping disk '%s' on domain '%s' (UUID '%s') "
+-                  "due to inaccessible source '%s'",
+-                  disk->dst, vm->def->name, uuid, disk->src);
+-
+-        event = virDomainEventDiskChangeNewFromObj(vm, disk->src, NULL, disk->info.alias,
+-                                                   VIR_DOMAIN_EVENT_DISK_CHANGE_MISSING_ON_START);
+-        if (event)
+-            qemuDomainEventQueue(driver, event);
+-
+-        VIR_FREE(disk->src);
++        if (qemuDomainCheckDiskStartupPolicy(driver, vm, disk,
++                                             cold_boot) < 0)
++            goto cleanup;
+     }
+ 
+     ret = 0;
+-- 
+1.9.2
+

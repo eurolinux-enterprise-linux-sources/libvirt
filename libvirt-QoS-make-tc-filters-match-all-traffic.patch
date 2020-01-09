@@ -1,0 +1,63 @@
+From 9d6dff142c719a1157bdfe008675920e2f15c4aa Mon Sep 17 00:00:00 2001
+Message-Id: <9d6dff142c719a1157bdfe008675920e2f15c4aa@dist-git>
+From: "Antoni S. Puimedon" <asegurap@redhat.com>
+Date: Mon, 14 Apr 2014 17:49:48 +0200
+Subject: [PATCH] QoS: make tc filters match all traffic
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1084477
+
+Up until now the traffic control filters for the vNIC QoS were
+matching only ip traffic. For egress traffic that was unnoticed
+because the unmatched traffic would just go to the default htb class
+and be shaped anyway. For ingress, though, since the policing of the
+rate is done by the filter itself.
+
+The problem is solved by changing protocol to all and making anything
+match the filter.
+
+Bug-Url: https://bugzilla.redhat.com/1084444
+Signed-off-by: Antoni S. Puimedon <asegurap@redhat.com>
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit d9de144385201d66929bf10e1941e30ba43fd746)
+
+Conflicts:
+	src/util/virnetdevbandwidth.c:  Context, as c7c84fa5 is not
+                                    backported yet.
+	tests/virnetdevbandwidthtest.c: The test does not exist in
+                                    RHEL-6.6
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdevbandwidth.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/src/util/virnetdevbandwidth.c b/src/util/virnetdevbandwidth.c
+index cd40a11..1a08914 100644
+--- a/src/util/virnetdevbandwidth.c
++++ b/src/util/virnetdevbandwidth.c
+@@ -191,8 +191,8 @@ virNetDevBandwidthSet(const char *ifname,
+ 
+         virCommandFree(cmd);
+         cmd = virCommandNew(TC);
+-        virCommandAddArgList(cmd,"filter", "add", "dev", ifname, "parent",
+-                             "1:0", "protocol", "ip", "handle", "1", "fw",
++        virCommandAddArgList(cmd, "filter", "add", "dev", ifname, "parent",
++                             "1:0", "protocol", "all", "handle", "1", "fw",
+                              "flowid", "1", NULL);
+ 
+         if (virCommandRun(cmd, NULL) < 0)
+@@ -220,9 +220,10 @@ virNetDevBandwidthSet(const char *ifname,
+ 
+         virCommandFree(cmd);
+         cmd = virCommandNew(TC);
++        /* Set filter to match all ingress traffic */
+         virCommandAddArgList(cmd, "filter", "add", "dev", ifname, "parent",
+-                             "ffff:", "protocol", "ip", "u32", "match", "ip",
+-                             "src", "0.0.0.0/0", "police", "rate", average,
++                             "ffff:", "protocol", "all", "u32", "match", "u32",
++                             "0", "0", "police", "rate", average,
+                              "burst", burst, "mtu", "64kb", "drop", "flowid",
+                              ":1", NULL);
+ 
+-- 
+1.9.2
+

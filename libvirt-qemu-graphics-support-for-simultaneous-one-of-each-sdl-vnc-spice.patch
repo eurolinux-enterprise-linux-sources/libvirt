@@ -1,0 +1,63 @@
+From 64a23ebb5e50015b92e702630457002942fc2fb4 Mon Sep 17 00:00:00 2001
+Message-Id: <64a23ebb5e50015b92e702630457002942fc2fb4.1373885145.git.jdenemar@redhat.com>
+From: Alon Levy <alevy@redhat.com>
+Date: Mon, 8 Jul 2013 09:26:43 +0200
+Subject: [PATCH] qemu: graphics support for simultaneous one of each sdl, vnc,
+ spice
+
+https://bugzilla.redhat.com/show_bug.cgi?id=975751
+
+(cherry picked from commit 37b415200ddc0b40b2b90d4f572212e16d92a0f6)
+---
+ src/qemu/qemu_command.c | 28 +++++++++++++++++++++++++---
+ 1 file changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 8057ba0..b345ab0 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4837,6 +4837,9 @@ qemuBuildCommandLine(virConnectPtr conn,
+     bool hasHwVirt = false;
+     virCommandPtr cmd = NULL;
+     bool emitBootindex = false;
++    int sdl = 0;
++    int vnc = 0;
++    int spice = 0;
+     int usbcontroller = 0;
+     bool usblegacy = false;
+     uname_normalize(&ut);
+@@ -6265,9 +6268,28 @@ qemuBuildCommandLine(virConnectPtr conn,
+         }
+     }
+ 
+-    if (def->ngraphics > 1) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       "%s", _("only 1 graphics device is supported"));
++    for (i = 0 ; i < def->ngraphics ; ++i) {
++        switch (def->graphics[i]->type) {
++        case VIR_DOMAIN_GRAPHICS_TYPE_SDL:
++            ++sdl;
++            break;
++        case VIR_DOMAIN_GRAPHICS_TYPE_VNC:
++            ++vnc;
++            break;
++        case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
++            ++spice;
++            break;
++        }
++    }
++    if (!qemuCapsGet(caps, QEMU_CAPS_0_10) && sdl + vnc + spice > 1) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("only 1 graphics device is supported"));
++        goto error;
++    }
++    if (sdl > 1 || vnc > 1 || spice > 1) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("only 1 graphics device of each type "
++                         "(sdl, vnc, spice) is supported"));
+         goto error;
+     }
+ 
+-- 
+1.8.3.2
+

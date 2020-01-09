@@ -1,0 +1,355 @@
+From 68c44a363de10e02050642953f0b407a67484360 Mon Sep 17 00:00:00 2001
+Message-Id: <68c44a363de10e02050642953f0b407a67484360.1377097597.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Fri, 16 Aug 2013 10:25:12 -0400
+Subject: [PATCH] network: permit upstream forwarding of unqualified DNS names
+
+This resolves the issue that prompted the filing of
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=928638
+
+(although the request there is for something much larger and more
+general than this patch).
+
+commit f3868259ca0517212e439a65c9060868f673b6c9 disabled the
+forwarding to upstream DNS servers of unresolved DNS requests for
+names that had no domain, but were just simple host names (no "."
+character anywhere in the name). While this behavior is frowned upon
+by DNS root servers (that's why it was changed in libvirt), it is
+convenient in some cases, and since dnsmasq can be configured to allow
+it, it must not be strictly forbidden.
+
+This patch restores the old behavior, but since it is usually
+undesirable, restoring it requires specification of a new option in
+the network config. Adding the attribute "forwardPlainNames='yes'" to
+the <dns> elemnt does the trick - when that attribute is added to a
+network config, any simple hostnames that can't be resolved by the
+network's dnsmasq instance will be forwarded to the DNS servers listed
+in the host's /etc/resolv.conf for an attempt at resolution (just as
+any FQDN would be forwarded).
+
+When that attribute *isn't* specified, unresolved simple names will
+*not* be forwarded to the upstream DNS server - this is the default
+behavior.
+
+cherry-pick from upstream 4f595ba61c792267dcd547a0e3c2887ab286e45b
+resulted in many minor conflicts, due to the virNetworkDNSDef in each
+network being a virNetworkDNSDefPtr in 0.10.2, and other changes to
+the surrounding code since then. In particular:
+
+1) because network->dns is sometime NULL in 0.10.2, we must check for that before examining any of its attributes.
+
+2) virNetworkDNSDefParseXML in the newer code saves the current
+ctxt->node on entry, sets it to the node of the <dns> element, then
+restores it on return. Because the older virNetworkDNSDefParseXML
+didn't use ctxt itself (it only passed it to a lower level) it wasn't
+making this change, so ctxt->node would always point to the parent
+node instead. New code added to the old version of that function does
+use ctxt, so ctxt->node must be saved and properly set to point to the
+<dns> node.
+---
+ docs/formatnetwork.html.in                         | 25 ++++++++++++---
+ docs/schemas/network.rng                           |  8 +++++
+ src/conf/network_conf.c                            | 37 +++++++++++++++++++---
+ src/conf/network_conf.h                            |  1 +
+ src/network/bridge_driver.c                        | 10 ++++--
+ .../nat-network-dns-forward-plain.argv             |  3 ++
+ .../nat-network-dns-forward-plain.xml              |  9 ++++++
+ .../networkxml2argvdata/nat-network-dns-hosts.xml  |  2 +-
+ tests/networkxml2argvtest.c                        |  1 +
+ .../nat-network-dns-forward-plain.xml              |  9 ++++++
+ tests/networkxml2xmlin/nat-network-dns-hosts.xml   |  2 +-
+ .../nat-network-dns-forward-plain.xml              | 11 +++++++
+ tests/networkxml2xmltest.c                         |  1 +
+ 13 files changed, 106 insertions(+), 13 deletions(-)
+ create mode 100644 tests/networkxml2argvdata/nat-network-dns-forward-plain.argv
+ create mode 100644 tests/networkxml2argvdata/nat-network-dns-forward-plain.xml
+ create mode 100644 tests/networkxml2xmlin/nat-network-dns-forward-plain.xml
+ create mode 100644 tests/networkxml2xmlout/nat-network-dns-forward-plain.xml
+
+diff --git a/docs/formatnetwork.html.in b/docs/formatnetwork.html.in
+index 030ee7d..a176c50 100644
+--- a/docs/formatnetwork.html.in
++++ b/docs/formatnetwork.html.in
+@@ -571,10 +571,27 @@
+         with the idiosyncrasies of the platform where libvirt is
+         running. <span class="since">Since 0.8.8</span>
+       </dd>
+-      <dt><code>dns</code></dt><dd>
+-        The dns element of a network contains configuration information for the
+-        virtual network's DNS server. <span class="since">Since 0.9.3</span>
+-        Currently supported elements are:
++      <dt><code>dns</code></dt>
++      <dd> The dns element of a network contains configuration
++        information for the virtual network's DNS
++        server <span class="since">Since 0.9.3</span>.
++
++        <p>
++          The dns element
++          can have an optional <code>forwardPlainNames</code>
++          attribute <span class="since">Since 1.1.2</span>.
++          If <code>forwardPlainNames</code> is "no", then DNS resolution
++          requests for names that are not qualified with a domain
++          (i.e. names with no "." character) will not be forwarded to
++          the host's upstream DNS server - they will only be resolved if
++          they are known locally within the virtual network's own DNS
++          server. If <code>forwardPlainNames</code> is "yes",
++          unqualified names <b>will</b> be forwarded to the upstream DNS
++          server if they can't be resolved by the virtual network's own
++          DNS server.
++        </p>
++
++        Currently supported sub-elements of <code>&lt;dns&gt;</code> are:
+         <dl>
+           <dt><code>txt</code></dt>
+           <dd>A <code>dns</code> element can have 0 or more <code>txt</code> elements.
+diff --git a/docs/schemas/network.rng b/docs/schemas/network.rng
+index 4abfd91..eeedcef 100644
+--- a/docs/schemas/network.rng
++++ b/docs/schemas/network.rng
+@@ -187,6 +187,14 @@
+              and other features in the <dns> element -->
+         <optional>
+             <element name="dns">
++              <optional>
++                <attribute name="forwardPlainNames">
++                  <choice>
++                    <value>yes</value>
++                    <value>no</value>
++                  </choice>
++                </attribute>
++              </optional>
+               <zeroOrMore>
+                 <element name="txt">
+                   <attribute name="name"><ref name="dnsName"/></attribute>
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index 98bfd14..46ff7ef 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -935,21 +935,39 @@ cleanup:
+ }
+ 
+ static int
+-virNetworkDNSDefParseXML(virNetworkDNSDefPtr *dnsdef,
++virNetworkDNSDefParseXML(const char *networkName,
+                          xmlNodePtr node,
+-                         xmlXPathContextPtr ctxt)
++                         xmlXPathContextPtr ctxt,
++                         virNetworkDNSDefPtr *dnsdef)
+ {
+     xmlNodePtr cur;
++    char *forwardPlainNames = NULL;
+     int ret = -1;
++    xmlNodePtr save = ctxt->node;
+     char *name = NULL;
+     char *value = NULL;
+     virNetworkDNSDefPtr def = NULL;
+ 
++    ctxt->node = node;
++
+     if (VIR_ALLOC(def) < 0) {
+         virReportOOMError();
+         goto error;
+     }
+ 
++    forwardPlainNames = virXPathString("string(./@forwardPlainNames)", ctxt);
++    if (forwardPlainNames) {
++        if (STREQ(forwardPlainNames, "yes")) {
++            def->forwardPlainNames = true;
++        } else if (STRNEQ(forwardPlainNames, "no")) {
++            virReportError(VIR_ERR_XML_ERROR,
++                           _("Invalid dns forwardPlainNames setting '%s' "
++                             "in network '%s'"),
++                           forwardPlainNames, networkName);
++            goto error;
++        }
++    }
++
+     cur = node->children;
+     while (cur != NULL) {
+         if (cur->type == XML_ELEMENT_NODE &&
+@@ -998,6 +1016,7 @@ virNetworkDNSDefParseXML(virNetworkDNSDefPtr *dnsdef,
+ 
+     ret = 0;
+ error:
++    VIR_FREE(forwardPlainNames);
+     if (ret < 0) {
+         VIR_FREE(name);
+         VIR_FREE(value);
+@@ -1005,6 +1024,7 @@ error:
+     } else {
+         *dnsdef = def;
+     }
++    ctxt->node = save;
+     return ret;
+ }
+ 
+@@ -1418,7 +1438,7 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt)
+ 
+     dnsNode = virXPathNode("./dns", ctxt);
+     if (dnsNode != NULL) {
+-        if (virNetworkDNSDefParseXML(&def->dns, dnsNode, ctxt) < 0)
++        if (virNetworkDNSDefParseXML(def->name, dnsNode, ctxt, &def->dns) < 0)
+             goto error;
+     }
+ 
+@@ -1795,7 +1815,16 @@ virNetworkDNSDefFormat(virBufferPtr buf,
+     if (def == NULL)
+         goto out;
+ 
+-    virBufferAddLit(buf, "<dns>\n");
++    virBufferAddLit(buf, "<dns");
++    if (def->forwardPlainNames) {
++        virBufferAddLit(buf, " forwardPlainNames='yes'");
++        if (!(def->nhosts || def->nsrvrecords || def->ntxtrecords)) {
++            virBufferAddLit(buf, "/>\n");
++            goto out;
++        }
++    }
++
++    virBufferAddLit(buf, ">\n");
+     virBufferAdjustIndent(buf, 2);
+ 
+     for (i = 0 ; i < def->ntxtrecords ; i++) {
+diff --git a/src/conf/network_conf.h b/src/conf/network_conf.h
+index ff76dcc..68bd008 100644
+--- a/src/conf/network_conf.h
++++ b/src/conf/network_conf.h
+@@ -104,6 +104,7 @@ struct _virNetworkDNSHostsDef {
+ typedef struct _virNetworkDNSHostsDef *virNetworkDNSHostsDefPtr;
+ 
+ struct _virNetworkDNSDef {
++    bool forwardPlainNames;
+     unsigned int ntxtrecords;
+     virNetworkDNSTxtRecordsDefPtr txtrecords;
+     unsigned int nhosts;
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 9b1de2d..2989c00 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -608,9 +608,13 @@ networkBuildDnsmasqArgv(virNetworkObjPtr network,
+     if (network->def->domain)
+         virCommandAddArgPair(cmd, "--domain", network->def->domain);
+     /* need to specify local even if no domain specified */
+-    virCommandAddArgFormat(cmd, "--local=/%s/",
+-                           network->def->domain ? network->def->domain : "");
+-    virCommandAddArg(cmd, "--domain-needed");
++    if (network->def->domain ||
++        !(network->def->dns && network->def->dns->forwardPlainNames)) {
++        virCommandAddArgFormat(cmd, "--local=/%s/",
++                               network->def->domain ? network->def->domain : "");
++    }
++    if (!(network->def->dns && network->def->dns->forwardPlainNames))
++        virCommandAddArg(cmd, "--domain-needed");
+ 
+     if (pidfile)
+         virCommandAddArgPair(cmd, "--pid-file", pidfile);
+diff --git a/tests/networkxml2argvdata/nat-network-dns-forward-plain.argv b/tests/networkxml2argvdata/nat-network-dns-forward-plain.argv
+new file mode 100644
+index 0000000..fa4373c
+--- /dev/null
++++ b/tests/networkxml2argvdata/nat-network-dns-forward-plain.argv
+@@ -0,0 +1,3 @@
++@DNSMASQ@ --strict-order --conf-file= \
++--except-interface lo --bind-dynamic --interface virbr0 \
++--addn-hosts=/var/lib/libvirt/dnsmasq/default.addnhosts\
+diff --git a/tests/networkxml2argvdata/nat-network-dns-forward-plain.xml b/tests/networkxml2argvdata/nat-network-dns-forward-plain.xml
+new file mode 100644
+index 0000000..10bacb5
+--- /dev/null
++++ b/tests/networkxml2argvdata/nat-network-dns-forward-plain.xml
+@@ -0,0 +1,9 @@
++<network>
++  <name>default</name>
++  <uuid>81ff0d90-c91e-6742-64da-4a736edb9a9c</uuid>
++  <forward dev='eth0' mode='nat'/>
++  <bridge name='virbr0' stp='on' delay='0' />
++  <dns forwardPlainNames='yes'/>
++  <ip address='192.168.122.1' netmask='255.255.255.0'>
++  </ip>
++</network>
+diff --git a/tests/networkxml2argvdata/nat-network-dns-hosts.xml b/tests/networkxml2argvdata/nat-network-dns-hosts.xml
+index 2180a5d..351df4f 100644
+--- a/tests/networkxml2argvdata/nat-network-dns-hosts.xml
++++ b/tests/networkxml2argvdata/nat-network-dns-hosts.xml
+@@ -4,7 +4,7 @@
+   <forward dev='eth0' mode='nat'/>
+   <bridge name='virbr0' stp='on' delay='0' />
+   <domain name="example.com"/>
+-  <dns>
++  <dns forwardPlainNames='no'>
+     <host ip='192.168.122.1'>
+       <hostname>host</hostname>
+       <hostname>gateway</hostname>
+diff --git a/tests/networkxml2argvtest.c b/tests/networkxml2argvtest.c
+index 69cbd1c..dec3efb 100644
+--- a/tests/networkxml2argvtest.c
++++ b/tests/networkxml2argvtest.c
+@@ -176,6 +176,7 @@ mymain(void)
+     DO_TEST("nat-network-dns-txt-record", full);
+     DO_TEST("nat-network-dns-srv-record", full);
+     DO_TEST("nat-network-dns-hosts", full);
++    DO_TEST("nat-network-dns-forward-plain", full);
+ 
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+diff --git a/tests/networkxml2xmlin/nat-network-dns-forward-plain.xml b/tests/networkxml2xmlin/nat-network-dns-forward-plain.xml
+new file mode 100644
+index 0000000..10bacb5
+--- /dev/null
++++ b/tests/networkxml2xmlin/nat-network-dns-forward-plain.xml
+@@ -0,0 +1,9 @@
++<network>
++  <name>default</name>
++  <uuid>81ff0d90-c91e-6742-64da-4a736edb9a9c</uuid>
++  <forward dev='eth0' mode='nat'/>
++  <bridge name='virbr0' stp='on' delay='0' />
++  <dns forwardPlainNames='yes'/>
++  <ip address='192.168.122.1' netmask='255.255.255.0'>
++  </ip>
++</network>
+diff --git a/tests/networkxml2xmlin/nat-network-dns-hosts.xml b/tests/networkxml2xmlin/nat-network-dns-hosts.xml
+index 9a83fed..954c9db 100644
+--- a/tests/networkxml2xmlin/nat-network-dns-hosts.xml
++++ b/tests/networkxml2xmlin/nat-network-dns-hosts.xml
+@@ -3,7 +3,7 @@
+   <uuid>81ff0d90-c91e-6742-64da-4a736edb9a9c</uuid>
+   <forward dev='eth0' mode='nat'/>
+   <bridge name='virbr0' stp='on' delay='0' />
+-  <dns>
++  <dns forwardPlainNames='no'>
+     <host ip='192.168.122.1'>
+       <hostname>host</hostname>
+       <hostname>gateway</hostname>
+diff --git a/tests/networkxml2xmlout/nat-network-dns-forward-plain.xml b/tests/networkxml2xmlout/nat-network-dns-forward-plain.xml
+new file mode 100644
+index 0000000..3b50828
+--- /dev/null
++++ b/tests/networkxml2xmlout/nat-network-dns-forward-plain.xml
+@@ -0,0 +1,11 @@
++<network>
++  <name>default</name>
++  <uuid>81ff0d90-c91e-6742-64da-4a736edb9a9c</uuid>
++  <forward dev='eth0' mode='nat'>
++    <interface dev='eth0'/>
++  </forward>
++  <bridge name='virbr0' stp='on' delay='0' />
++  <dns forwardPlainNames='yes'/>
++  <ip address='192.168.122.1' netmask='255.255.255.0'>
++  </ip>
++</network>
+diff --git a/tests/networkxml2xmltest.c b/tests/networkxml2xmltest.c
+index e57d190..ff91751 100644
+--- a/tests/networkxml2xmltest.c
++++ b/tests/networkxml2xmltest.c
+@@ -99,6 +99,7 @@ mymain(void)
+     DO_TEST("netboot-proxy-network");
+     DO_TEST("nat-network-dns-txt-record");
+     DO_TEST("nat-network-dns-hosts");
++    DO_TEST("nat-network-dns-forward-plain");
+     DO_TEST("8021Qbh-net");
+     DO_TEST("direct-net");
+     DO_TEST("host-bridge-net");
+-- 
+1.8.3.2
+

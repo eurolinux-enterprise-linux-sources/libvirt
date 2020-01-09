@@ -1,0 +1,53 @@
+From 5eb8335a36433568ac49106b887c5891b8111728 Mon Sep 17 00:00:00 2001
+Message-Id: <5eb8335a36433568ac49106b887c5891b8111728@dist-git>
+From: Christophe Fergeau <cfergeau@redhat.com>
+Date: Tue, 27 May 2014 18:19:53 +0200
+Subject: [PATCH] remote: Don't leak priv->tls object on connection failure
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1099075
+
+When testing SASL authentication over TLS with
+virsh -c qemu+tls:///system list --all
+I got this valgrind trace after entering wrong credentials:
+
+==30540== 26,903 (88 direct, 26,815 indirect) bytes in 1 blocks are definitely lost in loss record 289 of 293
+==30540==    at 0x4A081D4: calloc (in /usr/lib64/valgrind/vgpreload_memcheck-amd64-linux.so)
+==30540==    by 0x4C7379A: virAllocVar (viralloc.c:558)
+==30540==    by 0x4CBC178: virObjectNew (virobject.c:190)
+==30540==    by 0x4CBC329: virObjectLockableNew (virobject.c:216)
+==30540==    by 0x4E2D003: virNetTLSContextNew (virnettlscontext.c:719)
+==30540==    by 0x4E2DC3F: virNetTLSContextNewPath (virnettlscontext.c:930)
+==30540==    by 0x4E2DD5B: virNetTLSContextNewClientPath (virnettlscontext.c:957)
+==30540==    by 0x4DDB618: doRemoteOpen (remote_driver.c:627)
+==30540==    by 0x4DDC8BA: remoteConnectOpen (remote_driver.c:1031)
+==30540==    by 0x4D8595F: do_open (libvirt.c:1239)
+==30540==    by 0x4D863F3: virConnectOpenAuth (libvirt.c:1481)
+==30540==    by 0x12762B: vshReconnect (virsh.c:337)
+==30540==    by 0x12C9B0: vshInit (virsh.c:2470)
+==30540==    by 0x12E9A5: main (virsh.c:3338)
+
+(cherry picked from commit c7cdc9b01c8913e9639d7031dc87bbe651d559c2)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/remote/remote_driver.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 7c226fe..15d057c 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -872,6 +872,10 @@ no_memory:
+     virObjectUnref(priv->client);
+     priv->client = NULL;
+ 
++    if (priv->tls)
++        virObjectUnref(priv->tls);
++    priv->tls = NULL;
++
+     VIR_FREE(priv->hostname);
+     goto cleanup;
+ }
+-- 
+2.0.0
+

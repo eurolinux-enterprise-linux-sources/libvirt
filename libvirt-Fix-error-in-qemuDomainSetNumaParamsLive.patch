@@ -1,0 +1,35 @@
+From 71508f5d042437714b86eea51ea819508198139c Mon Sep 17 00:00:00 2001
+Message-Id: <71508f5d042437714b86eea51ea819508198139c@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 25 Jun 2014 15:40:47 +0200
+Subject: [PATCH] Fix error in qemuDomainSetNumaParamsLive
+
+RHEL-only (fixes incorrect backport)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=857312
+
+My backport of upstream commit 81fae6b added an incorrect error message.
+virReportSystemError should be used for reporting errors from errno.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index e247589..435f2c9 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -8277,8 +8277,7 @@ qemuDomainSetNumaParamsLive(virDomainObjPtr vm,
+ 
+     /*Get Exisitng nodeset values */
+     if ((rc = virCgroupGetCpusetMems(group, &nodeset_str)) < 0) {
+-        virReportError(-rc, "%s",
+-                       _("unable to get numa nodeset"));
++        virReportSystemError(-rc, "%s", _("unable to get numa nodeset"));
+         goto cleanup;
+     }
+     if (virBitmapParse(nodeset_str, 0, &temp_nodeset,
+-- 
+2.0.0
+

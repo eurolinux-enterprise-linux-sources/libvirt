@@ -1,0 +1,41 @@
+From a6cba27c9dddfad570bdf62f6eb7d9c92c6f6acf Mon Sep 17 00:00:00 2001
+Message-Id: <a6cba27c9dddfad570bdf62f6eb7d9c92c6f6acf@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 5 Jan 2015 17:33:37 +0100
+Subject: [PATCH] qemu: Fix memleak after commit
+ 59898a88ce8431bd3ea249b8789edc2ef9985827
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=834196
+
+If the ABI compatibility check with the "migratable" user XML is
+successful, we would leak the originally parsed XML from the user that
+would not be used in this case.
+
+Reported by Ján Tomko.
+
+(cherry picked from commit 044e3e75248f0346f9dfd181a90f7d16d69ed482)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index dce2914..43bec79 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5473,6 +5473,8 @@ qemuDomainSaveImageOpen(struct qemud_driver *driver,
+             /* use the user provided XML */
+             newdef = def2;
+             def2 = NULL;
++        } else {
++            virDomainDefFree(def2);
+         }
+ 
+         virDomainDefFree(def);
+-- 
+2.2.2
+

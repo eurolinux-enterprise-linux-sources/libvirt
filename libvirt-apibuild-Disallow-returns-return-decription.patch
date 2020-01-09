@@ -1,0 +1,41 @@
+From 8f31f45bb00de46b6dc84c5b8fc919c801300c88 Mon Sep 17 00:00:00 2001
+Message-Id: <8f31f45bb00de46b6dc84c5b8fc919c801300c88@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 13 May 2014 10:08:46 +0200
+Subject: [PATCH] apibuild: Disallow 'returns' return decription
+
+https://bugzilla.redhat.com/show_bug.cgi?id=808463
+
+Our documentation generator is a bit messy, to say the least. For
+instance, the description to return values of a function is searched
+within C comment. Currently, all lines that start with 'returns' or
+'Returns' are viewed as return value description. However, there are
+some valid uses where the 'returns' word is in the middle of a
+sentence describing function behavior nor the return value. For
+instance: virDomainDetachDeviceFlags,
+virConnectNetworkEventRegisterAny and virDomainGetDiskErrors. This
+leads to HTML documentation to be not correctly generated.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 9124aa55c09606b6f40d3862d27dcb52721cb50d)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/apibuild.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/apibuild.py b/docs/apibuild.py
+index ae84be9..f6671ed 100755
+--- a/docs/apibuild.py
++++ b/docs/apibuild.py
+@@ -924,7 +924,7 @@ class CParser:
+                 if i < len(l) and l[i] == ' ':
+                     i = i + 1
+                 l = l[i:]
+-            if len(l) >= 6 and  l[0:7] == "returns" or l[0:7] == "Returns":
++            if len(l) >= 6 and l[0:7] == "Returns":
+                 try:
+                     l = string.split(l, ' ', 1)[1]
+                 except:
+-- 
+1.9.3
+

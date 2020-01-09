@@ -1,0 +1,66 @@
+From e786646398162a9ac17a473b557dae2a5797afd2 Mon Sep 17 00:00:00 2001
+Message-Id: <e786646398162a9ac17a473b557dae2a5797afd2.1350297262.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 15 Oct 2012 12:36:14 +0800
+Subject: [PATCH] conf: Ignore emulatorpin if vcpu placement is auto
+
+https://bugzilla.redhat.com/show_bug.cgi?id=855218
+
+When vcpu placement is "auto", the domain process will be pinned
+to advisory nodeset from querying numad, While emulatorpin will
+override the pinning. That means both of them are to set the
+pinning policy for domain process, but conflicts with each other.
+
+This patch ingore emulatorpin if vcpu placement is "auto", because
+<vcpu> placement can't be simply ignored for <numatune> placement
+could default to it.
+(cherry picked from commit 5378effd57591f9215fb5fc27efc6c32dae2b634)
+---
+ src/conf/domain_conf.c | 28 ++++++++++++++++++----------
+ 1 file changed, 18 insertions(+), 10 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index e638c2d..cf78e22 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8884,19 +8884,27 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+         goto error;
+     }
+ 
++    /* Ignore emulatorpin if <vcpu> placement is "auto", they
++     * conflicts with each other, and <vcpu> placement can't be
++     * simply ignored, as <numatune>'s placement defaults to it.
++     */
+     if (n) {
+-        if (n > 1) {
+-            virReportError(VIR_ERR_XML_ERROR, "%s",
+-                           _("only one emulatorpin is supported"));
+-            VIR_FREE(nodes);
+-            goto error;
+-        }
++        if (def->placement_mode != VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO) {
++            if (n > 1) {
++                virReportError(VIR_ERR_XML_ERROR, "%s",
++                               _("only one emulatorpin is supported"));
++                VIR_FREE(nodes);
++                goto error;
++            }
+ 
+-        def->cputune.emulatorpin = virDomainVcpuPinDefParseXML(nodes[0], ctxt,
+-                                                               def->maxvcpus, 1);
++            def->cputune.emulatorpin = virDomainVcpuPinDefParseXML(nodes[0], ctxt,
++                                                                   def->maxvcpus, 1);
+ 
+-        if (!def->cputune.emulatorpin)
+-            goto error;
++            if (!def->cputune.emulatorpin)
++                goto error;
++        } else {
++            VIR_WARN("Ignore emulatorpin for <vcpu> placement is 'auto'");
++        }
+     }
+     VIR_FREE(nodes);
+ 
+-- 
+1.7.12.3
+

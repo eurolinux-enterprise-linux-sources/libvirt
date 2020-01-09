@@ -1,0 +1,175 @@
+From 7af0a26764c2e729e755142c7c0acbdb236780b2 Mon Sep 17 00:00:00 2001
+Message-Id: <7af0a26764c2e729e755142c7c0acbdb236780b2.1376483448.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 13 Aug 2013 16:40:42 +0100
+Subject: [PATCH] Fix parallel runs of TLS test suites
+
+For https://bugzilla.redhat.com/show_bug.cgi?id=975201
+
+Use a separate keyfile name for the two TLS test suites so that
+they don't clash when running tests in parallel
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit eaa99a17dbad06d973f335a632fd47605556096c)
+---
+ tests/virnettlscontexttest.c | 10 ++++++----
+ tests/virnettlshelpers.c     |  6 ++----
+ tests/virnettlshelpers.h     |  6 ++----
+ tests/virnettlssessiontest.c | 10 ++++++----
+ 4 files changed, 16 insertions(+), 16 deletions(-)
+
+diff --git a/tests/virnettlscontexttest.c b/tests/virnettlscontexttest.c
+index 80768f4..f098b5e 100644
+--- a/tests/virnettlscontexttest.c
++++ b/tests/virnettlscontexttest.c
+@@ -40,6 +40,8 @@
+ 
+ # define VIR_FROM_THIS VIR_FROM_RPC
+ 
++# define KEYFILE "key-ctx.pem"
++
+ struct testTLSContextData {
+     bool isServer;
+     const char *cacrt;
+@@ -66,7 +68,7 @@ static int testTLSContextInit(const void *opaque)
+         ctxt = virNetTLSContextNewServer(data->cacrt,
+                                          NULL,
+                                          data->crt,
+-                                         keyfile,
++                                         KEYFILE,
+                                          NULL,
+                                          true,
+                                          true);
+@@ -74,7 +76,7 @@ static int testTLSContextInit(const void *opaque)
+         ctxt = virNetTLSContextNewClient(data->cacrt,
+                                          NULL,
+                                          data->crt,
+-                                         keyfile,
++                                         KEYFILE,
+                                          true,
+                                          true);
+     }
+@@ -109,7 +111,7 @@ mymain(void)
+ {
+     int ret = 0;
+ 
+-    testTLSInit();
++    testTLSInit(KEYFILE);
+ 
+ # define DO_CTX_TEST(_isServer, _caCrt, _crt, _expectFail)              \
+     do {                                                                \
+@@ -617,7 +619,7 @@ mymain(void)
+     testTLSDiscardCert(&clientcertlevel2breq);
+     unlink("cacertchain.pem");
+ 
+-    testTLSCleanup();
++    testTLSCleanup(KEYFILE);
+ 
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+diff --git a/tests/virnettlshelpers.c b/tests/virnettlshelpers.c
+index 8f71acb..248a857 100644
+--- a/tests/virnettlshelpers.c
++++ b/tests/virnettlshelpers.c
+@@ -35,8 +35,6 @@
+ 
+ # define VIR_FROM_THIS VIR_FROM_RPC
+ 
+-const char *keyfile = abs_builddir "/virnettlscontexttest-key.pem";
+-
+ /*
+  * These store some static data that is needed when
+  * encoding extensions in the x509 certs
+@@ -100,7 +98,7 @@ static gnutls_x509_privkey_t testTLSLoadKey(void)
+ }
+ 
+ 
+-void testTLSInit(void)
++void testTLSInit(const char *keyfile)
+ {
+     gnutls_global_init();
+ 
+@@ -113,7 +111,7 @@ void testTLSInit(void)
+ }
+ 
+ 
+-void testTLSCleanup(void)
++void testTLSCleanup(const char *keyfile)
+ {
+     asn1_delete_structure(&pkix_asn1);
+     unlink(keyfile);
+diff --git a/tests/virnettlshelpers.h b/tests/virnettlshelpers.h
+index 7c3f8da..3f6afb9 100644
+--- a/tests/virnettlshelpers.h
++++ b/tests/virnettlshelpers.h
+@@ -28,8 +28,6 @@
+ 
+ # include "rpc/virnettlscontext.h"
+ 
+-extern const char *keyfile;
+-
+ /*
+  * This contains parameter about how to generate
+  * certificates.
+@@ -76,7 +74,7 @@ void testTLSWriteCertChain(const char *filename,
+                            size_t ncerts);
+ void testTLSDiscardCert(struct testTLSCertReq *req);
+ 
+-void testTLSInit(void);
+-void testTLSCleanup(void);
++void testTLSInit(const char *keyfile);
++void testTLSCleanup(const char *keyfile);
+ 
+ #endif
+diff --git a/tests/virnettlssessiontest.c b/tests/virnettlssessiontest.c
+index cf95d46..0364e0b 100644
+--- a/tests/virnettlssessiontest.c
++++ b/tests/virnettlssessiontest.c
+@@ -38,6 +38,8 @@
+ 
+ # define VIR_FROM_THIS VIR_FROM_RPC
+ 
++# define KEYFILE "key-sess.pem"
++
+ struct testTLSSessionData {
+     const char *servercacrt;
+     const char *clientcacrt;
+@@ -107,7 +109,7 @@ static int testTLSSessionInit(const void *opaque)
+     serverCtxt = virNetTLSContextNewServer(data->servercacrt,
+                                            NULL,
+                                            data->servercrt,
+-                                           keyfile,
++                                           KEYFILE,
+                                            data->wildcards,
+                                            false,
+                                            true);
+@@ -115,7 +117,7 @@ static int testTLSSessionInit(const void *opaque)
+     clientCtxt = virNetTLSContextNewClient(data->clientcacrt,
+                                            NULL,
+                                            data->clientcrt,
+-                                           keyfile,
++                                           KEYFILE,
+                                            false,
+                                            true);
+ 
+@@ -236,7 +238,7 @@ mymain(void)
+ {
+     int ret = 0;
+ 
+-    testTLSInit();
++    testTLSInit(KEYFILE);
+ 
+ # define DO_SESS_TEST(_caCrt, _serverCrt, _clientCrt, _expectServerFail, \
+                       _expectClientFail, _hostname, _wildcards)         \
+@@ -474,7 +476,7 @@ mymain(void)
+     testTLSDiscardCert(&clientcertlevel2breq);
+     unlink("cacertchain.pem");
+ 
+-    testTLSCleanup();
++    testTLSCleanup(KEYFILE);
+ 
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+-- 
+1.8.3.2
+

@@ -1,0 +1,306 @@
+From e4d6c22f5ff82692e65488bd2bed2b9d45d3c961 Mon Sep 17 00:00:00 2001
+Message-Id: <e4d6c22f5ff82692e65488bd2bed2b9d45d3c961.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:39 -0600
+Subject: [PATCH] Add a qemuMonitorGetCommands() method for QMP query-commands
+ command
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+Add a new qemuMonitorGetCPUCommands() method to support invocation
+of the 'query-commands' JSON monitor command. No HMP equivalent
+is required, since this will only be used when JSON is available
+
+The existing qemuMonitorJSONCheckCommands() method is refactored
+to use this new method
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit c70a6154b648aa2fb9f18b6e56adfa4e7b2c558a)
+---
+ src/qemu/qemu_monitor.c      |  22 +++++++++
+ src/qemu/qemu_monitor.h      |   3 ++
+ src/qemu/qemu_monitor_json.c | 114 +++++++++++++++++++++++++++++++------------
+ src/qemu/qemu_monitor_json.h |   4 ++
+ tests/qemumonitorjsontest.c  |  62 +++++++++++++++++++++++
+ 5 files changed, 175 insertions(+), 30 deletions(-)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index cacb663..6335034 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -3137,3 +3137,25 @@ int qemuMonitorGetCPUDefinitions(qemuMonitorPtr mon,
+ 
+     return qemuMonitorJSONGetCPUDefinitions(mon, cpus);
+ }
++
++
++int qemuMonitorGetCommands(qemuMonitorPtr mon,
++                           char ***commands)
++{
++    VIR_DEBUG("mon=%p commands=%p",
++              mon, commands);
++
++    if (!mon) {
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("monitor must not be NULL"));
++        return -1;
++    }
++
++    if (!mon->json) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("JSON monitor is required"));
++        return -1;
++    }
++
++    return qemuMonitorJSONGetCommands(mon, commands);
++}
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 0750cbb..18dc6e7 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -602,6 +602,9 @@ void qemuMonitorMachineInfoFree(qemuMonitorMachineInfoPtr machine);
+ int qemuMonitorGetCPUDefinitions(qemuMonitorPtr mon,
+                                  char ***cpus);
+ 
++int qemuMonitorGetCommands(qemuMonitorPtr mon,
++                           char ***commands);
++
+ 
+ /**
+  * When running two dd process and using <> redirection, we need a
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index ab24720..b945943 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -974,32 +974,15 @@ int
+ qemuMonitorJSONCheckCommands(qemuMonitorPtr mon,
+                              qemuCapsPtr caps)
+ {
+-    int ret = -1;
+-    virJSONValuePtr cmd = qemuMonitorJSONMakeCommand("query-commands", NULL);
+-    virJSONValuePtr reply = NULL;
+-    virJSONValuePtr data;
+-    int i, n;
+-
+-    if (!cmd)
+-        return ret;
+-
+-    if (qemuMonitorJSONCommand(mon, cmd, &reply) < 0 ||
+-        qemuMonitorJSONCheckError(cmd, reply) < 0)
+-        goto cleanup;
+-
+-    if (!(data = virJSONValueObjectGet(reply, "return")) ||
+-        data->type != VIR_JSON_TYPE_ARRAY ||
+-        (n = virJSONValueArraySize(data)) <= 0)
+-        goto cleanup;
+-
+-    for (i = 0; i < n; i++) {
+-        virJSONValuePtr entry;
+-        const char *name;
++    char **commands = NULL;
++    int ncommands;
++    size_t i;
+ 
+-        if (!(entry = virJSONValueArrayGet(data, i)) ||
+-            !(name = virJSONValueObjectGetString(entry, "name")))
+-            goto cleanup;
++    if ((ncommands = qemuMonitorJSONGetCommands(mon, &commands)) < 0)
++        return -1;
+ 
++    for (i = 0 ; i < ncommands ; i++) {
++        char *name = commands[i];
+         if (STREQ(name, "system_wakeup"))
+             qemuCapsSet(caps, QEMU_CAPS_WAKEUP);
+         else if (STREQ(name, "transaction"))
+@@ -1010,14 +993,11 @@ qemuMonitorJSONCheckCommands(qemuMonitorPtr mon,
+             qemuCapsSet(caps, QEMU_CAPS_BLOCKJOB_ASYNC);
+         else if (STREQ(name, "dump-guest-memory"))
+             qemuCapsSet(caps, QEMU_CAPS_DUMP_GUEST_MEMORY);
++        VIR_FREE(name);
+     }
++    VIR_FREE(commands);
+ 
+-    ret = 0;
+-
+-cleanup:
+-    virJSONValueFree(cmd);
+-    virJSONValueFree(reply);
+-    return ret;
++    return 0;
+ }
+ 
+ 
+@@ -4272,3 +4252,77 @@ cleanup:
+     virJSONValueFree(reply);
+     return ret;
+ }
++
++
++int qemuMonitorJSONGetCommands(qemuMonitorPtr mon,
++                               char ***commands)
++{
++    int ret;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++    virJSONValuePtr data;
++    char **commandlist = NULL;
++    int n = 0;
++    size_t i;
++
++    *commands = NULL;
++
++    if (!(cmd = qemuMonitorJSONMakeCommand("query-commands", NULL)))
++        return -1;
++
++    ret = qemuMonitorJSONCommand(mon, cmd, &reply);
++
++    if (ret == 0)
++        ret = qemuMonitorJSONCheckError(cmd, reply);
++
++    if (ret < 0)
++        goto cleanup;
++
++    ret = -1;
++
++    if (!(data = virJSONValueObjectGet(reply, "return"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-commands reply was missing return data"));
++        goto cleanup;
++    }
++
++    if ((n = virJSONValueArraySize(data)) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-commands reply data was not an array"));
++        goto cleanup;
++    }
++
++    if (VIR_ALLOC_N(commandlist, n) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    for (i = 0 ; i < n ; i++) {
++        virJSONValuePtr child = virJSONValueArrayGet(data, i);
++        const char *tmp;
++
++        if (!(tmp = virJSONValueObjectGetString(child, "name"))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("query-commands reply data was missing 'name'"));
++            goto cleanup;
++        }
++
++        if (!(commandlist[i] = strdup(tmp))) {
++            virReportOOMError();
++            goto cleanup;
++        }
++    }
++
++    ret = n;
++    *commands = commandlist;
++
++cleanup:
++    if (ret < 0 && commandlist) {
++        for (i = 0 ; i < n ; i++)
++            VIR_FREE(commandlist[i]);
++        VIR_FREE(commandlist);
++    }
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index 3d8afde..ef7e531 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -307,4 +307,8 @@ int qemuMonitorJSONGetCPUDefinitions(qemuMonitorPtr mon,
+                                      char ***cpus)
+     ATTRIBUTE_NONNULL(2);
+ 
++int qemuMonitorJSONGetCommands(qemuMonitorPtr mon,
++                               char ***commands)
++    ATTRIBUTE_NONNULL(2);
++
+ #endif /* QEMU_MONITOR_JSON_H */
+diff --git a/tests/qemumonitorjsontest.c b/tests/qemumonitorjsontest.c
+index c447e69..264c140 100644
+--- a/tests/qemumonitorjsontest.c
++++ b/tests/qemumonitorjsontest.c
+@@ -363,6 +363,67 @@ cleanup:
+ 
+ 
+ static int
++testQemuMonitorJSONGetCommands(const void *data)
++{
++    virCapsPtr caps = (virCapsPtr)data;
++    qemuMonitorTestPtr test = qemuMonitorTestNew(true, caps);
++    int ret = -1;
++    char **commands = NULL;
++    int ncommands;
++
++    if (!test)
++        return -1;
++
++    if (qemuMonitorTestAddItem(test, "query-commands",
++                               "{ "
++                               "  \"return\": [ "
++                               "   { "
++                               "     \"name\": \"system_wakeup\" "
++                               "   }, "
++                               "   { "
++                               "     \"name\": \"cont\" "
++                               "   }, "
++                               "   { "
++                               "     \"name\": \"quit\" "
++                               "   } "
++                               "  ]"
++                               "}") < 0)
++        goto cleanup;
++
++    if ((ncommands = qemuMonitorGetCommands(qemuMonitorTestGetMonitor(test),
++                                        &commands)) < 0)
++        goto cleanup;
++
++    if (ncommands != 3) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "ncommands %d is not 3", ncommands);
++        goto cleanup;
++    }
++
++#define CHECK(i, wantname)                                              \
++    do {                                                                \
++        if (STRNEQ(commands[i], (wantname))) {                          \
++            virReportError(VIR_ERR_INTERNAL_ERROR,                      \
++                           "name %s is not %s",                         \
++                           commands[i], (wantname));                    \
++            goto cleanup;                                               \
++        }                                                               \
++    } while (0)
++
++    CHECK(0, "system_wakeup");
++    CHECK(1, "cont");
++    CHECK(2, "quit");
++
++#undef CHECK
++    ret = 0;
++
++cleanup:
++    qemuMonitorTestFree(test);
++    return ret;
++}
++
++
++static int
+ mymain(void)
+ {
+     int ret = 0;
+@@ -384,6 +445,7 @@ mymain(void)
+     DO_TEST(GetVersion);
+     DO_TEST(GetMachines);
+     DO_TEST(GetCPUDefinitions);
++    DO_TEST(GetCommands);
+ 
+     virCapabilitiesFree(caps);
+ 
+-- 
+1.7.12.3
+

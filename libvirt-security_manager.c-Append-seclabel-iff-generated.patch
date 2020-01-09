@@ -1,0 +1,56 @@
+From dcc607c6b3e53d8522a37683dab00bccf2669856 Mon Sep 17 00:00:00 2001
+Message-Id: <dcc607c6b3e53d8522a37683dab00bccf2669856.1373271640.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 28 Mar 2013 23:14:49 +0100
+Subject: [PATCH] security_manager.c: Append seclabel iff generated
+
+https://bugzilla.redhat.com/show_bug.cgi?id=923946
+
+With my previous patches, we unconditionally appended a seclabel,
+even if it wasn't generated but found in array of defined seclabels.
+This resulted in double free later when doing virDomainDefFree
+and iterating over the array of defined seclabels.
+
+Moreover, there was another possibility of double free, if the
+seclabel was generated in the last iteration of the process of
+walking trough security managers array.
+(cherry picked from commit a1c68a1fcbc27fff19e11d0b2a801b416e94366d)
+---
+ src/security/security_manager.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/security/security_manager.c b/src/security/security_manager.c
+index c282b39..8afbe87 100644
+--- a/src/security/security_manager.c
++++ b/src/security/security_manager.c
+@@ -358,6 +358,7 @@ int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
+             } else if (vm->nseclabels && generated) {
+                 VIR_DEBUG("Skipping auto generated seclabel of type none");
+                 virSecurityLabelDefFree(seclabel);
++                seclabel = NULL;
+                 continue;
+             }
+         }
+@@ -367,8 +368,8 @@ int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
+         } else {
+             /* The seclabel must be added to @vm prior calling domainGenSecurityLabel
+              * which may require seclabel to be presented already */
+-
+-            if (VIR_APPEND_ELEMENT(vm->seclabels, vm->nseclabels, seclabel) < 0) {
++            if (generated &&
++                VIR_APPEND_ELEMENT(vm->seclabels, vm->nseclabels, seclabel) < 0) {
+                 virReportOOMError();
+                 goto cleanup;
+             }
+@@ -379,6 +380,8 @@ int virSecurityManagerGenLabel(virSecurityManagerPtr mgr,
+                     vm->nseclabels--;
+                 goto cleanup;
+             }
++
++            seclabel = NULL;
+         }
+     }
+ 
+-- 
+1.8.2.1
+

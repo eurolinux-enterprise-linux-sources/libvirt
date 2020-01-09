@@ -1,0 +1,139 @@
+From a0fb35d07fdcd67eacc589a2c9cea13267f80a60 Mon Sep 17 00:00:00 2001
+Message-Id: <a0fb35d07fdcd67eacc589a2c9cea13267f80a60.1350990677.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 18 Oct 2012 12:34:50 +0200
+Subject: [PATCH] conf: Make tri-state feature options more universal
+
+https://bugzilla.redhat.com/show_bug.cgi?id=864606
+
+The apic-eoi feature enum and implementation can be made more universal
+to allow re-use of the enum for other features.
+(cherry picked from commit 88cac66d921d533d2ed61b08ddc479bcf6fa439d)
+---
+ src/conf/domain_conf.c   |  6 +++---
+ src/conf/domain_conf.h   | 14 +++++++-------
+ src/libvirt_private.syms |  4 ++--
+ src/qemu/qemu_command.c  |  6 +++---
+ 4 files changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 14be7a5..4800cb9 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -115,7 +115,7 @@ VIR_ENUM_IMPL(virDomainFeature, VIR_DOMAIN_FEATURE_LAST,
+               "viridian",
+               "privnet")
+ 
+-VIR_ENUM_IMPL(virDomainApicEoi, VIR_DOMAIN_APIC_EOI_LAST,
++VIR_ENUM_IMPL(virDomainFeatureState, VIR_DOMAIN_FEATURE_STATE_LAST,
+               "default",
+               "on",
+               "off")
+@@ -9064,7 +9064,7 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+                 tmp = virXPathString("string(./features/apic/@eoi)", ctxt);
+                 if (tmp) {
+                     int eoi;
+-                    if ((eoi = virDomainApicEoiTypeFromString(tmp)) <= 0) {
++                    if ((eoi = virDomainFeatureStateTypeFromString(tmp)) <= 0) {
+                         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                                        _("unknown value for attribute eoi: %s"),
+                                        tmp);
+@@ -13837,7 +13837,7 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+                 if (i == VIR_DOMAIN_FEATURE_APIC && def->apic_eoi) {
+                     virBufferAsprintf(buf,
+                                       " eoi='%s'",
+-                                      virDomainApicEoiTypeToString(def->apic_eoi));
++                                      virDomainFeatureStateTypeToString(def->apic_eoi));
+                 }
+                 virBufferAddLit(buf, "/>\n");
+             }
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 6997fda..5fdd519 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1389,12 +1389,12 @@ enum virDomainFeature {
+     VIR_DOMAIN_FEATURE_LAST
+ };
+ 
+-enum virDomainApicEoi {
+-    VIR_DOMAIN_APIC_EOI_DEFAULT = 0,
+-    VIR_DOMAIN_APIC_EOI_ON,
+-    VIR_DOMAIN_APIC_EOI_OFF,
++enum virDomainFeatureState {
++    VIR_DOMAIN_FEATURE_STATE_DEFAULT = 0,
++    VIR_DOMAIN_FEATURE_STATE_ON,
++    VIR_DOMAIN_FEATURE_STATE_OFF,
+ 
+-    VIR_DOMAIN_APIC_EOI_LAST
++    VIR_DOMAIN_FEATURE_STATE_LAST
+ };
+ 
+ enum virDomainLifecycleAction {
+@@ -1709,7 +1709,7 @@ struct _virDomainDef {
+     virDomainOSDef os;
+     char *emulator;
+     int features;
+-    /* enum virDomainApicEoi */
++    /* enum virDomainFeatureState */
+     int apic_eoi;
+ 
+     virDomainClockDef clock;
+@@ -2174,7 +2174,7 @@ VIR_ENUM_DECL(virDomainVirt)
+ VIR_ENUM_DECL(virDomainBoot)
+ VIR_ENUM_DECL(virDomainBootMenu)
+ VIR_ENUM_DECL(virDomainFeature)
+-VIR_ENUM_DECL(virDomainApicEoi)
++VIR_ENUM_DECL(virDomainFeatureState)
+ VIR_ENUM_DECL(virDomainLifecycle)
+ VIR_ENUM_DECL(virDomainLifecycleCrash)
+ VIR_ENUM_DECL(virDomainPMState)
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 5c4fbcc..ee707d5 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -275,8 +275,6 @@ virBlkioDeviceWeightArrayClear;
+ virDiskNameToBusDeviceIndex;
+ virDiskNameToIndex;
+ virDomainActualNetDefFree;
+-virDomainApicEoiTypeFromString;
+-virDomainApicEoiTypeToString;
+ virDomainAssignDef;
+ virDomainBlockedReasonTypeFromString;
+ virDomainBlockedReasonTypeToString;
+@@ -366,6 +364,8 @@ virDomainFSTypeFromString;
+ virDomainFSTypeToString;
+ virDomainFSWrpolicyTypeFromString;
+ virDomainFSWrpolicyTypeToString;
++virDomainFeatureStateTypeFromString;
++virDomainFeatureStateTypeToString;
+ virDomainFindByID;
+ virDomainFindByName;
+ virDomainFindByUUID;
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index a6f5b26..ce7b32e 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4235,7 +4235,7 @@ qemuBuildCpuArgStr(const struct qemud_driver *driver,
+ 
+     if (def->apic_eoi) {
+         char sign;
+-        if (def->apic_eoi == VIR_DOMAIN_APIC_EOI_ON)
++        if (def->apic_eoi == VIR_DOMAIN_FEATURE_STATE_ON)
+             sign = '+';
+         else
+             sign = '-';
+@@ -7776,9 +7776,9 @@ qemuParseCommandLineCPU(virDomainDefPtr dom,
+                 dom->clock.timers[i]->present = present;
+             } else if (STREQ(feature, "kvm_pv_eoi")) {
+                 if (policy == VIR_CPU_FEATURE_REQUIRE)
+-                    dom->apic_eoi = VIR_DOMAIN_APIC_EOI_ON;
++                    dom->apic_eoi = VIR_DOMAIN_FEATURE_STATE_ON;
+                 else
+-                    dom->apic_eoi = VIR_DOMAIN_APIC_EOI_OFF;
++                    dom->apic_eoi = VIR_DOMAIN_FEATURE_STATE_OFF;
+             } else {
+                 if (!cpu) {
+                     if (!(cpu = qemuInitGuestCPU(dom)))
+-- 
+1.7.12.4
+

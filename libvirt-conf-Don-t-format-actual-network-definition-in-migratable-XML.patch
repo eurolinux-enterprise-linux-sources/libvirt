@@ -1,0 +1,65 @@
+From 7479baabadb5e248207d75893c00612993222f3a Mon Sep 17 00:00:00 2001
+Message-Id: <7479baabadb5e248207d75893c00612993222f3a@dist-git>
+From: Luyao Huang <lhuang@redhat.com>
+Date: Fri, 6 Feb 2015 13:41:38 -0500
+Subject: [PATCH] conf: Don't format actual network definition in migratable
+ XML
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1186142
+
+When migrate a vm, we will generate a xml via qemuDomainDefFormatLive and
+pass this xml to target libvirtd. Libvirt will use the current network
+state in def->data.network.actual to generate the xml, this will make
+migrate failed when we set a network type guest interface use a macvtap
+network as a source in a vm then migrate vm to another host(which has the
+different macvtap network settings: different interface name, bridge name...)
+
+Add a flag check in virDomainNetDefFormat, if we set a VIR_DOMAIN_XML_MIGRATABLE
+flag when call virDomainNetDefFormat, we won't get the current vm interface
+state.
+
+Signed-off-by: Luyao Huang <lhuang@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit db19a4a3c6f72e464bc3ad00e904d8df13887382)
+---
+ src/conf/domain_conf.c | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index b1490e8..9e59165 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -13155,18 +13155,23 @@ virDomainNetDefFormat(virBufferPtr buf,
+                       virDomainNetDefPtr def,
+                       unsigned int flags)
+ {
+-    /* publicActual is true if we should report the current state in
+-     * def->data.network.actual *instead of* the config (*not* in
+-     * addition to)
+-     */
+     unsigned int actualType = virDomainNetGetActualType(def);
+-    bool publicActual
+-       = (def->type == VIR_DOMAIN_NET_TYPE_NETWORK && def->data.network.actual &&
+-          !(flags & (VIR_DOMAIN_XML_INACTIVE | VIR_DOMAIN_XML_INTERNAL_ACTUAL_NET)));
++    bool publicActual = false;
+     const char *typeStr;
+     virDomainHostdevDefPtr hostdef = NULL;
+ 
+ 
++    /* publicActual is true if we should report the current state in
++     * def->data.network.actual *instead of* the config (*not* in
++     * addition to)
++     */
++    if (def->type == VIR_DOMAIN_NET_TYPE_NETWORK &&
++        def->data.network.actual &&
++        !(flags & (VIR_DOMAIN_XML_INACTIVE |
++                   VIR_DOMAIN_XML_INTERNAL_ACTUAL_NET |
++                   VIR_DOMAIN_XML_MIGRATABLE)))
++        publicActual = true;
++
+     if (publicActual) {
+         if (!(typeStr = virDomainNetTypeToString(actualType))) {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+-- 
+2.3.1
+

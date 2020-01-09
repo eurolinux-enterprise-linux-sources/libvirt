@@ -1,0 +1,65 @@
+From 301a27d9a15ca2e2c7fe22164348470386a054a0 Mon Sep 17 00:00:00 2001
+Message-Id: <301a27d9a15ca2e2c7fe22164348470386a054a0.1357740563.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Sat, 5 Jan 2013 08:59:28 +0100
+Subject: [PATCH] snapshot: qemu: Separate logic blocks with newlines
+
+https://bugzilla.redhat.com/show_bug.cgi?id=889407
+
+(cherry picked from commit 4494b11f8f9be532e02ab3ac0b0658e552c8661e)
+---
+ src/qemu/qemu_driver.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 465457f..22c437f 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11567,6 +11567,7 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+             goto cleanup;
+ 
+         }
++
+         if (def->dom &&
+             memcmp(def->dom->uuid, domain->uuid, VIR_UUID_BUFLEN)) {
+             virReportError(VIR_ERR_INVALID_ARG,
+@@ -11574,6 +11575,7 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+                            def->name, uuidstr);
+             goto cleanup;
+         }
++
+         other = virDomainSnapshotFindByName(vm->snapshots, def->name);
+         if (other) {
+             if ((other->def->state == VIR_DOMAIN_RUNNING ||
+@@ -11586,6 +11588,7 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+                                def->name);
+                 goto cleanup;
+             }
++
+             if ((other->def->state == VIR_DOMAIN_DISK_SNAPSHOT) !=
+                 (def->state == VIR_DOMAIN_DISK_SNAPSHOT)) {
+                 virReportError(VIR_ERR_INVALID_ARG,
+@@ -11594,6 +11597,7 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+                                def->name);
+                 goto cleanup;
+             }
++
+             if (other->def->dom) {
+                 if (def->dom) {
+                     if (!virDomainDefCheckABIStability(other->def->dom,
+@@ -11605,10 +11609,12 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+                     other->def->dom = NULL;
+                 }
+             }
++
+             if (other == vm->current_snapshot) {
+                 update_current = true;
+                 vm->current_snapshot = NULL;
+             }
++
+             /* Drop and rebuild the parent relationship, but keep all
+              * child relations by reusing snap.  */
+             virDomainSnapshotDropParent(other);
+-- 
+1.8.1
+

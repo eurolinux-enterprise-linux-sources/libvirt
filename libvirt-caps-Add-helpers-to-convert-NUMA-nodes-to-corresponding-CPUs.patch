@@ -1,0 +1,144 @@
+From 10b050b5545903d818bd3ce0f5d9915d6707a243 Mon Sep 17 00:00:00 2001
+Message-Id: <10b050b5545903d818bd3ce0f5d9915d6707a243@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 25 Apr 2014 13:53:22 -0400
+Subject: [PATCH] caps: Add helpers to convert NUMA nodes to corresponding CPUs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1012846
+
+These helpers use the remembered host capabilities to retrieve the cpu
+map rather than query the host again. The intended usage for this
+helpers is to fix automatic NUMA placement with strict memory alloc. The
+code doing the prepare needs to pin the emulator process only to cpus
+belonging to a subset of NUMA nodes of the host.
+
+(cherry picked from commit b8b38321e724b5b1b7858c415566ab5e6e96ec8c)
+
+Conflicts:
+	po/POTFILES.in
+	src/conf/capabilities.c
+	src/libvirt_private.syms
+
+* Conflict resolution was straightforward - just had to "save" what
+  was found in the cherry-picked commit.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ po/POTFILES.in           |  1 +
+ src/conf/capabilities.c  | 64 ++++++++++++++++++++++++++++++++++++++++++++++++
+ src/conf/capabilities.h  |  2 ++
+ src/libvirt_private.syms |  1 +
+ 4 files changed, 68 insertions(+)
+
+diff --git a/po/POTFILES.in b/po/POTFILES.in
+index 86fc4c9..49b03c3 100644
+--- a/po/POTFILES.in
++++ b/po/POTFILES.in
+@@ -6,6 +6,7 @@ daemon/remote_dispatch.h
+ daemon/stream.c
+ gnulib/lib/gai_strerror.c
+ gnulib/lib/regcomp.c
++src/conf/capabilities.c
+ src/conf/cpu_conf.c
+ src/conf/device_conf.c
+ src/conf/domain_conf.c
+diff --git a/src/conf/capabilities.c b/src/conf/capabilities.c
+index 666eeba..e37faec 100644
+--- a/src/conf/capabilities.c
++++ b/src/conf/capabilities.c
+@@ -925,3 +925,67 @@ extern unsigned int
+ virCapabilitiesIsEmulatorRequired(virCapsPtr caps) {
+     return caps->emulatorRequired;
+ }
++
++/* get the maximum ID of cpus in the host */
++static unsigned int
++virCapabilitiesGetHostMaxcpu(virCapsPtr caps)
++{
++    unsigned int maxcpu = 0;
++    size_t node;
++    size_t cpu;
++
++    for (node = 0; node < caps->host.nnumaCell; node++) {
++        virCapsHostNUMACellPtr cell = caps->host.numaCell[node];
++
++        for (cpu = 0; cpu < cell->ncpus; cpu++) {
++            if (cell->cpus[cpu].id > maxcpu)
++                maxcpu = cell->cpus[cpu].id;
++        }
++    }
++
++    return maxcpu;
++}
++
++/* set cpus of a numa node in the bitmask */
++static int
++virCapabilitiesGetCpusForNode(virCapsPtr caps,
++                              size_t node,
++                              virBitmapPtr cpumask)
++{
++    virCapsHostNUMACellPtr cell = caps->host.numaCell[node];
++    size_t cpu;
++
++    for (cpu = 0; cpu < cell->ncpus; cpu++) {
++        if (virBitmapSetBit(cpumask, cell->cpus[cpu].id) < 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("Cpu '%u' in node '%zu' is out of range "
++                             "of the provided bitmap"),
++                           cell->cpus[cpu].id, node);
++            return -1;
++        }
++    }
++
++    return 0;
++}
++
++virBitmapPtr
++virCapabilitiesGetCpusForNodemask(virCapsPtr caps,
++                                  virBitmapPtr nodemask)
++{
++    virBitmapPtr ret = NULL;
++    unsigned int maxcpu = virCapabilitiesGetHostMaxcpu(caps);
++    ssize_t node = -1;
++
++    if (!(ret = virBitmapNew(maxcpu + 1)))
++        return NULL;
++
++
++    while ((node = virBitmapNextSetBit(nodemask, node)) >= 0) {
++        if (virCapabilitiesGetCpusForNode(caps, node, ret) < 0) {
++            virBitmapFree(ret);
++            return NULL;
++        }
++    }
++
++    return ret;
++}
+diff --git a/src/conf/capabilities.h b/src/conf/capabilities.h
+index f5be157..577b0d5 100644
+--- a/src/conf/capabilities.h
++++ b/src/conf/capabilities.h
+@@ -281,5 +281,7 @@ virCapabilitiesDefaultGuestEmulator(virCapsPtr caps,
+ extern char *
+ virCapabilitiesFormatXML(virCapsPtr caps);
+ 
++virBitmapPtr virCapabilitiesGetCpusForNodemask(virCapsPtr caps,
++                                               virBitmapPtr nodemask);
+ 
+ #endif /* __VIR_CAPABILITIES_H */
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 6b58c99..4ef4987 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -66,6 +66,7 @@ virCapabilitiesFreeMachines;
+ virCapabilitiesFreeNUMAInfo;
+ virCapabilitiesGenerateMac;
+ virCapabilitiesIsEmulatorRequired;
++virCapabilitiesGetCpusForNodemask;
+ virCapabilitiesNew;
+ virCapabilitiesSetEmulatorRequired;
+ virCapabilitiesSetHostCPU;
+-- 
+1.9.2
+

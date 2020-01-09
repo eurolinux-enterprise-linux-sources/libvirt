@@ -1,0 +1,102 @@
+From 20f3329b4f5fa57d1e47dd1bf1c2024c42554dfe Mon Sep 17 00:00:00 2001
+Message-Id: <20f3329b4f5fa57d1e47dd1bf1c2024c42554dfe@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 8 May 2014 10:25:49 -0400
+Subject: [PATCH] qemu: add host-pci-multidomain capability
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1092390
+(part 1 of 2)
+
+Quite a long time ago, (apparently between qemu 0.12 and 0.13) qemu
+quietly began supporting the optional specification of a domain in the
+host-side address of all pci passthrough commands (by simply
+prepending it to the bus:slot.function format, as
+"dddd:bb:ss.f"). Since machines with multiple PCI domains are very
+rare, this never came up in practice, so libvirt was never updated to
+support it.
+
+This patch takes the first step to supporting specification of a non-0
+domain in the host-side address of PCI devices being assigned to a
+domain, by adding a capability bit to indicate support
+"QEMU_CAPS_HOST_PCI_MULTIDOMAIN", and detect it. Since this support
+was added in a version prior to the minimum version required for
+QMP-style capabilities detection, the capability is always enabled for
+any qemu that uses QMP for capabilities detection. For older qemus,
+the only clue that a domain can be specified in the host pci address
+is the presence of the string "[seg:]" in the help string for
+-pcidevice. (Ironically, libvirt will not be modified to support
+specification of domain for -pcidevice, since any qemu new enough for
+us to care about also supports "-device pci-assign" or "-device
+vfio-pci", which are greatly preferred).
+
+(cherry-picked from upstream commit 17133e37021becbaf9fe374c91f37c60448f6e4f)
+
+Conflicts:
+
+ tests/qemucapabilitiesdata/*
+   - these files don't exist on the RHEL6 branch
+
+ src/qemu/qemu_capabilities.c
+ src/qemu/qemu_capabilities.h
+
+ tests/qemuhelptest.c
+    - trivial changes due to new capabilities flags added upstream,
+      and renaming of some functions.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 3 +++
+ src/qemu/qemu_capabilities.h | 1 +
+ tests/qemuhelptest.c         | 3 ++-
+ 3 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index c6fd395..e5b78ff 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -205,6 +205,7 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "rng-egd",
+               "pvpanic",
+               "spice-file-xfer-disable",
++              "host-pci-multidomain",
+     );
+ 
+ struct _qemuCaps {
+@@ -988,6 +989,8 @@ qemuCapsComputeCmdFlags(const char *help,
+         qemuCapsSet(caps, QEMU_CAPS_DRIVE_SERIAL);
+     if (strstr(help, "-pcidevice"))
+         qemuCapsSet(caps, QEMU_CAPS_PCIDEVICE);
++    if (strstr(help, "host=[seg:]bus"))
++        qemuCapsSet(caps, QEMU_CAPS_HOST_PCI_MULTIDOMAIN);
+     if (strstr(help, "-mem-path"))
+         qemuCapsSet(caps, QEMU_CAPS_MEM_PATH);
+     if (strstr(help, "-chardev")) {
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 2b72efd..081d3ff 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -173,6 +173,7 @@ enum qemuCapsFlags {
+     QEMU_CAPS_OBJECT_RNG_EGD,           /* EGD protocol daemon for rng */
+     QEMU_CAPS_DEVICE_PANIC,             /* -device pvpanic */
+     QEMU_CAPS_SPICE_FILE_XFER_DISABLE,  /* -spice disable-agent-file-xfer */
++    QEMU_CAPS_HOST_PCI_MULTIDOMAIN,     /* support domain > 0 in host pci address */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/tests/qemuhelptest.c b/tests/qemuhelptest.c
+index 4247983..58fa12f 100644
+--- a/tests/qemuhelptest.c
++++ b/tests/qemuhelptest.c
+@@ -492,7 +492,8 @@ mymain(void)
+             QEMU_CAPS_DEVICE_QXL,
+             QEMU_CAPS_DEVICE_VGA,
+             QEMU_CAPS_DEVICE_CIRRUS_VGA,
+-            QEMU_CAPS_DEVICE_VMWARE_SVGA);
++            QEMU_CAPS_DEVICE_VMWARE_SVGA,
++            QEMU_CAPS_HOST_PCI_MULTIDOMAIN);
+     DO_TEST("qemu-kvm-0.12.1.2-rhel61", 12001, 1, 0,
+             QEMU_CAPS_VNC_COLON,
+             QEMU_CAPS_NO_REBOOT,
+-- 
+1.9.3
+

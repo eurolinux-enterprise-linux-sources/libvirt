@@ -1,0 +1,93 @@
+From 346a9fad2b9d59e52da3a310c6b60df12408c1fa Mon Sep 17 00:00:00 2001
+Message-Id: <346a9fad2b9d59e52da3a310c6b60df12408c1fa.1376483448.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Tue, 13 Aug 2013 16:40:43 +0100
+Subject: [PATCH] tests: Fix parallel runs of TLS test suites
+
+For https://bugzilla.redhat.com/show_bug.cgi?id=975201
+
+I noticed this yesterday and fixed it in a different way, but ended up
+with one more problem.  It was probably the way I fixed it combined
+with one more filename changed.
+
+Anyway, why I'm saying this is that one more filename should be renamed
+in order to avoid a race (which I was unable to reproduce, though).
+
+I checked this is the last file those two tests have in common by going
+through the code and the re-checked by this "script":
+
+strace -o session.trace -e open ./virnettlssessiontest
+strace -o context.trace -e open ./virnettlscontexttest
+sort \
+ <(sed -n '/^open/s/open("\([^"]*\)",.*$/\1/p' context.trace | sort -u)\
+ <(sed -n '/^open/s/open("\([^"]*\)",.*$/\1/p' session.trace | sort -u)\
+ | uniq -d| grep '.pem$'
+
+So it should be enough to make these tests independent of each other.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 3be7a30426d215ed50938d3674c50097b33953bf)
+---
+ tests/virnettlscontexttest.c | 8 ++++----
+ tests/virnettlssessiontest.c | 6 +++---
+ 2 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/tests/virnettlscontexttest.c b/tests/virnettlscontexttest.c
+index f098b5e..7191102 100644
+--- a/tests/virnettlscontexttest.c
++++ b/tests/virnettlscontexttest.c
+@@ -556,12 +556,12 @@ mymain(void)
+         cacertlevel2areq.crt,
+     };
+ 
+-    testTLSWriteCertChain("cacertchain.pem",
++    testTLSWriteCertChain("cacertchain-ctx.pem",
+                           certchain,
+                           ARRAY_CARDINALITY(certchain));
+ 
+-    DO_CTX_TEST(true, "cacertchain.pem", servercertlevel3areq.filename, false);
+-    DO_CTX_TEST(false, "cacertchain.pem", clientcertlevel2breq.filename, false);
++    DO_CTX_TEST(true, "cacertchain-ctx.pem", servercertlevel3areq.filename, false);
++    DO_CTX_TEST(false, "cacertchain-ctx.pem", clientcertlevel2breq.filename, false);
+ 
+     testTLSDiscardCert(&cacertreq);
+     testTLSDiscardCert(&cacert1req);
+@@ -617,7 +617,7 @@ mymain(void)
+     testTLSDiscardCert(&cacertlevel2areq);
+     testTLSDiscardCert(&servercertlevel3areq);
+     testTLSDiscardCert(&clientcertlevel2breq);
+-    unlink("cacertchain.pem");
++    unlink("cacertchain-ctx.pem");
+ 
+     testTLSCleanup(KEYFILE);
+ 
+diff --git a/tests/virnettlssessiontest.c b/tests/virnettlssessiontest.c
+index 0364e0b..6460889 100644
+--- a/tests/virnettlssessiontest.c
++++ b/tests/virnettlssessiontest.c
+@@ -451,11 +451,11 @@ mymain(void)
+         cacertlevel2areq.crt,
+     };
+ 
+-    testTLSWriteCertChain("cacertchain.pem",
++    testTLSWriteCertChain("cacertchain-sess.pem",
+                           certchain,
+                           ARRAY_CARDINALITY(certchain));
+ 
+-    DO_SESS_TEST("cacertchain.pem", servercertlevel3areq.filename, clientcertlevel2breq.filename,
++    DO_SESS_TEST("cacertchain-sess.pem", servercertlevel3areq.filename, clientcertlevel2breq.filename,
+                  false, false, "libvirt.org", NULL);
+ 
+     testTLSDiscardCert(&clientcertreq);
+@@ -474,7 +474,7 @@ mymain(void)
+     testTLSDiscardCert(&cacertlevel2areq);
+     testTLSDiscardCert(&servercertlevel3areq);
+     testTLSDiscardCert(&clientcertlevel2breq);
+-    unlink("cacertchain.pem");
++    unlink("cacertchain-sess.pem");
+ 
+     testTLSCleanup(KEYFILE);
+ 
+-- 
+1.8.3.2
+

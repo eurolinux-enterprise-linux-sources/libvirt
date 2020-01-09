@@ -1,0 +1,55 @@
+From 4bef6dc4816287190019d8c9f16cee5d3c0d90ce Mon Sep 17 00:00:00 2001
+Message-Id: <4bef6dc4816287190019d8c9f16cee5d3c0d90ce.1350297261.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 15 Oct 2012 12:36:10 +0800
+Subject: [PATCH] conf: Ignore vcpupin for not onlined vcpus when parsing
+
+https://bugzilla.redhat.com/show_bug.cgi?id=855218
+
+Setting pinning policy for vcpu which exceeds current vcpus number
+just makes no sense, however, it could cause various problems, E.g.
+
+<vcpu current='1'>4</vcpu>
+<cputune>
+  <vcpupin vcpuid='3' cpuset='4'/>
+</cputune>
+
+% virsh start linux
+error: Failed to start domain linux
+error: cannot set CPU affinity on process 32534: No such process
+
+We must have some odd codes underlying which produces the
+"on process 32534", but the point is why we not to prevent
+earlier when parsing? Note that this is only one of the
+problem it could cause.
+
+This patch is to ignore the <vcpupin> for not onlined vcpus.
+(cherry picked from commit 60b176c3d0f0d5037acfa5e27c7753f657833a0b)
+---
+ src/conf/domain_conf.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index f427bb4..7461c8c 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8810,7 +8810,15 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+             goto error;
+         }
+ 
+-        def->cputune.vcpupin[def->cputune.nvcpupin++] = vcpupin;
++        if (vcpupin->vcpuid >= def->vcpus)
++            /* To avoid the regression when daemon loading
++             * domain confs, we can't simply error out if
++             * <vcpupin> nodes greater than current vcpus,
++             * ignoring them instead.
++             */
++            VIR_WARN("Ignore vcpupin for not onlined vcpus");
++        else
++            def->cputune.vcpupin[def->cputune.nvcpupin++] = vcpupin;
+     }
+     VIR_FREE(nodes);
+ 
+-- 
+1.7.12.3
+

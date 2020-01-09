@@ -1,0 +1,138 @@
+From 6831dc4f10c9b3a5f33bdcc1a47b1be5101afbc0 Mon Sep 17 00:00:00 2001
+Message-Id: <6831dc4f10c9b3a5f33bdcc1a47b1be5101afbc0@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 24 Apr 2014 15:21:45 +0200
+Subject: [PATCH] qemu: Do sensible auto allocation of SPICE port numbers
+
+https://bugzilla.redhat.com/show_bug.cgi?id=953126
+
+With this patch, if the autoport attribute is used, the code will
+sensibly auto allocate the ports only if needed.
+
+(cherry picked from commit 7b4a6304846b020582dd0b978d20a184f3e15a60)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_process.c -- virPortAllocator, driver->cfg, etc.
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in |  2 +-
+ src/qemu/qemu_process.c   | 60 +++++++++++++++++++++++++++++++++++++----------
+ 2 files changed, 49 insertions(+), 13 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 29008ea..2cd5a1a 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -3317,7 +3317,7 @@ qemu-kvm -net nic,model=? /dev/null
+               while <code>tlsPort</code> gives an alternative secure
+               port number. The <code>autoport</code> attribute is the
+               new preferred syntax for indicating autoallocation of
+-              both port numbers.  The <code>listen</code> attribute is
++              needed port numbers.  The <code>listen</code> attribute is
+               an IP address for the server to listen
+               on. The <code>passwd</code> attribute provides a SPICE
+               password in clear text. The <code>keymap</code>
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 7cb8837..846f039 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3567,45 +3567,81 @@ static int
+ qemuProcessSPICEAllocatePorts(struct qemud_driver* driver,
+                               virDomainGraphicsDefPtr graphics)
+ {
+-    int ret = -1;
+     int port = 0;
+     int tlsPort;
++    int i;
++    int defaultMode = graphics->data.spice.defaultMode;
++
++    bool needTLSPort = false;
++    bool needPort = false;
++
++    if (graphics->data.spice.autoport) {
++        /* check if tlsPort or port need allocation */
++        for (i = 0 ; i < VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_LAST ; i++) {
++            switch (graphics->data.spice.channels[i]) {
++            case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_SECURE:
++                needTLSPort = true;
++                break;
++
++            case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_INSECURE:
++                needPort = true;
++                break;
+ 
+-    if (graphics->data.spice.autoport ||
+-        graphics->data.spice.port == -1) {
++            case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_ANY:
++                switch (defaultMode) {
++                case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_SECURE:
++                    needTLSPort = true;
++                    break;
++
++                case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_INSECURE:
++                    needPort = true;
++                    break;
++
++                case VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_MODE_ANY:
++                    needTLSPort = true;
++                    needPort = true;
++                    break;
++                }
++                break;
++            }
++        }
++    }
++
++    if (needPort || graphics->data.spice.port == -1) {
+         port = qemuProcessNextFreePort(driver, driver->remotePortMin);
+ 
+         if (port < 0) {
+             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                            _("Unable to find an unused port for SPICE"));
+-            goto cleanup;
++            goto error;
+         }
+ 
+         graphics->data.spice.port = port;
+     }
+ 
+     if (driver->spiceTLS &&
+-        (graphics->data.spice.autoport ||
+-         graphics->data.spice.tlsPort == -1)) {
++        (needTLSPort || graphics->data.spice.tlsPort == -1)) {
+         if (graphics->data.spice.port)
+             tlsPort = qemuProcessNextFreePort(driver, graphics->data.spice.port + 1);
+         else
+             tlsPort = qemuProcessNextFreePort(driver, driver->remotePortMin);
+ 
+         if (tlsPort < 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           "%s", _("Unable to find an unused port for SPICE TLS"));
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("Unable to find an unused port for SPICE TLS"));
+             qemuProcessReturnPort(driver, port);
+-            goto cleanup;
++            goto error;
+         }
+ 
+         graphics->data.spice.tlsPort = tlsPort;
+     }
+ 
+-    ret = 0;
++    return 0;
+ 
+-cleanup:
+-    return ret;
++error:
++    if (port)
++        qemuProcessReturnPort(driver, port);
++    return -1;
+ }
+ 
+ 
+-- 
+1.9.2
+

@@ -1,0 +1,63 @@
+From d89bd2921efe68534713dda9244ba93d55239a62 Mon Sep 17 00:00:00 2001
+Message-Id: <d89bd2921efe68534713dda9244ba93d55239a62@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 16 May 2014 13:43:06 +0200
+Subject: [PATCH] qemu: Fix augeas support for migration ports
+
+Commit e3ef20d7 allows user to configure migration ports range via
+qemu.conf. However, it forgot to update augeas definition file and
+even the test data was malicious.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1018695
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit d9be5a7157515eeae99379e9544c34b34c5e5198)
+
+Conflicts:
+	src/qemu/libvirtd_qemu.aug,
+	src/qemu/test_libvirtd_qemu.aug.in - RHEL-6 lacks
+	    migration_address
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/libvirtd_qemu.aug         | 4 ++++
+ src/qemu/test_libvirtd_qemu.aug.in | 4 ++--
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/libvirtd_qemu.aug b/src/qemu/libvirtd_qemu.aug
+index ca8467d..36e5a33 100644
+--- a/src/qemu/libvirtd_qemu.aug
++++ b/src/qemu/libvirtd_qemu.aug
+@@ -73,6 +73,9 @@ module Libvirtd_qemu =
+                  | int_entry "keepalive_interval"
+                  | int_entry "keepalive_count"
+ 
++   let network_entry = int_entry "migration_port_min"
++                 | int_entry "migration_port_max"
++
+    let log_entry = bool_entry "log_timestamp"
+ 
+    (* Each enty in the config is one of the following three ... *)
+@@ -84,6 +87,7 @@ module Libvirtd_qemu =
+              | process_entry
+              | device_entry
+              | rpc_entry
++             | network_entry
+              | log_entry
+ 
+    let comment = [ label "#comment" . del /#[ \t]*/ "# " .  store /([^ \t\n][^\n]*)?/ . del /\n/ "\n" ]
+diff --git a/src/qemu/test_libvirtd_qemu.aug.in b/src/qemu/test_libvirtd_qemu.aug.in
+index e721338..57f6f62 100644
+--- a/src/qemu/test_libvirtd_qemu.aug.in
++++ b/src/qemu/test_libvirtd_qemu.aug.in
+@@ -61,6 +61,6 @@ module Test_libvirtd_qemu =
+ { "keepalive_interval" = "5" }
+ { "keepalive_count" = "5" }
+ { "seccomp_sandbox" = "1" }
+-{ "migration_port_min" = "1234" }
+-{ "migration_port_max" = "12345" }
++{ "migration_port_min" = "49152" }
++{ "migration_port_max" = "49215" }
+ { "log_timestamp" = "0" }
+-- 
+1.9.3
+

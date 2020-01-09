@@ -1,0 +1,169 @@
+From 13e26276fadb3a3b3e285bb5a8169caa90507e9a Mon Sep 17 00:00:00 2001
+Message-Id: <13e26276fadb3a3b3e285bb5a8169caa90507e9a@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 27 May 2014 11:50:41 +0200
+Subject: [PATCH] qemu: Remove interface backend only after frontend is gone
+
+[1] reported that we are removing network's backend too early. I didn't
+really get the reproducer but libvirt behaves strangely when a guest
+does not confirm the removal, e.g., it does not support PCI hotplug. In
+such case, detaching a network device leaves its frontend in place but
+removes the backend, which makes the device unusable for the guest.
+Moreover attaching the same device again succeeds and both the guest and
+libvirt will see two network interfaces attached but only one of them is
+actually working.
+
+I checked with Paolo Bonzini and he confirmed we should only remove a
+backend after seeing DEVICE_DELETED event for a corresponding frontend.
+
+[1] https://www.redhat.com/archives/libvir-list/2014-March/msg01740.html
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 81f765985ed9c3ab5de9211394392dec4089a66d)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_hotplug.c - old spelling of virQEMUDriverPtr and
+	    virQEMUCaps*; virAsprintf does not report OOM yet;
+	    *MonitorWithDriver APIs; downstream changes made by earlier
+	    patches in this series
+---
+ src/qemu/qemu_hotplug.c | 74 +++++++++++++++++++++++++++----------------------
+ 1 file changed, 41 insertions(+), 33 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 35788f1..4bc4a45 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1995,18 +1995,50 @@ qemuDomainRemoveControllerDevice(struct qemud_driver *driver,
+ }
+ 
+ 
+-static void
++static int
+ qemuDomainRemoveNetDevice(struct qemud_driver *driver,
+                           virDomainObjPtr vm,
+                           virDomainNetDefPtr net)
+ {
++    qemuDomainObjPrivatePtr priv = vm->privateData;
+     virNetDevVPortProfilePtr vport;
+     virDomainEventPtr event;
++    char *hostnet_name = NULL;
+     size_t i;
++    int ret = -1;
+ 
+     VIR_DEBUG("Removing network interface %s from domain %p %s",
+               net->info.alias, vm, vm->def->name);
+ 
++    if (virAsprintf(&hostnet_name, "host%s", net->info.alias) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    qemuDomainObjEnterMonitorWithDriver(driver, vm);
++    if (qemuCapsGet(priv->caps, QEMU_CAPS_NETDEV) &&
++        qemuCapsGet(priv->caps, QEMU_CAPS_DEVICE)) {
++        if (qemuMonitorRemoveNetdev(priv->mon, hostnet_name) < 0) {
++            qemuDomainObjExitMonitorWithDriver(driver, vm);
++            virDomainAuditNet(vm, net, NULL, "detach", false);
++            goto cleanup;
++        }
++    } else {
++        int vlan;
++        if ((vlan = qemuDomainNetVLAN(net)) < 0 ||
++            qemuMonitorRemoveHostNetwork(priv->mon, vlan, hostnet_name) < 0) {
++            if (vlan < 0) {
++                virReportError(VIR_ERR_OPERATION_FAILED, "%s",
++                               _("unable to determine original VLAN"));
++
++            }
++            qemuDomainObjExitMonitorWithDriver(driver, vm);
++            virDomainAuditNet(vm, net, NULL, "detach", false);
++            goto cleanup;
++        }
++    }
++    qemuDomainObjExitMonitorWithDriver(driver, vm);
++
+     virDomainAuditNet(vm, net, NULL, "detach", true);
+ 
+     event = virDomainEventDeviceRemovedNewFromObj(vm, net->info.alias);
+@@ -2051,6 +2083,11 @@ qemuDomainRemoveNetDevice(struct qemud_driver *driver,
+ 
+     networkReleaseActualDevice(vm->def, net);
+     virDomainNetDefFree(net);
++    ret = 0;
++
++ cleanup:
++    VIR_FREE(hostnet_name);
++    return ret;
+ }
+ 
+ 
+@@ -2707,8 +2744,6 @@ qemuDomainDetachNetDevice(struct qemud_driver *driver,
+     int detachidx, ret = -1;
+     virDomainNetDefPtr detach = NULL;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+-    int vlan;
+-    char *hostnet_name = NULL;
+     char mac[VIR_MAC_STRING_BUFLEN];
+     int rc;
+ 
+@@ -2747,17 +2782,6 @@ qemuDomainDetachNetDevice(struct qemud_driver *driver,
+         goto cleanup;
+     }
+ 
+-    if ((vlan = qemuDomainNetVLAN(detach)) < 0) {
+-        virReportError(VIR_ERR_OPERATION_FAILED,
+-                       "%s", _("unable to determine original VLAN"));
+-        goto cleanup;
+-    }
+-
+-    if (virAsprintf(&hostnet_name, "host%s", detach->info.alias) < 0) {
+-        virReportOOMError();
+-        goto cleanup;
+-    }
+-
+     qemuDomainMarkDeviceForRemoval(vm, &detach->info);
+ 
+     qemuDomainObjEnterMonitorWithDriver(driver, vm);
+@@ -2775,32 +2799,16 @@ qemuDomainDetachNetDevice(struct qemud_driver *driver,
+             goto cleanup;
+         }
+     }
+-
+-    if (qemuCapsGet(priv->caps, QEMU_CAPS_NETDEV) &&
+-        qemuCapsGet(priv->caps, QEMU_CAPS_DEVICE)) {
+-        if (qemuMonitorRemoveNetdev(priv->mon, hostnet_name) < 0) {
+-            qemuDomainObjExitMonitorWithDriver(driver, vm);
+-            virDomainAuditNet(vm, detach, NULL, "detach", false);
+-            goto cleanup;
+-        }
+-    } else {
+-        if (qemuMonitorRemoveHostNetwork(priv->mon, vlan, hostnet_name) < 0) {
+-            qemuDomainObjExitMonitorWithDriver(driver, vm);
+-            virDomainAuditNet(vm, detach, NULL, "detach", false);
+-            goto cleanup;
+-        }
+-    }
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+ 
+     rc = qemuDomainWaitForDeviceRemoval(driver, vm);
+     if (rc == 0 || rc == 1)
+-        qemuDomainRemoveNetDevice(driver, vm, detach);
+-
+-    ret = 0;
++        ret = qemuDomainRemoveNetDevice(driver, vm, detach);
++    else
++        ret = 0;
+ 
+ cleanup:
+     qemuDomainResetDeviceRemoval(vm);
+-    VIR_FREE(hostnet_name);
+     return ret;
+ }
+ 
+-- 
+2.0.0
+

@@ -1,0 +1,53 @@
+From cd52516834c5ccfab573c7d66cb897ba7fbc8226 Mon Sep 17 00:00:00 2001
+Message-Id: <cd52516834c5ccfab573c7d66cb897ba7fbc8226@dist-git>
+From: Francesco Romani <fromani@redhat.com>
+Date: Tue, 6 May 2014 11:09:03 +0200
+Subject: [PATCH] spice: detect if qemu can disable file transfer
+
+https://bugzilla.redhat.com/show_bug.cgi?id=983018
+
+spice-server offers an API to disable file transfer messages
+on the agent channel between the client and the guest.
+This is supported in qemu through the disable-agent-file-xfer option.
+
+This patch detects if QEMU supports this option, and add
+a capability if does.
+(cherry picked from commit 19bbc8127685d5c33252a9e2fd257d5ef5c3cb1b)
+
+This is a manual backport as the code base is too different in upstream.
+
+Signed-off-by: Francesco Romani <fromani@redhat.com>
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 1 +
+ src/qemu/qemu_capabilities.h | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 6f21a8c..3875a41 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -204,6 +204,7 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "rng-random",
+               "rng-egd",
+               "pvpanic",
++              "spice-file-xfer-disable",
+     );
+ 
+ struct _qemuCaps {
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 932d4f6..2b72efd 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -172,6 +172,7 @@ enum qemuCapsFlags {
+                                            virtio rng */
+     QEMU_CAPS_OBJECT_RNG_EGD,           /* EGD protocol daemon for rng */
+     QEMU_CAPS_DEVICE_PANIC,             /* -device pvpanic */
++    QEMU_CAPS_SPICE_FILE_XFER_DISABLE,  /* -spice disable-agent-file-xfer */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+-- 
+1.9.2
+

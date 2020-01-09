@@ -1,0 +1,56 @@
+From 1655a5234754d200549e82901e51b5130be2c546 Mon Sep 17 00:00:00 2001
+Message-Id: <1655a5234754d200549e82901e51b5130be2c546.1350297258.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 11 Oct 2012 22:33:46 +0200
+Subject: [PATCH] conf: Mark missing optional USB devices in domain XML
+
+https://bugzilla.redhat.com/show_bug.cgi?id=843560
+
+When startupPolicy set for a USB devices allows such device to be
+missing, there was no way this could be detected from domain XML. With
+this patch, libvirt emits a new missing='yes' attribute for such devices
+when active domain XML is generated.
+(cherry picked from commit f95560b3fe5e239ed85ec01885ed5eb872439e98)
+---
+ docs/schemas/domaincommon.rng | 8 ++++++++
+ src/conf/domain_conf.c        | 5 +++++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 2753f59..5c0a9d9 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -1659,6 +1659,14 @@
+           </optional>
+           <interleave>
+             <element name="source">
++              <optional>
++                <attribute name="missing">
++                  <choice>
++                    <value>yes</value>
++                    <value>no</value>
++                  </choice>
++                </attribute>
++              </optional>
+               <choice>
+                 <group>
+                   <ref name="usbproduct"/>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 6107644..25ba0ba 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -12108,6 +12108,11 @@ virDomainHostdevSourceFormat(virBufferPtr buf,
+     if (def->source.subsys.u.usb.autoAddress &&
+         (flags & VIR_DOMAIN_XML_MIGRATABLE))
+         virBufferAddLit(buf, " autoAddress='yes'");
++
++    if (def->missing &&
++        !(flags & VIR_DOMAIN_XML_INACTIVE))
++        virBufferAddLit(buf, " missing='yes'");
++
+     virBufferAddLit(buf, ">\n");
+ 
+     virBufferAdjustIndent(buf, 2);
+-- 
+1.7.12.3
+

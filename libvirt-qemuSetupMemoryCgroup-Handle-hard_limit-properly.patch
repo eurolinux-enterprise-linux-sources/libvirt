@@ -1,0 +1,54 @@
+From 4c4fc1ef13c1206b3d626c33981e9cd4395551f7 Mon Sep 17 00:00:00 2001
+Message-Id: <4c4fc1ef13c1206b3d626c33981e9cd4395551f7.1380730269.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 30 Sep 2013 20:14:56 +0200
+Subject: [PATCH] qemuSetupMemoryCgroup: Handle hard_limit properly
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1013758
+
+Since 16bcb3 we have a regression. The hard_limit is set
+unconditionally. By default the limit is zero. Hence, if user hasn't
+configured any, we set the zero in cgroup subsystem making the kernel
+kill the corresponding qemu process immediately. The proper fix is to
+set hard_limit iff user has configured any.
+(cherry picked from commit 94a24dd3a953f415596dd2800287c9010fa51c4c)
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_cgroup.c
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_cgroup.c | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index f6f9d8c..8fd0d8a 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -343,13 +343,16 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+     }
+ 
+     if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_MEMORY)) {
+-        rc = virCgroupSetMemoryHardLimit(cgroup, vm->def->mem.hard_limit);
+-        if (rc != 0) {
+-            virReportSystemError(-rc,
+-                                 _("Unable to set memory hard limit for domain %s"),
+-                                 vm->def->name);
+-            goto cleanup;
++        if (vm->def->mem.hard_limit != 0) {
++            rc = virCgroupSetMemoryHardLimit(cgroup, vm->def->mem.hard_limit);
++            if (rc != 0) {
++                virReportSystemError(-rc,
++                                     _("Unable to set memory hard limit for domain %s"),
++                                     vm->def->name);
++                goto cleanup;
++            }
+         }
++
+         if (vm->def->mem.soft_limit != 0) {
+             rc = virCgroupSetMemorySoftLimit(cgroup, vm->def->mem.soft_limit);
+             if (rc != 0) {
+-- 
+1.8.3.2
+

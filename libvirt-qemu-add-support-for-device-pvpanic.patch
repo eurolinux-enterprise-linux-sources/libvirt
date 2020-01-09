@@ -1,0 +1,181 @@
+From afb663f8480885cf603d9ac0fc8b63127882a2ae Mon Sep 17 00:00:00 2001
+Message-Id: <afb663f8480885cf603d9ac0fc8b63127882a2ae@dist-git>
+From: Hu Tao <hutao@cn.fujitsu.com>
+Date: Mon, 21 Apr 2014 08:22:33 -0600
+Subject: [PATCH] qemu: add support for -device pvpanic
+
+RHEL 6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1033984
+
+Map the new <panic> device in XML to the '-device pvpanic' command
+line of qemu.  Clients can then couple the <panic> device and the
+<on_crash> directive to control behavior when the guest reports
+a panic to qemu.
+
+Signed-off-by: Hu Tao <hutao@cn.fujitsu.com>
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 4d18758df88c7b1b646cab37979667a19f858a9c)
+
+Conflicts:
+	src/qemu/qemu_capabilities.c - skipped other upstream capabilities
+	src/qemu/qemu_capabilities.h - likewise
+	tests/qemucapabilitiesdata/caps_1.5.3-1.caps - new upstream test not backported
+	tests/qemucapabilitiesdata/caps_1.6.0-1.caps - likewise
+	tests/qemucapabilitiesdata/caps_1.6.50-1.caps - likewise
+	tests/qemuxml2argvtest.c - context of upstream tests not backported
+	tests/qemuxml2xmltest.c - likewise
+	tests/qemuxml2argvdata/qemuxml2argv-panic.args - QEMU_AUDIO_DRV changes not backported, older -usb location
+	tests/qemuxml2argvdata/qemuxml2argv-panic.xml - no pci controller
+	src/qemu/qemu_command.c - older spelling of qemu caps functions
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c                   |  2 ++
+ src/qemu/qemu_capabilities.h                   |  1 +
+ src/qemu/qemu_command.c                        | 16 ++++++++++++++
+ tests/qemuxml2argvdata/qemuxml2argv-panic.args |  6 ++++++
+ tests/qemuxml2argvdata/qemuxml2argv-panic.xml  | 30 ++++++++++++++++++++++++++
+ tests/qemuxml2argvtest.c                       |  4 ++++
+ tests/qemuxml2xmltest.c                        |  2 ++
+ 7 files changed, 61 insertions(+)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-panic.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-panic.xml
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 9ae9f9c..44b5138 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -203,6 +203,7 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "virtio-rng",
+               "rng-random",
+               "rng-egd",
++              "pvpanic",
+     );
+ 
+ struct _qemuCaps {
+@@ -1326,6 +1327,7 @@ struct qemuCapsStringFlags qemuCapsObjectTypes[] = {
+     { "virtio-rng-pci", QEMU_CAPS_DEVICE_VIRTIO_RNG },
+     { "rng-random", QEMU_CAPS_OBJECT_RNG_RANDOM },
+     { "rng-egd", QEMU_CAPS_OBJECT_RNG_EGD },
++    { "pvpanic", QEMU_CAPS_DEVICE_PANIC },
+ };
+ 
+ 
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 18c4f8b..f8d7617 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -171,6 +171,7 @@ enum qemuCapsFlags {
+     QEMU_CAPS_OBJECT_RNG_RANDOM,        /* the rng-random backend for
+                                            virtio rng */
+     QEMU_CAPS_OBJECT_RNG_EGD,           /* EGD protocol daemon for rng */
++    QEMU_CAPS_DEVICE_PANIC,             /* -device pvpanic */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index d475ad0..a56e392 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -7081,6 +7081,22 @@ qemuBuildCommandLine(virConnectPtr conn,
+         goto error;
+     }
+ 
++    if (def->panic) {
++        if (qemuCapsGet(caps, QEMU_CAPS_DEVICE_PANIC)) {
++            if (def->panic->info.addr.isa.iobase > 0) {
++                virCommandAddArg(cmd, "-device");
++                virCommandAddArgFormat(cmd, "pvpanic,ioport=%d",
++                                       def->panic->info.addr.isa.iobase);
++            } else {
++                virCommandAddArgList(cmd, "-device", "pvpanic", NULL);
++            }
++        } else {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                           _("your QEMU is too old to support pvpanic"));
++            goto error;
++        }
++    }
++
+     if (mlock) {
+         unsigned long long memKB;
+ 
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-panic.args b/tests/qemuxml2argvdata/qemuxml2argv-panic.args
+new file mode 100644
+index 0000000..989fc5f
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-panic.args
+@@ -0,0 +1,6 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test \
++/usr/bin/qemu -S -M pc -m 214 -smp 1 -nographic -nodefconfig -nodefaults \
++-monitor unix:/tmp/test-monitor,server,nowait -no-acpi -boot c \
++-hda /dev/HostVG/QEMUGuest1 -usb \
++-device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3 \
++-device pvpanic,ioport=1285
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-panic.xml b/tests/qemuxml2argvdata/qemuxml2argv-panic.xml
+new file mode 100644
+index 0000000..565c804
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-panic.xml
+@@ -0,0 +1,30 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='fdc' index='0'/>
++    <controller type='ide' index='0'/>
++    <memballoon model='virtio'/>
++    <panic>
++      <address type='isa' iobase='0x505'/>
++    </panic>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 70614a8..534c893 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -871,8 +871,12 @@ mymain(void)
+     DO_TEST_PARSE_ERROR("virtio-rng-egd-crash", QEMU_CAPS_DEVICE,
+             QEMU_CAPS_DEVICE_VIRTIO_RNG, QEMU_CAPS_OBJECT_RNG_EGD);
+ 
++    DO_TEST("panic", QEMU_CAPS_DEVICE_PANIC,
++            QEMU_CAPS_DEVICE, QEMU_CAPS_NODEFCONFIG);
++
+     VIR_FREE(driver.stateDir);
+     virCapabilitiesFree(driver.caps);
++
+     VIR_FREE(map);
+ 
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 693ebfa..a9f871a 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -261,6 +261,8 @@ mymain(void)
+ 
+     DO_TEST_DIFFERENT("metadata");
+ 
++    DO_TEST("panic");
++
+     virCapabilitiesFree(driver.caps);
+ 
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+-- 
+1.9.2
+

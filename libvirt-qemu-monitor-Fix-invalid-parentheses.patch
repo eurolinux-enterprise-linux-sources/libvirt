@@ -1,0 +1,86 @@
+From 80d1685143eaca45f2770db69e8a18c3ad7cf8aa Mon Sep 17 00:00:00 2001
+Message-Id: <80d1685143eaca45f2770db69e8a18c3ad7cf8aa@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 19 Mar 2014 17:28:08 -0600
+Subject: [PATCH] qemu: monitor: Fix invalid parentheses
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1076719
+
+RHEL-only: the code in question is handling a downstream command
+
+A typo in parentheses in a condition checking the success of a monitor
+command lead to a crash of libvirtd if the monitor command isn't
+successful.
+
+Bug introduced upstream in c33ac2e (v0.9.0) and copied-and-pasted
+into our downstream patch for bug 573946 when we forward-ported
+that patch to RHEL 6.2. Upstream later cleaned up their bug by
+deleting the bogus code in commit 3d7f664 (v1.0.1).
+
+The error path uses a combination of "ret == 0" and "ret < 0" error
+checks. Due to this fact the disk definition parsed from the user input
+is added to the domain definition but at the same time it's freed at the
+end of the AttachDevice API.
+
+When the domain is destroyed afterwards a use-after-free error leads to
+a crash on random places when freeing the disk in question.
+
+To reproduce use the attached reproducer with ANY disk definition
+supported (gluster as stated in the original report isn't required).
+
+Reproducer:
+
+|diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+|index 502b977..afcf603 100644
+|--- a/src/qemu/qemu_monitor.c
+|+++ b/src/qemu/qemu_monitor.c
+|@@ -28,6 +28,7 @@
+| #include <sys/un.h>
+| #include <unistd.h>
+| #include <fcntl.h>
+|+#include <signal.h>
+|
+| #include "qemu_monitor.h"
+| #include "qemu_monitor_text.h"
+|@@ -3003,6 +3004,8 @@ int qemuMonitorAddDrive(qemuMonitorPtr mon,
+|         return -1;
+|     }
+|
+|+    kill(mon->vm->pid, 9);
+|+
+|     if (mon->json)
+|         ret = qemuMonitorJSONAddDrive(mon, drivestr);
+|     else
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Signed-off-by: Eric Blake <eblake@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_monitor_json.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 4673c8e..4a78735 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -3157,7 +3157,7 @@ int qemuMonitorJSONAddDrive(qemuMonitorPtr mon,
+     }
+     args = NULL; /* cmd owns reference to args now */
+ 
+-    if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply) < 0))
++    if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply)) < 0)
+         goto cleanup;
+ 
+     if (qemuMonitorJSONHasError(reply, "CommandNotFound")) {
+@@ -3178,7 +3178,7 @@ int qemuMonitorJSONAddDrive(qemuMonitorPtr mon,
+     if (!cmd)
+         return -1;
+ 
+-    if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply) < 0))
++    if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply)) < 0)
+         goto cleanup;
+ 
+     if (qemuMonitorJSONHasError(reply, "CommandNotFound")) {
+-- 
+1.9.1
+

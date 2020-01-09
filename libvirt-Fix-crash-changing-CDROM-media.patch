@@ -1,0 +1,61 @@
+From e8835355bbac98377b4da4f4969ac3f2f729995f Mon Sep 17 00:00:00 2001
+Message-Id: <e8835355bbac98377b4da4f4969ac3f2f729995f.1373271638.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 11 Mar 2013 15:26:10 +0800
+Subject: [PATCH] Fix crash changing CDROM media
+
+https://bugzilla.redhat.com/show_bug.cgi?id=908073
+
+This change tried to fix a crash with changing CDROM media but
+failed to actually do so
+
+  commit d0172d2b1b5d865aaa042070d7c2d00effb2ff8c
+  Author: Osier Yang <jyang@redhat.com>
+  Date:   Tue Feb 19 20:27:45 2013 +0800
+
+    qemu: Remove the shared disk entry if the operation is ejecting or updating
+
+It was still accessing disk->src, when the entire 'disk' object
+has been free'd already. Even if it weren't free'd, accessing
+the 'src' value of virDomainDiskDef is not allowed without
+first validating disk->type is file or block. Just remove the
+broken code entirely.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 02b9097274d1330c2e1dca7f598880e09b5c2aa0)
+
+Conflicts:
+  * Conflicts with 8cdd5faf (Pass virQEMUDriverPtr into APIs managed shared
+    disk list), which won't be backported to 6.4 for risks.
+
+	src/qemu/qemu_driver.c
+---
+ src/qemu/qemu_driver.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 51f50ca..7a9d14a 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5978,13 +5978,15 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+         dev->data.disk = tmp;
+ 
+         ret = qemuDomainChangeEjectableMedia(driver, vm, disk, orig_disk, false);
++        /* 'disk' must not be accessed now - it has been free'd.
++         * 'orig_disk' now points to the new disk, while 'dev_copy'
++         * now points to the old disk.
++         */
+ 
+         /* Need to remove the shared disk entry for the original disk src
+          * if the operation is either ejecting or updating.
+          */
+-        if (ret == 0 &&
+-            orig_disk->src &&
+-            STRNEQ_NULLABLE(orig_disk->src, disk->src))
++        if (ret == 0)
+             ignore_value(qemuRemoveSharedDisk(driver->sharedDisks,
+                                               dev_copy->data.disk,
+                                               vm->def->name));
+-- 
+1.8.2.1
+

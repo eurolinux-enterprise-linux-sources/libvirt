@@ -1,0 +1,83 @@
+From 335a7a5020987081e9c3c4f0a1cdfc7ad6e15603 Mon Sep 17 00:00:00 2001
+Message-Id: <335a7a5020987081e9c3c4f0a1cdfc7ad6e15603.1373271642.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 14 Jun 2013 10:25:58 +0200
+Subject: [PATCH] qemuDomainBlockStatsFlags: Guard disk lookup with a domain
+ job
+
+https://bugzilla.redhat.com/show_bug.cgi?id=916315
+
+When there are two concurrent threads, we may dereference a NULL
+pointer, even though it has been checked before:
+
+1. Thread1: starts executing qemuDomainBlockStatsFlags() with nparams != 0.
+            It finds given disk and successfully pass check for disk->info.alias
+            not being NULL.
+2. Thread2: starts executing qemuDomainDetachDeviceFlags() on the very same
+            disk as Thread1 is working on.
+3. Thread1: gets to qemuDomainObjBeginJob() where it sets a job on a
+            domain.
+4. Thread2: also tries to set a job. However, we are not guaranteed which
+            thread wins. So assume it's Thread2 who can continue.
+5. Thread2: does the actual detach and frees disk->info.alias
+6. Thread2: quits the job
+7. Thread1: now successfully acquires the job, and accesses a NULL pointer.
+(cherry picked from commit 5a791c899552628154320c6dfa068f51ee60c0a8)
+---
+ src/qemu/qemu_driver.c | 18 ++++++------------
+ 1 file changed, 6 insertions(+), 12 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 6a57074..4803d19 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -8732,17 +8732,20 @@ qemuDomainBlockStatsFlags(virDomainPtr dom,
+         goto cleanup;
+     }
+ 
++    if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_QUERY) < 0)
++        goto cleanup;
++
+     if (!virDomainObjIsActive(vm)) {
+         virReportError(VIR_ERR_OPERATION_INVALID,
+                        "%s", _("domain is not running"));
+-        goto cleanup;
++        goto endjob;
+     }
+ 
+     if (*nparams != 0) {
+         if ((i = virDomainDiskIndexByName(vm->def, path, false)) < 0) {
+             virReportError(VIR_ERR_INVALID_ARG,
+                            _("invalid path: %s"), path);
+-            goto cleanup;
++            goto endjob;
+         }
+         disk = vm->def->disks[i];
+ 
+@@ -8750,22 +8753,13 @@ qemuDomainBlockStatsFlags(virDomainPtr dom,
+              virReportError(VIR_ERR_INTERNAL_ERROR,
+                             _("missing disk device alias name for %s"),
+                             disk->dst);
+-             goto cleanup;
++             goto endjob;
+         }
+     }
+ 
+     priv = vm->privateData;
+     VIR_DEBUG("priv=%p, params=%p, flags=%x", priv, params, flags);
+ 
+-    if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_QUERY) < 0)
+-        goto cleanup;
+-
+-    if (!virDomainObjIsActive(vm)) {
+-        virReportError(VIR_ERR_OPERATION_INVALID,
+-                       "%s", _("domain is not running"));
+-        goto endjob;
+-    }
+-
+     qemuDomainObjEnterMonitor(driver, vm);
+     tmp = *nparams;
+     ret = qemuMonitorGetBlockStatsParamsNumber(priv->mon, nparams);
+-- 
+1.8.2.1
+

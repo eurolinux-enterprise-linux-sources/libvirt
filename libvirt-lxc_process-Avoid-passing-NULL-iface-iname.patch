@@ -1,0 +1,48 @@
+From 7161c0f351adc6700f72281ac34e68f0aa479742 Mon Sep 17 00:00:00 2001
+Message-Id: <7161c0f351adc6700f72281ac34e68f0aa479742@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 14 May 2014 16:12:17 +0200
+Subject: [PATCH] lxc_process: Avoid passing NULL iface->iname
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1064831
+
+A followon to commit id: 68dceb635 - if iface->iname is NULL, then
+neither virNetDevOpenvswitchRemovePort() nor virNetDevVethDelete()
+should be called.  Found by Coverity.
+
+(cherry picked from commit 73cdac3f72d202ab435d57841821b0e73fd4161d)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/lxc/lxc_process.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/src/lxc/lxc_process.c b/src/lxc/lxc_process.c
+index 0da3583..63257f6 100644
+--- a/src/lxc/lxc_process.c
++++ b/src/lxc/lxc_process.c
+@@ -254,13 +254,15 @@ static void virLXCProcessCleanup(virLXCDriverPtr driver,
+     for (i = 0 ; i < vm->def->nnets ; i++) {
+         virDomainNetDefPtr iface = vm->def->nets[i];
+         vport = virDomainNetGetActualVirtPortProfile(iface);
+-        if (iface->ifname)
++        if (iface->ifname) {
+             ignore_value(virNetDevSetOnline(iface->ifname, false));
+-        if (vport && vport->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH)
+-            ignore_value(virNetDevOpenvswitchRemovePort(
+-                            virDomainNetGetActualBridgeName(iface),
+-                            iface->ifname));
+-        ignore_value(virNetDevVethDelete(iface->ifname));
++            if (vport &&
++                vport->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH)
++                ignore_value(virNetDevOpenvswitchRemovePort(
++                                virDomainNetGetActualBridgeName(iface),
++                                iface->ifname));
++            ignore_value(virNetDevVethDelete(iface->ifname));
++        }
+         networkReleaseActualDevice(iface);
+     }
+ 
+-- 
+1.9.3
+

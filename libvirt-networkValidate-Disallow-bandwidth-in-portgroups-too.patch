@@ -1,0 +1,59 @@
+From f0126f9644470471ccf9cdb57046af99d731f3bb Mon Sep 17 00:00:00 2001
+Message-Id: <f0126f9644470471ccf9cdb57046af99d731f3bb@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 11 Dec 2014 13:52:57 +0100
+Subject: [PATCH] networkValidate: Disallow bandwidth in portgroups too
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115292
+
+In one of the previous commits (eafb53fe) we disallowed
+network-wide bandwidth to some network types. However, we
+forgot about <portgroups/> which can have <bandwidth/> too.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit abef0164963dbbe75ba7cd7ce06926e17d2eb326)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 78e7c38..fe371ca 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -2773,6 +2773,7 @@ networkValidate(struct network_driver *driver,
+     virNetworkIpDefPtr ipdef;
+     bool ipv4def = false;
+     int i;
++    bool bandwidthAllowed = true;
+ 
+     /* check for duplicate networks */
+     if (virNetworkObjIsDuplicate(&driver->networks, def, check_active) < 0)
+@@ -2835,6 +2836,7 @@ networkValidate(struct network_driver *driver,
+                            virNetworkForwardTypeToString(def->forwardType));
+             return -1;
+         }
++        bandwidthAllowed = false;
+     }
+ 
+     /* We only support dhcp on one IPv4 address per defined network */
+@@ -2894,6 +2896,15 @@ networkValidate(struct network_driver *driver,
+             }
+             defaultPortGroup = &def->portGroups[ii];
+         }
++
++        if (def->portGroups[i].bandwidth && !bandwidthAllowed) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("Unsupported <bandwidth> element in network '%s' "
++                             "in portgroup '%s' with forward mode='%s'"),
++                           def->name, def->portGroups[i].name,
++                           virNetworkForwardTypeToString(def->forwardType));
++            return -1;
++        }
+     }
+     if (badVlanUse ||
+         (vlanUsed && !vlanAllowed && !defaultPortGroup)) {
+-- 
+2.2.2
+

@@ -1,0 +1,54 @@
+From ff17aac5ee11e166f3e26e22d5a9116fc983943c Mon Sep 17 00:00:00 2001
+Message-Id: <ff17aac5ee11e166f3e26e22d5a9116fc983943c@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 7 Apr 2014 13:30:45 +0200
+Subject: [PATCH] virsh: clarify vol-{down, up}load description
+
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=955539
+
+Mention file/volume contents instead of just 'file'/'volume'.
+
+Also change Download->download in vol-download help,
+to be consistent with other volume commands.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=955537
+(cherry picked from commit ce284bb56dce0c35ec3e3bf3f019bca67ae0fab8)
+
+Conflicts:
+	tools/virsh-volume.c - missing commit bbd09ad:
+    virsh-volume.c: Switch to c99 initialization of vshCmdInfo
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-volume.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/tools/virsh-volume.c b/tools/virsh-volume.c
+index 5b0abeb..cb661a2 100644
+--- a/tools/virsh-volume.c
++++ b/tools/virsh-volume.c
+@@ -496,8 +496,8 @@ cleanup:
+  * "vol-upload" command
+  */
+ static const vshCmdInfo info_vol_upload[] = {
+-    {"help", N_("upload a file into a volume")},
+-    {"desc", N_("Upload a file into a volume")},
++    {"help", N_("upload file contents to a volume")},
++    {"desc", N_("Upload file contents to a volume")},
+     {NULL, NULL}
+ };
+ 
+@@ -591,8 +591,8 @@ cleanup:
+  * "vol-download" command
+  */
+ static const vshCmdInfo info_vol_download[] = {
+-    {"help", N_("Download a volume to a file")},
+-    {"desc", N_("Download a volume to a file")},
++    {"help", N_("download volume contents to a file")},
++    {"desc", N_("Download volume contents to a file")},
+     {NULL, NULL}
+ };
+ 
+-- 
+1.9.1
+

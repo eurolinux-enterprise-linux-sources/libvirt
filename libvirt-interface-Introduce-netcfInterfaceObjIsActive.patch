@@ -1,0 +1,130 @@
+From c107b2b3467e4843fc9b4045e09aac87c1a88812 Mon Sep 17 00:00:00 2001
+Message-Id: <c107b2b3467e4843fc9b4045e09aac87c1a88812@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 8 May 2014 10:24:48 -0400
+Subject: [PATCH] interface: Introduce netcfInterfaceObjIsActive
+
+Prerequisite for fix to:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=1095774
+
+This function barely wraps ncf_if_status() and error handling code.
+
+(cherry-pick of upstream commit 50f5468c960f4fe491399d5a495426e6cb6b41f1)
+
+Conflicts: minor things cuased by reformatting of code, and addition
+of fine grained ACLs upstream. Also netcf driverState is a
+full-fledged virObject upstream but not in RHEL6.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/interface/interface_backend_netcf.c | 55 +++++++++++++++++++--------------
+ 1 file changed, 32 insertions(+), 23 deletions(-)
+
+diff --git a/src/interface/interface_backend_netcf.c b/src/interface/interface_backend_netcf.c
+index 9186dbd..b212922 100644
+--- a/src/interface/interface_backend_netcf.c
++++ b/src/interface/interface_backend_netcf.c
+@@ -116,6 +116,31 @@ static struct netcf_if *interfaceDriverGetNetcfIF(struct netcf *ncf, virInterfac
+     return iface;
+ }
+ 
++static int
++netcfInterfaceObjIsActive(struct netcf *ncf,
++                          struct netcf_if *iface,
++                          bool *active)
++{
++    int ret = -1;
++    unsigned int flags = 0;
++
++    if (ncf_if_status(iface, &flags) < 0) {
++        const char *errmsg, *details;
++        int errcode = ncf_error(ncf, &errmsg, &details);
++        virReportError(netcf_to_vir_err(errcode),
++                       _("failed to get status of interface %s: %s%s%s"),
++                       ncf_if_name(iface), errmsg, details ? " - " : "",
++                       details ? details : "");
++        goto cleanup;
++    }
++
++    *active = flags & NETCF_IFACE_ACTIVE;
++    ret = 0;
++
++cleanup:
++    return ret;
++}
++
+ static virDrvOpenStatus interfaceOpenInterface(virConnectPtr conn,
+                                                virConnectAuthPtr auth ATTRIBUTE_UNUSED,
+                                                unsigned int flags)
+@@ -272,7 +297,7 @@ interfaceListAllInterfaces(virConnectPtr conn,
+     struct netcf_if *iface = NULL;
+     virInterfacePtr *tmp_iface_objs = NULL;
+     virInterfacePtr iface_obj = NULL;
+-    unsigned int status;
++    bool active;
+     int niface_objs = 0;
+     int ret = -1;
+     char **names = NULL;
+@@ -346,24 +371,15 @@ interfaceListAllInterfaces(virConnectPtr conn,
+             }
+         }
+ 
+-        if (ncf_if_status(iface, &status) < 0) {
+-            const char *errmsg, *details;
+-            int errcode = ncf_error(driver->netcf, &errmsg, &details);
+-            virReportError(netcf_to_vir_err(errcode),
+-                           _("failed to get status of interface %s: %s%s%s"),
+-                           names[i], errmsg, details ? " - " : "",
+-                           details ? details : "");
++        if (netcfInterfaceObjIsActive(driver->netcf, iface, &active) < 0)
+             goto cleanup;
+-        }
+ 
+         /* XXX: Filter the result, need to be splitted once new filter flags
+          * except active|inactive are supported.
+          */
+         if (MATCH(VIR_CONNECT_LIST_INTERFACES_FILTERS_ACTIVE) &&
+-            !((MATCH(VIR_CONNECT_LIST_INTERFACES_ACTIVE) &&
+-               (status & NETCF_IFACE_ACTIVE)) ||
+-              (MATCH(VIR_CONNECT_LIST_INTERFACES_INACTIVE) &&
+-               (status & NETCF_IFACE_INACTIVE)))) {
++            !((MATCH(VIR_CONNECT_LIST_INTERFACES_ACTIVE) && active) ||
++              (MATCH(VIR_CONNECT_LIST_INTERFACES_INACTIVE) && !active))) {
+             ncf_if_free(iface);
+             iface = NULL;
+             continue;
+@@ -684,8 +700,8 @@ static int interfaceIsActive(virInterfacePtr ifinfo)
+ {
+     struct interface_driver *driver = ifinfo->conn->interfacePrivateData;
+     struct netcf_if *iface = NULL;
+-    unsigned int flags = 0;
+     int ret = -1;
++    bool active;
+ 
+     interfaceDriverLock(driver);
+ 
+@@ -695,17 +711,10 @@ static int interfaceIsActive(virInterfacePtr ifinfo)
+         goto cleanup;
+     }
+ 
+-    if (ncf_if_status(iface, &flags) < 0) {
+-        const char *errmsg, *details;
+-        int errcode = ncf_error(driver->netcf, &errmsg, &details);
+-        virReportError(netcf_to_vir_err(errcode),
+-                       _("failed to get status of interface %s: %s%s%s"),
+-                       ifinfo->name, errmsg, details ? " - " : "",
+-                       details ? details : "");
++    if (netcfInterfaceObjIsActive(driver->netcf, iface, &active) < 0)
+         goto cleanup;
+-    }
+ 
+-    ret = flags & NETCF_IFACE_ACTIVE ? 1 : 0;
++    ret = active ? 1 : 0;
+ 
+ cleanup:
+     ncf_if_free(iface);
+-- 
+1.9.3
+

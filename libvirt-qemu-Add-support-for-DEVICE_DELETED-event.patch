@@ -1,0 +1,145 @@
+From 8e87c9d13a36a9808b9657ff43dbb5686a093df6 Mon Sep 17 00:00:00 2001
+Message-Id: <8e87c9d13a36a9808b9657ff43dbb5686a093df6@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 11 Jul 2013 17:07:26 +0200
+Subject: [PATCH] qemu: Add support for DEVICE_DELETED event
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit ab47cc9bf97d838a92d8b4dd40bd83c8e50e1083)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_capabilities.c -- missing caps; no 61a28414
+	src/qemu/qemu_capabilities.h -- missing caps
+---
+ src/qemu/qemu_capabilities.c |  3 +++
+ src/qemu/qemu_capabilities.h |  1 +
+ src/qemu/qemu_monitor.c      | 13 +++++++++++++
+ src/qemu/qemu_monitor.h      |  5 +++++
+ src/qemu/qemu_monitor_json.c | 15 +++++++++++++++
+ 5 files changed, 37 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index fb50b82..2d7b565 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -207,6 +207,7 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "spice-file-xfer-disable",
+               "host-pci-multidomain",
+               "msg-timestamp",
++              "device-del-event",
+     );
+ 
+ struct _qemuCaps {
+@@ -1999,6 +2000,8 @@ qemuCapsProbeQMPEvents(qemuCapsPtr caps,
+ 
+         if (STREQ(name, "BALLOON_CHANGE"))
+             qemuCapsSet(caps, QEMU_CAPS_BALLOON_EVENT);
++        else if (STREQ(name, "DEVICE_DELETED"))
++            qemuCapsSet(caps, QEMU_CAPS_DEVICE_DEL_EVENT);
+         VIR_FREE(name);
+     }
+     VIR_FREE(events);
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 9e41e3c..3f6ac2c 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -175,6 +175,7 @@ enum qemuCapsFlags {
+     QEMU_CAPS_SPICE_FILE_XFER_DISABLE,  /* -spice disable-agent-file-xfer */
+     QEMU_CAPS_HOST_PCI_MULTIDOMAIN,     /* support domain > 0 in host pci address */
+     QEMU_CAPS_MSG_TIMESTAMP,            /* -msg timestamp */
++    QEMU_CAPS_DEVICE_DEL_EVENT,         /* DEVICE_DELETED event */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 15d027a..adefc27 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -1172,6 +1172,19 @@ int qemuMonitorEmitBalloonChange(qemuMonitorPtr mon,
+ }
+ 
+ 
++int
++qemuMonitorEmitDeviceDeleted(qemuMonitorPtr mon,
++                             const char *devAlias)
++{
++    int ret = -1;
++    VIR_DEBUG("mon=%p", mon);
++
++    QEMU_MONITOR_CALLBACK(mon, ret, domainDeviceDeleted, mon->vm, devAlias);
++
++    return ret;
++}
++
++
+ int qemuMonitorSetCapabilities(qemuMonitorPtr mon)
+ {
+     int ret;
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index ced6b03..38bdd46 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -142,6 +142,9 @@ struct _qemuMonitorCallbacks {
+                                virDomainObjPtr vm);
+     int (*domainGuestPanic)(qemuMonitorPtr mon,
+                             virDomainObjPtr vm);
++    int (*domainDeviceDeleted)(qemuMonitorPtr mon,
++                               virDomainObjPtr vm,
++                               const char *devAlias);
+ };
+ 
+ char *qemuMonitorEscapeArg(const char *in);
+@@ -222,6 +225,8 @@ int qemuMonitorEmitBalloonChange(qemuMonitorPtr mon,
+                                  unsigned long long actual);
+ int qemuMonitorEmitPMSuspendDisk(qemuMonitorPtr mon);
+ int qemuMonitorEmitGuestPanic(qemuMonitorPtr mon);
++int qemuMonitorEmitDeviceDeleted(qemuMonitorPtr mon,
++                                 const char *devAlias);
+ 
+ int qemuMonitorStartCPUs(qemuMonitorPtr mon,
+                          virConnectPtr conn);
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 4a78735..0f6281a 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -74,6 +74,7 @@ static void qemuMonitorJSONHandleBlockJobReady(qemuMonitorPtr mon, virJSONValueP
+ static void qemuMonitorJSONHandleBalloonChange(qemuMonitorPtr mon, virJSONValuePtr data);
+ static void qemuMonitorJSONHandlePMSuspendDisk(qemuMonitorPtr mon, virJSONValuePtr data);
+ static void qemuMonitorJSONHandleGuestPanic(qemuMonitorPtr mon, virJSONValuePtr data);
++static void qemuMonitorJSONHandleDeviceDeleted(qemuMonitorPtr mon, virJSONValuePtr data);
+ 
+ typedef struct {
+     const char *type;
+@@ -86,6 +87,7 @@ static qemuEventHandler eventHandlers[] = {
+     { "BLOCK_JOB_CANCELLED", qemuMonitorJSONHandleBlockJobCanceled, },
+     { "BLOCK_JOB_COMPLETED", qemuMonitorJSONHandleBlockJobCompleted, },
+     { "BLOCK_JOB_READY", qemuMonitorJSONHandleBlockJobReady, },
++    { "DEVICE_DELETED", qemuMonitorJSONHandleDeviceDeleted, },
+     { "DEVICE_TRAY_MOVED", qemuMonitorJSONHandleTrayChange, },
+     { "GUEST_PANICKED", qemuMonitorJSONHandleGuestPanic, },
+     { "POWERDOWN", qemuMonitorJSONHandlePowerdown, },
+@@ -927,6 +929,19 @@ qemuMonitorJSONHandlePMSuspendDisk(qemuMonitorPtr mon,
+     qemuMonitorEmitPMSuspendDisk(mon);
+ }
+ 
++static void
++qemuMonitorJSONHandleDeviceDeleted(qemuMonitorPtr mon, virJSONValuePtr data)
++{
++    const char *device;
++
++    if (!(device = virJSONValueObjectGetString(data, "device"))) {
++        VIR_WARN("missing device in device deleted event");
++        return;
++    }
++
++    qemuMonitorEmitDeviceDeleted(mon, device);
++}
++
+ int
+ qemuMonitorJSONHumanCommandWithFd(qemuMonitorPtr mon,
+                                   const char *cmd_str,
+-- 
+2.0.0
+

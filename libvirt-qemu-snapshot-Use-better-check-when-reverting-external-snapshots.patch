@@ -1,0 +1,45 @@
+From d8b29f5c1e20b7df1967521c856f8c3f05245409 Mon Sep 17 00:00:00 2001
+Message-Id: <d8b29f5c1e20b7df1967521c856f8c3f05245409@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 20 Jan 2015 10:39:39 +0100
+Subject: [PATCH] qemu: snapshot: Use better check when reverting external
+ snapshots
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1124854 [6.7]
+https://bugzilla.redhat.com/show_bug.cgi?id=1071264 [7.1]
+
+Reverting of external snapshots is not supported currently. The check
+that is present doesn't properly check for all aspects that make a
+snapshot external. Use virDomainSnapshotIsExternal() to do the check.
+
+(cherry picked from commit d410e6f19d944ad78bc9257726d613597db00701)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 7cf7d78..97ece61 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -12973,12 +12973,13 @@ static int qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+                          "to revert to inactive snapshot"));
+         goto cleanup;
+     }
+-    if (snap->def->state == VIR_DOMAIN_DISK_SNAPSHOT) {
++
++    if (virDomainSnapshotIsExternal(snap)) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+-                       _("revert to external disk snapshot not supported "
+-                         "yet"));
++                       _("revert to external snapshot not supported yet"));
+         goto cleanup;
+     }
++
+     if (!(flags & VIR_DOMAIN_SNAPSHOT_REVERT_FORCE)) {
+         if (!snap->def->dom) {
+             virReportError(VIR_ERR_SNAPSHOT_REVERT_RISKY,
+-- 
+2.2.2
+

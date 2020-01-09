@@ -1,0 +1,86 @@
+From a000e6ad047cc5426e34073681bca08f5e960e8d Mon Sep 17 00:00:00 2001
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 4 Oct 2011 11:13:00 +0200
+Subject: [PATCH] daemon: Modify init script to detect upstart managed
+ libvirtd
+To: libvir-list@redhat.com
+
+For https://bugzilla.redhat.com/show_bug.cgi?id=728153
+
+This patch modifies the startup process of the libvirtd daemon. RHEL 6.2
+machines use SysV init scripts for managing system processes. The VDSM
+package requires using upstart script to manage libvirtd as it uses
+"respawn" stanza in upstart configuration to restart libvirtd in a case
+of crash.
+
+This causes confusion as users are to manage processes with
+"service" command. When libvirtd is managed using upstart and user tries
+to issue commands using service command the daemon fails to start/stop
+and the error messages emitted don't describe the problem helpfully.
+
+This patch adds detection to the SysV init script, that checks if
+libvirtd is managed using upstart and prints a descriptive error
+message.
+
+This is a RHEL-only patch as this problem does not occur on other
+distros.
+
+Signed-off-by: Daniel Veillard <veillard@redhat.com>
+---
+ daemon/libvirtd.init.in | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/daemon/libvirtd.init.in b/daemon/libvirtd.init.in
+index f66ddad..63fda5c 100644
+--- a/daemon/libvirtd.init.in
++++ b/daemon/libvirtd.init.in
+@@ -41,6 +41,7 @@ PIDFILE=@localstatedir@/run/$SERVICE.pid
+ LIBVIRTD_CONFIG=
+ LIBVIRTD_ARGS=
+ KRB5_KTNAME=/etc/libvirt/krb5.tab
++INITCTL_PATH=/sbin/initctl
+ 
+ test -f @sysconfdir@/sysconfig/libvirtd && . @sysconfdir@/sysconfig/libvirtd
+ 
+@@ -55,8 +56,22 @@ fi
+ 
+ RETVAL=0
+ 
++# Check if libvirt is managed by upstart and fail if it's the case
++initctl_check() {
++    if [ -x "$INITCTL_PATH" ]; then
++        #extract status from upstart
++        LIBVIRTD_UPSTART_STATUS=$($INITCTL_PATH status $SERVICE  2>/dev/null | cut -d/ -f 1)
++        if [ "$LIBVIRTD_UPSTART_STATUS" = "$SERVICE start" ]; then
++            logger -t "libvirtd" -s  "libvirtd is managed by upstart and started, use initctl instead"
++            exit 14
++        fi
++    fi
++}
++
+ start() {
+     echo -n $"Starting $SERVICE daemon: "
++    initctl_check
++
+     mkdir -p @localstatedir@/cache/libvirt
+     rm -rf @localstatedir@/cache/libvirt/*
+ 
+@@ -74,6 +89,7 @@ start() {
+ 
+ stop() {
+     echo -n $"Stopping $SERVICE daemon: "
++    initctl_check
+ 
+     killproc -p $PIDFILE $PROCESS
+     RETVAL=$?
+@@ -93,6 +109,7 @@ restart() {
+ 
+ reload() {
+     echo -n $"Reloading $SERVICE configuration: "
++    initctl_check
+ 
+     killproc -p $PIDFILE $PROCESS -HUP
+     RETVAL=$?
+-- 
+1.7.11.4
+

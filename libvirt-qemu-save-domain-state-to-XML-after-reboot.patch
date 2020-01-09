@@ -1,0 +1,53 @@
+From 484798b9395a1d8b92a49e657698747faada517b Mon Sep 17 00:00:00 2001
+Message-Id: <484798b9395a1d8b92a49e657698747faada517b@dist-git>
+From: Sergey Fionov <fionov@gmail.com>
+Date: Wed, 21 Jan 2015 17:33:24 +0100
+Subject: [PATCH] qemu: save domain state to XML after reboot
+
+Currently qemuDomainReboot() does reboot in two phases:
+qemuMonitorSystemPowerdown() and qemuProcessFakeReboot().
+
+qemuMonitorSystemPowerdown() shutdowns the domain and saves domain
+state/reason as VIR_DOMAIN_SHUTDOWN_UNKNOWN.
+
+qemuProcessFakeReboot() sets domain state/reason to
+VIR_DOMAIN_RESUMED_UNPAUSED but does not save domain state changes.
+
+Subsequent restart of libvirtd leads to restoring domain state/reason to
+saved that is VIR_DOMAIN_SHUTDOWN_UNKNOWN and to automatic shutdown of
+the domain. This commit adds virDomainSaveStatus() into
+qemuProcessFakeReboot() to avoid unexpected shutdowns.
+
+(cherry picked from commit 2697c8a116fbac52326bca180bdd3edfd1a8b544)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1169405
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_process.c - different code-base, we don't have
+                              'virQEMUDriverConfigPtr' in RHEL-6
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index d5bdf95..e872497 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -608,6 +608,11 @@ qemuProcessFakeReboot(void *opaque)
+                                      VIR_DOMAIN_EVENT_RESUMED,
+                                      VIR_DOMAIN_EVENT_RESUMED_UNPAUSED);
+ 
++    if (virDomainSaveStatus(driver->caps, driver->stateDir, vm) < 0) {
++        VIR_WARN("Unable to save status on vm %s after state change",
++                 vm->def->name);
++    }
++
+     ret = 0;
+ 
+ endjob:
+-- 
+2.2.2
+

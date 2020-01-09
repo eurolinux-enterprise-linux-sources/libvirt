@@ -1,0 +1,93 @@
+From 53ff8c1f7d2d8fc6d7b53802cc9a307fff1cf67a Mon Sep 17 00:00:00 2001
+Message-Id: <53ff8c1f7d2d8fc6d7b53802cc9a307fff1cf67a.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 10 Oct 2012 15:38:45 +0100
+Subject: [PATCH] Fix (rare) deadlock in QEMU monitor callbacks
+
+https://bugzilla.redhat.com/show_bug.cgi?id=859712
+
+Some users report (very rarely) seeing a deadlock in the QEMU
+monitor callbacks
+
+ Thread 10 (Thread 0x7fcd11e20700 (LWP 26753)):
+ #0  0x00000030d0e0de4d in __lll_lock_wait () from /lib64/libpthread.so.0
+ #1  0x00000030d0e09ca6 in _L_lock_840 () from /lib64/libpthread.so.0
+ #2  0x00000030d0e09ba8 in pthread_mutex_lock () from /lib64/libpthread.so.0
+ #3  0x00007fcd162f416d in virMutexLock (m=<optimized out>)
+     at util/threads-pthread.c:85
+ #4  0x00007fcd1632c651 in virDomainObjLock (obj=<optimized out>)
+     at conf/domain_conf.c:14256
+ #5  0x00007fcd0daf05cc in qemuProcessHandleMonitorDestroy (mon=0x7fcccc0029e0,
+     vm=0x7fcccc00a850) at qemu/qemu_process.c:1026
+ #6  0x00007fcd0db01710 in qemuMonitorDispose (obj=0x7fcccc0029e0)
+     at qemu/qemu_monitor.c:249
+ #7  0x00007fcd162fd4e3 in virObjectUnref (anyobj=<optimized out>)
+     at util/virobject.c:139
+ #8  0x00007fcd0db027a9 in qemuMonitorClose (mon=<optimized out>)
+     at qemu/qemu_monitor.c:860
+ #9  0x00007fcd0daf61ad in qemuProcessStop (driver=driver@entry=0x7fcd04079d50,
+     vm=vm@entry=0x7fcccc00a850,
+     reason=reason@entry=VIR_DOMAIN_SHUTOFF_DESTROYED, flags=flags@entry=0)
+     at qemu/qemu_process.c:4057
+ #10 0x00007fcd0db323cf in qemuDomainDestroyFlags (dom=<optimized out>,
+     flags=<optimized out>) at qemu/qemu_driver.c:1977
+ #11 0x00007fcd1637ff51 in virDomainDestroyFlags (
+     domain=domain@entry=0x7fccf00c1830, flags=1) at libvirt.c:2256
+
+At frame #10 we are holding the domain lock, we call into
+qemuProcessStop() to cleanup QEMU, which triggers the monitor
+to close, which invokes qemuProcessHandleMonitorDestroy() which
+tries to obtain the domain lock again. This is a non-recursive
+lock, hence hang.
+
+Since qemuMonitorPtr is a virObject, the unref call in
+qemuProcessHandleMonitorDestroy no longer needs mutex
+protection. The assignment of priv->mon = NULL, can be
+instead done by the caller of qemuMonitorClose(), thus
+removing all need for locking.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 25f582e36a1c066b6c82303b5e4f18eec337a25b)
+---
+ src/qemu/qemu_process.c | 15 +++++----------
+ 1 file changed, 5 insertions(+), 10 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 127906e..ff2dc3d 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1012,17 +1012,10 @@ no_memory:
+ }
+ 
+ 
+-static void qemuProcessHandleMonitorDestroy(qemuMonitorPtr mon,
++static void qemuProcessHandleMonitorDestroy(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+                                             virDomainObjPtr vm)
+ {
+-    qemuDomainObjPrivatePtr priv;
+-
+-    virDomainObjLock(vm);
+-    priv = vm->privateData;
+-    if (priv->mon == mon)
+-        priv->mon = NULL;
+-    if (virObjectUnref(vm))
+-        virDomainObjUnlock(vm);
++    virObjectUnref(vm);
+ }
+ 
+ static int
+@@ -4042,8 +4035,10 @@ void qemuProcessStop(struct qemud_driver *driver,
+         priv->agentError = false;
+     }
+ 
+-    if (priv->mon)
++    if (priv->mon) {
+         qemuMonitorClose(priv->mon);
++        priv->mon = NULL;
++    }
+ 
+     if (priv->monConfig) {
+         if (priv->monConfig->type == VIR_DOMAIN_CHR_TYPE_UNIX)
+-- 
+1.7.12.3
+

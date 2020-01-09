@@ -1,0 +1,286 @@
+From 1fa882877283cc360c2b516632a873744310fe21 Mon Sep 17 00:00:00 2001
+Message-Id: <1fa882877283cc360c2b516632a873744310fe21.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:45 -0600
+Subject: [PATCH] Move command/event capabilities detection out of QEMU
+ monitor code
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+The qemuMonitorSetCapabilities() API is used to initialize the QMP
+protocol capabilities. It has since been abused to initialize some
+libvirt internal capabilities based on command/event existance too.
+Move the latter code out into qemuCapsProbeQMP() in the QEMU
+capabilities source file instead
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 1b21351b93248c80bd545d8e268849c8bf76df95)
+---
+ src/qemu/qemu_capabilities.c | 70 ++++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_capabilities.h |  4 +++
+ src/qemu/qemu_monitor.c      | 11 +------
+ src/qemu/qemu_monitor.h      |  4 +--
+ src/qemu/qemu_monitor_json.c | 59 -------------------------------------
+ src/qemu/qemu_monitor_json.h |  5 ----
+ src/qemu/qemu_process.c      |  5 +++-
+ 7 files changed, 80 insertions(+), 78 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index ccc1dae..5e7781c 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1701,6 +1701,76 @@ const char *qemuCapsGetCanonicalMachine(qemuCapsPtr caps,
+ }
+ 
+ 
++static int
++qemuCapsProbeQMPCommands(qemuCapsPtr caps,
++                         qemuMonitorPtr mon)
++{
++    char **commands = NULL;
++    int ncommands;
++    size_t i;
++
++    if ((ncommands = qemuMonitorGetCommands(mon, &commands)) < 0)
++        return -1;
++
++    for (i = 0 ; i < ncommands ; i++) {
++        char *name = commands[i];
++        if (STREQ(name, "system_wakeup"))
++            qemuCapsSet(caps, QEMU_CAPS_WAKEUP);
++        else if (STREQ(name, "transaction"))
++            qemuCapsSet(caps, QEMU_CAPS_TRANSACTION);
++        else if (STREQ(name, "block_job_cancel"))
++            qemuCapsSet(caps, QEMU_CAPS_BLOCKJOB_SYNC);
++        else if (STREQ(name, "block-job-cancel"))
++            qemuCapsSet(caps, QEMU_CAPS_BLOCKJOB_ASYNC);
++        else if (STREQ(name, "dump-guest-memory"))
++            qemuCapsSet(caps, QEMU_CAPS_DUMP_GUEST_MEMORY);
++        VIR_FREE(name);
++    }
++    VIR_FREE(commands);
++
++    return 0;
++}
++
++
++static int
++qemuCapsProbeQMPEvents(qemuCapsPtr caps,
++                       qemuMonitorPtr mon)
++{
++    char **events = NULL;
++    int nevents;
++    size_t i;
++
++    if ((nevents = qemuMonitorGetEvents(mon, &events)) < 0)
++        return -1;
++
++    for (i = 0 ; i < nevents ; i++) {
++        char *name = events[i];
++
++        if (STREQ(name, "BALLOON_CHANGE"))
++            qemuCapsSet(caps, QEMU_CAPS_BALLOON_EVENT);
++        VIR_FREE(name);
++    }
++    VIR_FREE(events);
++
++    return 0;
++}
++
++
++int qemuCapsProbeQMP(qemuCapsPtr caps,
++                     qemuMonitorPtr mon)
++{
++    VIR_DEBUG("caps=%p mon=%p", caps, mon);
++
++    if (qemuCapsProbeQMPCommands(caps, mon) < 0)
++        return -1;
++
++    if (qemuCapsProbeQMPEvents(caps, mon) < 0)
++        return -1;
++
++    return 0;
++}
++
++
+ #define QEMU_SYSTEM_PREFIX "qemu-system-"
+ 
+ qemuCapsPtr qemuCapsNewForBinary(const char *binary)
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index d3b2bed..21cddf1 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -28,6 +28,7 @@
+ # include "capabilities.h"
+ # include "command.h"
+ # include "virobject.h"
++# include "qemu_monitor.h"
+ 
+ /* Internal flags to keep track of qemu command line capabilities */
+ enum qemuCapsFlags {
+@@ -176,6 +177,9 @@ qemuCapsPtr qemuCapsNew(void);
+ qemuCapsPtr qemuCapsNewCopy(qemuCapsPtr caps);
+ qemuCapsPtr qemuCapsNewForBinary(const char *binary);
+ 
++int qemuCapsProbeQMP(qemuCapsPtr caps,
++                     qemuMonitorPtr mon);
++
+ void qemuCapsSet(qemuCapsPtr caps,
+                  enum qemuCapsFlags flag) ATTRIBUTE_NONNULL(1);
+ 
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 865c6c4..c53ea11 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -1125,8 +1125,7 @@ int qemuMonitorEmitBalloonChange(qemuMonitorPtr mon,
+ }
+ 
+ 
+-int qemuMonitorSetCapabilities(qemuMonitorPtr mon,
+-                               qemuCapsPtr caps)
++int qemuMonitorSetCapabilities(qemuMonitorPtr mon)
+ {
+     int ret;
+     VIR_DEBUG("mon=%p", mon);
+@@ -1141,14 +1140,6 @@ int qemuMonitorSetCapabilities(qemuMonitorPtr mon,
+         ret = qemuMonitorJSONSetCapabilities(mon);
+         if (ret < 0)
+             goto cleanup;
+-
+-        ret = qemuMonitorJSONCheckCommands(mon, caps);
+-        if (ret < 0)
+-            goto cleanup;
+-
+-        ret = qemuMonitorJSONCheckEvents(mon, caps);
+-        if (ret < 0)
+-            goto cleanup;
+     } else {
+         ret = 0;
+     }
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 26c04d7..2b2d08a 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -27,7 +27,6 @@
+ 
+ # include "internal.h"
+ 
+-# include "qemu_capabilities.h"
+ # include "domain_conf.h"
+ # include "bitmap.h"
+ # include "virhash.h"
+@@ -155,8 +154,7 @@ qemuMonitorPtr qemuMonitorOpenFD(virDomainObjPtr vm,
+ 
+ void qemuMonitorClose(qemuMonitorPtr mon);
+ 
+-int qemuMonitorSetCapabilities(qemuMonitorPtr mon,
+-                               qemuCapsPtr caps);
++int qemuMonitorSetCapabilities(qemuMonitorPtr mon);
+ 
+ void qemuMonitorLock(qemuMonitorPtr mon);
+ void qemuMonitorUnlock(qemuMonitorPtr mon);
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 60f6ff1..2060842 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -966,65 +966,6 @@ qemuMonitorJSONSetCapabilities(qemuMonitorPtr mon)
+ }
+ 
+ 
+-/*
+- * Returns: 0 if human-monitor-command is not supported, +1 if
+- * human-monitor-command worked or -1 on failure
+- */
+-int
+-qemuMonitorJSONCheckCommands(qemuMonitorPtr mon,
+-                             qemuCapsPtr caps)
+-{
+-    char **commands = NULL;
+-    int ncommands;
+-    size_t i;
+-
+-    if ((ncommands = qemuMonitorJSONGetCommands(mon, &commands)) < 0)
+-        return -1;
+-
+-    for (i = 0 ; i < ncommands ; i++) {
+-        char *name = commands[i];
+-        if (STREQ(name, "system_wakeup"))
+-            qemuCapsSet(caps, QEMU_CAPS_WAKEUP);
+-        else if (STREQ(name, "transaction"))
+-            qemuCapsSet(caps, QEMU_CAPS_TRANSACTION);
+-        else if (STREQ(name, "block_job_cancel"))
+-            qemuCapsSet(caps, QEMU_CAPS_BLOCKJOB_SYNC);
+-        else if (STREQ(name, "block-job-cancel"))
+-            qemuCapsSet(caps, QEMU_CAPS_BLOCKJOB_ASYNC);
+-        else if (STREQ(name, "dump-guest-memory"))
+-            qemuCapsSet(caps, QEMU_CAPS_DUMP_GUEST_MEMORY);
+-        VIR_FREE(name);
+-    }
+-    VIR_FREE(commands);
+-
+-    return 0;
+-}
+-
+-
+-int
+-qemuMonitorJSONCheckEvents(qemuMonitorPtr mon,
+-                           qemuCapsPtr caps)
+-{
+-    char **events = NULL;
+-    int nevents;
+-    size_t i;
+-
+-    if ((nevents = qemuMonitorJSONGetEvents(mon, &events)) < 0)
+-        return -1;
+-
+-    for (i = 0 ; i < nevents ; i++) {
+-        char *name = events[i];
+-
+-        if (STREQ(name, "BALLOON_CHANGE"))
+-            qemuCapsSet(caps, QEMU_CAPS_BALLOON_EVENT);
+-        VIR_FREE(name);
+-    }
+-    VIR_FREE(events);
+-
+-    return 0;
+-}
+-
+-
+ int
+ qemuMonitorJSONStartCPUs(qemuMonitorPtr mon,
+                          virConnectPtr conn ATTRIBUTE_UNUSED)
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index defa3ff..2bb0166 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -42,11 +42,6 @@ int qemuMonitorJSONHumanCommandWithFd(qemuMonitorPtr mon,
+ 
+ int qemuMonitorJSONSetCapabilities(qemuMonitorPtr mon);
+ 
+-int qemuMonitorJSONCheckCommands(qemuMonitorPtr mon,
+-                                 qemuCapsPtr caps);
+-int qemuMonitorJSONCheckEvents(qemuMonitorPtr mon,
+-                               qemuCapsPtr caps);
+-
+ int qemuMonitorJSONStartCPUs(qemuMonitorPtr mon,
+                              virConnectPtr conn);
+ int qemuMonitorJSONStopCPUs(qemuMonitorPtr mon);
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 16a82dc..429ba8f 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1263,7 +1263,10 @@ qemuConnectMonitor(struct qemud_driver *driver, virDomainObjPtr vm)
+ 
+ 
+     qemuDomainObjEnterMonitorWithDriver(driver, vm);
+-    ret = qemuMonitorSetCapabilities(priv->mon, priv->caps);
++    ret = qemuMonitorSetCapabilities(priv->mon);
++    if (ret == 0 &&
++        qemuCapsGet(priv->caps, QEMU_CAPS_MONITOR_JSON))
++        ret = qemuCapsProbeQMP(priv->caps, priv->mon);
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+ 
+ error:
+-- 
+1.7.12.3
+

@@ -1,0 +1,134 @@
+From 1d1bda377bfb6a6babcb45b50c2b1e4187a3f321 Mon Sep 17 00:00:00 2001
+Message-Id: <1d1bda377bfb6a6babcb45b50c2b1e4187a3f321@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 17 Jan 2014 14:14:15 +0100
+Subject: [PATCH] qemu: Avoid operations on NULL monitor if VM fails early
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1047659
+
+If a VM dies very early during an attempted connect to the guest agent
+while the locks are down the domain monitor object will be freed. The
+object is then accessed later as any failure during guest agent startup
+isn't considered fatal.
+
+In the current upstream version this doesn't lead to a crash as
+virObjectLock called when entering the monitor in
+qemuProcessDetectVcpuPIDs checks the pointer before attempting to
+dereference (lock) it. The NULL pointer is then caught in the monitor
+helper code.
+
+Before the introduction of virObjectLockable - observed on 0.10.2 - the
+pointer is locked directly via virMutexLock leading to a crash.
+
+To avoid this problem we need to differentiate between the guest agent
+not being present and the VM quitting when the locks were down. The fix
+reorganizes the code in qemuConnectAgent to add the check and then adds
+special handling to the callers.
+
+(cherry picked from commit b952cbbccafd5ead8b5a70b2608a1d5a7f03b31e)
+
+Conflicts:
+	src/qemu/qemu_process.c - context conflict with new access means to
+                              qemu driver configuration
+
+                            - label mismatch between upstream and
+                            downstream, probably some cleanup patch not
+                            backported. (s/error/cleanup/ @
+                            src/qemu/qemu_process.c:4602)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c | 34 +++++++++++++++++++++++++---------
+ 1 file changed, 25 insertions(+), 9 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index c77bb93..2731630 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -251,6 +251,17 @@ qemuConnectAgent(struct qemud_driver *driver, virDomainObjPtr vm)
+     virDomainObjLock(vm);
+     priv->agentStart = 0;
+ 
++    if (agent == NULL)
++        virObjectUnref(vm);
++
++    if (!virDomainObjIsActive(vm)) {
++        qemuAgentClose(agent);
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("guest crashed while connecting to the guest agent"));
++        ret = -2;
++        goto cleanup;
++    }
++
+     if (virSecurityManagerClearSocketLabel(driver->securityManager,
+                                            vm->def) < 0) {
+         VIR_ERROR(_("Failed to clear security context for agent for %s"),
+@@ -258,13 +269,7 @@ qemuConnectAgent(struct qemud_driver *driver, virDomainObjPtr vm)
+         goto cleanup;
+     }
+ 
+-    if (agent == NULL)
+-        virObjectUnref(vm);
+ 
+-    if (!virDomainObjIsActive(vm)) {
+-        qemuAgentClose(agent);
+-        goto cleanup;
+-    }
+     priv->agent = agent;
+ 
+     if (priv->agent == NULL) {
+@@ -3249,6 +3254,7 @@ qemuProcessReconnect(void *opaque)
+     int state;
+     int reason;
+     size_t i;
++    int ret;
+ 
+     memcpy(&oldjob, &data->oldjob, sizeof(oldjob));
+ 
+@@ -3274,7 +3280,10 @@ qemuProcessReconnect(void *opaque)
+         goto error;
+ 
+     /* Failure to connect to agent shouldn't be fatal */
+-    if (qemuConnectAgent(driver, obj) < 0) {
++    if ((ret = qemuConnectAgent(driver, obj)) < 0) {
++        if (ret == -2)
++            goto error;
++
+         VIR_WARN("Cannot connect to QEMU guest agent for %s",
+                  obj->def->name);
+         virResetLastError();
+@@ -3998,7 +4007,10 @@ int qemuProcessStart(virConnectPtr conn,
+         goto cleanup;
+ 
+     /* Failure to connect to agent shouldn't be fatal */
+-    if (qemuConnectAgent(driver, vm) < 0) {
++    if ((ret = qemuConnectAgent(driver, vm)) < 0) {
++        if (ret == -2)
++            goto cleanup;
++
+         VIR_WARN("Cannot connect to QEMU guest agent for %s",
+                  vm->def->name);
+         virResetLastError();
+@@ -4474,6 +4486,7 @@ int qemuProcessAttach(virConnectPtr conn ATTRIBUTE_UNUSED,
+     virSecurityLabelDefPtr seclabeldef = NULL;
+     virSecurityManagerPtr* sec_managers = NULL;
+     const char *model;
++    int ret;
+ 
+     VIR_DEBUG("Beginning VM attach process");
+ 
+@@ -4584,7 +4597,10 @@ int qemuProcessAttach(virConnectPtr conn ATTRIBUTE_UNUSED,
+         goto cleanup;
+ 
+     /* Failure to connect to agent shouldn't be fatal */
+-    if (qemuConnectAgent(driver, vm) < 0) {
++    if ((ret = qemuConnectAgent(driver, vm)) < 0) {
++        if (ret == -2)
++            goto cleanup;
++
+         VIR_WARN("Cannot connect to QEMU guest agent for %s",
+                  vm->def->name);
+         virResetLastError();
+-- 
+1.9.1
+

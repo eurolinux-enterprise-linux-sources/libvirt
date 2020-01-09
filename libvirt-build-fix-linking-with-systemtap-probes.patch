@@ -1,0 +1,55 @@
+From 692df8d1225e48c5c6fd45645960d721792db461 Mon Sep 17 00:00:00 2001
+Message-Id: <692df8d1225e48c5c6fd45645960d721792db461.1352118320.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Thu, 1 Nov 2012 17:05:29 +0100
+Subject: [PATCH] build: fix linking with systemtap probes
+
+https://bugzilla.redhat.com/show_bug.cgi?id=866369
+
+Commit 34e8f63a3 altered virfile.o to drag in additional symbols,
+which in turn led to pulling in other .o files and eventually causing
+a link failure when systemtap probes are enabled, such as:
+
+./.libs/libvirt_util.a(libvirt_util_la-event_poll.o): In function `virEventPollRunOnce':
+/home/dummy/libvirt/src/util/event_poll.c:614: undefined reference to `libvirt_event_poll_run_semaphore'
+./.libs/libvirt_util.a(libvirt_util_la-event_poll.o):(.note.stapsdt+0x24): undefined reference to `libvirt_event_poll_add_handle_semaphore'
+
+Even though libvirt_iohelper and libvirt_parthelper don't directly
+use the portion of virfile.o that drags in probing, it was easier
+to satisfy the linker and get the build back up, than to figure out
+whether it is even possible or worth trying to disentangle the mess.
+
+* src/Makefile.am (libvirt_iohelper_LDADD)
+(libvirt_parthelper_LDADD): Use libvirt_probes.lo when needed.
+(cherry picked from commit a047a24d11135cdf30e3a1693ec283ebe96b97bb)
+---
+ src/Makefile.am | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/Makefile.am b/src/Makefile.am
+index f75ae9b..76093ac 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -1619,6 +1619,9 @@ libvirt_iohelper_LDFLAGS = $(WARN_LDFLAGS) $(AM_LDFLAGS)
+ libvirt_iohelper_LDADD =		\
+ 		libvirt_util.la		\
+ 		../gnulib/lib/libgnu.la
++if WITH_DTRACE_PROBES
++libvirt_iohelper_LDADD += libvirt_probes.lo
++endif
+ 
+ libvirt_iohelper_CFLAGS = $(AM_CFLAGS)
+ endif
+@@ -1633,6 +1636,9 @@ libvirt_parthelper_LDADD =		\
+ 		$(LIBPARTED_LIBS)	\
+ 		libvirt_util.la		\
+ 		../gnulib/lib/libgnu.la
++if WITH_DTRACE_PROBES
++libvirt_parthelper_LDADD += libvirt_probes.lo
++endif
+ 
+ libvirt_parthelper_CFLAGS = $(LIBPARTED_CFLAGS) $(AM_CFLAGS)
+ endif
+-- 
+1.8.0
+

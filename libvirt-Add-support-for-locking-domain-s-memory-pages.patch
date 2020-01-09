@@ -1,0 +1,149 @@
+From 72c64d69af30d43b681598acb5c76d79e14de898 Mon Sep 17 00:00:00 2001
+Message-Id: <72c64d69af30d43b681598acb5c76d79e14de898.1374158623.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 16 May 2013 22:00:03 +0200
+Subject: [PATCH] Add support for locking domain's memory pages
+
+https://bugzilla.redhat.com/show_bug.cgi?id=947118
+
+The following XML configuration can be used to request all domain's
+memory pages to be kept locked in host's memory (i.e., domain's memory
+pages will not be swapped out):
+
+      <memoryBacking>
+        <locked/>
+      </memoryBacking>
+
+(cherry picked from commit 555866389c26a1bcf4f6cec9406e3c8ad435d778)
+
+Conflicts:
+	docs/formatdomain.html.in - context and removal of unrelated
+	    blkiotune crap that went in 89e0e17 RHEL-only patch
+	docs/schemas/domaincommon.rng - context
+	src/conf/domain_conf.c, src/conf/domain_conf.h - context:
+	    mem.ksm_disabled vs. mem.nosharepages
+---
+ docs/formatdomain.html.in     | 30 ++++++++++++++++--------------
+ docs/schemas/domaincommon.rng |  5 +++++
+ src/conf/domain_conf.c        | 20 +++++++++++---------
+ src/conf/domain_conf.h        |  1 +
+ 4 files changed, 33 insertions(+), 23 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 0be7293..d2ef888 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -553,26 +553,28 @@
+   ...
+   &lt;memoryBacking&gt;
+     &lt;hugepages/&gt;
++    &lt;locked/&gt;
+   &lt;/memoryBacking&gt;
+   ...
+ &lt;/domain&gt;
+ </pre>
+ 
++    <p>The optional <code>memoryBacking</code> element may contain several
++      elements that influence how virtual memory pages are backed by host
++      pages.</p>
++
+     <dl>
+-      <dt><code>memoryBacking</code></dt>
+-      <dd>The optional <code>memoryBacking</code> element, may have an
+-        <code>hugepages</code> element set within it. This tells the
+-        hypervisor that the guest should have its memory allocated using
+-        hugepages instead of the normal native page size. The optional
+-        <code>nosharepages</code> element tells the hypervisor that
+-        share pages (KSM) should be disabled on guest startup</dd>
+-      <dt><code>blkiotune</code></dt>
+-      <dd> The optional <code>blkiotune</code> element provides the ability
+-        to tune Blkio cgroup tunable parameters for the domain. If this is
+-        omitted, it defaults to the OS provided defaults.</dd>
+-      <dt><code>weight</code></dt>
+-      <dd> The optional <code>weight</code> element is the I/O weight of the
+-        guest. The value should be in range [100, 1000].</dd>
++      <dt><code>hugepages</code></dt>
++      <dd>This tells the hypervisor that the guest should have its memory
++        allocated using hugepages instead of the normal native page size.</dd>
++      <dt><code>nosharepages</code></dt>
++      <dd>Instructs hypervisor to disable shared pages (memory merge, KSM) for
++        this domain. <span class="since">Since 1.0.6</span></dd>
++      <dt><code>locked</code></dt>
++      <dd>When set and supported by the hypervisor, memory pages belonging
++        to the domain will be locked in host's memory and the host will not
++        be allowed to swap them out.
++        <span class="since">Since 1.0.6</span></dd>
+     </dl>
+ 
+ 
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 2c19531..6da00e2 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -496,6 +496,11 @@
+               <empty/>
+             </element>
+           </optional>
++          <optional>
++            <element name="locked">
++              <empty/>
++            </element>
++          </optional>
+         </element>
+       </optional>
+ 
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 5851bb9..6afd3fc 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8850,6 +8850,9 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+     if (node)
+         def->mem.ksm_disabled = 1;
+ 
++    if (virXPathBoolean("boolean(./memoryBacking/locked)", ctxt))
++        def->mem.locked = true;
++
+     /* Extract blkio cgroup tunables */
+     if (virXPathUInt("string(./blkiotune/weight)", ctxt,
+                      &def->blkio.weight) < 0)
+@@ -13867,17 +13870,16 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+         def->mem.swap_hard_limit)
+         virBufferAddLit(buf, "  </memtune>\n");
+ 
+-    if (def->mem.hugepage_backed || def->mem.ksm_disabled)
++    if (def->mem.hugepage_backed || def->mem.ksm_disabled || def->mem.locked) {
+         virBufferAddLit(buf, "  <memoryBacking>\n");
+-
+-    if (def->mem.hugepage_backed)
+-        virBufferAddLit(buf, "    <hugepages/>\n");
+-
+-    if (def->mem.ksm_disabled)
+-        virBufferAddLit(buf, "    <nosharepages/>\n");
+-
+-    if (def->mem.hugepage_backed || def->mem.ksm_disabled)
++        if (def->mem.hugepage_backed)
++            virBufferAddLit(buf, "    <hugepages/>\n");
++        if (def->mem.ksm_disabled)
++            virBufferAddLit(buf, "    <nosharepages/>\n");
++        if (def->mem.locked)
++            virBufferAddLit(buf, "    <locked/>\n");
+         virBufferAddLit(buf, "  </memoryBacking>\n");
++    }
+ 
+     virBufferAddLit(buf, "  <vcpu");
+     virBufferAsprintf(buf, " placement='%s'",
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 06bb66b..ed0a98e 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1700,6 +1700,7 @@ struct _virDomainDef {
+         unsigned long long cur_balloon; /* in kibibytes */
+         bool hugepage_backed;
+         unsigned long ksm_disabled;
++        bool locked;
+         int dump_core; /* enum virDomainMemDump */
+         unsigned long long hard_limit; /* in kibibytes */
+         unsigned long long soft_limit; /* in kibibytes */
+-- 
+1.8.3.2
+

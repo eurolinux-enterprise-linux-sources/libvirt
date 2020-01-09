@@ -1,0 +1,57 @@
+From 5d4f65acb9e4ca5d9f76c064dc92c39a8113b153 Mon Sep 17 00:00:00 2001
+Message-Id: <5d4f65acb9e4ca5d9f76c064dc92c39a8113b153@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 19 Mar 2015 09:53:17 -0400
+Subject: [PATCH] util: more verbose error when failing to create macvtap
+ device
+
+This helps in debugging problems similar to:
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1186142
+
+although it is not necessary to fix the problem reported there.
+
+Investigation of a problem with creating passthrough macvtap devices
+(https://bugzilla.redhat.com/show_bug.cgi?id=1185501) has shown that
+this slightly more verbose failure message is useful. In particular,
+the mac address can be used to determine the domain. You could also
+figure this out by looking at preceding messages in a debug log, but
+this gets it in a single place.
+
+(cherry-picked from commit 72423df9920491f8f59455a4161a7c31d1e15c8a)
+
+Conflict: message upstream had been slightly changed in a different
+          commit prior to changing it into this current form.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virnetdevmacvlan.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/virnetdevmacvlan.c b/src/util/virnetdevmacvlan.c
+index b8e09dd..216b791 100644
+--- a/src/util/virnetdevmacvlan.c
++++ b/src/util/virnetdevmacvlan.c
+@@ -104,6 +104,7 @@ virNetDevMacVLanCreate(const char *ifname,
+     unsigned int recvbuflen;
+     struct nl_msg *nl_msg;
+     struct nlattr *linkinfo, *info_data;
++    char macstr[VIR_MAC_STRING_BUFLEN];
+ 
+     if (virNetDevGetIndex(srcdev, &ifindex) < 0)
+         return -1;
+@@ -176,8 +177,9 @@ virNetDevMacVLanCreate(const char *ifname,
+ 
+         default:
+             virReportSystemError(-err->error,
+-                                 _("error creating %s type of interface"),
+-                                 type);
++                                 _("error creating %s interface %s@%s (%s)"),
++                                 type, ifname, srcdev,
++                                 virMacAddrFormat(macaddress, macstr));
+             goto cleanup;
+         }
+         break;
+-- 
+2.3.3
+

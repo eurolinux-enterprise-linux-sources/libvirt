@@ -1,0 +1,52 @@
+From aaecf915b217759b2e552262fe6690fc7a7a5fe5 Mon Sep 17 00:00:00 2001
+Message-Id: <aaecf915b217759b2e552262fe6690fc7a7a5fe5.1351526126.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 29 Oct 2012 09:51:47 +0100
+Subject: [PATCH] virsh: Fix POD syntax
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=870273
+
+The first two hunks fix "Unterminated I<...> sequence" error and the
+last one fixes "’=item’ outside of any ’=over’" error.
+(cherry picked from commit 61299a1c983a64c7e0337b94232fdd2d42c1f4f2)
+---
+ tools/virsh.pod | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 2363bf8..0d9f92b 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -728,7 +728,7 @@ I<bandwidth> specifies copying bandwidth limit in MiB/s, although for
+ qemu, it may be non-zero only for an online domain.
+ 
+ =item B<blockcopy> I<domain> I<path> I<dest> [I<bandwidth>] [I<--shallow>]
+-[I<--reuse-external>] [I<--raw>] [I<--wait> [I<--verbose]
++[I<--reuse-external>] [I<--raw>] [I<--wait> [I<--verbose>]
+ [{I<--pivot> | I<--finish>}] [I<--timeout> B<seconds>] [I<--async>]]
+ 
+ Copy a disk backing image chain to I<dest>. By default, this command
+@@ -769,7 +769,7 @@ I<path> specifies fully-qualified path of the disk.
+ I<bandwidth> specifies copying bandwidth limit in MiB/s.
+ 
+ =item B<blockpull> I<domain> I<path> [I<bandwidth>] [I<base>]
+-[I<--wait> [I<--verbose>] [I<--timeout> B<seconds>] [I<--async]]
++[I<--wait> [I<--verbose>] [I<--timeout> B<seconds>] [I<--async>]]
+ 
+ Populate a disk from its backing image chain. By default, this command
+ flattens the entire chain; but if I<base> is specified, containing the
+@@ -2924,8 +2924,6 @@ the result will also be converted back from QMP.  If more than one argument
+ is provided for I<command>, they are concatenated with a space in between
+ before passing the single command to the monitor.
+ 
+-=back
+-
+ =item B<qemu-agent-command> I<domain> [I<--timeout> I<seconds> | I<--async> | I<--block>] I<command>...
+ 
+ Send an arbitrary guest agent command I<command> to domain I<domain> through
+-- 
+1.7.12.4
+

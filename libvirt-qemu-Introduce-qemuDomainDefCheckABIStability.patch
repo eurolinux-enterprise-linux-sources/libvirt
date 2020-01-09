@@ -1,0 +1,128 @@
+From 8aa3210ffa9a9f898124c4f7f270db0c88dfe962 Mon Sep 17 00:00:00 2001
+Message-Id: <8aa3210ffa9a9f898124c4f7f270db0c88dfe962@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 10 Oct 2013 10:53:56 +0200
+Subject: [PATCH] qemu: Introduce qemuDomainDefCheckABIStability
+
+https://bugzilla.redhat.com/show_bug.cgi?id=994364
+https://bugzilla.redhat.com/show_bug.cgi?id=1141838
+https://bugzilla.redhat.com/show_bug.cgi?id=1155564
+
+Whenever we check for ABI stability, we have new xml (e.g. provided by
+user, or obtained from snapshot, whatever) which we compare to old xml
+and see if ABI won't break. However, if the new xml was produced via
+virDomainGetXMLDesc(..., VIR_DOMAIN_XML_MIGRATABLE) it lacks some
+devices, e.g. 'pci-root' controller. Hence, the ABI stability check
+fails even though it is stable. Moreover, we can't simply fix
+virDomainDefCheckABIStability because removing the correct devices is
+task for the driver. For instance, qemu driver wants to remove the usb
+controller too, while LXC driver doesn't. That's why we need special
+qemu wrapper over virDomainDefCheckABIStability which removes the
+correct devices from domain XML, produces MIGRATABLE xml and calls the
+check ABI stability function.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 7d704812b9c50cd3804dd1e7f9e2ea3e75fdc847)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_driver.c -- missing 53c39f58, but it was
+        effectively reverted by this patch anyway; config not separated
+        from driver in RHEL-6
+	src/qemu/qemu_migration.c -- missing 9313a6a7
+---
+ src/qemu/qemu_domain.c    | 22 ++++++++++++++++++++++
+ src/qemu/qemu_domain.h    |  3 +++
+ src/qemu/qemu_driver.c    |  4 ++--
+ src/qemu/qemu_migration.c |  4 ++--
+ 4 files changed, 29 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 0c3d459..ee59fa7 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -2206,3 +2206,25 @@ qemuDomainUpdateDeviceList(struct qemud_driver *driver,
+     priv->qemuDevices = aliases;
+     return 0;
+ }
++
++bool
++qemuDomainDefCheckABIStability(struct qemud_driver *driver,
++                               virDomainDefPtr src,
++                               virDomainDefPtr dst)
++{
++    virDomainDefPtr migratableDefSrc = NULL;
++    virDomainDefPtr migratableDefDst = NULL;
++    const int flags = VIR_DOMAIN_XML_SECURE | VIR_DOMAIN_XML_UPDATE_CPU | VIR_DOMAIN_XML_MIGRATABLE;
++    bool ret = false;
++
++    if (!(migratableDefSrc = qemuDomainDefCopy(driver, src, flags)) ||
++        !(migratableDefDst = qemuDomainDefCopy(driver, dst, flags)))
++        goto cleanup;
++
++    ret = virDomainDefCheckABIStability(migratableDefSrc, migratableDefDst);
++
++cleanup:
++    virDomainDefFree(migratableDefSrc);
++    virDomainDefFree(migratableDefDst);
++    return ret;
++}
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 91f06d8..08b992b 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -382,4 +382,7 @@ void qemuDomainCleanupRun(struct qemud_driver *driver,
+ int qemuDomainUpdateDeviceList(struct qemud_driver *driver,
+                                virDomainObjPtr vm);
+ 
++bool qemuDomainDefCheckABIStability(struct qemud_driver *driver,
++                                    virDomainDefPtr src,
++                                    virDomainDefPtr dst);
+ #endif /* __QEMU_DOMAIN_H__ */
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 76c7f80..6ef9574 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3079,7 +3079,7 @@ qemuDomainSaveInternal(struct qemud_driver *driver, virDomainPtr dom,
+                                             VIR_DOMAIN_XML_INACTIVE))) {
+             goto endjob;
+         }
+-        if (!virDomainDefCheckABIStability(vm->def, def)) {
++        if (!qemuDomainDefCheckABIStability(driver, vm->def, def)) {
+             virDomainDefFree(def);
+             goto endjob;
+         }
+@@ -13028,7 +13028,7 @@ static int qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+         if (virDomainObjIsActive(vm)) {
+             /* Transitions 5, 6, 8, 9 */
+             /* Check for ABI compatibility.  */
+-            if (config && !virDomainDefCheckABIStability(vm->def, config)) {
++            if (config && !qemuDomainDefCheckABIStability(driver, vm->def, config)) {
+                 virErrorPtr err = virGetLastError();
+ 
+                 if (!(flags & VIR_DOMAIN_SNAPSHOT_REVERT_FORCE)) {
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 32b3563..c4f0fcb 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1299,7 +1299,7 @@ char *qemuMigrationBegin(struct qemud_driver *driver,
+             goto cleanup;
+         }
+ 
+-        if (!virDomainDefCheckABIStability(vm->def, def))
++        if (!qemuDomainDefCheckABIStability(driver, vm->def, def))
+             goto cleanup;
+ 
+         rv = qemuDomainDefFormatLive(driver, def, false, true);
+@@ -1414,7 +1414,7 @@ qemuMigrationPrepareAny(struct qemud_driver *driver,
+                 if (!newdef)
+                     goto cleanup;
+ 
+-                if (!virDomainDefCheckABIStability(def, newdef)) {
++                if (!qemuDomainDefCheckABIStability(driver, def, newdef)) {
+                     virDomainDefFree(newdef);
+                     goto cleanup;
+                 }
+-- 
+2.2.0
+

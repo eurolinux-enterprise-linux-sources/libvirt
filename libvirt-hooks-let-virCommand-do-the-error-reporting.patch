@@ -1,0 +1,64 @@
+From 4819ae999bb017a395ee385ed7ee859f7ca005ca Mon Sep 17 00:00:00 2001
+Message-Id: <4819ae999bb017a395ee385ed7ee859f7ca005ca@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 6 Jun 2014 10:28:27 +0200
+Subject: [PATCH] hooks: let virCommand do the error reporting
+
+The code was reporting raw exit status without decoding it into
+normal vs. signal exit.  virCommandRun already does this, but
+with a different error type, so all we have to do is recast
+the error to the correct type.
+Reported by li guang.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1105397
+
+* src/util/hooks.c (virHookCall): Simplify.
+
+(cherry picked from commit 9c74414ded1ccc7378d8075000eb476917c196e4)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/hooks.c | 14 ++++++--------
+ 1 file changed, 6 insertions(+), 8 deletions(-)
+
+diff --git a/src/util/hooks.c b/src/util/hooks.c
+index 8f70580..e7c3196 100644
+--- a/src/util/hooks.c
++++ b/src/util/hooks.c
+@@ -1,7 +1,7 @@
+ /*
+  * hooks.c: implementation of the synchronous hooks support
+  *
+- * Copyright (C) 2010-2011 Red Hat, Inc.
++ * Copyright (C) 2010-2012 Red Hat, Inc.
+  * Copyright (C) 2010 Daniel Veillard
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -215,7 +215,6 @@ virHookCall(int driver,
+             char **output)
+ {
+     int ret;
+-    int exitstatus;
+     char *path;
+     virCommandPtr cmd;
+     const char *drvstr;
+@@ -290,12 +289,11 @@ virHookCall(int driver,
+     if (output)
+         virCommandSetOutputBuffer(cmd, output);
+ 
+-    ret = virCommandRun(cmd, &exitstatus);
+-    if (ret == 0 && exitstatus != 0) {
+-        virReportError(VIR_ERR_HOOK_SCRIPT_FAILED,
+-                       _("Hook script %s %s failed with error code %d"),
+-                       path, drvstr, exitstatus);
+-        ret = -1;
++    ret = virCommandRun(cmd, NULL);
++    if (ret < 0) {
++        /* Convert INTERNAL_ERROR into known error.  */
++        virErrorPtr err = virGetLastError();
++        virReportError(VIR_ERR_HOOK_SCRIPT_FAILED, "%s", err->message);
+     }
+ 
+     virCommandFree(cmd);
+-- 
+2.0.0
+

@@ -1,0 +1,111 @@
+From e74b268e7e184bdd4e13236385052b7e54b6148c Mon Sep 17 00:00:00 2001
+Message-Id: <e74b268e7e184bdd4e13236385052b7e54b6148c.1350990679.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:45 -0600
+Subject: [PATCH] blockjob: properly label disks for qemu block-commit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+I finally have all the pieces in place to perform a block-commit with
+SELinux enforcing.  There's still missing cleanup work when the commit
+completes, but doing that requires tracking both the backing chain and
+the base and top files within that chain in domain XML across libvirtd
+restarts.  Furthermore, from a security standpoint, once you have
+granted access, you must assume any damage that can be done will be
+done; later revoking access is nice to minimize the window of damage,
+but less important as it does not affect the fact that damage can be
+done in the first place.  Therefore, deferring the revoke efforts until
+we have better XML tracking of what chain operations are in effect,
+including across a libvirtd restart, is reasonable.
+
+* src/qemu/qemu_driver.c (qemuDomainBlockCommit): Label disks as
+needed.
+(qemuDomainPrepareDiskChainElement): Cast away const.
+(cherry picked from commit 2e43cb8e9090969eb33fafa2a785211478a1f394)
+---
+ src/qemu/qemu_driver.c | 42 +++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 37 insertions(+), 5 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 47a580e..a1dcfa9 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -10467,7 +10467,7 @@ qemuDomainPrepareDiskChainElement(struct qemud_driver *driver,
+                                   virDomainObjPtr vm,
+                                   virCgroupPtr cgroup,
+                                   virDomainDiskDefPtr disk,
+-                                  char *file,
++                                  const char *file,
+                                   qemuDomainDiskChainMode mode)
+ {
+     /* The easiest way to label a single file with the same
+@@ -10479,7 +10479,7 @@ qemuDomainPrepareDiskChainElement(struct qemud_driver *driver,
+     bool origreadonly = disk->readonly;
+     int ret = -1;
+ 
+-    disk->src = file;
++    disk->src = (char *) file; /* casting away const is safe here */
+     disk->format = VIR_STORAGE_FILE_RAW;
+     disk->backingChain = NULL;
+     disk->readonly = mode == VIR_DISK_CHAIN_READ_ONLY;
+@@ -12696,6 +12696,7 @@ qemuDomainBlockCommit(virDomainPtr dom, const char *path, const char *base,
+     virStorageFileMetadataPtr top_meta = NULL;
+     const char *top_parent = NULL;
+     const char *base_canon = NULL;
++    virCgroupPtr cgroup = NULL;
+ 
+     virCheckFlags(VIR_DOMAIN_BLOCK_COMMIT_SHALLOW, -1);
+ 
+@@ -12771,15 +12772,46 @@ qemuDomainBlockCommit(virDomainPtr dom, const char *path, const char *base,
+         goto endjob;
+     }
+ 
+-    /* XXX We need to be changing the SELinux label on both 'base' and
+-     * the parent of 'top', so that qemu can open(O_RDWR) those files
+-     * for the duration of the commit.  */
++    /* For the commit to succeed, we must allow qemu to open both the
++     * 'base' image and the parent of 'top' as read/write; 'top' might
++     * not have a parent, or might already be read-write.  XXX It
++     * would also be nice to revert 'base' to read-only, as well as
++     * revoke access to files removed from the chain, when the commit
++     * operation succeeds, but doing that requires tracking the
++     * operation in XML across libvirtd restarts.  */
++    if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_DEVICES) &&
++        virCgroupForDomain(driver->cgroup, vm->def->name, &cgroup, 0) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("Unable to find cgroup for %s"),
++                       vm->def->name);
++        goto endjob;
++    }
++    if (qemuDomainPrepareDiskChainElement(driver, vm, cgroup, disk, base_canon,
++                                          VIR_DISK_CHAIN_READ_WRITE) < 0 ||
++        (top_parent && top_parent != disk->src &&
++         qemuDomainPrepareDiskChainElement(driver, vm, cgroup, disk,
++                                           top_parent,
++                                           VIR_DISK_CHAIN_READ_WRITE) < 0))
++        goto endjob;
++
++    /* Start the commit operation.  */
+     qemuDomainObjEnterMonitor(driver, vm);
+     ret = qemuMonitorBlockCommit(priv->mon, device, top_canon, base_canon,
+                                  bandwidth);
+     qemuDomainObjExitMonitor(driver, vm);
+ 
+ endjob:
++    if (ret < 0) {
++        /* Revert access to read-only, if possible.  */
++        qemuDomainPrepareDiskChainElement(driver, vm, cgroup, disk, base_canon,
++                                          VIR_DISK_CHAIN_READ_ONLY);
++        if (top_parent && top_parent != disk->src)
++            qemuDomainPrepareDiskChainElement(driver, vm, cgroup, disk,
++                                              top_parent,
++                                              VIR_DISK_CHAIN_READ_ONLY);
++    }
++    if (cgroup)
++        virCgroupFree(&cgroup);
+     if (qemuDomainObjEndJob(driver, vm) == 0) {
+         vm = NULL;
+         goto cleanup;
+-- 
+1.7.12.4
+

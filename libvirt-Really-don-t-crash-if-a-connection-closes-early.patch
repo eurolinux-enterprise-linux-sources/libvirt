@@ -1,0 +1,37 @@
+From a6d1437191d4a320bae63756a96a7075fe9e1235 Mon Sep 17 00:00:00 2001
+Message-Id: <a6d1437191d4a320bae63756a96a7075fe9e1235@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 17 Jan 2014 16:19:59 -0700
+Subject: [PATCH] Really don't crash if a connection closes early
+
+CVE-2014-1447
+
+When writing commit 173c291, I missed the fact virNetServerClientClose
+unlocks the client object before actually clearing client->sock and thus
+it is possible to hit a window when client->keepalive is NULL while
+client->sock is not NULL. I was thinking client->sock == NULL was a
+better check for a closed connection but apparently we have to go with
+client->keepalive == NULL to actually fix the crash.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 066c8ef6c18bc1faf8b3e10787b39796a7a06cc0)
+---
+ src/rpc/virnetserverclient.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/rpc/virnetserverclient.c b/src/rpc/virnetserverclient.c
+index 3d294a5..abb9ed1 100644
+--- a/src/rpc/virnetserverclient.c
++++ b/src/rpc/virnetserverclient.c
+@@ -1215,7 +1215,7 @@ virNetServerClientStartKeepAlive(virNetServerClientPtr client)
+     /* The connection might have been closed before we got here and thus the
+      * keepalive object could have been removed too.
+      */
+-    if (!client->sock) {
++    if (!client->keepalive) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("connection not open"));
+         goto cleanup;
+-- 
+1.9.1
+

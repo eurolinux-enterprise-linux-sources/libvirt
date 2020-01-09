@@ -1,0 +1,54 @@
+From 7bedad85db15577b9ddc4d5510e19bcc730f1e7d Mon Sep 17 00:00:00 2001
+Message-Id: <7bedad85db15577b9ddc4d5510e19bcc730f1e7d@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:48 +0200
+Subject: [PATCH] qemu: snapshot: Remove memory image if external checkpoint
+ fails
+
+https://bugzilla.redhat.com/show_bug.cgi?id=885963
+
+When the disk snapshot part of an external system checkpoint fails the
+memory image is retained. This patch adds code to remove the image in
+such case.
+
+(cherry picked from commit a912977a657ae92724c04e8c4e6f70c6e8231849)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index bb7f15d..cb16d53 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11914,6 +11914,7 @@ qemuDomainSnapshotCreateActiveExternal(virConnectPtr conn,
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     char *xml = NULL;
+     bool memory = snap->def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL;
++    bool memory_unlink = false;
+     bool atomic = !!(flags & VIR_DOMAIN_SNAPSHOT_CREATE_ATOMIC);
+     bool transaction = qemuCapsGet(priv->caps, QEMU_CAPS_TRANSACTION);
+     int thaw = 0; /* 1 if freeze succeeded, -1 if freeze failed */
+@@ -11985,6 +11986,9 @@ qemuDomainSnapshotCreateActiveExternal(virConnectPtr conn,
+                                         QEMU_ASYNC_JOB_SNAPSHOT)) < 0)
+             goto endjob;
+ 
++        /* the memory image was created, remove it on errors */
++        memory_unlink = true;
++
+         /* forbid any further manipulation */
+         qemuDomainObjSetAsyncJobMask(vm, DEFAULT_JOB_MASK);
+     }
+@@ -12054,6 +12058,8 @@ endjob:
+ 
+ cleanup:
+     VIR_FREE(xml);
++    if (memory_unlink && ret < 0)
++        unlink(snap->def->file);
+ 
+     return ret;
+ }
+-- 
+1.9.2
+

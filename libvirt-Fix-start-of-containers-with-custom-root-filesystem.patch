@@ -1,0 +1,41 @@
+From 0d001532283d5e139240a707891e6113a704f900 Mon Sep 17 00:00:00 2001
+Message-Id: <0d001532283d5e139240a707891e6113a704f900.1349722366.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 8 Oct 2012 14:22:38 +0200
+Subject: [PATCH] Fix start of containers with custom root filesystem
+
+https://bugzilla.redhat.com/show_bug.cgi?id=861564
+
+A prefix change to unmount the SELinux filesystem broke starting
+of LXC containers with a custom root filesystem
+(cherry picked from commit 1532bd498a879494bb1e4757a54fce796eab368c)
+---
+ src/lxc/lxc_container.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/lxc/lxc_container.c b/src/lxc/lxc_container.c
+index a749d24..4bb2aff 100644
+--- a/src/lxc/lxc_container.c
++++ b/src/lxc/lxc_container.c
+@@ -1191,6 +1191,8 @@ static int lxcContainerGetSubtree(const char *prefix,
+     char **mounts = NULL;
+     size_t nmounts = 0;
+ 
++    VIR_DEBUG("prefix=%s", prefix);
++
+     *mountsret = NULL;
+     *nmountsret = 0;
+ 
+@@ -1528,7 +1530,8 @@ static int lxcContainerSetupPivotRoot(virDomainDefPtr vmDef,
+     /* Some versions of Linux kernel don't let you overmount
+      * the selinux filesystem, so make sure we kill it first
+      */
+-    if (lxcContainerUnmountSubtree(SELINUX_MOUNT, false) < 0)
++    if (STREQ(root->src, "/") &&
++        lxcContainerUnmountSubtree(SELINUX_MOUNT, false) < 0)
+         goto cleanup;
+ #endif
+ 
+-- 
+1.7.12
+

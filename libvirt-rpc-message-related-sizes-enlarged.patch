@@ -1,0 +1,225 @@
+From d79253a989612934374ee3a671ba8d856b4df7f5 Mon Sep 17 00:00:00 2001
+Message-Id: <d79253a989612934374ee3a671ba8d856b4df7f5@dist-git>
+From: Daniel Hansel <daniel.hansel@linux.vnet.ibm.com>
+Date: Fri, 8 Aug 2014 14:19:50 +0200
+Subject: [PATCH] rpc: message related sizes enlarged
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1126393
+
+We have seen an issue on s390x platform where domain XMLs larger than 1MB
+were used. The define command was finished successfully. The dumpxml command
+was not successful (i.e. could not encode message payload).
+
+Enlarged message related sizes (e.g. maximum string size, message size, etc.)
+to handle larger system configurations used on s390x platform.
+
+To improve handling of the RPC message size the allocation during encode process
+is changed to a dynamic one (i.e. starting with 64kB initial size and increasing
+that size in steps up to 16MB if the payload data is larger).
+
+Signed-off-by: Daniel Hansel <daniel.hansel@linux.vnet.ibm.com>
+Signed-off-by: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+(cherry picked from commit e914dcfdaa8b382bc4831b622d9686ade924520f)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt.c                |  4 ++++
+ src/remote/remote_protocol.x |  6 +++---
+ src/rpc/virnetmessage.c      | 46 ++++++++++++++++++++++++++++++++++++--------
+ src/rpc/virnetmessage.h      |  3 ++-
+ src/rpc/virnetprotocol.x     | 16 +++++++++++----
+ tests/virnetmessagetest.c    |  2 +-
+ 6 files changed, 60 insertions(+), 17 deletions(-)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 6952164..6563336 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -7650,6 +7650,8 @@ error:
+  * For your program to be able to work reliably over a remote
+  * connection you should split large requests to <= 65536 bytes.
+  * However, with 0.9.13 this RPC limit has been raised to 1M byte.
++ * Starting with version 1.0.6 the RPC limit has been raised again.
++ * Now large requests up to 16M byte are supported.
+  *
+  * Returns: 0 in case of success or -1 in case of failure.
+  */
+@@ -7800,6 +7802,8 @@ error:
+  * For your program to be able to work reliably over a remote
+  * connection you should split large requests to <= 65536 bytes.
+  * However, with 0.9.13 this RPC limit has been raised to 1M byte.
++ * Starting with version 1.0.6 the RPC limit has been raised again.
++ * Now large requests up to 16M byte are supported.
+  *
+  * Returns: 0 in case of success or -1 in case of failure.
+  */
+diff --git a/src/remote/remote_protocol.x b/src/remote/remote_protocol.x
+index 62f1390..7bf2891 100644
+--- a/src/remote/remote_protocol.x
++++ b/src/remote/remote_protocol.x
+@@ -65,7 +65,7 @@
+  * This is an arbitrary limit designed to stop the decoder from trying
+  * to allocate unbounded amounts of memory when fed with a bad message.
+  */
+-const REMOTE_STRING_MAX = 1048576;
++const REMOTE_STRING_MAX = 4194304;
+ 
+ /* A long string, which may NOT be NULL. */
+ typedef string remote_nonnull_string<REMOTE_STRING_MAX>;
+@@ -160,13 +160,13 @@ const REMOTE_DOMAIN_SNAPSHOT_LIST_NAMES_MAX = 1024;
+  * Note applications need to be aware of this limit and issue multiple
+  * requests for large amounts of data.
+  */
+-const REMOTE_DOMAIN_BLOCK_PEEK_BUFFER_MAX = 1048576;
++const REMOTE_DOMAIN_BLOCK_PEEK_BUFFER_MAX = 4194304;
+ 
+ /* Maximum length of a memory peek buffer message.
+  * Note applications need to be aware of this limit and issue multiple
+  * requests for large amounts of data.
+  */
+-const REMOTE_DOMAIN_MEMORY_PEEK_BUFFER_MAX = 1048576;
++const REMOTE_DOMAIN_MEMORY_PEEK_BUFFER_MAX = 4194304;
+ 
+ /*
+  * Maximum length of a security label list.
+diff --git a/src/rpc/virnetmessage.c b/src/rpc/virnetmessage.c
+index 2fbd603..90af635 100644
+--- a/src/rpc/virnetmessage.c
++++ b/src/rpc/virnetmessage.c
+@@ -215,7 +215,7 @@ int virNetMessageEncodeHeader(virNetMessagePtr msg)
+     int ret = -1;
+     unsigned int len = 0;
+ 
+-    msg->bufferLength = VIR_NET_MESSAGE_MAX + VIR_NET_MESSAGE_LEN_MAX;
++    msg->bufferLength = VIR_NET_MESSAGE_INITIAL + VIR_NET_MESSAGE_LEN_MAX;
+     if (VIR_REALLOC_N(msg->buffer, msg->bufferLength) < 0) {
+         virReportOOMError();
+         return ret;
+@@ -345,9 +345,27 @@ int virNetMessageEncodePayload(virNetMessagePtr msg,
+     xdrmem_create(&xdr, msg->buffer + msg->bufferOffset,
+                   msg->bufferLength - msg->bufferOffset, XDR_ENCODE);
+ 
+-    if (!(*filter)(&xdr, data)) {
+-        virReportError(VIR_ERR_RPC, "%s", _("Unable to encode message payload"));
+-        goto error;
++    /* Try to encode the payload. If the buffer is too small increase it. */
++    while (!(*filter)(&xdr, data)) {
++        if ((msg->bufferLength - VIR_NET_MESSAGE_LEN_MAX) * 4 > VIR_NET_MESSAGE_MAX) {
++            virReportError(VIR_ERR_RPC, "%s", _("Unable to encode message payload"));
++            goto error;
++        }
++
++        xdr_destroy(&xdr);
++
++        msg->bufferLength = (msg->bufferLength - VIR_NET_MESSAGE_LEN_MAX) * 4 +
++            VIR_NET_MESSAGE_LEN_MAX;
++
++        if (VIR_REALLOC_N(msg->buffer, msg->bufferLength) < 0) {
++            virReportOOMError();
++            goto error;
++        }
++
++        xdrmem_create(&xdr, msg->buffer + msg->bufferOffset,
++                      msg->bufferLength - msg->bufferOffset, XDR_ENCODE);
++
++        VIR_DEBUG("Increased message buffer length = %zu", msg->bufferLength);
+     }
+ 
+     /* Get the length stored in buffer. */
+@@ -409,11 +427,23 @@ int virNetMessageEncodePayloadRaw(virNetMessagePtr msg,
+     XDR xdr;
+     unsigned int msglen;
+ 
++    /* If the message buffer is too small for the payload increase it accordingly. */
+     if ((msg->bufferLength - msg->bufferOffset) < len) {
+-        virReportError(VIR_ERR_RPC,
+-                    _("Stream data too long to send (%zu bytes needed, %zu bytes available)"),
+-                    len, (msg->bufferLength - msg->bufferOffset));
+-        return -1;
++        if ((msg->bufferOffset + len) > VIR_NET_MESSAGE_MAX) {
++            virReportError(VIR_ERR_RPC,
++                           _("Stream data too long to send (%zu bytes needed, %zu bytes available)"),
++                           len, (VIR_NET_MESSAGE_MAX - msg->bufferOffset));
++            return -1;
++        }
++
++        msg->bufferLength = msg->bufferOffset + len;
++
++        if (VIR_REALLOC_N(msg->buffer, msg->bufferLength) < 0) {
++            virReportOOMError();
++            return -1;
++        }
++
++        VIR_DEBUG("Increased message buffer length = %zu", msg->bufferLength);
+     }
+ 
+     memcpy(msg->buffer + msg->bufferOffset, data, len);
+diff --git a/src/rpc/virnetmessage.h b/src/rpc/virnetmessage.h
+index dfa1c6c..c94dddc 100644
+--- a/src/rpc/virnetmessage.h
++++ b/src/rpc/virnetmessage.h
+@@ -34,7 +34,8 @@ typedef void (*virNetMessageFreeCallback)(virNetMessagePtr msg, void *opaque);
+ struct _virNetMessage {
+     bool tracked;
+ 
+-    char *buffer; /* Typically VIR_NET_MESSAGE_MAX + VIR_NET_MESSAGE_LEN_MAX */
++    char *buffer; /* Initially VIR_NET_MESSAGE_INITIAL + VIR_NET_MESSAGE_LEN_MAX */
++                  /* Maximum   VIR_NET_MESSAGE_MAX     + VIR_NET_MESSAGE_LEN_MAX */
+     size_t bufferLength;
+     size_t bufferOffset;
+ 
+diff --git a/src/rpc/virnetprotocol.x b/src/rpc/virnetprotocol.x
+index eb2e81d..131e40b 100644
+--- a/src/rpc/virnetprotocol.x
++++ b/src/rpc/virnetprotocol.x
+@@ -44,23 +44,31 @@
+ 
+ /*----- Data types. -----*/
+ 
++/* Initial message size.
++ * When the message payload is larger this initial size will be
++ * quadrupled until the maximum total message size is reached.
++ */
++const VIR_NET_MESSAGE_INITIAL = 65536;
++
+ /* Maximum total message size (serialised). */
+-const VIR_NET_MESSAGE_MAX = 4194304;
++const VIR_NET_MESSAGE_MAX = 16777216;
+ 
+ /* Size of struct virNetMessageHeader (serialised)*/
+ const VIR_NET_MESSAGE_HEADER_MAX = 24;
+ 
+ /* Size of message payload */
+-const VIR_NET_MESSAGE_PAYLOAD_MAX = 4194280;
++const VIR_NET_MESSAGE_PAYLOAD_MAX = 16777192;
+ 
+-/* Size of message length field. Not counted in VIR_NET_MESSAGE_MAX */
++/* Size of message length field. Not counted in VIR_NET_MESSAGE_MAX
++ * and VIR_NET_MESSAGE_INITIAL.
++ */
+ const VIR_NET_MESSAGE_LEN_MAX = 4;
+ 
+ /* Length of long, but not unbounded, strings.
+  * This is an arbitrary limit designed to stop the decoder from trying
+  * to allocate unbounded amounts of memory when fed with a bad message.
+  */
+-const VIR_NET_MESSAGE_STRING_MAX = 1048576;
++const VIR_NET_MESSAGE_STRING_MAX = 4194304;
+ 
+ /* Limit on number of File Descriptors allowed to be
+  * passed per message
+diff --git a/tests/virnetmessagetest.c b/tests/virnetmessagetest.c
+index eff8ea7..a91407e 100644
+--- a/tests/virnetmessagetest.c
++++ b/tests/virnetmessagetest.c
+@@ -47,7 +47,7 @@ static int testMessageHeaderEncode(const void *args ATTRIBUTE_UNUSED)
+     };
+     /* According to doc to virNetMessageEncodeHeader(&msg):
+      * msg->buffer will be this long */
+-    unsigned long msg_buf_size = VIR_NET_MESSAGE_MAX + VIR_NET_MESSAGE_LEN_MAX;
++    unsigned long msg_buf_size = VIR_NET_MESSAGE_INITIAL + VIR_NET_MESSAGE_LEN_MAX;
+     int ret = -1;
+ 
+     if (!msg) {
+-- 
+2.0.4
+

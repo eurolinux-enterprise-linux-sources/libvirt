@@ -1,0 +1,709 @@
+From bab8263719353c0129c6ab95884e9cb4a64bea4f Mon Sep 17 00:00:00 2001
+Message-Id: <bab8263719353c0129c6ab95884e9cb4a64bea4f.1350297259.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:30 -0600
+Subject: [PATCH] Remove probing of flags when launching QEMU guests
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+Remove all use of the existing APIs for querying QEMU
+capability flags. Instead obtain a qemuCapsPtr object
+from the global cache. This avoids the execution of
+'qemu -help' (and related commands) when launching new
+guests.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 15ee6614f7fa6ec13979922cc96e792d3e0c8987)
+---
+ src/qemu/qemu_capabilities.c | 92 ++++----------------------------------------
+ src/qemu/qemu_capabilities.h | 11 ++----
+ src/qemu/qemu_command.c      | 85 +++++++++-------------------------------
+ src/qemu/qemu_command.h      |  3 +-
+ src/qemu/qemu_driver.c       | 63 +++++++++++++++++++++---------
+ src/qemu/qemu_process.c      | 21 +++-------
+ tests/qemuxml2argvtest.c     |  4 --
+ tests/qemuxmlnstest.c        |  4 --
+ 8 files changed, 81 insertions(+), 202 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 993d575..d8a10ae 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1484,79 +1484,6 @@ qemuCapsParseDeviceStr(const char *str, qemuCapsPtr caps)
+     return 0;
+ }
+ 
+-int qemuCapsExtractVersionInfo(const char *qemu,
+-                               const char *arch,
+-                               bool check_yajl,
+-                               unsigned int *retversion,
+-                               qemuCapsPtr *retcaps)
+-{
+-    int ret = -1;
+-    unsigned int version, is_kvm, kvm_version;
+-    qemuCapsPtr caps = NULL;
+-    char *help = NULL;
+-    virCommandPtr cmd;
+-
+-    if (retcaps)
+-        *retcaps = NULL;
+-    if (retversion)
+-        *retversion = 0;
+-
+-    /* Make sure the binary we are about to try exec'ing exists.
+-     * Technically we could catch the exec() failure, but that's
+-     * in a sub-process so it's hard to feed back a useful error.
+-     */
+-    if (!virFileIsExecutable(qemu)) {
+-        virReportSystemError(errno, _("Cannot find QEMU binary %s"), qemu);
+-        return -1;
+-    }
+-
+-    cmd = qemuCapsProbeCommand(qemu, NULL);
+-    virCommandAddArgList(cmd, "-help", NULL);
+-    virCommandSetOutputBuffer(cmd, &help);
+-
+-    if (virCommandRun(cmd, NULL) < 0)
+-        goto cleanup;
+-
+-    if (!(caps = qemuCapsNew()) ||
+-        qemuCapsParseHelpStr(qemu, help, caps,
+-                             &version, &is_kvm, &kvm_version,
+-                             check_yajl) == -1)
+-        goto cleanup;
+-
+-    /* Currently only x86_64 and i686 support PCI-multibus. */
+-    if (STREQLEN(arch, "x86_64", 6) ||
+-        STREQLEN(arch, "i686", 4)) {
+-        qemuCapsSet(caps, QEMU_CAPS_PCI_MULTIBUS);
+-    }
+-
+-    /* S390 and probably other archs do not support no-acpi -
+-       maybe the qemu option parsing should be re-thought. */
+-    if (STRPREFIX(arch, "s390"))
+-        qemuCapsClear(caps, QEMU_CAPS_NO_ACPI);
+-
+-    /* qemuCapsExtractDeviceStr will only set additional caps if qemu
+-     * understands the 0.13.0+ notion of "-device driver,".  */
+-    if (qemuCapsGet(caps, QEMU_CAPS_DEVICE) &&
+-        strstr(help, "-device driver,?") &&
+-        qemuCapsExtractDeviceStr(qemu, caps) < 0)
+-        goto cleanup;
+-
+-    if (retversion)
+-        *retversion = version;
+-    if (retcaps) {
+-        *retcaps = caps;
+-        caps = NULL;
+-    }
+-
+-    ret = 0;
+-
+-cleanup:
+-    VIR_FREE(help);
+-    virCommandFree(cmd);
+-    virObjectUnref(caps);
+-
+-    return ret;
+-}
+ 
+ static void
+ uname_normalize (struct utsname *ut)
+@@ -1572,12 +1499,13 @@ uname_normalize (struct utsname *ut)
+         ut->machine[1] = '6';
+ }
+ 
+-int qemuCapsExtractVersion(virCapsPtr caps,
+-                           unsigned int *version)
++int qemuCapsGetDefaultVersion(virCapsPtr caps,
++                              qemuCapsCachePtr capsCache,
++                              unsigned int *version)
+ {
+     const char *binary;
+-    struct stat sb;
+     struct utsname ut;
++    qemuCapsPtr qemucaps;
+ 
+     if (*version > 0)
+         return 0;
+@@ -1592,17 +1520,11 @@ int qemuCapsExtractVersion(virCapsPtr caps,
+         return -1;
+     }
+ 
+-    if (stat(binary, &sb) < 0) {
+-        virReportSystemError(errno,
+-                             _("Cannot find QEMU binary %s"), binary);
+-        return -1;
+-    }
+-
+-    if (qemuCapsExtractVersionInfo(binary, ut.machine, false,
+-                                   version, NULL) < 0) {
++    if (!(qemucaps = qemuCapsCacheLookup(capsCache, binary)))
+         return -1;
+-    }
+ 
++    *version = qemuCapsGetVersion(qemucaps);
++    virObjectUnref(qemucaps);
+     return 0;
+ }
+ 
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index e105e14..c693a4e 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -27,6 +27,7 @@
+ # include "virobject.h"
+ # include "capabilities.h"
+ # include "command.h"
++# include "virobject.h"
+ 
+ /* Internal flags to keep track of qemu command line capabilities */
+ enum qemuCapsFlags {
+@@ -224,13 +225,9 @@ int qemuCapsProbeCPUModels(const char *qemu,
+                            size_t *count,
+                            const char ***cpus);
+ 
+-int qemuCapsExtractVersion(virCapsPtr caps,
+-                           unsigned int *version);
+-int qemuCapsExtractVersionInfo(const char *qemu,
+-                               const char *arch,
+-                               bool check_yajl,
+-                               unsigned int *version,
+-                               qemuCapsPtr *retcaps);
++int qemuCapsGetDefaultVersion(virCapsPtr caps,
++                              qemuCapsCachePtr capsCache,
++                              unsigned int *version);
+ 
+ int qemuCapsParseHelpStr(const char *qemu,
+                          const char *str,
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index b99e19c..61c1df4 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -810,33 +810,13 @@ qemuDomainPrimeS390VirtioDevices(virDomainDefPtr def,
+ 
+ }
+ 
+-static int
++static void
+ qemuDomainAssignS390Addresses(virDomainDefPtr def, qemuCapsPtr caps)
+ {
+-    int ret = -1;
+-    qemuCapsPtr localCaps = NULL;
+-
+-    if (!caps) {
+-        /* need to get information from real environment */
+-        if (qemuCapsExtractVersionInfo(def->emulator, def->os.arch,
+-                                       false, NULL,
+-                                       &localCaps) < 0)
+-            goto cleanup;
+-        caps = localCaps;
+-    }
+-
+-    if (qemuCapsGet(caps, QEMU_CAPS_VIRTIO_S390)) {
+-        /* deal with legacy virtio-s390 */
++    /* deal with legacy virtio-s390 */
++    if (qemuCapsGet(caps, QEMU_CAPS_VIRTIO_S390))
+         qemuDomainPrimeS390VirtioDevices(
+             def, VIR_DOMAIN_DEVICE_ADDRESS_TYPE_VIRTIO_S390);
+-    }
+-
+-    ret = 0;
+-
+-cleanup:
+-    virObjectUnref(localCaps);
+-
+-    return ret;
+ }
+ 
+ static int
+@@ -863,7 +843,7 @@ qemuAssignSpaprVIOAddress(virDomainDefPtr def, virDomainDeviceInfoPtr info,
+                           unsigned long long default_reg)
+ {
+     bool user_reg;
+-    int rc;
++    int ret;
+ 
+     if (info->type != VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO)
+         return 0;
+@@ -875,8 +855,8 @@ qemuAssignSpaprVIOAddress(virDomainDefPtr def, virDomainDeviceInfoPtr info,
+         info->addr.spaprvio.has_reg = true;
+     }
+ 
+-    rc = virDomainDeviceInfoIterate(def, qemuSpaprVIOFindByReg, info);
+-    while (rc != 0) {
++    ret = virDomainDeviceInfoIterate(def, qemuSpaprVIOFindByReg, info);
++    while (ret != 0) {
+         if (user_reg) {
+             virReportError(VIR_ERR_XML_ERROR,
+                            _("spapr-vio address %#llx already in use"),
+@@ -886,7 +866,7 @@ qemuAssignSpaprVIOAddress(virDomainDefPtr def, virDomainDeviceInfoPtr info,
+ 
+         /* We assigned the reg, so try a new value */
+         info->addr.spaprvio.reg += 0x1000;
+-        rc = virDomainDeviceInfoIterate(def, qemuSpaprVIOFindByReg, info);
++        ret = virDomainDeviceInfoIterate(def, qemuSpaprVIOFindByReg, info);
+     }
+ 
+     return 0;
+@@ -895,45 +875,32 @@ qemuAssignSpaprVIOAddress(virDomainDefPtr def, virDomainDeviceInfoPtr info,
+ int qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def,
+                                       qemuCapsPtr caps)
+ {
+-    int i, rc = -1;
++    int i, ret = -1;
+     int model;
+-    qemuCapsPtr localCaps = NULL;
+ 
+     /* Default values match QEMU. See spapr_(llan|vscsi|vty).c */
+ 
+-    if (!caps) {
+-        /* need to get information from real environment */
+-        if (qemuCapsExtractVersionInfo(def->emulator, def->os.arch,
+-                                       false, NULL,
+-                                       &localCaps) < 0)
+-            goto cleanup;
+-        caps = localCaps;
+-    }
+-
+     for (i = 0 ; i < def->nnets; i++) {
+         if (def->nets[i]->model &&
+             STREQ(def->nets[i]->model, "spapr-vlan"))
+             def->nets[i]->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO;
+-        rc = qemuAssignSpaprVIOAddress(def, &def->nets[i]->info,
+-                                       0x1000ul);
+-        if (rc)
++        if (qemuAssignSpaprVIOAddress(def, &def->nets[i]->info,
++                                      0x1000ul) < 0)
+             goto cleanup;
+     }
+ 
+     for (i = 0 ; i < def->ncontrollers; i++) {
+         model = def->controllers[i]->model;
+         if (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI) {
+-            rc = qemuSetScsiControllerModel(def, caps, &model);
+-            if (rc)
++            if (qemuSetScsiControllerModel(def, caps, &model) < 0)
+                 goto cleanup;
+         }
+ 
+         if (model == VIR_DOMAIN_CONTROLLER_MODEL_SCSI_IBMVSCSI &&
+             def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI)
+             def->controllers[i]->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO;
+-        rc = qemuAssignSpaprVIOAddress(def, &def->controllers[i]->info,
+-                                       0x2000ul);
+-        if (rc)
++        if (qemuAssignSpaprVIOAddress(def, &def->controllers[i]->info,
++                                      0x2000ul) < 0)
+             goto cleanup;
+     }
+ 
+@@ -943,19 +910,17 @@ int qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def,
+             STREQ(def->os.arch, "ppc64") &&
+             STREQ(def->os.machine, "pseries"))
+             def->serials[i]->info.type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_SPAPRVIO;
+-        rc = qemuAssignSpaprVIOAddress(def, &def->serials[i]->info,
+-                                       0x30000000ul);
+-        if (rc)
++        if (qemuAssignSpaprVIOAddress(def, &def->serials[i]->info,
++                                      0x30000000ul) < 0)
+             goto cleanup;
+     }
+ 
+     /* No other devices are currently supported on spapr-vio */
+ 
+-    rc = 0;
++    ret = 0;
+ 
+ cleanup:
+-    virObjectUnref(localCaps);
+-    return rc;
++    return ret;
+ }
+ 
+ #define QEMU_PCI_ADDRESS_LAST_SLOT 31
+@@ -1070,20 +1035,9 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
+                              virDomainObjPtr obj)
+ {
+     int ret = -1;
+-    qemuCapsPtr localCaps = NULL;
+     qemuDomainPCIAddressSetPtr addrs = NULL;
+     qemuDomainObjPrivatePtr priv = NULL;
+ 
+-    if (!caps) {
+-        /* need to get information from real environment */
+-        if (qemuCapsExtractVersionInfo(def->emulator, def->os.arch,
+-                                       false,
+-                                       NULL,
+-                                       &localCaps) < 0)
+-            goto cleanup;
+-        caps = localCaps;
+-    }
+-
+     if (qemuCapsGet(caps, QEMU_CAPS_DEVICE)) {
+         if (!(addrs = qemuDomainPCIAddressSetCreate(def)))
+             goto cleanup;
+@@ -1108,7 +1062,6 @@ qemuDomainAssignPCIAddresses(virDomainDefPtr def,
+     ret = 0;
+ 
+ cleanup:
+-    virObjectUnref(localCaps);
+     qemuDomainPCIAddressSetFree(addrs);
+ 
+     return ret;
+@@ -1124,9 +1077,7 @@ int qemuDomainAssignAddresses(virDomainDefPtr def,
+     if (rc)
+         return rc;
+ 
+-    rc = qemuDomainAssignS390Addresses(def, caps);
+-    if (rc)
+-        return rc;
++    qemuDomainAssignS390Addresses(def, caps);
+ 
+     return qemuDomainAssignPCIAddresses(def, caps, obj);
+ }
+diff --git a/src/qemu/qemu_command.h b/src/qemu/qemu_command.h
+index 939833d..37bef84 100644
+--- a/src/qemu/qemu_command.h
++++ b/src/qemu/qemu_command.h
+@@ -188,7 +188,8 @@ virDomainDefPtr qemuParseCommandLinePid(virCapsPtr caps,
+ 
+ int qemuDomainAssignAddresses(virDomainDefPtr def,
+                               qemuCapsPtr caps,
+-                              virDomainObjPtr);
++                              virDomainObjPtr obj)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+ int qemuDomainAssignSpaprVIOAddresses(virDomainDefPtr def,
+                                       qemuCapsPtr caps);
+ 
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index a2bfcc8..ae284c2 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -1418,7 +1418,9 @@ static int qemudGetVersion(virConnectPtr conn, unsigned long *version) {
+     int ret = -1;
+ 
+     qemuDriverLock(driver);
+-    if (qemuCapsExtractVersion(driver->caps, &driver->qemuVersion) < 0)
++    if (qemuCapsGetDefaultVersion(driver->caps,
++                                  driver->capsCache,
++                                  &driver->qemuVersion) < 0)
+         goto cleanup;
+ 
+     *version = driver->qemuVersion;
+@@ -1460,6 +1462,7 @@ static virDomainPtr qemudDomainCreate(virConnectPtr conn, const char *xml,
+     virDomainEventPtr event = NULL;
+     virDomainEventPtr event2 = NULL;
+     unsigned int start_flags = VIR_QEMU_PROCESS_START_COLD;
++    qemuCapsPtr caps = NULL;
+ 
+     virCheckFlags(VIR_DOMAIN_START_PAUSED |
+                   VIR_DOMAIN_START_AUTODESTROY, NULL);
+@@ -1481,10 +1484,13 @@ static virDomainPtr qemudDomainCreate(virConnectPtr conn, const char *xml,
+     if (virDomainObjIsDuplicate(&driver->domains, def, 1) < 0)
+         goto cleanup;
+ 
++    if (!(caps = qemuCapsCacheLookup(driver->capsCache, def->emulator)))
++        goto cleanup;
++
+     if (qemudCanonicalizeMachine(driver, def) < 0)
+         goto cleanup;
+ 
+-    if (qemuDomainAssignAddresses(def, NULL, NULL) < 0)
++    if (qemuDomainAssignAddresses(def, caps, NULL) < 0)
+         goto cleanup;
+ 
+     if (!(vm = virDomainAssignDef(driver->caps,
+@@ -1538,6 +1544,7 @@ cleanup:
+         if (event2)
+             qemuDomainEventQueue(driver, event2);
+     }
++    virObjectUnref(caps);
+     qemuDriverUnlock(driver);
+     return dom;
+ }
+@@ -5166,6 +5173,9 @@ static char *qemuDomainXMLToNative(virConnectPtr conn,
+     if (!def)
+         goto cleanup;
+ 
++    if (!(caps = qemuCapsCacheLookup(driver->capsCache, def->emulator)))
++        goto cleanup;
++
+     /* Since we're just exporting args, we can't do bridge/network/direct
+      * setups, since libvirt will normally create TAP/macvtap devices
+      * directly. We convert those configs into generic 'ethernet'
+@@ -5234,12 +5244,6 @@ static char *qemuDomainXMLToNative(virConnectPtr conn,
+         net->info.bootIndex = bootIndex;
+     }
+ 
+-    if (qemuCapsExtractVersionInfo(def->emulator, def->os.arch,
+-                                   false,
+-                                   NULL,
+-                                   &caps) < 0)
+-        goto cleanup;
+-
+     monitor_json = qemuCapsGet(caps, QEMU_CAPS_MONITOR_JSON);
+ 
+     if (qemuProcessPrepareMonitorChr(driver, &monConfig, def->name) < 0)
+@@ -5533,6 +5537,7 @@ static virDomainPtr qemudDomainDefine(virConnectPtr conn, const char *xml) {
+     virDomainObjPtr vm = NULL;
+     virDomainPtr dom = NULL;
+     virDomainEventPtr event = NULL;
++    qemuCapsPtr caps = NULL;
+     int dupVM;
+ 
+     qemuDriverLock(driver);
+@@ -5547,10 +5552,13 @@ static virDomainPtr qemudDomainDefine(virConnectPtr conn, const char *xml) {
+     if ((dupVM = virDomainObjIsDuplicate(&driver->domains, def, 0)) < 0)
+         goto cleanup;
+ 
++    if (!(caps = qemuCapsCacheLookup(driver->capsCache, def->emulator)))
++        goto cleanup;
++
+     if (qemudCanonicalizeMachine(driver, def) < 0)
+         goto cleanup;
+ 
+-    if (qemuDomainAssignAddresses(def, NULL, NULL) < 0)
++    if (qemuDomainAssignAddresses(def, caps, NULL) < 0)
+         goto cleanup;
+ 
+     /* We need to differentiate two cases:
+@@ -5613,6 +5621,7 @@ cleanup:
+         virDomainObjUnlock(vm);
+     if (event)
+         qemuDomainEventQueue(driver, event);
++    virObjectUnref(caps);
+     qemuDriverUnlock(driver);
+     return dom;
+ }
+@@ -6031,7 +6040,8 @@ qemuDomainUpdateDeviceLive(virDomainObjPtr vm,
+ }
+ 
+ static int
+-qemuDomainAttachDeviceConfig(virDomainDefPtr vmdef,
++qemuDomainAttachDeviceConfig(qemuCapsPtr caps,
++                             virDomainDefPtr vmdef,
+                              virDomainDeviceDefPtr dev)
+ {
+     virDomainDiskDefPtr disk;
+@@ -6057,7 +6067,7 @@ qemuDomainAttachDeviceConfig(virDomainDefPtr vmdef,
+         if (disk->bus != VIR_DOMAIN_DISK_BUS_VIRTIO)
+             if (virDomainDefAddImplicitControllers(vmdef) < 0)
+                 return -1;
+-        if (qemuDomainAssignAddresses(vmdef, NULL, NULL) < 0)
++        if (qemuDomainAssignAddresses(vmdef, caps, NULL) < 0)
+             return -1;
+         break;
+ 
+@@ -6076,7 +6086,7 @@ qemuDomainAttachDeviceConfig(virDomainDefPtr vmdef,
+             return -1;
+         }
+         dev->data.net = NULL;
+-        if (qemuDomainAssignAddresses(vmdef, NULL, NULL) < 0)
++        if (qemuDomainAssignAddresses(vmdef, caps, NULL) < 0)
+             return -1;
+         break;
+ 
+@@ -6092,7 +6102,7 @@ qemuDomainAttachDeviceConfig(virDomainDefPtr vmdef,
+             return -1;
+         }
+         dev->data.hostdev = NULL;
+-        if (qemuDomainAssignAddresses(vmdef, NULL, NULL) < 0)
++        if (qemuDomainAssignAddresses(vmdef, caps, NULL) < 0)
+             return -1;
+         break;
+ 
+@@ -6124,7 +6134,7 @@ qemuDomainAttachDeviceConfig(virDomainDefPtr vmdef,
+             return -1;
+         dev->data.controller = NULL;
+ 
+-        if (qemuDomainAssignAddresses(vmdef, NULL, NULL) < 0)
++        if (qemuDomainAssignAddresses(vmdef, caps, NULL) < 0)
+             return -1;
+         break;
+ 
+@@ -6217,7 +6227,8 @@ qemuDomainDetachDeviceConfig(virDomainDefPtr vmdef,
+ }
+ 
+ static int
+-qemuDomainUpdateDeviceConfig(virDomainDefPtr vmdef,
++qemuDomainUpdateDeviceConfig(qemuCapsPtr caps,
++                             virDomainDefPtr vmdef,
+                              virDomainDeviceDefPtr dev)
+ {
+     virDomainDiskDefPtr orig, disk;
+@@ -6277,7 +6288,7 @@ qemuDomainUpdateDeviceConfig(virDomainDefPtr vmdef,
+         vmdef->nets[pos] = net;
+         dev->data.net = NULL;
+ 
+-        if (qemuDomainAssignAddresses(vmdef, NULL, NULL) < 0)
++        if (qemuDomainAssignAddresses(vmdef, caps, NULL) < 0)
+             return -1;
+         break;
+ 
+@@ -6308,6 +6319,8 @@ qemuDomainModifyDeviceFlags(virDomainPtr dom, const char *xml,
+     bool force = (flags & VIR_DOMAIN_DEVICE_MODIFY_FORCE) != 0;
+     int ret = -1;
+     unsigned int affect;
++    qemuCapsPtr caps = NULL;
++    qemuDomainObjPrivatePtr priv;
+ 
+     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                   VIR_DOMAIN_AFFECT_CONFIG |
+@@ -6325,6 +6338,7 @@ qemuDomainModifyDeviceFlags(virDomainPtr dom, const char *xml,
+                        _("no domain with matching uuid '%s'"), uuidstr);
+         goto cleanup;
+     }
++    priv = vm->privateData;
+ 
+     if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0)
+         goto cleanup;
+@@ -6366,6 +6380,11 @@ qemuDomainModifyDeviceFlags(virDomainPtr dom, const char *xml,
+             goto endjob;
+     }
+ 
++    if (priv->caps)
++        caps = virObjectRef(priv->caps);
++    else if (!(caps = qemuCapsCacheLookup(driver->capsCache, vm->def->emulator)))
++        goto cleanup;
++
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         if (virDomainDefCompatibleDevice(vm->def, dev) < 0)
+             goto endjob;
+@@ -6376,13 +6395,13 @@ qemuDomainModifyDeviceFlags(virDomainPtr dom, const char *xml,
+             goto endjob;
+         switch (action) {
+         case QEMU_DEVICE_ATTACH:
+-            ret = qemuDomainAttachDeviceConfig(vmdef, dev);
++            ret = qemuDomainAttachDeviceConfig(caps, vmdef, dev);
+             break;
+         case QEMU_DEVICE_DETACH:
+             ret = qemuDomainDetachDeviceConfig(vmdef, dev);
+             break;
+         case QEMU_DEVICE_UPDATE:
+-            ret = qemuDomainUpdateDeviceConfig(vmdef, dev);
++            ret = qemuDomainUpdateDeviceConfig(caps, vmdef, dev);
+             break;
+         default:
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+@@ -6442,6 +6461,7 @@ endjob:
+         vm = NULL;
+ 
+ cleanup:
++    virObjectUnref(caps);
+     virDomainDefFree(vmdef);
+     if (dev != dev_copy)
+         virDomainDeviceDefFree(dev_copy);
+@@ -12372,6 +12392,7 @@ static virDomainPtr qemuDomainAttach(virConnectPtr conn,
+     bool monJSON = false;
+     pid_t pid = pid_value;
+     char *pidfile = NULL;
++    qemuCapsPtr caps = NULL;
+ 
+     virCheckFlags(0, NULL);
+ 
+@@ -12401,13 +12422,16 @@ static virDomainPtr qemuDomainAttach(virConnectPtr conn,
+         goto cleanup;
+     }
+ 
++    if (!(caps = qemuCapsCacheLookup(driver->capsCache, def->emulator)))
++        goto cleanup;
++
+     if (virDomainObjIsDuplicate(&driver->domains, def, 1) < 0)
+         goto cleanup;
+ 
+     if (qemudCanonicalizeMachine(driver, def) < 0)
+         goto cleanup;
+ 
+-    if (qemuDomainAssignAddresses(def, NULL, NULL) < 0)
++    if (qemuDomainAssignAddresses(def, caps, NULL) < 0)
+         goto cleanup;
+ 
+     if (!(vm = virDomainAssignDef(driver->caps,
+@@ -12439,6 +12463,7 @@ endjob:
+ 
+ cleanup:
+     virDomainDefFree(def);
++    virObjectUnref(caps);
+     virDomainChrSourceDefFree(monConfig);
+     if (vm)
+         virDomainObjUnlock(vm);
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index dcb1faf..16a82dc 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3107,10 +3107,8 @@ qemuProcessReconnect(void *opaque)
+      * caps in the domain status, so re-query them
+      */
+     if (!priv->caps &&
+-        qemuCapsExtractVersionInfo(obj->def->emulator, obj->def->os.arch,
+-                                   false,
+-                                   NULL,
+-                                   &priv->caps) < 0)
++        !(priv->caps = qemuCapsCacheLookupCopy(driver->capsCache,
++                                               obj->def->emulator)))
+         goto error;
+ 
+     /* In case the domain shutdown while we were not running,
+@@ -3507,11 +3505,8 @@ int qemuProcessStart(virConnectPtr conn,
+ 
+     VIR_DEBUG("Determining emulator version");
+     virObjectUnref(priv->caps);
+-    priv->caps = NULL;
+-    if (qemuCapsExtractVersionInfo(vm->def->emulator, vm->def->os.arch,
+-                                   true,
+-                                   NULL,
+-                                   &priv->caps) < 0)
++    if (!(priv->caps = qemuCapsCacheLookupCopy(driver->capsCache,
++                                               vm->def->emulator)))
+         goto cleanup;
+ 
+     if (qemuAssignDeviceAliases(vm->def, priv->caps) < 0)
+@@ -4272,12 +4267,8 @@ int qemuProcessAttach(virConnectPtr conn ATTRIBUTE_UNUSED,
+ 
+     VIR_DEBUG("Determining emulator version");
+     virObjectUnref(priv->caps);
+-    priv->caps = NULL;
+-    if (qemuCapsExtractVersionInfo(vm->def->emulator,
+-                                   vm->def->os.arch,
+-                                   false,
+-                                   NULL,
+-                                   &priv->caps) < 0)
++    if (!(priv->caps = qemuCapsCacheLookupCopy(driver->capsCache,
++                                               vm->def->emulator)))
+         goto cleanup;
+ 
+     VIR_DEBUG("Preparing monitor state");
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 4918c86..36c8907 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -157,10 +157,6 @@ static int testCompareXMLToArgvFiles(const char *xml,
+     VIR_FREE(log);
+     virResetLastError();
+ 
+-    /* We do not call qemuCapsExtractVersionInfo() before calling
+-     * qemuBuildCommandLine(), so we should set QEMU_CAPS_PCI_MULTIBUS for
+-     * x86_64 and i686 architectures here.
+-     */
+     if (STREQLEN(vmdef->os.arch, "x86_64", 6) ||
+         STREQLEN(vmdef->os.arch, "i686", 4)) {
+         qemuCapsSet(extraFlags, QEMU_CAPS_PCI_MULTIBUS);
+diff --git a/tests/qemuxmlnstest.c b/tests/qemuxmlnstest.c
+index 43b5fe6..dd56091 100644
+--- a/tests/qemuxmlnstest.c
++++ b/tests/qemuxmlnstest.c
+@@ -102,10 +102,6 @@ static int testCompareXMLToArgvFiles(const char *xml,
+     VIR_FREE(log);
+     virResetLastError();
+ 
+-    /* We do not call qemuCapsExtractVersionInfo() before calling
+-     * qemuBuildCommandLine(), so we should set QEMU_CAPS_PCI_MULTIBUS for
+-     * x86_64 and i686 architectures here.
+-     */
+     if (STREQLEN(vmdef->os.arch, "x86_64", 6) ||
+         STREQLEN(vmdef->os.arch, "i686", 4)) {
+         qemuCapsSet(extraFlags, QEMU_CAPS_PCI_MULTIBUS);
+-- 
+1.7.12.3
+

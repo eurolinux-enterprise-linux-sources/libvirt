@@ -1,0 +1,106 @@
+From 6982c7453f5dd6849695783eefc6d034255e606e Mon Sep 17 00:00:00 2001
+Message-Id: <6982c7453f5dd6849695783eefc6d034255e606e@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 20 Nov 2013 17:41:32 +0100
+Subject: [PATCH] qemuDomainDestroyFlags: Don't allow @vm to disappear while
+ executing API
+
+RHEL-ONLY-PATCH (read further for reasoning)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1030736
+
+With current RHEL-6.5 implementation we can modify a domain without any
+job set resulting in the daemon crash. The problem is that
+qemuDomainDestroyFlags locks the driver, finds & locks @vm and prior
+setting any job, the @vm (and driver) are unlocked and locked again.
+However, the @vm may have been killed meanwhile so even though the @vm
+is refed and unrefed correctly, the unref we are doing may result in
+dispose and subsequent SIGSEGV. Hard to parse, I know. So here is what
+I'm observing (T1 is thread doing qemuDomainStartWithFlags, T2 is thread
+doing qemuDomainDestroyFlags)
+
+T1: starts executing qemuDomainStartWithFlags, driver is locked,
+@vm is not created yet, so vm.refs = 0.
+T1: Parse given XML and creates @vm, vm.refs = 1.
+T1: qemuDomainObjBeginJobWithDriver, vm.refs = 2
+T1: qemuConnectMonitor, ref @vm, unlocks driver and @vm, vm.refs = 3
+
+T2: starts executing qemuDomainDestroyFlags, since driver and @vm are
+unlocked, both are immediately locked.
+T2: qemuProcessKill: sends a signal to qemu
+
+T1: qemuMonitorOpenUnix: fails with 'No such process'
+
+T2: qemuProcessKill: driver gets unlocked
+T2: in order to lock driver again, we must follow locking order:
+driverLock() can't be called with any domain lock held. Hence @vm must
+be unlocked, qemuDriver can be locked, then @vm can be locked again. But
+to prevent @vm disappearing while unlocked, it's refed, vm.refs = 4
+T2: unlock(@vm); unlock(driver);
+
+T1: qemuConnectMonitor, lock driver, lock @vm, unref @vm, vm.refs = 3
+T1: <some cleanup work>
+T1: qemuDomainObjEndJob, unref @vm, vm.refs = 2
+T1: unlock @vm
+T1: qemuDomainRemoveInactive, unref @vm, vm.refs = 1
+T1: unlock driver
+
+T2: lock(driver), lock(vm), unref @vm, vm.refs = 0
+T2: Dispose @vm
+T2: qemuDomainObjBeginJobWithDriver (where @vm->priv is touched) =>
+SIGSEGV
+
+This however doesn't reproduce on upstream, as qemuProcessKill() doesn't
+do the @vm locking and unlocking magic. Hence, no virObjUnref() is done
+prior setting a job on @vm. The patches that would need backport to
+transform qemuProcessKill into locking-free form are quite big and
+invasive (e.g. "Remove qemuDriverLock from almost everywhere"). The
+full list of the upstream patches that would need backport are below.
+
+So we need a RHEL-6.5 specific patch. The patch itself just increments
+@vm ref counter at the beginning and decrements it at the end. Hence we
+are sure the @vm will not disappear in qemuProcessKill().
+
+Upstream patches: 8fd382311 325b02b5a3f a9e97e0c3057df
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 767903b..0adbf63 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2053,7 +2053,7 @@ qemuDomainDestroyFlags(virDomainPtr dom,
+                        unsigned int flags)
+ {
+     struct qemud_driver *driver = dom->conn->privateData;
+-    virDomainObjPtr vm;
++    virDomainObjPtr vm = NULL;
+     int ret = -1;
+     virDomainEventPtr event = NULL;
+     qemuDomainObjPrivatePtr priv;
+@@ -2074,6 +2074,9 @@ qemuDomainDestroyFlags(virDomainPtr dom,
+ 
+     qemuDomainSetFakeReboot(driver, vm, false);
+ 
++    /* Make sure @vm doesn't disappear during our API.
++     * See RHBZ 1030736 for more info */
++    virObjectRef(vm);
+ 
+     /* We need to prevent monitor EOF callback from doing our work (and sending
+      * misleading events) while the vm is unlocked inside BeginJob/ProcessKill API
+@@ -2131,6 +2134,8 @@ endjob:
+         vm = NULL;
+ 
+ cleanup:
++    if (!virObjectUnref(vm))
++        vm = NULL;
+     if (vm)
+         virDomainObjUnlock(vm);
+     if (event)
+-- 
+1.9.1
+

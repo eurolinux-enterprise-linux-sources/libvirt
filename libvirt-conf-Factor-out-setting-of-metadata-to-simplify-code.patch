@@ -1,0 +1,177 @@
+From b1cd0f59dc80b750ee7e8124cc95813f113f218c Mon Sep 17 00:00:00 2001
+Message-Id: <b1cd0f59dc80b750ee7e8124cc95813f113f218c@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 2 Jul 2014 15:49:24 +0200
+Subject: [PATCH] conf: Factor out setting of metadata to simplify code
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115039
+
+The code to set the metadata in a domain definition is common to live
+and inactive domains. Factor it out into a common func.
+
+(cherry picked from commit e9cb66f14e19935db16938ebdf1e407103b4de1e)
+
+Conflicts:
+	src/conf/domain_conf.c
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 123 +++++++++++++++++++++++--------------------------
+ 1 file changed, 58 insertions(+), 65 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index b3039cf..2f743ca 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -16632,90 +16632,83 @@ cleanup:
+     return ret;
+ }
+ 
+-int
+-virDomainObjSetMetadata(virDomainObjPtr vm,
++
++static int
++virDomainDefSetMetadata(virDomainDefPtr def,
+                         int type,
+                         const char *metadata,
+                         const char *key ATTRIBUTE_UNUSED,
+-                        const char *uri ATTRIBUTE_UNUSED,
++                        const char *uri ATTRIBUTE_UNUSED)
++{
++    int ret = -1;
++
++    switch ((virDomainMetadataType) type) {
++    case VIR_DOMAIN_METADATA_DESCRIPTION:
++        VIR_FREE(def->description);
++        if (!(def->description = strdup(metadata)))
++            goto no_memory;
++        break;
++
++    case VIR_DOMAIN_METADATA_TITLE:
++        VIR_FREE(def->title);
++        if (!(def->title = strdup(metadata)))
++            goto no_memory;
++        break;
++
++    case VIR_DOMAIN_METADATA_ELEMENT:
++        virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
++                       _("<metadata> element is not supported"));
++        goto cleanup;
++        break;
++
++    default:
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("unknown metadata type"));
++        goto cleanup;
++        break;
++    }
++
++    ret = 0;
++
++cleanup:
++    return ret;
++
++no_memory:
++    virReportOOMError();
++    goto cleanup;
++}
++
++
++int
++virDomainObjSetMetadata(virDomainObjPtr vm,
++                        int type,
++                        const char *metadata,
++                        const char *key,
++                        const char *uri,
+                         virCapsPtr caps,
+                         const char *configDir,
+                         unsigned int flags)
+ {
+     virDomainDefPtr persistentDef;
+-    int ret = -1;
+ 
+     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+                   VIR_DOMAIN_AFFECT_CONFIG, -1);
+ 
+     if (virDomainLiveConfigHelperMethod(caps, vm, &flags,
+                                         &persistentDef) < 0)
+-        goto cleanup;
++        return -1;
+ 
+-    if (flags & VIR_DOMAIN_AFFECT_LIVE) {
+-        switch ((virDomainMetadataType) type) {
+-        case VIR_DOMAIN_METADATA_DESCRIPTION:
+-            VIR_FREE(vm->def->description);
+-            if (!(vm->def->description = strdup(metadata)))
+-                goto no_memory;
+-            break;
+-
+-        case VIR_DOMAIN_METADATA_TITLE:
+-            VIR_FREE(vm->def->title);
+-            if (!(vm->def->title = strdup(metadata)))
+-                goto no_memory;
+-            break;
+-
+-        case VIR_DOMAIN_METADATA_ELEMENT:
+-            virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
+-                           _("<metadata> element is not supported"));
+-            goto cleanup;
+-            break;
+-
+-        default:
+-            virReportError(VIR_ERR_INVALID_ARG, "%s",
+-                           _("unknown metadata type"));
+-            goto cleanup;
+-            break;
+-        }
+-    }
++    if (flags & VIR_DOMAIN_AFFECT_LIVE)
++        if (virDomainDefSetMetadata(vm->def, type, metadata, key, uri) < 0)
++            return -1;
+ 
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+-        switch ((virDomainMetadataType) type) {
+-        case VIR_DOMAIN_METADATA_DESCRIPTION:
+-            VIR_FREE(persistentDef->description);
+-            if (!(persistentDef->description = strdup(metadata)))
+-                goto no_memory;
+-            break;
+-
+-        case VIR_DOMAIN_METADATA_TITLE:
+-            VIR_FREE(persistentDef->title);
+-            if (!(persistentDef->title = strdup(metadata)))
+-                goto no_memory;
+-            break;
+-
+-        case VIR_DOMAIN_METADATA_ELEMENT:
+-            virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
+-                           _("<metadata> element is not supported"));
+-            goto cleanup;
+-
+-         default:
+-            virReportError(VIR_ERR_INVALID_ARG, "%s",
+-                           _("unknown metadata type"));
+-            goto cleanup;
+-            break;
+-        }
++        if (virDomainDefSetMetadata(persistentDef, type, metadata, key, uri) < 0)
++            return -1;
+ 
+         if (virDomainSaveConfig(configDir, persistentDef) < 0)
+-            goto cleanup;
++            return -1;
+     }
+ 
+-    ret = 0;
+-
+-cleanup:
+-    return ret;
+-
+-no_memory:
+-    virReportOOMError();
+-    return -1;
++    return 0;
+ }
+-- 
+2.0.0
+

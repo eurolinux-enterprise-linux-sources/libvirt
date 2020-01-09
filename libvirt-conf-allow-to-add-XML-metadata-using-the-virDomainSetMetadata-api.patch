@@ -1,0 +1,150 @@
+From 42cc08627f805942e628a0abd7dba444dc73ed3d Mon Sep 17 00:00:00 2001
+Message-Id: <42cc08627f805942e628a0abd7dba444dc73ed3d@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 2 Jul 2014 15:49:27 +0200
+Subject: [PATCH] conf: allow to add XML metadata using the
+ virDomainSetMetadata api
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115039
+
+The functionality wasn't originally implemented. This patch adds the
+ability to modify domain's XML metadata using the API.
+
+(cherry picked from commit 73bfac0e7182a3abde02304fd2f17845715a9a2e)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 47 ++++++++++++++++++++++++++++++++++++++++++-----
+ src/util/xml.c         | 32 ++++++++++++++++++++++++++++++++
+ src/util/xml.h         |  4 ++++
+ 3 files changed, 78 insertions(+), 5 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index e08a39f..462ca48 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -16641,9 +16641,12 @@ static int
+ virDomainDefSetMetadata(virDomainDefPtr def,
+                         int type,
+                         const char *metadata,
+-                        const char *key ATTRIBUTE_UNUSED,
+-                        const char *uri ATTRIBUTE_UNUSED)
++                        const char *key,
++                        const char *uri)
+ {
++    xmlDocPtr doc = NULL;
++    xmlNodePtr old;
++    xmlNodePtr new;
+     int ret = -1;
+ 
+     switch ((virDomainMetadataType) type) {
+@@ -16660,9 +16663,42 @@ virDomainDefSetMetadata(virDomainDefPtr def,
+         break;
+ 
+     case VIR_DOMAIN_METADATA_ELEMENT:
+-        virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
+-                       _("<metadata> element is not supported"));
+-        goto cleanup;
++        if (metadata) {
++            /* parse and modify the xml from the user */
++            if (!(doc = virXMLParseString(metadata, _("(metadata_xml)"))))
++                goto cleanup;
++
++            if (virXMLInjectNamespace(doc->children, uri, key) < 0)
++                goto cleanup;
++
++            /* create the root node if needed */
++            if (!def->metadata &&
++                !(def->metadata = xmlNewNode(NULL, (unsigned char *)"metadata"))) {
++                virReportOOMError();
++                goto cleanup;
++            }
++
++            if (!(new = xmlCopyNode(doc->children, 1))) {
++                virReportOOMError();
++                goto cleanup;
++            }
++        }
++
++        /* remove possible other nodes sharing the namespace */
++        while ((old = virXMLFindChildNodeByNs(def->metadata, uri))) {
++            xmlUnlinkNode(old);
++            xmlFreeNode(old);
++        }
++
++        /* just delete the metadata */
++        if (!metadata)
++            break;
++
++        if (!(xmlAddChild(def->metadata, new))) {
++            xmlFreeNode(new);
++            virReportOOMError();
++            goto cleanup;
++        }
+         break;
+ 
+     default:
+@@ -16675,6 +16711,7 @@ virDomainDefSetMetadata(virDomainDefPtr def,
+     ret = 0;
+ 
+ cleanup:
++    xmlFreeDoc(doc);
+     return ret;
+ 
+ no_memory:
+diff --git a/src/util/xml.c b/src/util/xml.c
+index e8187fc..842ef57 100644
+--- a/src/util/xml.c
++++ b/src/util/xml.c
+@@ -1042,3 +1042,35 @@ cleanup:
+     xmlFreeNode(nodeCopy);
+     return ret;
+ }
++
++
++static int
++virXMLAddElementNamespace(xmlNodePtr node,
++                          void *opaque)
++{
++    xmlNsPtr ns = opaque;
++
++    if (!node->ns)
++        xmlSetNs(node, ns);
++
++    return 0;
++}
++
++
++int
++virXMLInjectNamespace(xmlNodePtr node,
++                      const char *uri,
++                      const char *key)
++{
++    xmlNsPtr ns;
++
++    if (!(ns = xmlNewNs(node, (const unsigned char *)uri, (const unsigned char *)key))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("failed to create a new XML namespace"));
++        return -1;
++    }
++
++    virXMLForeachNode(node, virXMLAddElementNamespace, ns);
++
++    return 0;
++}
+diff --git a/src/util/xml.h b/src/util/xml.h
+index f7a51a4..cd516f4 100644
+--- a/src/util/xml.h
++++ b/src/util/xml.h
+@@ -154,4 +154,8 @@ int virXMLExtractNamespaceXML(xmlNodePtr root,
+                               const char *uri,
+                               char **doc);
+ 
++int virXMLInjectNamespace(xmlNodePtr node,
++                          const char *uri,
++                          const char *key);
++
+ #endif                          /* __VIR_XML_H__ */
+-- 
+2.0.0
+

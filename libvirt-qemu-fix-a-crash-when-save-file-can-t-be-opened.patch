@@ -1,0 +1,42 @@
+From 52706d71a74586b84da3d36ae6ce42891a3521f4 Mon Sep 17 00:00:00 2001
+Message-Id: <52706d71a74586b84da3d36ae6ce42891a3521f4.1354720507.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 28 Nov 2012 10:41:22 +0100
+Subject: [PATCH] qemu: fix a crash when save file can't be opened
+
+In qemuDomainSaveMemory, wrapperFd might be NULL and should be checked before
+calling virFileWrapperFdCatchError. Same in doCoreDump.
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=880919
+(cherry picked from commit 8927c0eab6681ee4ae014cb37fe60b42c225b8df)
+---
+ src/qemu/qemu_driver.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 225e89c..f57d013 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2883,7 +2883,8 @@ qemuDomainSaveMemory(struct qemud_driver *driver,
+ 
+ cleanup:
+     VIR_FORCE_CLOSE(fd);
+-    virFileWrapperFdCatchError(wrapperFd);
++    if (wrapperFd)
++        virFileWrapperFdCatchError(wrapperFd);
+     virFileWrapperFdFree(wrapperFd);
+     VIR_FREE(xml);
+ 
+@@ -3339,7 +3340,8 @@ doCoreDump(struct qemud_driver *driver,
+ cleanup:
+     VIR_FORCE_CLOSE(fd);
+     if (ret != 0) {
+-        virFileWrapperFdCatchError(wrapperFd);
++        if (wrapperFd)
++            virFileWrapperFdCatchError(wrapperFd);
+         unlink(path);
+     }
+     virFileWrapperFdFree(wrapperFd);
+-- 
+1.8.0
+

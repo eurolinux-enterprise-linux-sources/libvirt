@@ -1,0 +1,43 @@
+From 10dd82d6716ab42e32e6b1bf9e3962e5380cbc83 Mon Sep 17 00:00:00 2001
+Message-Id: <10dd82d6716ab42e32e6b1bf9e3962e5380cbc83.1373271642.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 13 Jun 2013 11:12:23 +0200
+Subject: [PATCH] RPC: Support up to 16384 cpus on the host and 4096 in the
+ guest
+
+https://bugzilla.redhat.com/show_bug.cgi?id=960683
+
+The RPC limits for cpu maps didn't allow to use libvirt on ultra big
+boxes. This patch increases size of the limits to support a maximum of
+16384 cpus on the host with a maximum of 4096 cpus per guest.
+The full cpu map of such a system takes 8 megabytes and the map for
+vcpu pinning is 2 kilobytes long.
+(cherry picked from commit cdd642ba5eea8db956652b08fd6d3d258b8f57bd)
+---
+ src/remote/remote_protocol.x | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/remote/remote_protocol.x b/src/remote/remote_protocol.x
+index 4359c82..d8998ce 100644
+--- a/src/remote/remote_protocol.x
++++ b/src/remote/remote_protocol.x
+@@ -82,13 +82,13 @@ const REMOTE_DOMAIN_ID_LIST_MAX = 16384;
+ const REMOTE_DOMAIN_NAME_LIST_MAX = 16384;
+ 
+ /* Upper limit on cpumap (bytes) passed to virDomainPinVcpu. */
+-const REMOTE_CPUMAP_MAX = 256;
++const REMOTE_CPUMAP_MAX = 2048;
+ 
+ /* Upper limit on number of info fields returned by virDomainGetVcpus. */
+-const REMOTE_VCPUINFO_MAX = 2048;
++const REMOTE_VCPUINFO_MAX = 16384;
+ 
+ /* Upper limit on cpumaps (bytes) passed to virDomainGetVcpus. */
+-const REMOTE_CPUMAPS_MAX = 16384;
++const REMOTE_CPUMAPS_MAX = 8388608;
+ 
+ /* Upper limit on migrate cookie. */
+ const REMOTE_MIGRATE_COOKIE_MAX = 16384;
+-- 
+1.8.2.1
+

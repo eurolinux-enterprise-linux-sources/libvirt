@@ -1,0 +1,88 @@
+From c953cf9df21fcb29134aca602276bfce04b9f37c Mon Sep 17 00:00:00 2001
+Message-Id: <c953cf9df21fcb29134aca602276bfce04b9f37c.1354720508.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 3 Dec 2012 16:48:18 +0100
+Subject: [PATCH] virsh: Report errors if arguments of the schedinfo command
+ are incorrect
+
+https://bugzilla.redhat.com/show_bug.cgi?id=882915
+
+Libvirt's helper API's when called directly don't raise the error so
+that virsh remembers it. Subsequent calls to libvirt API's might reset
+the error.
+
+In case of schedinfo virDomainFree() in the cleanup section resets the
+error when virTypedParameterAssignFromStr() fails.
+
+This patch adds function vshSaveLibvirtError() that can be called after
+calling libvirt helper APIs to ensure the error is remembered.
+(cherry picked from commit bf7209595445782dc106fadaf01d81afc34c4afb)
+---
+ tools/virsh-domain.c | 8 ++++++--
+ tools/virsh.c        | 9 +++++++++
+ tools/virsh.h        | 1 +
+ 3 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 624544f..6618a3f 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -3490,8 +3490,10 @@ cmdSchedInfoUpdate(vshControl *ctl, const vshCmd *cmd,
+             if (virTypedParameterAssign(&(params[nparams++]),
+                                         param->field,
+                                         param->type,
+-                                        val) < 0)
++                                        val) < 0) {
++                vshSaveLibvirtError();
+                 goto cleanup;
++            }
+ 
+             continue;
+         }
+@@ -3501,8 +3503,10 @@ cmdSchedInfoUpdate(vshControl *ctl, const vshCmd *cmd,
+             if (virTypedParameterAssignFromStr(&(params[nparams++]),
+                                                param->field,
+                                                param->type,
+-                                               set_val) < 0)
++                                               set_val) < 0) {
++                vshSaveLibvirtError();
+                 goto cleanup;
++            }
+ 
+             continue;
+         }
+diff --git a/tools/virsh.c b/tools/virsh.c
+index f7fd2fd..ba1d78d 100644
+--- a/tools/virsh.c
++++ b/tools/virsh.c
+@@ -240,6 +240,15 @@ virshErrorHandler(void *unused ATTRIBUTE_UNUSED, virErrorPtr error)
+         virDefaultErrorFunc(error);
+ }
+ 
++/* Store a libvirt error that is from a helper API that doesn't raise errors
++ * so it doesn't get overwritten */
++void
++vshSaveLibvirtError(void)
++{
++    virFreeError(last_error);
++    last_error = virSaveLastError();
++}
++
+ /*
+  * Reset libvirt error on graceful fallback paths
+  */
+diff --git a/tools/virsh.h b/tools/virsh.h
+index ba44f42..6913ed1 100644
+--- a/tools/virsh.h
++++ b/tools/virsh.h
+@@ -346,6 +346,7 @@ struct _vshCtrlData {
+ extern virErrorPtr last_error;
+ void vshReportError(vshControl *ctl);
+ void vshResetLibvirtError(void);
++void vshSaveLibvirtError(void);
+ 
+ /* allocation wrappers */
+ void *_vshMalloc(vshControl *ctl, size_t sz, const char *filename, int line);
+-- 
+1.8.0
+

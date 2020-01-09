@@ -1,0 +1,111 @@
+From 2a183f8186f477666e7fa4d08255b806c841d931 Mon Sep 17 00:00:00 2001
+Message-Id: <2a183f8186f477666e7fa4d08255b806c841d931.1374158623.git.jdenemar@redhat.com>
+From: Chen Fan <chen.fan.fnst@cn.fujitsu.com>
+Date: Tue, 9 Jul 2013 06:52:00 -0600
+Subject: [PATCH] qemu: Implement 'oncrash' coredump events when guest panicked
+
+https://bugzilla.redhat.com/show_bug.cgi?id=822306
+https://bugzilla.redhat.com/show_bug.cgi?id=826315
+
+Add doDumpCoreToAutoPath to implement
+'coredump-destroy' and 'coredump-restart' events of the 'on_crash'
+in the XML when domain crashed.
+(cherry picked from commit 36bac65d8a1debe578985569ecaabb62ca8bc063)
+
+Conflicts:
+	src/qemu/qemu_process.c - no backport of 4738c2a7 qemud_driver refactor
+---
+ src/qemu/qemu_driver.c | 63 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 63 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 34efd1d..8a3a344 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3716,6 +3716,57 @@ cleanup:
+     ;
+ }
+ 
++static int
++doCoreDumpToAutoDumpPath(struct qemud_driver *driver,
++                         virDomainObjPtr vm,
++                         unsigned int flags)
++{
++    int ret = -1;
++    char *dumpfile = NULL;
++    time_t curtime = time(NULL);
++    char timestr[100];
++    struct tm time_info;
++
++    localtime_r(&curtime, &time_info);
++    strftime(timestr, sizeof(timestr), "%Y-%m-%d-%H:%M:%S", &time_info);
++
++    if (virAsprintf(&dumpfile, "%s/%s-%s",
++                    driver->autoDumpPath,
++                    vm->def->name,
++                    timestr) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    if (qemuDomainObjBeginAsyncJob(driver, vm,
++                                   QEMU_ASYNC_JOB_DUMP) < 0) {
++        goto cleanup;
++    }
++
++    if (!virDomainObjIsActive(vm)) {
++        virReportError(VIR_ERR_OPERATION_INVALID,
++                       "%s", _("domain is not running"));
++        goto endjob;
++    }
++
++    flags |= driver->autoDumpBypassCache ? VIR_DUMP_BYPASS_CACHE: 0;
++    ret = doCoreDump(driver, vm, dumpfile,
++                     getCompressionType(driver), flags);
++    if (ret < 0)
++        virReportError(VIR_ERR_OPERATION_FAILED,
++                       "%s", _("Dump failed"));
++
++endjob:
++    /* Safe to ignore value since ref count was incremented in
++     * qemuProcessHandleGuestPanic().
++     */
++    ignore_value(qemuDomainObjEndAsyncJob(driver, vm));
++
++cleanup:
++    VIR_FREE(dumpfile);
++    return ret;
++}
++
+ static void
+ processGuestPanicEvent(struct qemud_driver *driver,
+                        virDomainObjPtr vm,
+@@ -3751,6 +3802,12 @@ processGuestPanicEvent(struct qemud_driver *driver,
+      }
+ 
+     switch (action) {
++    case VIR_DOMAIN_LIFECYCLE_CRASH_COREDUMP_DESTROY:
++        if (doCoreDumpToAutoDumpPath(driver, vm, VIR_DUMP_MEMORY_ONLY) < 0) {
++            goto cleanup;
++        }
++        /* fall through */
++
+     case VIR_DOMAIN_LIFECYCLE_CRASH_DESTROY:
+         priv->beingDestroyed = true;
+ 
+@@ -3782,6 +3839,12 @@ processGuestPanicEvent(struct qemud_driver *driver,
+         }
+         break;
+ 
++    case VIR_DOMAIN_LIFECYCLE_CRASH_COREDUMP_RESTART:
++        if (doCoreDumpToAutoDumpPath(driver, vm, VIR_DUMP_MEMORY_ONLY) < 0) {
++            goto cleanup;
++        }
++        /* fall through */
++
+     case VIR_DOMAIN_LIFECYCLE_CRASH_RESTART:
+         qemuDomainSetFakeReboot(driver, vm, true);
+         qemuProcessShutdownOrReboot(driver, vm);
+-- 
+1.8.3.2
+

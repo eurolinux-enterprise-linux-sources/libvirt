@@ -1,0 +1,34 @@
+From 43f1097cb71893b79b30de87b2b80208784842b4 Mon Sep 17 00:00:00 2001
+Message-Id: <43f1097cb71893b79b30de87b2b80208784842b4@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:59 +0100
+Subject: [PATCH] rng: allow default device in RNG grammar
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+This matches the documentation of commit 4932ef4, and the
+C code changes of commit 75e656a.
+
+* docs/schemas/domaincommon.rng: Allow default entry.
+(cherry picked from commit 374631d0164cd1772e3632404b7ec24b0b92dcd8)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/schemas/domaincommon.rng | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index ddb9c88..d5685d5 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -3437,6 +3437,7 @@
+           <choice>
+             <value>/dev/random</value>
+             <value>/dev/hwrng</value>
++            <empty/>
+           </choice>
+         </group>
+         <group>
+-- 
+1.9.1
+

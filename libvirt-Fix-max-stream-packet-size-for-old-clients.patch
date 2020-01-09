@@ -1,0 +1,55 @@
+From 4e7c57694265a4eea720993b447ca2861fe8be6d Mon Sep 17 00:00:00 2001
+Message-Id: <4e7c57694265a4eea720993b447ca2861fe8be6d@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Fri, 8 Aug 2014 14:19:52 +0200
+Subject: [PATCH] Fix max stream packet size for old clients
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1126393
+
+The libvirtd server pushes data out to clients. It does not
+know what protocol version the client might have, so must be
+conservative and use the old payload limits. ie send no more
+than 256kb of data per packet.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 27e81517a876dcb738dd8a9bb2e0e68d71c3b7e3)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ daemon/stream.c          | 2 +-
+ src/rpc/virnetprotocol.x | 7 +++++++
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/daemon/stream.c b/daemon/stream.c
+index 58c53a9..49c738a 100644
+--- a/daemon/stream.c
++++ b/daemon/stream.c
+@@ -702,7 +702,7 @@ daemonStreamHandleRead(virNetServerClientPtr client,
+                        daemonClientStream *stream)
+ {
+     char *buffer;
+-    size_t bufferLen = VIR_NET_MESSAGE_PAYLOAD_MAX;
++    size_t bufferLen = VIR_NET_MESSAGE_LEGACY_PAYLOAD_MAX;
+     int ret;
+ 
+     VIR_DEBUG("client=%p, stream=%p tx=%d closed=%d",
+diff --git a/src/rpc/virnetprotocol.x b/src/rpc/virnetprotocol.x
+index 131e40b..1eae7cb 100644
+--- a/src/rpc/virnetprotocol.x
++++ b/src/rpc/virnetprotocol.x
+@@ -50,6 +50,13 @@
+  */
+ const VIR_NET_MESSAGE_INITIAL = 65536;
+ 
++/*
++ * Until we enlarged the message buffers, this was the max
++ * payload size. We need to remember this for compat with
++ * old clients.
++ */
++const VIR_NET_MESSAGE_LEGACY_PAYLOAD_MAX = 262144;
++
+ /* Maximum total message size (serialised). */
+ const VIR_NET_MESSAGE_MAX = 16777216;
+ 
+-- 
+2.0.4
+

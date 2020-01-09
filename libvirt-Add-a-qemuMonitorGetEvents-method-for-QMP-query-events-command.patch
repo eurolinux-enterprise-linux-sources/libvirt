@@ -1,0 +1,226 @@
+From 9a1901f811958037fdc2ac80fa785c5113a64fa2 Mon Sep 17 00:00:00 2001
+Message-Id: <9a1901f811958037fdc2ac80fa785c5113a64fa2.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:40 -0600
+Subject: [PATCH] Add a qemuMonitorGetEvents() method for QMP query-events
+ command
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+Add a new qemuMonitorGetEvents() method to support invocation
+of the 'query-events' JSON monitor command. No HMP equivalent
+is required, since this will only be used when JSON is available
+
+The existing qemuMonitorJSONCheckEvents() method is refactored
+to use this new method
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 3b565d3f46a947ac9b51f1546ccf5c8664f15301)
+---
+ src/qemu/qemu_monitor.c      |  22 ++++++++
+ src/qemu/qemu_monitor.h      |   2 +
+ src/qemu/qemu_monitor_json.c | 120 ++++++++++++++++++++++++++++++-------------
+ src/qemu/qemu_monitor_json.h |   3 ++
+ 4 files changed, 111 insertions(+), 36 deletions(-)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 6335034..396b4e1 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -3159,3 +3159,25 @@ int qemuMonitorGetCommands(qemuMonitorPtr mon,
+ 
+     return qemuMonitorJSONGetCommands(mon, commands);
+ }
++
++
++int qemuMonitorGetEvents(qemuMonitorPtr mon,
++                         char ***events)
++{
++    VIR_DEBUG("mon=%p events=%p",
++              mon, events);
++
++    if (!mon) {
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("monitor must not be NULL"));
++        return -1;
++    }
++
++    if (!mon->json) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("JSON monitor is required"));
++        return -1;
++    }
++
++    return qemuMonitorJSONGetEvents(mon, events);
++}
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 18dc6e7..ac3fd31 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -604,6 +604,8 @@ int qemuMonitorGetCPUDefinitions(qemuMonitorPtr mon,
+ 
+ int qemuMonitorGetCommands(qemuMonitorPtr mon,
+                            char ***commands);
++int qemuMonitorGetEvents(qemuMonitorPtr mon,
++                         char ***events);
+ 
+ 
+ /**
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index b945943..be39799 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -1005,49 +1005,23 @@ int
+ qemuMonitorJSONCheckEvents(qemuMonitorPtr mon,
+                            qemuCapsPtr caps)
+ {
+-    int ret = -1;
+-    virJSONValuePtr cmd = qemuMonitorJSONMakeCommand("query-events", NULL);
+-    virJSONValuePtr reply = NULL;
+-    virJSONValuePtr data;
+-    int i, n;
+-
+-    if (!cmd)
+-        return ret;
+-
+-    if (qemuMonitorJSONCommand(mon, cmd, &reply) < 0)
+-        goto cleanup;
+-
+-    if (qemuMonitorJSONHasError(reply, "CommandNotFound")) {
+-        ret = 0;
+-        goto cleanup;
+-    }
+-
+-    if (qemuMonitorJSONCheckError(cmd, reply) < 0)
+-        goto cleanup;
+-
+-    if (!(data = virJSONValueObjectGet(reply, "return")) ||
+-        data->type != VIR_JSON_TYPE_ARRAY ||
+-        (n = virJSONValueArraySize(data)) <= 0)
+-        goto cleanup;
++    char **events = NULL;
++    int nevents;
++    size_t i;
+ 
+-    for (i = 0; i < n; i++) {
+-        virJSONValuePtr entry;
+-        const char *name;
++    if ((nevents = qemuMonitorJSONGetEvents(mon, &events)) < 0)
++        return -1;
+ 
+-        if (!(entry = virJSONValueArrayGet(data, i)) ||
+-            !(name = virJSONValueObjectGetString(entry, "name")))
+-            goto cleanup;
++    for (i = 0 ; i < nevents ; i++) {
++        char *name = events[i];
+ 
+         if (STREQ(name, "BALLOON_CHANGE"))
+             qemuCapsSet(caps, QEMU_CAPS_BALLOON_EVENT);
++        VIR_FREE(name);
+     }
++    VIR_FREE(events);
+ 
+-    ret = 0;
+-
+-cleanup:
+-    virJSONValueFree(cmd);
+-    virJSONValueFree(reply);
+-    return ret;
++    return 0;
+ }
+ 
+ 
+@@ -4326,3 +4300,77 @@ cleanup:
+     virJSONValueFree(reply);
+     return ret;
+ }
++
++
++int qemuMonitorJSONGetEvents(qemuMonitorPtr mon,
++                             char ***events)
++{
++    int ret;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++    virJSONValuePtr data;
++    char **eventlist = NULL;
++    int n = 0;
++    size_t i;
++
++    *events = NULL;
++
++    if (!(cmd = qemuMonitorJSONMakeCommand("query-events", NULL)))
++        return -1;
++
++    ret = qemuMonitorJSONCommand(mon, cmd, &reply);
++
++    if (ret == 0)
++        ret = qemuMonitorJSONCheckError(cmd, reply);
++
++    if (ret < 0)
++        goto cleanup;
++
++    ret = -1;
++
++    if (!(data = virJSONValueObjectGet(reply, "return"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-events reply was missing return data"));
++        goto cleanup;
++    }
++
++    if ((n = virJSONValueArraySize(data)) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-events reply data was not an array"));
++        goto cleanup;
++    }
++
++    if (VIR_ALLOC_N(eventlist, n) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    for (i = 0 ; i < n ; i++) {
++        virJSONValuePtr child = virJSONValueArrayGet(data, i);
++        const char *tmp;
++
++        if (!(tmp = virJSONValueObjectGetString(child, "name"))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("query-events reply data was missing 'name'"));
++            goto cleanup;
++        }
++
++        if (!(eventlist[i] = strdup(tmp))) {
++            virReportOOMError();
++            goto cleanup;
++        }
++    }
++
++    ret = n;
++    *events = eventlist;
++
++cleanup:
++    if (ret < 0 && eventlist) {
++        for (i = 0 ; i < n ; i++)
++            VIR_FREE(eventlist[i]);
++        VIR_FREE(eventlist);
++    }
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index ef7e531..3703379 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -310,5 +310,8 @@ int qemuMonitorJSONGetCPUDefinitions(qemuMonitorPtr mon,
+ int qemuMonitorJSONGetCommands(qemuMonitorPtr mon,
+                                char ***commands)
+     ATTRIBUTE_NONNULL(2);
++int qemuMonitorJSONGetEvents(qemuMonitorPtr mon,
++                             char ***events)
++    ATTRIBUTE_NONNULL(2);
+ 
+ #endif /* QEMU_MONITOR_JSON_H */
+-- 
+1.7.12.3
+

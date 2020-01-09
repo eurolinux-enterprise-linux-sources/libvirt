@@ -1,0 +1,122 @@
+From d09225aba03aac3073b346b08d818c188485577a Mon Sep 17 00:00:00 2001
+Message-Id: <d09225aba03aac3073b346b08d818c188485577a@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:56 +0100
+Subject: [PATCH] rng: restrict passthrough names to known-good files
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+There is some controversy[1] on the qemu list on whether qemu should
+have ever allowed arbitrary file name passthrough, or whether it
+should be restricted to JUST /dev/random and /dev/hwrng.  It is
+always easier to add support for additional filenames than it is
+to remove support for something once released, so this patch
+restricts libvirt 1.0.3 (where the virtio-random backend was first
+supported) to just the two uncontroversial names, letting us defer
+to a later date any decision on whether supporting arbitrary files
+makes sense. Additionally, since qemu 1.4 does NOT support
+/dev/fdset/nnn fd passthrough for the backend, limiting to just
+two known names means that we don't get tempted to try fd
+passthrough where it won't work.
+
+[1]https://lists.gnu.org/archive/html/qemu-devel/2013-03/threads.html#00023
+
+* src/conf/domain_conf.c (virDomainRNGDefParseXML): Only allow
+/dev/random and /dev/hwrng.
+* docs/schemas/domaincommon.rng: Flag invalid files.
+* docs/formatdomain.html.in (elementsRng): Document this.
+* tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args:
+Update test to match.
+* tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml:
+Likewise.
+(cherry picked from commit 4932ef4502bc515a7d33e09e763118b7d763cd69)
+
+Conflicts:
+	tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args
+	tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in                                  | 3 ++-
+ docs/schemas/domaincommon.rng                              | 5 ++++-
+ src/conf/domain_conf.c                                     | 7 +++++++
+ tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args | 7 ++++++-
+ tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml  | 2 +-
+ 5 files changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index f237a57..31a1a07 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -4222,7 +4222,8 @@ qemu-kvm -net nic,model=? /dev/null
+           <code>model</code> attribute. Supported source models are:
+         </p>
+         <ul>
+-          <li>'random' &mdash; /dev/random (default) or similar device as source</li>
++          <li>'random' &mdash; /dev/random (default) or /dev/hwrng
++            device as source (for now, no other sources are permitted)</li>
+           <li>'egd' &mdash; a EGD protocol backend</li>
+         </ul>
+       </dd>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index fff8611..ddb9c88 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -3434,7 +3434,10 @@
+           <attribute name="model">
+             <value>random</value>
+           </attribute>
+-          <ref name="filePath"/>
++          <choice>
++            <value>/dev/random</value>
++            <value>/dev/hwrng</value>
++          </choice>
+         </group>
+         <group>
+           <attribute name="model">
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index f3a8c9e..dce601a 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -7166,6 +7166,13 @@ virDomainRNGDefParseXML(const xmlNodePtr node,
+     switch ((enum virDomainRNGBackend) def->backend) {
+     case VIR_DOMAIN_RNG_BACKEND_RANDOM:
+         def->source.file = virXPathString("string(./backend)", ctxt);
++        if (STRNEQ(def->source.file, "/dev/random") &&
++            STRNEQ(def->source.file, "/dev/hwrng")) {
++            virReportError(VIR_ERR_XML_ERROR,
++                           _("file '%s' is not a supported random source"),
++                           def->source.file);
++            goto error;
++        }
+         break;
+ 
+     case VIR_DOMAIN_RNG_BACKEND_EGD:
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args
+index 4611ae5..7ab9dbc 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args
+@@ -1 +1,6 @@
+-LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu -S -M pc -m 214 -smp 1 -nographic -nodefaults -monitor unix:/tmp/test-monitor,server,nowait -no-acpi -boot c -usb -device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3 -object rng-random,id=rng0,filename=/test/phile -device virtio-rng-pci,rng=rng0,bus=pci.0,addr=0x4
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu \
++-S -M pc -m 214 -smp 1 -nographic -nodefaults \
++-monitor unix:/tmp/test-monitor,server,nowait -no-acpi -boot c -usb \
++-device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3 \
++-object rng-random,id=rng0,filename=/dev/hwrng \
++-device virtio-rng-pci,rng=rng0,bus=pci.0,addr=0x4
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml
+index ab1f38c..1e2c4be 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml
+@@ -17,7 +17,7 @@
+     <controller type='usb' index='0'/>
+     <memballoon model='virtio'/>
+     <rng model='virtio'>
+-      <backend model='random'>/test/phile</backend>
++      <backend model='random'>/dev/hwrng</backend>
+     </rng>
+   </devices>
+ </domain>
+-- 
+1.9.1
+

@@ -1,0 +1,53 @@
+From 17fcd9ff99333e2451e3f1b10a2f842c0f63d36a Mon Sep 17 00:00:00 2001
+Message-Id: <17fcd9ff99333e2451e3f1b10a2f842c0f63d36a@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Tue, 29 Apr 2014 11:05:28 +0200
+Subject: [PATCH] qemu: properly quit migration with abort_on_error
+
+When EIO comes to qemu while it's replying to
+qemuMigrationUpdateJobStatus(), qemu blocks, the migration of RAM can
+complete in the meantime, and when qemu unblocks, it sends us
+BLOCK_IO_ERROR plus migrations "status": "complete".  Even though we
+act upon the BLOCK_IO_ERROR by setting the proper state of the domain,
+the call still waits for the proper reply on monitor for query_migrate
+and after it gets it, it checks that migration is completed and the
+migration is finished.  This is what abort_on_error flag was meant for
+(we can migrate with these errors, but this flag must inhibit such
+behaviour).  Changing the order of the steps guarantees the flag works
+properly.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1045833
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit 837154a151ce056caba73e60c641a705136fb965)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_migration.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 32b26bd..7344468 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1082,15 +1082,15 @@ qemuMigrationWaitForCompletion(struct qemud_driver *driver, virDomainObjPtr vm,
+         /* Poll every 50ms for progress & to allow cancellation */
+         struct timespec ts = { .tv_sec = 0, .tv_nsec = 50 * 1000 * 1000ull };
+ 
++        if (qemuMigrationUpdateJobStatus(driver, vm, job, asyncJob) < 0)
++            goto cleanup;
++
+         /* cancel migration if disk I/O error is emitted while migrating */
+         if (abort_on_error &&
+             virDomainObjGetState(vm, &pauseReason) == VIR_DOMAIN_PAUSED &&
+             pauseReason == VIR_DOMAIN_PAUSED_IOERROR)
+             goto cancel;
+ 
+-        if (qemuMigrationUpdateJobStatus(driver, vm, job, asyncJob) < 0)
+-            goto cleanup;
+-
+         if (dconn && virConnectIsAlive(dconn) <= 0) {
+             virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+                            _("Lost connection to destination host"));
+-- 
+1.9.2
+

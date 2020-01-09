@@ -1,0 +1,40 @@
+From 142100965a9d466523b74755418c261fe64cec33 Mon Sep 17 00:00:00 2001
+Message-Id: <142100965a9d466523b74755418c261fe64cec33.1358348559.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 10 Jan 2013 11:02:34 +0100
+Subject: [PATCH] qemu_agent: Remove agent reference only when disposing it
+
+https://bugzilla.redhat.com/show_bug.cgi?id=892079
+
+With current code, if user calls virDomainPMSuspendForDuration()
+followed by virDomainDestroy(), the former API checks for qemu agent
+presence, which will evaluate as true (if agent is configured). While
+talking to qemu agent, the qemu driver is unlocked, so the latter API
+starts executing.  However, if machine dies meanwhile, libvirtd gets
+EOF on the agent socket and qemuProcessHandleAgentEOF() is called. The
+handler clears reference to qemu agent while the destroy API already
+holding a reference to it. This leads to NULL dereferencing later in
+the code. Therefore, the agent pointer should be set to NULL only if
+we are the exclusive owner of it.
+(cherry picked from commit f2a4e5f176c408fd2db79ed08b2a7d32a52d35a2)
+---
+ src/qemu/qemu_process.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 91369c7..3ca315e 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -128,7 +128,8 @@ qemuProcessHandleAgentEOF(qemuAgentPtr agent,
+     virDomainObjLock(vm);
+ 
+     priv = vm->privateData;
+-    if (priv->agent == agent)
++    if (priv->agent == agent &&
++        !virObjectUnref(priv->agent))
+         priv->agent = NULL;
+ 
+     virDomainObjUnlock(vm);
+-- 
+1.8.1.1
+

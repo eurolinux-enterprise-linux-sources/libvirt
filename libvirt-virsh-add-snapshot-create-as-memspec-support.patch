@@ -1,0 +1,183 @@
+From e6f820857a7e4e8c9777bddc7de6791c593e7449 Mon Sep 17 00:00:00 2001
+Message-Id: <e6f820857a7e4e8c9777bddc7de6791c593e7449.1352726475.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Wed, 7 Nov 2012 09:19:04 -0700
+Subject: [PATCH] virsh: add snapshot-create-as memspec support
+
+https://bugzilla.redhat.com/show_bug.cgi?id=874171
+
+External checkpoints could be created with snapshot-create, but
+without libvirt supplying a default name for the memory file,
+it is essential to add a new argument to snapshot-create-as to
+allow the user to choose the memory file name.  This adds the
+option --memspec [file=]name[,snapshot=type], where type can
+be none, internal, or external.  For an example,
+
+virsh snapshot-create-as $dom --memspec /path/to/file
+
+is the shortest possible command line for creating an external
+checkpoint, named after the current timestamp.
+
+* tools/virsh-snapshot.c (vshParseSnapshotMemspec): New function.
+(cmdSnapshotCreateAs): Use it.
+* tests/virsh-optparse (test_url): Test it.
+* tools/virsh.pod (snapshot-create-as): Document it.
+(cherry picked from commit 2cd4d8e506ae80742c29af07eed423cca163d58d)
+---
+ tests/virsh-optparse   |  5 +++--
+ tools/virsh-snapshot.c | 52 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ tools/virsh.pod        | 17 ++++++++++++-----
+ 3 files changed, 67 insertions(+), 7 deletions(-)
+
+diff --git a/tests/virsh-optparse b/tests/virsh-optparse
+index 4ddc31a..214ae41 100755
+--- a/tests/virsh-optparse
++++ b/tests/virsh-optparse
+@@ -1,7 +1,7 @@
+ #!/bin/sh
+ # Ensure that virsh option parsing doesn't regress
+ 
+-# Copyright (C) 2011 Red Hat, Inc.
++# Copyright (C) 2011-2012 Red Hat, Inc.
+ 
+ # This program is free software: you can redistribute it and/or modify
+ # it under the terms of the GNU General Public License as published by
+@@ -73,6 +73,7 @@ done
+ cat <<\EOF > exp-out || framework_failure
+ <domainsnapshot>
+   <description>1&lt;2</description>
++  <memory file='d,e'/>
+   <disks>
+     <disk name='vda' snapshot='external'>
+       <source file='a&amp;b,c'/>
+@@ -84,7 +85,7 @@ cat <<\EOF > exp-out || framework_failure
+ EOF
+ virsh -q -c $test_url snapshot-create-as --print-xml test \
+   --diskspec 'vda,file=a&b,,c,snapshot=external' --description '1<2' \
+-  --diskspec vdb >out 2>>err || fail=1
++  --diskspec vdb --memspec file=d,,e >out 2>>err || fail=1
+ compare exp-out out || fail=1
+ 
+ cat <<\EOF > exp-out || framework_failure
+diff --git a/tools/virsh-snapshot.c b/tools/virsh-snapshot.c
+index 3a9975f..4281109 100644
+--- a/tools/virsh-snapshot.c
++++ b/tools/virsh-snapshot.c
+@@ -194,6 +194,49 @@ cleanup:
+  * "snapshot-create-as" command
+  */
+ static int
++vshParseSnapshotMemspec(vshControl *ctl, virBufferPtr buf, const char *str)
++{
++    int ret = -1;
++    const char *snapshot = NULL;
++    const char *file = NULL;
++    char **array = NULL;
++    int narray;
++    int i;
++
++    if (!str)
++        return 0;
++
++    narray = vshStringToArray(str, &array);
++    if (narray < 0)
++        goto cleanup;
++
++    for (i = 0; i < narray; i++) {
++        if (!snapshot && STRPREFIX(array[i], "snapshot="))
++            snapshot = array[i] + strlen("snapshot=");
++        else if (!file && STRPREFIX(array[i], "file="))
++            file = array[i] + strlen("file=");
++        else if (!file && *array[i] == '/')
++            file = array[i];
++        else
++            goto cleanup;
++    }
++
++    virBufferAddLit(buf, "  <memory");
++    virBufferEscapeString(buf, " snapshot='%s'", snapshot);
++    virBufferEscapeString(buf, " file='%s'", file);
++    virBufferAddLit(buf, "/>\n");
++    ret = 0;
++cleanup:
++    if (ret < 0)
++        vshError(ctl, _("unable to parse memspec: %s"), str);
++    if (array) {
++        VIR_FREE(*array);
++        VIR_FREE(array);
++    }
++    return ret;
++}
++
++static int
+ vshParseSnapshotDiskspec(vshControl *ctl, virBufferPtr buf, const char *str)
+ {
+     int ret = -1;
+@@ -263,6 +306,8 @@ static const vshCmdOptDef opts_snapshot_create_as[] = {
+     {"quiesce", VSH_OT_BOOL, 0, N_("quiesce guest's file systems")},
+     {"atomic", VSH_OT_BOOL, 0, N_("require atomic operation")},
+     {"live", VSH_OT_BOOL, 0, N_("take a live snapshot")},
++    {"memspec", VSH_OT_DATA, VSH_OFLAG_REQ_OPT,
++     N_("memory attributes: [file=]name[,snapshot=type]")},
+     {"diskspec", VSH_OT_ARGV, 0,
+      N_("disk attributes: disk[,snapshot=type][,driver=type][,file=name]")},
+     {NULL, 0, 0, NULL}
+@@ -276,6 +321,7 @@ cmdSnapshotCreateAs(vshControl *ctl, const vshCmd *cmd)
+     char *buffer = NULL;
+     const char *name = NULL;
+     const char *desc = NULL;
++    const char *memspec = NULL;
+     virBuffer buf = VIR_BUFFER_INITIALIZER;
+     unsigned int flags = 0;
+     const vshCmdOpt *opt = NULL;
+@@ -310,6 +356,12 @@ cmdSnapshotCreateAs(vshControl *ctl, const vshCmd *cmd)
+         virBufferEscapeString(&buf, "  <name>%s</name>\n", name);
+     if (desc)
+         virBufferEscapeString(&buf, "  <description>%s</description>\n", desc);
++
++    if (vshCommandOptString(cmd, "memspec", &memspec) < 0 ||
++        vshParseSnapshotMemspec(ctl, &buf, memspec) < 0) {
++        virBufferFreeAndReset(&buf);
++        goto cleanup;
++    }
+     if (vshCommandOptBool(cmd, "diskspec")) {
+         virBufferAddLit(&buf, "  <disks>\n");
+         while ((opt = vshCommandOptArgv(cmd, opt))) {
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index fee6baa..5888a95 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -2641,8 +2641,8 @@ by command such as B<destroy> or by internal guest action).
+ 
+ =item B<snapshot-create-as> I<domain> {[I<--print-xml>]
+ | [I<--no-metadata>] [I<--halt>] [I<--reuse-external>]} [I<name>]
+-[I<description>] [I<--disk-only> [I<--quiesce>] [I<--atomic>]
+-[I<--live>] [[I<--diskspec>] B<diskspec>]...]
++[I<description>] [I<--disk-only> [I<--quiesce>]] [I<--atomic>]
++[[I<--live>] [I<--memspec> B<memspec>]] [I<--diskspec>] B<diskspec>]...
+ 
+ Create a snapshot for domain I<domain> with the given <name> and
+ <description>; if either value is omitted, libvirt will choose a
+@@ -2652,9 +2652,16 @@ Otherwise, if I<--halt> is specified, the domain will be left in an
+ inactive state after the snapshot is created, and if I<--disk-only>
+ is specified, the snapshot will not include vm state.
+ 
+-The I<--disk-only> flag is used to request a disk-only snapshot.  When
+-this flag is in use, the command can also take additional I<diskspec>
+-arguments to add <disk> elements to the xml.  Each <diskspec> is in the
++The I<--memspec> option can be used to control whether a checkpoint
++is internal or external.  The I<--memspec> flag is mandatory, followed
++by a B<memspec> of the form B<[file=]name[,snapshot=type]>, where
++type can be B<none>, B<internal>, or B<external>.  To include a literal
++comma in B<file=name>, escape it with a second comma.
++
++The I<--diskspec> option can be used to control how I<--disk-only> and
++external checkpoints create external files.  This option can occur
++multiple times, according to the number of <disk> elements in the domain
++xml.  Each <diskspec> is in the
+ form B<disk[,snapshot=type][,driver=type][,file=name]>.  To include a
+ literal comma in B<disk> or in B<file=name>, escape it with a second
+ comma.  A literal I<--diskspec> must preceed each B<diskspec> unless
+-- 
+1.8.0
+

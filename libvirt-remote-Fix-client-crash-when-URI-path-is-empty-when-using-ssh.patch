@@ -1,0 +1,45 @@
+From e1b0419c292d557e121b53dc8390ba0766cac2e8 Mon Sep 17 00:00:00 2001
+Message-Id: <e1b0419c292d557e121b53dc8390ba0766cac2e8.1373271643.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 14 Jun 2013 10:53:46 +0200
+Subject: [PATCH] remote: Fix client crash when URI path is empty when using
+ ssh
+
+https://bugzilla.redhat.com/show_bug.cgi?id=847822
+
+The parsed path in the URI may be NULL resulting into:
+
+  $ virsh -c qemu+ssh:// list
+  Segmentation fault (core dumped)
+
+Introduced by 22d81ceb46ea4b83ad817c29b2b04df27a09c671
+(cherry picked from commit 7710d236b223c4f7bcb0a348c296d59a5955d9bd)
+---
+ src/remote/remote_driver.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 0c7ea763..f7d7119 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -618,7 +618,7 @@ doRemoteOpen(virConnectPtr conn,
+     case trans_libssh2:
+         if (!sockname) {
+             /* Right now we don't support default session connections */
+-            if (STREQ(conn->uri->path, "/session")) {
++            if (STREQ_NULLABLE(conn->uri->path, "/session")) {
+                 virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                                _("Connecting to session instance without "
+                                  "socket path is not supported by the libssh2 "
+@@ -700,7 +700,7 @@ doRemoteOpen(virConnectPtr conn,
+ 
+         if (!sockname) {
+             /* Right now we don't support default session connections */
+-            if (STREQ(conn->uri->path, "/session")) {
++            if (STREQ_NULLABLE(conn->uri->path, "/session")) {
+                 virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                                _("Connecting to session instance without "
+                                  "socket path is not supported by the ssh "
+-- 
+1.8.2.1
+

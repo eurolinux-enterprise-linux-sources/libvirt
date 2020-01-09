@@ -1,0 +1,44 @@
+From 56592628f46387857295136b9d0d0ee550289381 Mon Sep 17 00:00:00 2001
+Message-Id: <56592628f46387857295136b9d0d0ee550289381@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 28 Aug 2013 15:17:39 +0200
+Subject: [PATCH] virt-sanlock-cleanup; Fix augtool usage
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1000890
+
+Surprisingly, augtool get (or print) returns "path = value" while we are
+only interested in the value. We need to remove the "path = " part from
+the augtool's output. The following is an example of the augtool command
+as used in virt-sanlock-cleanup script:
+
+$ augtool get /files/etc/libvirt/qemu-sanlock.conf/disk_lease_dir
+/files/etc/libvirt/qemu-sanlock.conf/disk_lease_dir = /var/lib/libvirt/sanlock
+
+(cherry picked from commit 74c5156f9db3be51eb7431a84f32731e7f687f2c)
+
+Conflicts:
+	tools/virt-sanlock-cleanup.in - context, RHEL still uses
+	    uppercase @...@
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virt-sanlock-cleanup.in | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/tools/virt-sanlock-cleanup.in b/tools/virt-sanlock-cleanup.in
+index 301389d..c33307b 100644
+--- a/tools/virt-sanlock-cleanup.in
++++ b/tools/virt-sanlock-cleanup.in
+@@ -10,7 +10,8 @@ fi
+ 
+ LOCKSPACE="__LIBVIRT__DISKS__"
+ 
+-LOCKDIR=`augtool print '/files@SYSCONFDIR@/libvirt/qemu-sanlock.conf/disk_lease_dir'`
++LOCKDIR=`augtool get '/files@SYSCONFDIR@/libvirt/qemu-sanlock.conf/disk_lease_dir'`
++LOCKDIR=${LOCKDIR#* = }
+ if test $? != 0 || test "x$LOCKDIR" = "x" ; then
+   LOCKDIR="@LOCALSTATEDIR@/lib/libvirt/sanlock"
+ fi
+-- 
+1.9.2
+

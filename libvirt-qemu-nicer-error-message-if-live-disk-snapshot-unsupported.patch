@@ -1,0 +1,221 @@
+From 8c700c82a256ef3da46df87e17321eb28b2e2fd8 Mon Sep 17 00:00:00 2001
+Message-Id: <8c700c82a256ef3da46df87e17321eb28b2e2fd8.1373271636.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 25 Feb 2013 08:33:50 -0700
+Subject: [PATCH] qemu: nicer error message if live disk snapshot unsupported
+
+https://bugzilla.redhat.com/show_bug.cgi?id=882077
+
+Without this patch, attempts to create a disk snapshot when qemu
+is too old results in a cryptic message:
+
+virsh # snapshot-create 23 --disk-only
+error: operation failed: Failed to take snapshot: unknown command: 'snapshot_blkdev'
+
+Now it reports:
+
+virsh # snapshot-create 23 --disk-only
+error: unsupported configuration: live disk snapshot not supported with this QEMU binary
+
+All versions of qemu that support live disk snapshot also support
+QMP (basically upstream qemu 1.1 and later, and backports to RHEL 6.2).
+
+* src/qemu/qemu_capabilities.h (QEMU_CAPS_DISK_SNAPSHOT): New
+capability.
+* src/qemu/qemu_capabilities.c (qemuCaps): Track it.
+(qemuCapsProbeQMPCommands): Set it.
+* src/qemu/qemu_driver.c (qemuDomainSnapshotCreateDiskActive): Use
+it.
+* src/qemu/qemu_monitor.c (qemuMonitorDiskSnapshot): Simplify.
+* src/qemu/qemu_monitor_json.c (qemuMonitorJSONDiskSnapshot):
+Likewise.
+* src/qemu/qemu_monitor_text.h (qemuMonitorTextDiskSnapshot):
+Delete.
+* src/qemu/qemu_monitor_text.c (qemuMonitorTextDiskSnapshot):
+Likewise.
+(cherry picked from commit 3bef4adf7358a948b4159936862d7d857e08a44b)
+
+Conflicts:
+	src/qemu/qemu_capabilities.c - context with rhel-specific caps
+	src/qemu/qemu_capabilities.h - context with rhel-specific caps
+---
+ src/qemu/qemu_capabilities.c |  7 +++++--
+ src/qemu/qemu_capabilities.h |  1 +
+ src/qemu/qemu_driver.c       |  5 +++++
+ src/qemu/qemu_monitor.c      | 15 +++++----------
+ src/qemu/qemu_monitor_json.c |  6 ------
+ src/qemu/qemu_monitor_text.c | 37 -------------------------------------
+ src/qemu/qemu_monitor_text.h |  4 ----
+ 7 files changed, 16 insertions(+), 59 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 1094351..b223adf 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -189,8 +189,9 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               /* RHEL-specific below here */
+               "disable-ksm",
+               "virtio-net-pci.__com_redhat_macvtap_compat",
+-               "drive-mirror",
+-               "drive-reopen",
++              "drive-mirror",
++              "drive-reopen",
++              "blockdev-snapshot-sync",
+     );
+ 
+ struct _qemuCaps {
+@@ -1891,6 +1892,8 @@ qemuCapsProbeQMPCommands(qemuCapsPtr caps,
+         else if (STREQ(name, "drive-mirror") ||
+                  STREQ(name, "__com.redhat_drive-mirror"))
+             qemuCapsSet(caps, QEMU_CAPS_DRIVE_MIRROR);
++        else if (STREQ(name, "blockdev-snapshot-sync"))
++            qemuCapsSet(caps, QEMU_CAPS_DISK_SNAPSHOT);
+         VIR_FREE(name);
+     }
+     VIR_FREE(commands);
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index d154cf1..7f81a9a 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -157,6 +157,7 @@ enum qemuCapsFlags {
+     QEMU_CAPS_VIRTIO_NET_MACVTAP_COMPAT, /* virtio-net-pci.__com_redhat_macvtap_compat */
+     QEMU_CAPS_DRIVE_MIRROR,             /* drive-mirror monitor command */
+     QEMU_CAPS_DRIVE_REOPEN,             /* drive-reopen vs block-job-complete */
++    QEMU_CAPS_DISK_SNAPSHOT,            /* blockdev-snapshot-sync command */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 72a4e20..ae657f2 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11228,6 +11228,11 @@ qemuDomainSnapshotCreateDiskActive(struct qemud_driver *driver,
+             virReportOOMError();
+             goto cleanup;
+         }
++    } else if (!qemuCapsGet(priv->caps, QEMU_CAPS_DISK_SNAPSHOT)) {
++        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
++                       _("live disk snapshot not supported with this "
++                         "QEMU binary"));
++        goto cleanup;
+     }
+ 
+     /* No way to roll back if first disk succeeds but later disks
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 6b01f0a..2836ad9 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -2797,7 +2797,7 @@ qemuMonitorDiskSnapshot(qemuMonitorPtr mon, virJSONValuePtr actions,
+                         const char *device, const char *file,
+                         const char *format, bool reuse)
+ {
+-    int ret;
++    int ret = -1;
+ 
+     VIR_DEBUG("mon=%p, actions=%p, device=%s, file=%s, format=%s, reuse=%d",
+               mon, actions, device, file, format, reuse);
+@@ -2808,17 +2808,12 @@ qemuMonitorDiskSnapshot(qemuMonitorPtr mon, virJSONValuePtr actions,
+         return -1;
+     }
+ 
+-    if (mon->json) {
++    if (mon->json)
+         ret = qemuMonitorJSONDiskSnapshot(mon, actions, device, file, format,
+                                           reuse);
+-    } else {
+-        if (actions || STRNEQ(format, "qcow2") || reuse) {
+-            virReportError(VIR_ERR_INVALID_ARG, "%s",
+-                           _("text monitor lacks several snapshot features"));
+-            return -1;
+-        }
+-        ret = qemuMonitorTextDiskSnapshot(mon, device, file);
+-    }
++    else
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("disk snapshot requires JSON monitor"));
+     return ret;
+ }
+ 
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 6ab3fa2..d395f44 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -3386,12 +3386,6 @@ qemuMonitorJSONDiskSnapshot(qemuMonitorPtr mon, virJSONValuePtr actions,
+         if ((ret = qemuMonitorJSONCommand(mon, cmd, &reply)) < 0)
+             goto cleanup;
+ 
+-        if (qemuMonitorJSONHasError(reply, "CommandNotFound")) {
+-            VIR_DEBUG("blockdev-snapshot-sync command not found, trying HMP");
+-            ret = qemuMonitorTextDiskSnapshot(mon, device, file);
+-            goto cleanup;
+-        }
+-
+         ret = qemuMonitorJSONCheckError(cmd, reply);
+     }
+ 
+diff --git a/src/qemu/qemu_monitor_text.c b/src/qemu/qemu_monitor_text.c
+index 7f5c3e3..ef2aff7 100644
+--- a/src/qemu/qemu_monitor_text.c
++++ b/src/qemu/qemu_monitor_text.c
+@@ -2958,43 +2958,6 @@ cleanup:
+     return ret;
+ }
+ 
+-int
+-qemuMonitorTextDiskSnapshot(qemuMonitorPtr mon, const char *device,
+-                            const char *file)
+-{
+-    char *cmd = NULL;
+-    char *reply = NULL;
+-    int ret = -1;
+-    char *safename;
+-
+-    if (!(safename = qemuMonitorEscapeArg(file)) ||
+-        virAsprintf(&cmd, "snapshot_blkdev %s \"%s\"", device, safename) < 0) {
+-        virReportOOMError();
+-        goto cleanup;
+-    }
+-
+-    if (qemuMonitorHMPCommand(mon, cmd, &reply))
+-        goto cleanup;
+-
+-    if (strstr(reply, "error while creating qcow2") != NULL ||
+-        strstr(reply, "unknown command:") != NULL) {
+-        virReportError(VIR_ERR_OPERATION_FAILED,
+-                       _("Failed to take snapshot: %s"), reply);
+-        goto cleanup;
+-    }
+-
+-    /* XXX Should we scrape 'info block' output for
+-     * 'device:... file=name backing_file=oldname' to make sure the
+-     * command succeeded?  */
+-
+-    ret = 0;
+-
+-cleanup:
+-    VIR_FREE(safename);
+-    VIR_FREE(cmd);
+-    VIR_FREE(reply);
+-    return ret;
+-}
+ 
+ int qemuMonitorTextArbitraryCommand(qemuMonitorPtr mon, const char *cmd,
+                                     char **reply)
+diff --git a/src/qemu/qemu_monitor_text.h b/src/qemu/qemu_monitor_text.h
+index 079fbdc..97abad6 100644
+--- a/src/qemu/qemu_monitor_text.h
++++ b/src/qemu/qemu_monitor_text.h
+@@ -217,10 +217,6 @@ int qemuMonitorTextCreateSnapshot(qemuMonitorPtr mon, const char *name);
+ int qemuMonitorTextLoadSnapshot(qemuMonitorPtr mon, const char *name);
+ int qemuMonitorTextDeleteSnapshot(qemuMonitorPtr mon, const char *name);
+ 
+-int qemuMonitorTextDiskSnapshot(qemuMonitorPtr mon,
+-                                const char *device,
+-                                const char *file);
+-
+ int qemuMonitorTextArbitraryCommand(qemuMonitorPtr mon, const char *cmd,
+                                     char **reply);
+ 
+-- 
+1.8.2.1
+

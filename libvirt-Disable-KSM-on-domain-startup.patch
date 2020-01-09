@@ -1,0 +1,252 @@
+From 89e0e17d29d45184209c433a10b5f48c3594b0f7 Mon Sep 17 00:00:00 2001
+From: Osier Yang <jyang@redhat.com>
+Date: Tue, 1 Feb 2011 15:45:35 +0800
+Subject: [PATCH] Disable KSM on domain startup
+To: libvir-list@redhat.com
+
+RHEL-6 only, uses -redhat-disable-ksm qemu option
+
+NOTE:
+  This patch is based on patches by Andrea Arcangeli(aarcange@redhat com),
+  (Message-Id: <20101228113546 GT21490 random random>).
+
+BZ# 635419
+https://bugzilla.redhat.com/show_bug.cgi?id=635419
+
+Conflicts:
+
+	src/conf/domain_conf.h: context changes
+	src/qemu/qemu_capabilities.c: context changes
+	tests/qemuhelptest.c: context changes
+
+Signed-off-by: Daniel Veillard <veillard@redhat.com>
+---
+ docs/formatdomain.html.in                          | 11 ++++++++-
+ docs/schemas/domaincommon.rng                      |  5 ++++
+ src/conf/domain_conf.c                             | 21 +++++++++++-----
+ src/conf/domain_conf.h                             |  1 +
+ src/qemu/qemu_capabilities.c                       |  4 ++++
+ src/qemu/qemu_capabilities.h                       |  2 ++
+ src/qemu/qemu_command.c                            | 11 +++++++++
+ tests/qemuhelptest.c                               |  6 +++--
+ .../qemuxml2argvdata/qemuxml2argv-disable-ksm.args |  2 ++
+ .../qemuxml2argvdata/qemuxml2argv-disable-ksm.xml  | 28 ++++++++++++++++++++++
+ 10 files changed, 82 insertions(+), 9 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-disable-ksm.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-disable-ksm.xml
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index bc4cc4a..8a7f873 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -551,7 +551,16 @@
+       <dd>The optional <code>memoryBacking</code> element, may have an
+         <code>hugepages</code> element set within it. This tells the
+         hypervisor that the guest should have its memory allocated using
+-        hugepages instead of the normal native page size.</dd>
++        hugepages instead of the normal native page size. The optional
++        <code>nosharepages</code> element tells the hypervisor that
++        share pages (KSM) should be disabled on guest startup</dd>
++      <dt><code>blkiotune</code></dt>
++      <dd> The optional <code>blkiotune</code> element provides the ability
++        to tune Blkio cgroup tunable parameters for the domain. If this is
++        omitted, it defaults to the OS provided defaults.</dd>
++      <dt><code>weight</code></dt>
++      <dd> The optional <code>weight</code> element is the I/O weight of the
++        guest. The value should be in range [100, 1000].</dd>
+     </dl>
+ 
+ 
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index f47fdad..45bb67c 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -491,6 +491,11 @@
+               <empty/>
+             </element>
+           </optional>
++          <optional>
++            <element name="nosharepages">
++              <empty/>
++            </element>
++          </optional>
+         </element>
+       </optional>
+ 
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 4aa08d0..af02f4a 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8606,6 +8606,10 @@ static virDomainDefPtr virDomainDefParseXML(virCapsPtr caps,
+     if (node)
+         def->mem.hugepage_backed = true;
+ 
++    node = virXPathNode("./memoryBacking/nosharepages", ctxt);
++    if (node)
++        def->mem.ksm_disabled = 1;
++
+     /* Extract blkio cgroup tunables */
+     if (virXPathUInt("string(./blkiotune/weight)", ctxt,
+                      &def->blkio.weight) < 0)
+@@ -13412,12 +13416,17 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+         def->mem.swap_hard_limit)
+         virBufferAddLit(buf, "  </memtune>\n");
+ 
+-    if (def->mem.hugepage_backed) {
+-        virBufferStrcat(buf,
+-                        "  <memoryBacking>\n",
+-                        "    <hugepages/>\n",
+-                        "  </memoryBacking>\n", NULL);
+-    }
++    if (def->mem.hugepage_backed || def->mem.ksm_disabled)
++        virBufferAddLit(buf, "  <memoryBacking>\n");
++
++    if (def->mem.hugepage_backed)
++        virBufferAddLit(buf, "    <hugepages/>\n");
++
++    if (def->mem.ksm_disabled)
++        virBufferAddLit(buf, "    <nosharepages/>\n");
++
++    if (def->mem.hugepage_backed || def->mem.ksm_disabled)
++        virBufferAddLit(buf, "  </memoryBacking>\n");
+ 
+     virBufferAddLit(buf, "  <vcpu");
+     virBufferAsprintf(buf, " placement='%s'",
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 1a61318..7a7ffca 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1652,6 +1652,7 @@ struct _virDomainDef {
+         unsigned long long max_balloon; /* in kibibytes */
+         unsigned long long cur_balloon; /* in kibibytes */
+         bool hugepage_backed;
++        unsigned long ksm_disabled;
+         int dump_core; /* enum virDomainMemDump */
+         unsigned long long hard_limit; /* in kibibytes */
+         unsigned long long soft_limit; /* in kibibytes */
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 3b08ef8..1869fea 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -183,6 +183,7 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+ 
+               "reboot-timeout", /* 110 */
+               "dump-guest-core",
++              "disable-ksm", /* 112 */
+     );
+ 
+ struct _qemuCaps {
+@@ -1227,6 +1228,9 @@ qemuCapsComputeCmdFlags(const char *help,
+         strstr(help, "sockets="))
+         qemuCapsSet(caps, QEMU_CAPS_SMP_TOPOLOGY);
+ 
++    if (strstr(help, "-redhat-disable-KSM"))
++        qemuCapsSet(caps, QEMU_CAPS_DISABLE_KSM);
++
+     if (version >= 9000)
+         qemuCapsSet(caps, QEMU_CAPS_VNC_COLON);
+ 
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 485c297..a16a3c4 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -148,6 +148,8 @@ enum qemuCapsFlags {
+     QEMU_CAPS_REBOOT_TIMEOUT     = 110, /* -boot reboot-timeout */
+     QEMU_CAPS_DUMP_GUEST_CORE    = 111, /* dump-guest-core-parameter */
+ 
++    QEMU_CAPS_DISABLE_KSM           , /* Is '-redhat-disable-KSM' available? */
++
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+ 
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index e7bb88e..8431f65 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4595,6 +4595,17 @@ qemuBuildCommandLine(virConnectPtr conn,
+                              driver->hugepage_path, NULL);
+     }
+ 
++    if (def->mem.ksm_disabled) {
++        if (!qemuCapsGet(caps, QEMU_CAPS_DISABLE_KSM)) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                            _("'-redhat-disable-KSM' is not supported by '%s'"),
++                            def->emulator);
++            goto error;
++        }
++
++        virCommandAddArg(cmd, "-redhat-disable-KSM");
++    }
++
+     virCommandAddArg(cmd, "-smp");
+     if (!(smp = qemuBuildSmpArgStr(def, caps)))
+         goto error;
+diff --git a/tests/qemuhelptest.c b/tests/qemuhelptest.c
+index 079aef8..a3cdc96 100644
+--- a/tests/qemuhelptest.c
++++ b/tests/qemuhelptest.c
+@@ -541,7 +541,8 @@ mymain(void)
+             QEMU_CAPS_VIRTIO_BLK_SCSI,
+             QEMU_CAPS_VIRTIO_BLK_SG_IO,
+             QEMU_CAPS_CPU_HOST,
+-            QEMU_CAPS_BLOCKIO);
++            QEMU_CAPS_BLOCKIO,
++            QEMU_CAPS_DISABLE_KSM);
+     DO_TEST("qemu-kvm-0.12.1.2-rhel62-beta", 12001, 1, 0,
+             QEMU_CAPS_VNC_COLON,
+             QEMU_CAPS_NO_REBOOT,
+@@ -609,7 +610,8 @@ mymain(void)
+             QEMU_CAPS_DRIVE_COPY_ON_READ,
+             QEMU_CAPS_CPU_HOST,
+             QEMU_CAPS_SCSI_CD,
+-            QEMU_CAPS_BLOCKIO);
++            QEMU_CAPS_BLOCKIO,
++            QEMU_CAPS_DISABLE_KSM);
+     DO_TEST("qemu-1.0", 1000000, 0, 0,
+             QEMU_CAPS_VNC_COLON,
+             QEMU_CAPS_NO_REBOOT,
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-disable-ksm.args b/tests/qemuxml2argvdata/qemuxml2argv-disable-ksm.args
+new file mode 100644
+index 0000000..a9715d3
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-disable-ksm.args
+@@ -0,0 +1,2 @@
+++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu -S -M pc -m 214 -smp 1 -redhat-disable-KSM -nographic -monitor unix:/tmp/test-monitor,server,nowait -no-acpi -boot c -hda /dev/HostVG/QEMUGuest1 -net none -serial none -parallel none -usb
++diff --git a/tests/qemuxml2argvdata/qemuxml2argv-disable-ksm.xml b/tests/qemuxml2argvdata/qemuxml2argv-disable-ksm.xml
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-disable-ksm.xml b/tests/qemuxml2argvdata/qemuxml2argv-disable-ksm.xml
+new file mode 100644
+index 0000000..3c7bbbe
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-disable-ksm.xml
+@@ -0,0 +1,28 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory>219200</memory>
++  <currentMemory>219200</currentMemory>
++  <memoryBacking>
++    <nosharepages/>
++  </memoryBacking>
++  <vcpu>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' unit='0'/>
++    </disk>
++    <controller type='ide' index='0'/>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+-- 
+1.7.11.4
+

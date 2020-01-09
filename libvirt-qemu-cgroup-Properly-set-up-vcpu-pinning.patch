@@ -1,0 +1,198 @@
+From e939127cc75e04a31460fb59cf34872d197f74c2 Mon Sep 17 00:00:00 2001
+Message-Id: <e939127cc75e04a31460fb59cf34872d197f74c2@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 2 Apr 2015 10:31:11 +0200
+Subject: [PATCH] qemu: cgroup: Properly set up vcpu pinning
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1198096 [6.7]
+https://bugzilla.redhat.com/show_bug.cgi?id=1209891 [6.6.z]
+
+When the default cpuset or automatic numa placement is used libvirt
+would place the whole parent cgroup in the specified cpuset. This then
+disallowed to re-pin the vcpus to a different cpu.
+
+This patch pins only the vcpu threads to the default cpuset and thus
+allows to re-pin them later.
+
+The following config would fail to start:
+<domain type='kvm'>
+  ...
+  <vcpu placement='static' cpuset='0-1' current='2'>4</vcpu>
+  <cputune>
+    <vcpupin vcpu='0' cpuset='2-3'/>
+    ...
+
+This is a regression since 298eb3db0a033777bd5091ff21bea72d5e1839cc that
+fixed bug https://bugzilla.redhat.com/show_bug.cgi?id=1012846.
+
+This is a reimplementation based on upstream commit
+f0fa9080d47b7aedad6f4884b8879d88688752 , but written from scratch
+since the code diverged too much.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_cgroup.c  | 76 ++++++++++++++++++++-----------------------------
+ src/qemu/qemu_cgroup.h  |  4 ++-
+ src/qemu/qemu_process.c |  2 +-
+ 3 files changed, 35 insertions(+), 47 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 99be07e..0060bc2 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -432,38 +432,6 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+         }
+     }
+ 
+-    if (vm->def->cpumask ||
+-        (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO)) {
+-        char *cpu_mask = NULL;
+-
+-
+-        if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO) {
+-            virBitmapPtr cpumap;
+-
+-            cpumap = virCapabilitiesGetCpusForNodemask(driver->caps, nodemask);
+-            if (!cpumap)
+-                goto cleanup;
+-            cpu_mask = virBitmapFormat(cpumap);
+-            virBitmapFree(cpumap);
+-        } else {
+-            cpu_mask = virBitmapFormat(vm->def->cpumask);
+-        }
+-
+-        if (!cpu_mask) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-                           _("failed to convert cpu mask"));
+-            goto cleanup;
+-        }
+-
+-        rc = virCgroupSetCpusetCpus(cgroup, cpu_mask);
+-        VIR_FREE(cpu_mask);
+-        if (rc != 0) {
+-            virReportSystemError(-rc,
+-                                 _("Unable to set cpuset.cpus for domain %s"),
+-                                 vm->def->name);
+-            goto cleanup;
+-        }
+-    }
+ done:
+     virCgroupFree(&cgroup);
+ 
+@@ -568,7 +536,9 @@ cleanup:
+     return rc;
+ }
+ 
+-int qemuSetupCgroupForVcpu(struct qemud_driver *driver, virDomainObjPtr vm)
++int qemuSetupCgroupForVcpu(struct qemud_driver *driver,
++                           virDomainObjPtr vm,
++                           virBitmapPtr nodemask)
+ {
+     virCgroupPtr cgroup = NULL;
+     virCgroupPtr cgroup_vcpu = NULL;
+@@ -578,6 +548,7 @@ int qemuSetupCgroupForVcpu(struct qemud_driver *driver, virDomainObjPtr vm)
+     unsigned int i, j;
+     unsigned long long period = vm->def->cputune.period;
+     long long quota = vm->def->cputune.quota;
++    virBitmapPtr autoCpuset = NULL;
+ 
+     if ((period || quota) &&
+         (!driver->cgroup ||
+@@ -611,6 +582,10 @@ int qemuSetupCgroupForVcpu(struct qemud_driver *driver, virDomainObjPtr vm)
+         return 0;
+     }
+ 
++    if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO &&
++        !(autoCpuset = virCapabilitiesGetCpusForNodemask(driver->caps, nodemask)))
++        goto cleanup;
++
+     for (i = 0; i < priv->nvcpupids; i++) {
+         rc = virCgroupForVcpu(cgroup, i, &cgroup_vcpu, 1);
+         if (rc < 0) {
+@@ -637,25 +612,34 @@ int qemuSetupCgroupForVcpu(struct qemud_driver *driver, virDomainObjPtr vm)
+ 
+         /* Set vcpupin in cgroup if vcpupin xml is provided */
+         if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_CPUSET)) {
+-            /* find the right CPU to pin, otherwise
+-             * qemuSetupCgroupVcpuPin will fail. */
++            virBitmapPtr cpumap = NULL;
++
++            /* try to use the default cpu maps */
++            if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO)
++                cpumap = autoCpuset;
++            else
++                cpumap = vm->def->cpumask;
++
++
++            /* lookup a more specific pinning info */
+             for (j = 0; j < def->cputune.nvcpupin; j++) {
+-                if (def->cputune.vcpupin[j]->vcpuid != i)
+-                    continue;
+-
+-                if (qemuSetupCgroupVcpuPin(cgroup_vcpu,
+-                                           def->cputune.vcpupin,
+-                                           def->cputune.nvcpupin,
+-                                           i) < 0)
+-                    goto cleanup;
+-
+-                break;
++                if (def->cputune.vcpupin[j]->vcpuid == i) {
++                    cpumap = def->cputune.vcpupin[j]->cpumask;
++                    break;
++                }
+             }
++
++            if (!cpumap)
++                continue;
++
++            if (qemuSetupCgroupEmulatorPin(cgroup_vcpu, cpumap) < 0)
++                goto cleanup;
+         }
+ 
+         virCgroupFree(&cgroup_vcpu);
+     }
+ 
++    virBitmapFree(autoCpuset);
+     virCgroupFree(&cgroup);
+     return 0;
+ 
+@@ -670,6 +654,8 @@ cleanup:
+         virCgroupFree(&cgroup);
+     }
+ 
++    virBitmapFree(autoCpuset);
++
+     return -1;
+ }
+ 
+diff --git a/src/qemu/qemu_cgroup.h b/src/qemu/qemu_cgroup.h
+index 50ee092..ed5d757 100644
+--- a/src/qemu/qemu_cgroup.h
++++ b/src/qemu/qemu_cgroup.h
+@@ -56,7 +56,9 @@ int qemuSetupCgroupVcpuPin(virCgroupPtr cgroup,
+                            int nvcpupin,
+                            int vcpuid);
+ int qemuSetupCgroupEmulatorPin(virCgroupPtr cgroup, virBitmapPtr cpumask);
+-int qemuSetupCgroupForVcpu(struct qemud_driver *driver, virDomainObjPtr vm);
++int qemuSetupCgroupForVcpu(struct qemud_driver *driver,
++                           virDomainObjPtr vm,
++                           virBitmapPtr nodemask);
+ int qemuSetupCgroupForEmulator(struct qemud_driver *driver,
+                                virDomainObjPtr vm,
+                                virBitmapPtr nodemask);
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index e872497..3e00afb 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -4199,7 +4199,7 @@ int qemuProcessStart(virConnectPtr conn,
+         goto cleanup;
+ 
+     VIR_DEBUG("Setting cgroup for each VCPU (if required)");
+-    if (qemuSetupCgroupForVcpu(driver, vm) < 0)
++    if (qemuSetupCgroupForVcpu(driver, vm, nodemask) < 0)
+         goto cleanup;
+ 
+     VIR_DEBUG("Setting cgroup for emulator (if required)");
+-- 
+2.3.5
+

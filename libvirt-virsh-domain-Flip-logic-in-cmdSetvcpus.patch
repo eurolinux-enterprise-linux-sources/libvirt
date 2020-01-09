@@ -1,0 +1,73 @@
+From f4b27e18989169ffde5155744c893fab4442064c Mon Sep 17 00:00:00 2001
+Message-Id: <f4b27e18989169ffde5155744c893fab4442064c@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 22 Jan 2015 16:26:29 +0100
+Subject: [PATCH] virsh-domain: Flip logic in cmdSetvcpus
+
+To avoid having to assign a failure code to the returned variable switch
+this function to negative logic. This will fix issue with invalid number
+of cpus returning success return code.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=996466
+(cherry picked from commit 3abb6ec077f7fdc9ac9969b5c33f2c2d270903f3)
+
+Also resolves:
+https://bugzilla.redhat.com/show_bug.cgi?id=1139114
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-domain.c | 17 ++++++++---------
+ 1 file changed, 8 insertions(+), 9 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 5dc8c43..9006084 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -5131,7 +5131,7 @@ cmdSetvcpus(vshControl *ctl, const vshCmd *cmd)
+ {
+     virDomainPtr dom;
+     int count = 0;
+-    bool ret = true;
++    bool ret = false;
+     bool maximum = vshCommandOptBool(cmd, "maximum");
+     bool config = vshCommandOptBool(cmd, "config");
+     bool live = vshCommandOptBool(cmd, "live");
+@@ -5172,9 +5172,8 @@ cmdSetvcpus(vshControl *ctl, const vshCmd *cmd)
+     }
+ 
+     if (flags == -1) {
+-        if (virDomainSetVcpus(dom, count) != 0) {
+-            ret = false;
+-        }
++        if (virDomainSetVcpus(dom, count) != 0)
++            goto cleanup;
+     } else {
+         /* If the --maximum flag was given, we need to ensure only the
+            --config flag is in effect as well */
+@@ -5191,18 +5190,18 @@ cmdSetvcpus(vshControl *ctl, const vshCmd *cmd)
+ 
+                 /* Warn the user about the invalid flag combination */
+                 vshError(ctl, _("--maximum must be used with --config only"));
+-                ret = false;
+                 goto cleanup;
+             }
+         }
+ 
+         /* Apply the virtual cpu changes */
+-        if (virDomainSetVcpusFlags(dom, count, flags) < 0) {
+-            ret = false;
+-        }
++        if (virDomainSetVcpusFlags(dom, count, flags) < 0)
++            goto cleanup;
+     }
+ 
+-  cleanup:
++    ret = true;
++
++cleanup:
+     virDomainFree(dom);
+     return ret;
+ }
+-- 
+2.2.2
+

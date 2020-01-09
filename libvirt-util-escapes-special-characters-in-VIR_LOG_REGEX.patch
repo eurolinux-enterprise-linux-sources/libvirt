@@ -1,0 +1,33 @@
+From cfb7c542b3bc4f6248bdab07705ee79d53cc5327 Mon Sep 17 00:00:00 2001
+Message-Id: <cfb7c542b3bc4f6248bdab07705ee79d53cc5327.1373271644.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Sat, 9 Mar 2013 22:49:16 +0800
+Subject: [PATCH] util: escapes special characters in VIR_LOG_REGEX
+
+https://bugzilla.redhat.com/show_bug.cgi?id=954248
+
+In debug mode, the bug failed to start vm
+error: Failed to start domain rhel5u9
+error: internal error Out of space while reading console log output:
+...
+(cherry picked from commit eb086eb5b58c771cb3f731ef2169dab6a8967cff)
+---
+ src/util/logging.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/util/logging.c b/src/util/logging.c
+index eab3fea..138ab65 100644
+--- a/src/util/logging.c
++++ b/src/util/logging.c
+@@ -61,7 +61,7 @@ static regex_t *virLogRegex = NULL;
+ 
+ 
+ #define VIR_LOG_DATE_REGEX "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
+-#define VIR_LOG_TIME_REGEX "[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]+[0-9][0-9][0-9][0-9]"
++#define VIR_LOG_TIME_REGEX "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\.[0-9][0-9][0-9]\\+[0-9][0-9][0-9][0-9]"
+ #define VIR_LOG_PID_REGEX "[0-9]+"
+ #define VIR_LOG_LEVEL_REGEX "debug|info|warning|error"
+ 
+-- 
+1.8.2.1
+

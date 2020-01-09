@@ -1,0 +1,643 @@
+From 98f0ce7e75ba1986631e982878a2abd737770a27 Mon Sep 17 00:00:00 2001
+Message-Id: <98f0ce7e75ba1986631e982878a2abd737770a27.1350297262.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Mon, 15 Oct 2012 12:10:45 +0200
+Subject: [PATCH] Add support for SUSPEND_DISK event
+
+https://bugzilla.redhat.com/show_bug.cgi?id=839661
+
+This patch adds support for SUSPEND_DISK event; both lifecycle and
+separated.  The support is added for QEMU, machines are changed to
+PMSUSPENDED, but as QEMU sends SHUTDOWN afterwards, the state changes
+to shut-off.  This and much more needs to be done in order for libvirt
+to work with transient devices, wake-ups etc.  This patch is not
+aiming for that functionality.
+(cherry picked from commit 7ba5defb5a34bb82de2f16467c2b8d157cd14d2d)
+---
+ daemon/remote.c                                    | 25 +++++++++++
+ examples/domain-events/events-c/event-test.c       | 22 +++++++++-
+ examples/domain-events/events-python/event-test.py |  3 +-
+ include/libvirt/libvirt.h.in                       | 29 +++++++++++++
+ python/libvirt-override-virConnect.py              |  9 ++++
+ python/libvirt-override.c                          | 50 ++++++++++++++++++++++
+ src/conf/domain_event.c                            | 30 ++++++++++++-
+ src/conf/domain_event.h                            |  4 ++
+ src/libvirt_private.syms                           |  2 +
+ src/qemu/qemu_monitor.c                            | 10 +++++
+ src/qemu/qemu_monitor.h                            |  3 ++
+ src/qemu/qemu_monitor_json.c                       |  9 ++++
+ src/qemu/qemu_process.c                            | 47 ++++++++++++++++++++
+ src/remote/remote_driver.c                         | 31 ++++++++++++++
+ src/remote/remote_protocol.x                       |  7 ++-
+ src/remote_protocol-structs                        |  4 ++
+ 16 files changed, 281 insertions(+), 4 deletions(-)
+
+diff --git a/daemon/remote.c b/daemon/remote.c
+index 0a082b9..642ad78 100644
+--- a/daemon/remote.c
++++ b/daemon/remote.c
+@@ -607,6 +607,30 @@ remoteRelayDomainEventBalloonChange(virConnectPtr conn ATTRIBUTE_UNUSED,
+ }
+ 
+ 
++static int remoteRelayDomainEventPMSuspendDisk(virConnectPtr conn ATTRIBUTE_UNUSED,
++                                               virDomainPtr dom,
++                                               int reason ATTRIBUTE_UNUSED,
++                                               void *opaque) {
++    virNetServerClientPtr client = opaque;
++    remote_domain_event_pmsuspend_disk_msg data;
++
++    if (!client)
++        return -1;
++
++    VIR_DEBUG("Relaying domain %s %d system pmsuspend-disk", dom->name, dom->id);
++
++    /* build return data */
++    memset(&data, 0, sizeof(data));
++    make_nonnull_domain(&data.dom, dom);
++
++    remoteDispatchDomainEventSend(client, remoteProgram,
++                                  REMOTE_PROC_DOMAIN_EVENT_PMSUSPEND_DISK,
++                                  (xdrproc_t)xdr_remote_domain_event_pmsuspend_disk_msg, &data);
++
++    return 0;
++}
++
++
+ static virConnectDomainEventGenericCallback domainEventCallbacks[] = {
+     VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventLifecycle),
+     VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventReboot),
+@@ -622,6 +646,7 @@ static virConnectDomainEventGenericCallback domainEventCallbacks[] = {
+     VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventPMWakeup),
+     VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventPMSuspend),
+     VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventBalloonChange),
++    VIR_DOMAIN_EVENT_CALLBACK(remoteRelayDomainEventPMSuspendDisk),
+ };
+ 
+ verify(ARRAY_CARDINALITY(domainEventCallbacks) == VIR_DOMAIN_EVENT_ID_LAST);
+diff --git a/examples/domain-events/events-c/event-test.c b/examples/domain-events/events-c/event-test.c
+index cde60fb..39bea49 100644
+--- a/examples/domain-events/events-c/event-test.c
++++ b/examples/domain-events/events-c/event-test.c
+@@ -201,6 +201,9 @@ static const char *eventDetailToString(int event, int detail) {
+             case VIR_DOMAIN_EVENT_PMSUSPENDED_MEMORY:
+                 ret = "Memory";
+                 break;
++            case VIR_DOMAIN_EVENT_PMSUSPENDED_DISK:
++                ret = "Disk";
++                break;
+             }
+             break;
+     }
+@@ -402,6 +405,16 @@ static int myDomainEventPMSuspendCallback(virConnectPtr conn ATTRIBUTE_UNUSED,
+     return 0;
+ }
+ 
++static int myDomainEventPMSuspendDiskCallback(virConnectPtr conn ATTRIBUTE_UNUSED,
++                                              virDomainPtr dom,
++                                              int reason ATTRIBUTE_UNUSED,
++                                              void *opaque ATTRIBUTE_UNUSED)
++{
++    printf("%s EVENT: Domain %s(%d) system pmsuspend-disk\n",
++           __func__, virDomainGetName(dom), virDomainGetID(dom));
++    return 0;
++}
++
+ static void myFreeFunc(void *opaque)
+ {
+     char *str = opaque;
+@@ -440,6 +453,7 @@ int main(int argc, char **argv)
+     int callback11ret = -1;
+     int callback12ret = -1;
+     int callback13ret = -1;
++    int callback14ret = -1;
+     struct sigaction action_stop;
+ 
+     memset(&action_stop, 0, sizeof(action_stop));
+@@ -533,6 +547,11 @@ int main(int argc, char **argv)
+                                                      VIR_DOMAIN_EVENT_ID_BALLOON_CHANGE,
+                                                      VIR_DOMAIN_EVENT_CALLBACK(myDomainEventBalloonChangeCallback),
+                                                      strdup("callback balloonchange"), myFreeFunc);
++    callback14ret = virConnectDomainEventRegisterAny(dconn,
++                                                     NULL,
++                                                     VIR_DOMAIN_EVENT_ID_PMSUSPEND_DISK,
++                                                     VIR_DOMAIN_EVENT_CALLBACK(myDomainEventPMSuspendDiskCallback),
++                                                     strdup("pmsuspend-disk"), myFreeFunc);
+     if ((callback1ret != -1) &&
+         (callback2ret != -1) &&
+         (callback3ret != -1) &&
+@@ -544,7 +563,8 @@ int main(int argc, char **argv)
+         (callback10ret != -1) &&
+         (callback11ret != -1) &&
+         (callback12ret != -1) &&
+-        (callback13ret != -1)) {
++        (callback13ret != -1) &&
++        (callback14ret != -1)) {
+         if (virConnectSetKeepAlive(dconn, 5, 3) < 0) {
+             virErrorPtr err = virGetLastError();
+             fprintf(stderr, "Failed to start keepalive protocol: %s\n",
+diff --git a/examples/domain-events/events-python/event-test.py b/examples/domain-events/events-python/event-test.py
+index 3e314bf..1adabe3 100644
+--- a/examples/domain-events/events-python/event-test.py
++++ b/examples/domain-events/events-python/event-test.py
+@@ -449,7 +449,7 @@ def detailToString(event, detail):
+         ( "Unpaused", "Migrated", "Snapshot" ),
+         ( "Shutdown", "Destroyed", "Crashed", "Migrated", "Saved", "Failed", "Snapshot"),
+         ( "Finished", ),
+-        ( "Memory", )
++        ( "Memory", "Disk" )
+         )
+     return eventStrings[event][detail]
+ 
+@@ -554,6 +554,7 @@ def main():
+     vc.domainEventRegisterAny(None, libvirt.VIR_DOMAIN_EVENT_ID_PMWAKEUP, myDomainEventPMWakeupCallback, None)
+     vc.domainEventRegisterAny(None, libvirt.VIR_DOMAIN_EVENT_ID_PMSUSPEND, myDomainEventPMSuspendCallback, None)
+     vc.domainEventRegisterAny(None, libvirt.VIR_DOMAIN_EVENT_ID_BALLOON_CHANGE, myDomainEventBalloonChangeCallback, None)
++    vc.domainEventRegisterAny(None, libvirt.VIR_DOMAIN_EVENT_ID_PMSUSPEND_DISK, myDomainEventPMSuspendDiskCallback, None)
+ 
+     vc.setKeepAlive(5, 3)
+ 
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index 62c04d0..ed1915b 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -225,6 +225,14 @@ typedef enum {
+ #endif
+ } virDomainPMSuspendedReason;
+ 
++typedef enum {
++    VIR_DOMAIN_PMSUSPENDED_DISK_UNKNOWN = 0,
++
++#ifdef VIR_ENUM_SENTINELS
++    VIR_DOMAIN_PMSUSPENDED_DISK_LAST
++#endif
++} virDomainPMSuspendedDiskReason;
++
+ /**
+  * virDomainControlState:
+  *
+@@ -3114,6 +3122,7 @@ typedef enum {
+  */
+ typedef enum {
+     VIR_DOMAIN_EVENT_PMSUSPENDED_MEMORY = 0, /* Guest was PM suspended to memory */
++    VIR_DOMAIN_EVENT_PMSUSPENDED_DISK = 1, /* Guest was PM suspended to disk */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_EVENT_PMSUSPENDED_LAST
+@@ -4164,6 +4173,25 @@ typedef void (*virConnectDomainEventBalloonChangeCallback)(virConnectPtr conn,
+                                                            void *opaque);
+ 
+ /**
++ * virConnectDomainEventPMSuspendDiskCallback:
++ * @conn: connection object
++ * @dom: domain on which the event occurred
++ * @reason: reason why the callback was called, unused currently,
++ *          always passes 0
++ * @opaque: application specified data
++ *
++ * This callback occurs when the guest is suspended to disk.
++ *
++ * The callback signature to use when registering for an event of type
++ * VIR_DOMAIN_EVENT_ID_PMSUSPEND_DISK with virConnectDomainEventRegisterAny()
++ */
++typedef void (*virConnectDomainEventPMSuspendDiskCallback)(virConnectPtr conn,
++                                                           virDomainPtr dom,
++                                                           int reason,
++                                                           void *opaque);
++
++
++/**
+  * VIR_DOMAIN_EVENT_CALLBACK:
+  *
+  * Used to cast the event specific callback into the generic one
+@@ -4187,6 +4215,7 @@ typedef enum {
+     VIR_DOMAIN_EVENT_ID_PMWAKEUP = 11,       /* virConnectDomainEventPMWakeupCallback */
+     VIR_DOMAIN_EVENT_ID_PMSUSPEND = 12,      /* virConnectDomainEventPMSuspendCallback */
+     VIR_DOMAIN_EVENT_ID_BALLOON_CHANGE = 13, /* virConnectDomainEventBalloonChangeCallback */
++    VIR_DOMAIN_EVENT_ID_PMSUSPEND_DISK = 14, /* virConnectDomainEventPMSuspendDiskCallback */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     /*
+diff --git a/python/libvirt-override-virConnect.py b/python/libvirt-override-virConnect.py
+index 6bec66d..cb8d892 100644
+--- a/python/libvirt-override-virConnect.py
++++ b/python/libvirt-override-virConnect.py
+@@ -170,6 +170,15 @@
+         cb(self, virDomain(self, _obj=dom), actual, opaque)
+         return 0
+ 
++    def _dispatchDomainEventPMSuspendDiskCallback(self, dom, reason, cbData):
++        """Dispatches event to python user domain pmsuspend-disk event callbacks
++        """
++        cb = cbData["cb"]
++        opaque = cbData["opaque"]
++
++        cb(self, virDomain(self, _obj=dom), reason, opaque)
++        return 0;
++
+     def domainEventDeregisterAny(self, callbackID):
+         """Removes a Domain Event Callback. De-registering for a
+            domain callback will disable delivery of this event type """
+diff --git a/python/libvirt-override.c b/python/libvirt-override.c
+index 25f9d3f..4d261e8 100644
+--- a/python/libvirt-override.c
++++ b/python/libvirt-override.c
+@@ -5733,6 +5733,53 @@ libvirt_virConnectDomainEventBalloonChangeCallback(virConnectPtr conn ATTRIBUTE_
+     return ret;
+ }
+ 
++static int
++libvirt_virConnectDomainEventPMSuspendDiskCallback(virConnectPtr conn ATTRIBUTE_UNUSED,
++                                                   virDomainPtr dom,
++                                                   int reason,
++                                                   void *opaque)
++{
++    PyObject *pyobj_cbData = (PyObject*)opaque;
++    PyObject *pyobj_dom;
++    PyObject *pyobj_ret;
++    PyObject *pyobj_conn;
++    PyObject *dictKey;
++    int ret = -1;
++
++    LIBVIRT_ENSURE_THREAD_STATE;
++    /* Create a python instance of this virDomainPtr */
++    virDomainRef(dom);
++
++    pyobj_dom = libvirt_virDomainPtrWrap(dom);
++    Py_INCREF(pyobj_cbData);
++
++    dictKey = libvirt_constcharPtrWrap("conn");
++    pyobj_conn = PyDict_GetItem(pyobj_cbData, dictKey);
++    Py_DECREF(dictKey);
++
++    /* Call the Callback Dispatcher */
++    pyobj_ret = PyObject_CallMethod(pyobj_conn,
++                                    (char*)"_dispatchDomainEventPMSuspendDiskCallback",
++                                    (char*)"OiO",
++                                    pyobj_dom,
++                                    reason,
++                                    pyobj_cbData);
++
++    Py_DECREF(pyobj_cbData);
++    Py_DECREF(pyobj_dom);
++
++    if(!pyobj_ret) {
++        DEBUG("%s - ret:%p\n", __FUNCTION__, pyobj_ret);
++        PyErr_Print();
++    } else {
++        Py_DECREF(pyobj_ret);
++        ret = 0;
++    }
++
++    LIBVIRT_RELEASE_THREAD_STATE;
++    return ret;
++}
++
+ static PyObject *
+ libvirt_virConnectDomainEventRegisterAny(ATTRIBUTE_UNUSED PyObject * self,
+                                          PyObject * args)
+@@ -5805,6 +5852,9 @@ libvirt_virConnectDomainEventRegisterAny(ATTRIBUTE_UNUSED PyObject * self,
+     case VIR_DOMAIN_EVENT_ID_BALLOON_CHANGE:
+         cb = VIR_DOMAIN_EVENT_CALLBACK(libvirt_virConnectDomainEventBalloonChangeCallback);
+         break;
++    case VIR_DOMAIN_EVENT_ID_PMSUSPEND_DISK:
++        cb = VIR_DOMAIN_EVENT_CALLBACK(libvirt_virConnectDomainEventPMSuspendDiskCallback);
++        break;
+     }
+ 
+     if (!cb) {
+diff --git a/src/conf/domain_event.c b/src/conf/domain_event.c
+index 7da4a1e..3cfd9f0 100644
+--- a/src/conf/domain_event.c
++++ b/src/conf/domain_event.c
+@@ -1,7 +1,7 @@
+ /*
+  * domain_event.c: domain event queue processing helpers
+  *
+- * Copyright (C) 2010-2011 Red Hat, Inc.
++ * Copyright (C) 2010-2012 Red Hat, Inc.
+  * Copyright (C) 2008 VirtualIron
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -1125,6 +1125,30 @@ virDomainEventPMSuspendNewFromDom(virDomainPtr dom)
+     return virDomainEventPMSuspendNew(dom->id, dom->name, dom->uuid);
+ }
+ 
++static virDomainEventPtr
++virDomainEventPMSuspendDiskNew(int id, const char *name,
++                               unsigned char *uuid)
++{
++    virDomainEventPtr ev =
++        virDomainEventNewInternal(VIR_DOMAIN_EVENT_ID_PMSUSPEND_DISK,
++                                  id, name, uuid);
++    return ev;
++}
++
++virDomainEventPtr
++virDomainEventPMSuspendDiskNewFromObj(virDomainObjPtr obj)
++{
++    return virDomainEventPMSuspendDiskNew(obj->def->id,
++                                          obj->def->name,
++                                          obj->def->uuid);
++}
++
++virDomainEventPtr
++virDomainEventPMSuspendDiskNewFromDom(virDomainPtr dom)
++{
++    return virDomainEventPMSuspendDiskNew(dom->id, dom->name, dom->uuid);
++}
++
+ virDomainEventPtr virDomainEventBalloonChangeNewFromDom(virDomainPtr dom,
+                                                         unsigned long long actual)
+ {
+@@ -1294,6 +1318,10 @@ virDomainEventDispatchDefaultFunc(virConnectPtr conn,
+                                                          cbopaque);
+         break;
+ 
++    case VIR_DOMAIN_EVENT_ID_PMSUSPEND_DISK:
++        ((virConnectDomainEventPMSuspendDiskCallback)cb)(conn, dom, 0, cbopaque);
++        break;
++
+     default:
+         VIR_WARN("Unexpected event ID %d", event->eventID);
+         break;
+diff --git a/src/conf/domain_event.h b/src/conf/domain_event.h
+index 995b655..5f64a47 100644
+--- a/src/conf/domain_event.h
++++ b/src/conf/domain_event.h
+@@ -1,6 +1,7 @@
+ /*
+  * domain_event.h: domain event queue processing helpers
+  *
++ * Copyright (C) 2012 Red Hat, Inc.
+  * Copyright (C) 2008 VirtualIron
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -128,6 +129,9 @@ virDomainEventPtr virDomainEventPMSuspendNewFromDom(virDomainPtr dom);
+ virDomainEventPtr virDomainEventBalloonChangeNewFromDom(virDomainPtr dom, unsigned long long actual);
+ virDomainEventPtr virDomainEventBalloonChangeNewFromObj(virDomainObjPtr obj, unsigned long long actual);
+ 
++virDomainEventPtr virDomainEventPMSuspendDiskNewFromObj(virDomainObjPtr obj);
++virDomainEventPtr virDomainEventPMSuspendDiskNewFromDom(virDomainPtr dom);
++
+ void virDomainEventFree(virDomainEventPtr event);
+ 
+ void virDomainEventStateFree(virDomainEventStatePtr state);
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 1babbc4..5c4fbcc 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -590,6 +590,8 @@ virDomainEventStateRegisterID;
+ virDomainEventStateFree;
+ virDomainEventStateNew;
+ virDomainEventStateQueue;
++virDomainEventPMSuspendDiskNewFromDom;
++virDomainEventPMSuspendDiskNewFromObj;
+ virDomainEventTrayChangeNewFromDom;
+ virDomainEventTrayChangeNewFromObj;
+ virDomainEventWatchdogNewFromDom;
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index bd9667d..423f0e2 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -1110,6 +1110,16 @@ int qemuMonitorEmitPMSuspend(qemuMonitorPtr mon)
+     return ret;
+ }
+ 
++int qemuMonitorEmitPMSuspendDisk(qemuMonitorPtr mon)
++{
++    int ret = -1;
++    VIR_DEBUG("mon=%p", mon);
++
++    QEMU_MONITOR_CALLBACK(mon, ret, domainPMSuspendDisk, mon->vm);
++
++    return ret;
++}
++
+ int qemuMonitorEmitBlockJob(qemuMonitorPtr mon,
+                             const char *diskAlias,
+                             int type,
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 2b2d08a..ade0cbb 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -136,6 +136,8 @@ struct _qemuMonitorCallbacks {
+     int (*domainBalloonChange)(qemuMonitorPtr mon,
+                                virDomainObjPtr vm,
+                                unsigned long long actual);
++    int (*domainPMSuspendDisk)(qemuMonitorPtr mon,
++                               virDomainObjPtr vm);
+ };
+ 
+ char *qemuMonitorEscapeArg(const char *in);
+@@ -213,6 +215,7 @@ int qemuMonitorEmitBlockJob(qemuMonitorPtr mon,
+                             int status);
+ int qemuMonitorEmitBalloonChange(qemuMonitorPtr mon,
+                                  unsigned long long actual);
++int qemuMonitorEmitPMSuspendDisk(qemuMonitorPtr mon);
+ 
+ int qemuMonitorStartCPUs(qemuMonitorPtr mon,
+                          virConnectPtr conn);
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index f1badff..a9e0732 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -70,6 +70,7 @@ static void qemuMonitorJSONHandlePMSuspend(qemuMonitorPtr mon, virJSONValuePtr d
+ static void qemuMonitorJSONHandleBlockJobCompleted(qemuMonitorPtr mon, virJSONValuePtr data);
+ static void qemuMonitorJSONHandleBlockJobCanceled(qemuMonitorPtr mon, virJSONValuePtr data);
+ static void qemuMonitorJSONHandleBalloonChange(qemuMonitorPtr mon, virJSONValuePtr data);
++static void qemuMonitorJSONHandlePMSuspendDisk(qemuMonitorPtr mon, virJSONValuePtr data);
+ 
+ typedef struct {
+     const char *type;
+@@ -91,6 +92,7 @@ static qemuEventHandler eventHandlers[] = {
+     { "SPICE_INITIALIZED", qemuMonitorJSONHandleSPICEInitialize, },
+     { "STOP", qemuMonitorJSONHandleStop, },
+     { "SUSPEND", qemuMonitorJSONHandlePMSuspend, },
++    { "SUSPEND_DISK", qemuMonitorJSONHandlePMSuspendDisk, },
+     { "VNC_CONNECTED", qemuMonitorJSONHandleVNCConnect, },
+     { "VNC_DISCONNECTED", qemuMonitorJSONHandleVNCDisconnect, },
+     { "VNC_INITIALIZED", qemuMonitorJSONHandleVNCInitialize, },
+@@ -889,6 +891,13 @@ qemuMonitorJSONHandleBalloonChange(qemuMonitorPtr mon,
+     qemuMonitorEmitBalloonChange(mon, actual);
+ }
+ 
++static void
++qemuMonitorJSONHandlePMSuspendDisk(qemuMonitorPtr mon,
++                                   virJSONValuePtr data ATTRIBUTE_UNUSED)
++{
++    qemuMonitorEmitPMSuspendDisk(mon);
++}
++
+ int
+ qemuMonitorJSONHumanCommandWithFd(qemuMonitorPtr mon,
+                                   const char *cmd_str,
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index e6c3e56..04a5093 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1177,6 +1177,52 @@ qemuProcessHandleBalloonChange(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+     return 0;
+ }
+ 
++static int
++qemuProcessHandlePMSuspendDisk(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
++                               virDomainObjPtr vm)
++{
++    struct qemud_driver *driver = qemu_driver;
++    virDomainEventPtr event = NULL;
++    virDomainEventPtr lifecycleEvent = NULL;
++
++    virDomainObjLock(vm);
++    event = virDomainEventPMSuspendDiskNewFromObj(vm);
++
++    if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_RUNNING) {
++        qemuDomainObjPrivatePtr priv = vm->privateData;
++        VIR_DEBUG("Transitioned guest %s to pmsuspended state due to "
++                  "QMP suspend_disk event", vm->def->name);
++
++        virDomainObjSetState(vm, VIR_DOMAIN_PMSUSPENDED,
++                             VIR_DOMAIN_PMSUSPENDED_UNKNOWN);
++        lifecycleEvent =
++            virDomainEventNewFromObj(vm,
++                                     VIR_DOMAIN_EVENT_PMSUSPENDED,
++                                     VIR_DOMAIN_EVENT_PMSUSPENDED_DISK);
++
++        if (virDomainSaveStatus(driver->caps, driver->stateDir, vm) < 0) {
++            VIR_WARN("Unable to save status on vm %s after suspend event",
++                     vm->def->name);
++        }
++
++        if (priv->agent)
++            qemuAgentNotifyEvent(priv->agent, QEMU_AGENT_EVENT_SUSPEND);
++    }
++
++    virDomainObjUnlock(vm);
++
++    if (event || lifecycleEvent) {
++        qemuDriverLock(driver);
++        if (event)
++            qemuDomainEventQueue(driver, event);
++        if (lifecycleEvent)
++            qemuDomainEventQueue(driver, lifecycleEvent);
++        qemuDriverUnlock(driver);
++    }
++
++    return 0;
++}
++
+ 
+ static qemuMonitorCallbacks monitorCallbacks = {
+     .destroy = qemuProcessHandleMonitorDestroy,
+@@ -1195,6 +1241,7 @@ static qemuMonitorCallbacks monitorCallbacks = {
+     .domainPMWakeup = qemuProcessHandlePMWakeup,
+     .domainPMSuspend = qemuProcessHandlePMSuspend,
+     .domainBalloonChange = qemuProcessHandleBalloonChange,
++    .domainPMSuspendDisk = qemuProcessHandlePMSuspendDisk,
+ };
+ 
+ static int
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 83eaabb..072d347 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -253,6 +253,10 @@ static void
+ remoteDomainBuildEventBalloonChange(virNetClientProgramPtr prog,
+                                     virNetClientPtr client,
+                                     void *evdata, void *opaque);
++static void
++remoteDomainBuildEventPMSuspendDisk(virNetClientProgramPtr prog,
++                                  virNetClientPtr client,
++                                  void *evdata, void *opaque);
+ 
+ static virNetClientProgramEvent remoteDomainEvents[] = {
+     { REMOTE_PROC_DOMAIN_EVENT_RTC_CHANGE,
+@@ -311,6 +315,10 @@ static virNetClientProgramEvent remoteDomainEvents[] = {
+       remoteDomainBuildEventBalloonChange,
+       sizeof(remote_domain_event_balloon_change_msg),
+       (xdrproc_t)xdr_remote_domain_event_balloon_change_msg },
++    { REMOTE_PROC_DOMAIN_EVENT_PMSUSPEND_DISK,
++      remoteDomainBuildEventPMSuspendDisk,
++      sizeof(remote_domain_event_pmsuspend_disk_msg),
++      (xdrproc_t)xdr_remote_domain_event_pmsuspend_disk_msg },
+ };
+ 
+ enum virDrvOpenRemoteFlags {
+@@ -4575,6 +4583,29 @@ remoteDomainBuildEventBalloonChange(virNetClientProgramPtr prog ATTRIBUTE_UNUSED
+ }
+ 
+ 
++static void
++remoteDomainBuildEventPMSuspendDisk(virNetClientProgramPtr prog ATTRIBUTE_UNUSED,
++                                    virNetClientPtr client ATTRIBUTE_UNUSED,
++                                    void *evdata, void *opaque)
++{
++    virConnectPtr conn = opaque;
++    struct private_data *priv = conn->privateData;
++    remote_domain_event_pmsuspend_disk_msg *msg = evdata;
++    virDomainPtr dom;
++    virDomainEventPtr event = NULL;
++
++    dom = get_nonnull_domain(conn, msg->dom);
++    if (!dom)
++        return;
++
++    event = virDomainEventPMSuspendDiskNewFromDom(dom);
++
++    virDomainFree(dom);
++
++    remoteDomainEventQueue(priv, event);
++}
++
++
+ static virDrvOpenStatus ATTRIBUTE_NONNULL (1)
+ remoteSecretOpen(virConnectPtr conn, virConnectAuthPtr auth,
+                  unsigned int flags)
+diff --git a/src/remote/remote_protocol.x b/src/remote/remote_protocol.x
+index b0b530c..4359c82 100644
+--- a/src/remote/remote_protocol.x
++++ b/src/remote/remote_protocol.x
+@@ -2259,6 +2259,10 @@ struct remote_domain_event_balloon_change_msg {
+     unsigned hyper actual;
+ };
+ 
++struct remote_domain_event_pmsuspend_disk_msg {
++    remote_nonnull_domain dom;
++};
++
+ struct remote_domain_managed_save_args {
+     remote_nonnull_domain dom;
+     unsigned int flags;
+@@ -3008,7 +3012,8 @@ enum remote_procedure {
+     REMOTE_PROC_NODE_GET_MEMORY_PARAMETERS = 289, /* skipgen skipgen */
+     REMOTE_PROC_DOMAIN_BLOCK_COMMIT = 290, /* autogen autogen */
+ 
+-    REMOTE_PROC_NETWORK_UPDATE = 291 /* autogen autogen priority:high */
++    REMOTE_PROC_NETWORK_UPDATE = 291, /* autogen autogen priority:high */
++    REMOTE_PROC_DOMAIN_EVENT_PMSUSPEND_DISK = 292 /* autogen autogen */
+ 
+     /*
+      * Notice how the entries are grouped in sets of 10 ?
+diff --git a/src/remote_protocol-structs b/src/remote_protocol-structs
+index 4d2627a..0c0a317 100644
+--- a/src/remote_protocol-structs
++++ b/src/remote_protocol-structs
+@@ -1718,6 +1718,9 @@ struct remote_domain_event_balloon_change_msg {
+         remote_nonnull_domain      dom;
+         uint64_t                   actual;
+ };
++struct remote_domain_event_pmsuspend_disk_msg {
++        remote_nonnull_domain      dom;
++};
+ struct remote_domain_managed_save_args {
+         remote_nonnull_domain      dom;
+         u_int                      flags;
+@@ -2415,4 +2418,5 @@ enum remote_procedure {
+         REMOTE_PROC_NODE_GET_MEMORY_PARAMETERS = 289,
+         REMOTE_PROC_DOMAIN_BLOCK_COMMIT = 290,
+         REMOTE_PROC_NETWORK_UPDATE = 291,
++        REMOTE_PROC_DOMAIN_EVENT_PMSUSPEND_DISK = 292,
+ };
+-- 
+1.7.12.3
+

@@ -1,0 +1,87 @@
+From 6ef4a4faf00908d13325ed7cff2bfad624c3a699 Mon Sep 17 00:00:00 2001
+Message-Id: <6ef4a4faf00908d13325ed7cff2bfad624c3a699@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 20 Jan 2015 10:37:21 +0100
+Subject: [PATCH] qemu: blkiotune: Avoid accessing non-existing disk
+ configuration
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1131821 [6.7]
+
+When a user would try changing the persistent IO tuning settings for a
+disk that was hotplugged to a vm in a transient way, the
+qemuDomainSetBlockIoTune API would use the same index for both the
+live and config disk array. The disk was missing from the config array
+though causing a crash of libvirtd.
+
+To fix the issue, determine the indexes separately.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1131819
+(cherry picked from commit 653137eb957a278b556c6226424aad5395a38a61)
+
+Conflicts:
+	src/qemu/qemu_driver.c
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 17 +++++++++++++++--
+ 1 file changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 43bec79..2f74921 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -14482,6 +14482,7 @@ qemuDomainSetBlockIoTune(virDomainPtr dom,
+     int ret = -1;
+     int i;
+     int idx = -1;
++    int conf_idx;
+     bool set_bytes = false;
+     bool set_iops = false;
+ 
+@@ -14569,6 +14570,15 @@ qemuDomainSetBlockIoTune(virDomainPtr dom,
+         goto endjob;
+     }
+ 
++    if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
++        if ((conf_idx = virDomainDiskIndexByName(persistentDef, disk, true)) < 0) {
++            virReportError(VIR_ERR_INVALID_ARG,
++                           _("missing persistent configuration for disk '%s'"),
++                           disk);
++            goto endjob;
++        }
++    }
++
+     if (flags & VIR_DOMAIN_AFFECT_LIVE) {
+         if (!qemuCapsGet(priv->caps, QEMU_CAPS_DRIVE_IOTUNE)) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+@@ -14577,6 +14587,9 @@ qemuDomainSetBlockIoTune(virDomainPtr dom,
+             goto endjob;
+         }
+ 
++        if (!(device = qemuDiskPathToAlias(vm, disk, &idx)))
++            goto endjob;
++
+         /* If the user didn't specify bytes limits, inherit previous
+          * values; likewise if the user didn't specify iops
+          * limits.  */
+@@ -14601,7 +14614,7 @@ qemuDomainSetBlockIoTune(virDomainPtr dom,
+ 
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         sa_assert(persistentDef);
+-        oldinfo = &persistentDef->disks[idx]->blkdeviotune;
++        oldinfo = &persistentDef->disks[conf_idx]->blkdeviotune;
+         if (!set_bytes) {
+             info.total_bytes_sec = oldinfo->total_bytes_sec;
+             info.read_bytes_sec = oldinfo->read_bytes_sec;
+@@ -14612,7 +14625,7 @@ qemuDomainSetBlockIoTune(virDomainPtr dom,
+             info.read_iops_sec = oldinfo->read_iops_sec;
+             info.write_iops_sec = oldinfo->write_iops_sec;
+         }
+-        persistentDef->disks[idx]->blkdeviotune = info;
++        persistentDef->disks[conf_idx]->blkdeviotune = info;
+         ret = virDomainSaveConfig(driver->configDir, persistentDef);
+         if (ret < 0) {
+             virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+-- 
+2.2.2
+

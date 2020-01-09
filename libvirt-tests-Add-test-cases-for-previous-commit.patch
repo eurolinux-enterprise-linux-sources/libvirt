@@ -1,0 +1,255 @@
+From 720100a853ae068bd6c8531964788bd3130d67e4 Mon Sep 17 00:00:00 2001
+Message-Id: <720100a853ae068bd6c8531964788bd3130d67e4@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 3 Dec 2014 16:58:19 +0100
+Subject: [PATCH] tests: Add test cases for previous commit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1138500
+
+This commit is rather big. Firstly, the in memory config
+representation is adjusted like if security_driver was set to "none".
+The rest is then just adaptation to the new code that will generate
+different seclabels.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 36cc189a46b642d202100efddfcefa7cf7bdd08b)
+
+Conflicts:
+	tests/qemuhotplugtestdata/qemuhotplug-hotplug-base+disk-scsi.xml
+	tests/qemuhotplugtestdata/qemuhotplug-hotplug-base+disk-usb.xml
+	tests/qemuhotplugtestdata/qemuhotplug-hotplug-base+disk-virtio.xml
+	tests/qemuxml2argvdata/qemuxml2argv-hotplug-base.xml
+	tests/qemuxml2xmltest.c
+	tests/testutilsqemu.c: Some files are deleted, some have
+        context conflicts.
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ .../qemuxml2argv-seclabel-dynamic-none-relabel.xml | 49 ++++++++++++++++++++++
+ ...emuxml2xmlout-seclabel-dynamic-none-relabel.xml | 49 ++++++++++++++++++++++
+ .../qemuxml2xmlout-seclabel-dynamic-relabel.xml    | 27 ++++++++++++
+ .../qemuxml2xmlout-seclabel-none.xml               | 27 ++++++++++++
+ tests/qemuxml2xmltest.c                            |  5 ++-
+ tests/testutilsqemu.c                              |  9 ++++
+ 6 files changed, 164 insertions(+), 2 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-none-relabel.xml
+ create mode 100644 tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-dynamic-none-relabel.xml
+ create mode 100644 tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-dynamic-relabel.xml
+ create mode 100644 tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-none.xml
+
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-none-relabel.xml b/tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-none-relabel.xml
+new file mode 100644
+index 0000000..f81c3b0
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-seclabel-dynamic-none-relabel.xml
+@@ -0,0 +1,49 @@
++<domain type='kvm'>
++  <name>migt10</name>
++  <uuid>0d73c5c3-43d0-f75b-31de-6aa919b0176b</uuid>
++  <memory unit='KiB'>262144</memory>
++  <currentMemory unit='KiB'>262144</currentMemory>
++  <memoryBacking>
++    <hugepages/>
++  </memoryBacking>
++  <vcpu placement='static'>4</vcpu>
++  <os>
++    <type arch='x86_64' machine='pc-i440fx-2.1'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <features>
++    <acpi/>
++  </features>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-x86_64</emulator>
++    <controller type='usb' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='virtio-serial' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
++    </controller>
++    <controller type='ide' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
++    </controller>
++    <channel type='spicevmc'>
++      <target type='virtio' name='com.redhat.spice.0'/>
++      <address type='virtio-serial' controller='0' bus='0' port='1'/>
++    </channel>
++    <input type='mouse' bus='ps2'/>
++    <graphics type='spice' autoport='yes' listen='0.0.0.0'>
++      <listen type='address' address='0.0.0.0'/>
++    </graphics>
++    <video>
++      <model type='cirrus' vram='8192' heads='1'/>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>
++    </video>
++    <memballoon model='virtio'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x05' function='0x0'/>
++    </memballoon>
++  </devices>
++  <seclabel type='dynamic' relabel='yes'/>
++</domain>
+diff --git a/tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-dynamic-none-relabel.xml b/tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-dynamic-none-relabel.xml
+new file mode 100644
+index 0000000..22d9b53
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-dynamic-none-relabel.xml
+@@ -0,0 +1,49 @@
++<domain type='kvm'>
++  <name>migt10</name>
++  <uuid>0d73c5c3-43d0-f75b-31de-6aa919b0176b</uuid>
++  <memory unit='KiB'>262144</memory>
++  <currentMemory unit='KiB'>262144</currentMemory>
++  <memoryBacking>
++    <hugepages/>
++  </memoryBacking>
++  <vcpu placement='static'>4</vcpu>
++  <os>
++    <type arch='x86_64' machine='pc-i440fx-2.1'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <features>
++    <acpi/>
++  </features>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-x86_64</emulator>
++    <controller type='usb' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='virtio-serial' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
++    </controller>
++    <controller type='ide' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
++    </controller>
++    <channel type='spicevmc'>
++      <target type='virtio' name='com.redhat.spice.0'/>
++      <address type='virtio-serial' controller='0' bus='0' port='1'/>
++    </channel>
++    <input type='mouse' bus='ps2'/>
++    <graphics type='spice' autoport='yes' listen='0.0.0.0'>
++      <listen type='address' address='0.0.0.0'/>
++    </graphics>
++    <video>
++      <model type='cirrus' vram='8192' heads='1'/>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>
++    </video>
++    <memballoon model='virtio'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x05' function='0x0'/>
++    </memballoon>
++  </devices>
++  <seclabel type='none' model='none'/>
++</domain>
+diff --git a/tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-dynamic-relabel.xml b/tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-dynamic-relabel.xml
+new file mode 100644
+index 0000000..e1713ca
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-dynamic-relabel.xml
+@@ -0,0 +1,27 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static' cpuset='1-4,8-20,525'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='ide' index='0'/>
++    <memballoon model='virtio'/>
++  </devices>
++  <seclabel type='none' model='none'/>
++</domain>
+diff --git a/tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-none.xml b/tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-none.xml
+new file mode 100644
+index 0000000..e1713ca
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/qemuxml2xmlout-seclabel-none.xml
+@@ -0,0 +1,27 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static' cpuset='1-4,8-20,525'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='ide' index='0'/>
++    <memballoon model='virtio'/>
++  </devices>
++  <seclabel type='none' model='none'/>
++</domain>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 685cbcd..f7236ab 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -236,10 +236,11 @@ mymain(void)
+ 
+     DO_TEST_FULL("seclabel-dynamic-baselabel", false, WHEN_INACTIVE);
+     DO_TEST_FULL("seclabel-dynamic-override", false, WHEN_INACTIVE);
+-    DO_TEST_FULL("seclabel-dynamic-relabel", false, WHEN_INACTIVE);
++    DO_TEST_FULL("seclabel-dynamic-relabel", true, WHEN_INACTIVE);
+     DO_TEST("seclabel-static");
+-    DO_TEST("seclabel-none");
++    DO_TEST_DIFFERENT("seclabel-none");
+     DO_TEST("seclabel-dynamic-none");
++    DO_TEST_FULL("seclabel-dynamic-none-relabel", true, WHEN_INACTIVE);
+     DO_TEST("numad-static-vcpu-no-numatune");
+     DO_TEST("disk-scsi-lun-passthrough-sgio");
+ 
+diff --git a/tests/testutilsqemu.c b/tests/testutilsqemu.c
+index 69c78ec..d922fd8 100644
+--- a/tests/testutilsqemu.c
++++ b/tests/testutilsqemu.c
+@@ -164,6 +164,15 @@ virCapsPtr testQemuCapsInit(void) {
+         return NULL;
+ 
+     caps->defaultConsoleTargetType = testQemuDefaultConsoleType;
++    /* Add dummy 'none' security_driver. This is equal to setting
++     * security_driver = "none" in qemu.conf. */
++    if (VIR_ALLOC_N(caps->host.secModels, 1) < 0)
++        goto cleanup;
++    caps->host.nsecModels = 1;
++
++    if (!(caps->host.secModels[0].model = strdup("none")) ||
++        !(caps->host.secModels[0].doi = strdup("0")))
++        goto cleanup;
+ 
+     if ((caps->host.cpu = virCPUDefCopy(&host_cpu)) == NULL ||
+         (machines = testQemuAllocMachines(&nmachines)) == NULL)
+-- 
+2.2.0
+

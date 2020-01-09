@@ -1,0 +1,51 @@
+From ac2e11e9062063573a3278b5b44194cc378f4c32 Mon Sep 17 00:00:00 2001
+Message-Id: <ac2e11e9062063573a3278b5b44194cc378f4c32@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 17 Mar 2014 11:04:07 +0100
+Subject: [PATCH] qemu: Return meaningful error when qemu dies early
+
+https://bugzilla.redhat.com/show_bug.cgi?id=844378
+
+When qemu dies early after connecting to its monitor but before we
+actually try to read something from the monitor, we would just fail
+domain start with useless message:
+
+    "An error occurred, but the cause is unknown"
+
+This is because the real error gets reported in a monitor EOF handler
+executing within libvirt's event loop.
+
+The fix is to take any error set in qemuMonitor structure and propagate
+it into the thread-local error when qemuMonitorClose is called and no
+thread-local error is set.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit cfa7ceab7735410c0427136236bf8bad10670816)
+
+Conflicts:
+	src/qemu/qemu_monitor.c -- s/virObjectUnlock/qemuMonitorUnlock/
+	    in the context
+---
+ src/qemu/qemu_monitor.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index a8fd5f1..f2b30f7 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -866,6 +866,12 @@ void qemuMonitorClose(qemuMonitorPtr mon)
+         virCondSignal(&mon->notify);
+     }
+ 
++    /* Propagate existing monitor error in case the current thread has no
++     * error set.
++     */
++    if (mon->lastError.code != VIR_ERR_OK && !virGetLastError())
++        virSetError(&mon->lastError);
++
+     qemuMonitorUnlock(mon);
+     virObjectUnref(mon);
+ }
+-- 
+1.9.2
+

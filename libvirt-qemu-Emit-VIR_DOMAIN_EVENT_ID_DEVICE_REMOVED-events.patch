@@ -1,0 +1,103 @@
+From 993388ef65de694c99edde699560b28f6e821dd7 Mon Sep 17 00:00:00 2001
+Message-Id: <993388ef65de694c99edde699560b28f6e821dd7@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 11 Jul 2013 17:30:56 +0200
+Subject: [PATCH] qemu: Emit VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED events
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit 984c01ba5c6bf105263f99ff242c4df15a422e24)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_hotplug.c -- old spelling of virQEMUDriverPtr; no
+	    chardev hotplug
+	tests/qemuhotplugtest.c -- does not exist in RHEL-6
+---
+ src/qemu/qemu_hotplug.c | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 102e756..970938e 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1922,6 +1922,7 @@ qemuDomainRemoveDiskDevice(struct qemud_driver *driver,
+                            virDomainObjPtr vm,
+                            virDomainDiskDefPtr disk)
+ {
++    virDomainEventPtr event;
+     size_t i;
+ 
+     VIR_DEBUG("Removing disk %s from domain %p %s",
+@@ -1929,6 +1930,10 @@ qemuDomainRemoveDiskDevice(struct qemud_driver *driver,
+ 
+     virDomainAuditDisk(vm, disk->src, NULL, "detach", true);
+ 
++    event = virDomainEventDeviceRemovedNewFromObj(vm, disk->info.alias);
++    if (event)
++        qemuDomainEventQueue(driver, event);
++
+     for (i = 0; i < vm->def->ndisks; i++) {
+         if (vm->def->disks[i] == disk) {
+             virDomainDiskRemove(vm->def, i);
+@@ -1964,15 +1969,20 @@ qemuDomainRemoveDiskDevice(struct qemud_driver *driver,
+ 
+ 
+ static void
+-qemuDomainRemoveControllerDevice(struct qemud_driver *driver ATTRIBUTE_UNUSED,
++qemuDomainRemoveControllerDevice(struct qemud_driver *driver,
+                                  virDomainObjPtr vm,
+                                  virDomainControllerDefPtr controller)
+ {
++    virDomainEventPtr event;
+     size_t i;
+ 
+     VIR_DEBUG("Removing controller %s from domain %p %s",
+               controller->info.alias, vm, vm->def->name);
+ 
++    event = virDomainEventDeviceRemovedNewFromObj(vm, controller->info.alias);
++    if (event)
++        qemuDomainEventQueue(driver, event);
++
+     for (i = 0; i < vm->def->ncontrollers; i++) {
+         if (vm->def->controllers[i] == controller) {
+             virDomainControllerRemove(vm->def, i);
+@@ -1991,6 +2001,7 @@ qemuDomainRemoveNetDevice(struct qemud_driver *driver,
+                           virDomainNetDefPtr net)
+ {
+     virNetDevVPortProfilePtr vport;
++    virDomainEventPtr event;
+     size_t i;
+ 
+     VIR_DEBUG("Removing network interface %s from domain %p %s",
+@@ -1998,6 +2009,10 @@ qemuDomainRemoveNetDevice(struct qemud_driver *driver,
+ 
+     virDomainAuditNet(vm, net, NULL, "detach", true);
+ 
++    event = virDomainEventDeviceRemovedNewFromObj(vm, net->info.alias);
++    if (event)
++        qemuDomainEventQueue(driver, event);
++
+     for (i = 0; i < vm->def->nnets; i++) {
+         if (vm->def->nets[i] == net) {
+             virDomainNetRemove(vm->def, i);
+@@ -2097,11 +2112,16 @@ qemuDomainRemoveHostDevice(struct qemud_driver *driver,
+                            virDomainHostdevDefPtr hostdev)
+ {
+     virDomainNetDefPtr net = NULL;
++    virDomainEventPtr event;
+     size_t i;
+ 
+     VIR_DEBUG("Removing host device %s from domain %p %s",
+               hostdev->info->alias, vm, vm->def->name);
+ 
++    event = virDomainEventDeviceRemovedNewFromObj(vm, hostdev->info->alias);
++    if (event)
++        qemuDomainEventQueue(driver, event);
++
+     if (hostdev->parent.type == VIR_DOMAIN_DEVICE_NET) {
+         net = hostdev->parent.data.net;
+ 
+-- 
+2.0.0
+

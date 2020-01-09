@@ -1,0 +1,83 @@
+From 704f6bfb813c5ede042a3fbbf6fca36fa4b01b73 Mon Sep 17 00:00:00 2001
+Message-Id: <704f6bfb813c5ede042a3fbbf6fca36fa4b01b73@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 10 Apr 2015 09:27:04 +0200
+Subject: [PATCH] qemuProcessHook: Call qemuProcessInitNumaMemoryPolicy only
+ when needed
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1198645
+
+Once upon a time, there was a little domain. And the domain was pinned
+onto a NUMA node and hasn't fully allocated its memory:
+
+  <memory unit='KiB'>2355200</memory>
+  <currentMemory unit='KiB'>1048576</currentMemory>
+
+  <numatune>
+    <memory mode='strict' nodeset='0'/>
+  </numatune>
+
+Oh little me, said the domain, what will I do with so little memory.
+If I only had a few megabytes more. But the old admin noticed the
+whimpering, barely audible to untrained human ear. And good admin he
+was, he gave the domain yet more memory. But the old NUMA topology
+witch forbade to allocate more memory on the node zero. So he
+decided to allocate it on a different node:
+
+virsh # numatune little_domain --nodeset 0-1
+
+virsh # setmem little_domain 2355200
+
+The little domain was happy. For a while. Until bad, sharp teeth
+shaped creature came. Every process in the system was afraid of him.
+The OOM Killer they called him. Oh no, he's after the little domain.
+There's no escape.
+
+Do you kids know why? Because when the little domain was born, her
+father, Libvirt, called numa_set_membind(). So even if the admin
+allowed her to allocate memory from other nodes in the cgroups, the
+membind() forbid it.
+
+So what's the lesson? Libvirt should rely on cgroups, whenever
+possible and use numa_set_membind() as the last ditch effort.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit ea576ee543d6fb95583072249224481010e8fb43)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_process.c: Code's just too old. Completely
+        reworked.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 3e00afb..7c8154e 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2892,8 +2892,16 @@ static int qemuProcessHook(void *data)
+         qemuProcessInitCpuAffinity(h->driver, h->vm, h->nodemask) < 0)
+         goto cleanup;
+ 
+-    if (qemuProcessInitNumaMemoryPolicy(h->vm, h->nodemask) < 0)
+-        goto cleanup;
++    if (qemuCgroupControllerActive(h->driver, VIR_CGROUP_CONTROLLER_CPUSET) &&
++        h->vm->def->numatune.memory.mode == VIR_DOMAIN_NUMATUNE_MEM_STRICT) {
++        /* Use numa* API iff necessary. Once set and child is exec()-ed,
++         * there's no way for us to change it. Rely on cgroups (if available
++         * and enabled in the config) rather then numa*. */
++        VIR_DEBUG("Relying on CGroups for memory binding");
++    } else {
++        if (qemuProcessInitNumaMemoryPolicy(h->vm, h->nodemask) < 0)
++            goto cleanup;
++    }
+ 
+     VIR_DEBUG("Setting up security labelling");
+     if (virSecurityManagerSetProcessLabel(h->driver->securityManager, h->vm->def) < 0)
+-- 
+2.3.5
+

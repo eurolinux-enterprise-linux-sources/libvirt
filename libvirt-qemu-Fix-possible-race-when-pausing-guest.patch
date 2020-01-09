@@ -1,0 +1,56 @@
+From f4d0496049f56499647c1f87d84a70efc73e3e3a Mon Sep 17 00:00:00 2001
+Message-Id: <f4d0496049f56499647c1f87d84a70efc73e3e3a.1352118320.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Sun, 4 Nov 2012 20:47:31 +0100
+Subject: [PATCH] qemu: Fix possible race when pausing guest
+
+https://bugzilla.redhat.com/show_bug.cgi?id=638512
+
+When pausing the guest while migration is running (to speed up
+convergence) the virDomainSuspend API checks if the migration job is
+active before entering the job. This could cause a possible race if the
+virDomainSuspend is called while the job is active but ends before the
+Suspend API enters the job (this would require that the migration is
+aborted). This would cause a incorrect event to be emitted.
+(cherry picked from commit d0fc6dc8315b3172501e6fe09c8aed12598de47e)
+---
+ src/qemu/qemu_driver.c | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 308c49c..298b840 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -1642,14 +1642,6 @@ static int qemudDomainSuspend(virDomainPtr dom) {
+ 
+     priv = vm->privateData;
+ 
+-    if (priv->job.asyncJob == QEMU_ASYNC_JOB_MIGRATION_OUT) {
+-        reason = VIR_DOMAIN_PAUSED_MIGRATION;
+-        eventDetail = VIR_DOMAIN_EVENT_SUSPENDED_MIGRATED;
+-    } else {
+-        reason = VIR_DOMAIN_PAUSED_USER;
+-        eventDetail = VIR_DOMAIN_EVENT_SUSPENDED_PAUSED;
+-    }
+-
+     if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_SUSPEND) < 0)
+         goto cleanup;
+ 
+@@ -1659,6 +1651,14 @@ static int qemudDomainSuspend(virDomainPtr dom) {
+         goto endjob;
+     }
+ 
++    if (priv->job.asyncJob == QEMU_ASYNC_JOB_MIGRATION_OUT) {
++        reason = VIR_DOMAIN_PAUSED_MIGRATION;
++        eventDetail = VIR_DOMAIN_EVENT_SUSPENDED_MIGRATED;
++    } else {
++        reason = VIR_DOMAIN_PAUSED_USER;
++        eventDetail = VIR_DOMAIN_EVENT_SUSPENDED_PAUSED;
++    }
++
+     state = virDomainObjGetState(vm, NULL);
+     if (state == VIR_DOMAIN_PMSUSPENDED) {
+         virReportError(VIR_ERR_OPERATION_INVALID,
+-- 
+1.8.0
+

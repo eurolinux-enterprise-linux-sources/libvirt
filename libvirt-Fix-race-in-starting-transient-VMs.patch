@@ -1,0 +1,68 @@
+From 62603aedb52205b53be6ecf85edd10bc25216c5f Mon Sep 17 00:00:00 2001
+Message-Id: <62603aedb52205b53be6ecf85edd10bc25216c5f@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 6 Nov 2013 15:16:31 +0100
+Subject: [PATCH] Fix race in starting transient VMs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1022924
+
+When starting a transient VM the first thing done is to check
+for duplicates. The check looks if there are any running VMs
+with the matching name/uuid. It explicitly allows there to
+be inactive VMs, so that a persistent VM can be temporarily
+booted with a different config.
+
+There is a race condition, however, where 2 or more clients
+try to create the same transient VM. The first client will
+cause a virDomainObjPtr to be added to the domain list, and
+it is inactive at this stage. The second client may then
+come along and see this inactive VM, and mistake it for a
+persistent VM.
+
+If the first VM fails to start its transient guest for any
+reason, then it'll remove the virDomainObjPtr from the list.
+The second client now has a virDomainObjPtr that it can try
+to boot, which libvirt no longer has a record of. The result
+can be a running QEMU process that is orphaned.
+
+It was also, however, possible for the virDomainObjPtr to be
+completely free'd which will cause libvirtd to crash in some
+scenarios.
+
+The fix is to only allow an existing inactive VM if it is
+marked as persistent.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 89759301dea870ee80f2ca74751db589e8f7b593)
+
+Conflicts:
+	src/conf/domain_conf.c: The code in 6.5 is not rebased and therefore
+    completely different to the upstream that has been cherry picked
+    from.
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 6937a1f..a63755b 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -14898,7 +14898,13 @@ virDomainObjIsDuplicate(virDomainObjListPtr doms,
+             /* UUID & name match, but if VM is already active, refuse it */
+             if (virDomainObjIsActive(vm)) {
+                 virReportError(VIR_ERR_OPERATION_INVALID,
+-                               _("domain is already active as '%s'"),
++                               _("domain '%s' is already active"),
++                               vm->def->name);
++                goto cleanup;
++            }
++            if (!vm->persistent) {
++                virReportError(VIR_ERR_OPERATION_INVALID,
++                               _("domain '%s' is already being started"),
+                                vm->def->name);
+                 goto cleanup;
+             }
+-- 
+1.9.1
+

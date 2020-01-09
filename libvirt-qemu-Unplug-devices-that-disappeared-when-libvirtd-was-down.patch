@@ -1,0 +1,252 @@
+From f9ea437400f05339369ac336a05af87d1a6a84ae Mon Sep 17 00:00:00 2001
+Message-Id: <f9ea437400f05339369ac336a05af87d1a6a84ae@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 19 Jul 2013 15:08:29 +0200
+Subject: [PATCH] qemu: Unplug devices that disappeared when libvirtd was down
+
+In case libvirtd is asked to unplug a device but the device is actually
+unplugged later when libvirtd is not running, we need to detect that and
+remove such device when libvirtd starts again and reconnects to running
+domains.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit 0dfb8a1b9e7fd3c4bb85e0487a83726f08167654)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_domain.c -- context
+
+Downstream changes:
+    - old spelling of virQEMUDriverPtr and virQEMUCaps*
+    - use *WithDriver variants of {Enter,Exit}Monitor APIs
+    - virstring.h was not included in qemu_{domain,process}.c
+---
+ src/qemu/qemu_domain.c  | 57 +++++++++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_domain.h  |  4 ++++
+ src/qemu/qemu_driver.c  |  6 ++++++
+ src/qemu/qemu_process.c | 44 ++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 111 insertions(+)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 651987f..caa9c1a 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -37,6 +37,7 @@
+ #include "domain_event.h"
+ #include "virtime.h"
+ #include "storage_file.h"
++#include "virstring.h"
+ 
+ #include <sys/time.h>
+ #include <fcntl.h>
+@@ -330,6 +331,16 @@ static int qemuDomainObjPrivateXMLFormat(virBufferPtr buf, void *data)
+     if (priv->fakeReboot)
+         virBufferAsprintf(buf, "  <fakereboot/>\n");
+ 
++    if (priv->qemuDevices && *priv->qemuDevices) {
++        char **tmp = priv->qemuDevices;
++        virBufferAddLit(buf, "  <devices>\n");
++        while (*tmp) {
++            virBufferAsprintf(buf, "    <device alias='%s'/>\n", *tmp);
++            tmp++;
++        }
++        virBufferAddLit(buf, "  </devices>\n");
++    }
++
+     return 0;
+ }
+ 
+@@ -475,12 +486,35 @@ static int qemuDomainObjPrivateXMLParse(xmlXPathContextPtr ctxt, void *data)
+ 
+     priv->fakeReboot = virXPathBoolean("boolean(./fakereboot)", ctxt) == 1;
+ 
++    if ((n = virXPathNodeSet("./devices/device", ctxt, &nodes)) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("failed to parse qemu device list"));
++        goto error;
++    }
++    if (n > 0) {
++        /* NULL-terminated list */
++        if (VIR_ALLOC_N(priv->qemuDevices, n + 1) < 0)
++            goto error;
++
++        for (i = 0; i < n; i++) {
++            priv->qemuDevices[i] = virXMLPropString(nodes[i], "alias");
++            if (!priv->qemuDevices[i]) {
++                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                               _("failed to parse qemu device list"));
++                goto error;
++            }
++        }
++    }
++    VIR_FREE(nodes);
++
+     return 0;
+ 
+ error:
+     virDomainChrSourceDefFree(priv->monConfig);
+     priv->monConfig = NULL;
+     VIR_FREE(nodes);
++    virStringFreeList(priv->qemuDevices);
++    priv->qemuDevices = NULL;
+     virObjectUnref(caps);
+     return -1;
+ }
+@@ -2125,3 +2159,26 @@ qemuDomainDetermineDiskChain(struct qemud_driver *driver,
+         return -1;
+     return 0;
+ }
++
++
++int
++qemuDomainUpdateDeviceList(struct qemud_driver *driver,
++                           virDomainObjPtr vm)
++{
++    qemuDomainObjPrivatePtr priv = vm->privateData;
++    char **aliases;
++
++    if (!qemuCapsGet(priv->caps, QEMU_CAPS_DEVICE_DEL_EVENT))
++        return 0;
++
++    qemuDomainObjEnterMonitorWithDriver(driver, vm);
++    if (qemuMonitorGetDeviceAliases(priv->mon, &aliases) < 0) {
++        qemuDomainObjExitMonitorWithDriver(driver, vm);
++        return -1;
++    }
++    qemuDomainObjExitMonitorWithDriver(driver, vm);
++
++    virStringFreeList(priv->qemuDevices);
++    priv->qemuDevices = aliases;
++    return 0;
++}
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 975e68b..b41fb2f 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -164,6 +164,7 @@ struct _qemuDomainObjPrivate {
+ 
+     virCond unplugFinished; /* signals that unpluggingDevice was unplugged */
+     const char *unpluggingDevice; /* alias of the device that is being unplugged */
++    char **qemuDevices; /* NULL-terminated list of devices aliases known to QEMU */
+ };
+ 
+ typedef enum {
+@@ -372,4 +373,7 @@ void qemuDomainCleanupRun(struct qemud_driver *driver,
+                           virDomainObjPtr vm);
+ 
+ 
++int qemuDomainUpdateDeviceList(struct qemud_driver *driver,
++                               virDomainObjPtr vm);
++
+ #endif /* __QEMU_DOMAIN_H__ */
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index dd1f73a..42081f1 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -6557,6 +6557,9 @@ qemuDomainAttachDeviceLive(virDomainObjPtr vm,
+         break;
+     }
+ 
++    if (ret == 0)
++        qemuDomainUpdateDeviceList(driver, vm);
++
+     return ret;
+ }
+ 
+@@ -6663,6 +6666,9 @@ qemuDomainDetachDeviceLive(virDomainObjPtr vm,
+         break;
+     }
+ 
++    if (ret == 0)
++        qemuDomainUpdateDeviceList(driver, vm);
++
+     return ret;
+ }
+ 
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 22c9e90..95349d6 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -65,6 +65,7 @@
+ #include "virtime.h"
+ #include "virnetdevtap.h"
+ #include "bitmap.h"
++#include "virstring.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_QEMU
+ 
+@@ -3269,6 +3270,39 @@ qemuProcessRecoverJob(struct qemud_driver *driver,
+     return 0;
+ }
+ 
++static int
++qemuProcessUpdateDevices(struct qemud_driver *driver,
++                         virDomainObjPtr vm)
++{
++    qemuDomainObjPrivatePtr priv = vm->privateData;
++    virDomainDeviceDef dev;
++    char **old;
++    char **tmp;
++    int ret = -1;
++
++    if (!qemuCapsGet(priv->caps, QEMU_CAPS_DEVICE_DEL_EVENT))
++        return 0;
++
++    old = priv->qemuDevices;
++    priv->qemuDevices = NULL;
++    if (qemuDomainUpdateDeviceList(driver, vm) < 0)
++        goto cleanup;
++
++    if ((tmp = old)) {
++        while (*tmp) {
++            if (!virStringArrayHasString(priv->qemuDevices, *tmp) &&
++                virDomainDefFindDevice(vm->def, *tmp, &dev, false) == 0)
++                qemuDomainRemoveDevice(driver, vm, &dev);
++            tmp++;
++        }
++    }
++    ret = 0;
++
++cleanup:
++    virStringFreeList(old);
++    return ret;
++}
++
+ struct qemuProcessReconnectData {
+     virConnectPtr conn;
+     struct qemud_driver *driver;
+@@ -3397,6 +3431,9 @@ qemuProcessReconnect(void *opaque)
+     if (qemuProcessRecoverJob(driver, obj, conn, &oldjob) < 0)
+         goto error;
+ 
++    if (qemuProcessUpdateDevices(driver, obj) < 0)
++        goto error;
++
+     /* update domain state XML with possibly updated state in virDomainObj */
+     if (virDomainSaveStatus(driver->caps, driver->stateDir, obj) < 0)
+         goto error;
+@@ -4167,6 +4204,10 @@ int qemuProcessStart(virConnectPtr conn,
+ 
+     qemuDomainObjExitMonitorWithDriver(driver, vm);
+ 
++    VIR_DEBUG("Fetching list of active devices");
++    if (qemuDomainUpdateDeviceList(driver, vm) < 0)
++        goto cleanup;
++
+     /* Technically, qemuProcessStart can be called from inside
+      * QEMU_ASYNC_JOB_MIGRATION_IN, but we are okay treating this like
+      * a sync job since no other job can call into the domain until
+@@ -4476,6 +4517,9 @@ void qemuProcessStop(struct qemud_driver *driver,
+         VIR_FREE(vm->def->seclabels[i]->imagelabel);
+     }
+ 
++    virStringFreeList(priv->qemuDevices);
++    priv->qemuDevices = NULL;
++
+     virDomainDefClearDeviceAliases(vm->def);
+     if (!priv->persistentAddrs) {
+         virDomainDefClearPCIAddresses(vm->def);
+-- 
+2.0.0
+

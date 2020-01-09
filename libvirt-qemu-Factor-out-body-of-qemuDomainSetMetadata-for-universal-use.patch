@@ -1,0 +1,255 @@
+From 939ac051653bb20a05e08e91bda521ce36c7b37a Mon Sep 17 00:00:00 2001
+Message-Id: <939ac051653bb20a05e08e91bda521ce36c7b37a@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Jul 2014 16:51:28 +0200
+Subject: [PATCH] qemu: Factor out body of qemuDomainSetMetadata for universal
+ use
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115039
+
+The function implemented common behavior that can be reused for other
+hypervisor drivers that use the virDomainObj data structures. Factor out
+the core into a separate helper func.
+
+(cherry picked from commit f87a7c67de946f941fddde44d5959baaac6c7de4)
+
+Conflicts:
+	src/qemu/qemu_driver.c
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c   | 88 ++++++++++++++++++++++++++++++++++++++++++++++++
+ src/conf/domain_conf.h   |  9 +++++
+ src/libvirt_private.syms |  1 +
+ src/qemu/qemu_driver.c   | 73 +++------------------------------------
+ 4 files changed, 102 insertions(+), 69 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index e5a93de..b3039cf 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -16631,3 +16631,91 @@ virDomainObjGetMetadata(virDomainObjPtr vm,
+ cleanup:
+     return ret;
+ }
++
++int
++virDomainObjSetMetadata(virDomainObjPtr vm,
++                        int type,
++                        const char *metadata,
++                        const char *key ATTRIBUTE_UNUSED,
++                        const char *uri ATTRIBUTE_UNUSED,
++                        virCapsPtr caps,
++                        const char *configDir,
++                        unsigned int flags)
++{
++    virDomainDefPtr persistentDef;
++    int ret = -1;
++
++    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
++                  VIR_DOMAIN_AFFECT_CONFIG, -1);
++
++    if (virDomainLiveConfigHelperMethod(caps, vm, &flags,
++                                        &persistentDef) < 0)
++        goto cleanup;
++
++    if (flags & VIR_DOMAIN_AFFECT_LIVE) {
++        switch ((virDomainMetadataType) type) {
++        case VIR_DOMAIN_METADATA_DESCRIPTION:
++            VIR_FREE(vm->def->description);
++            if (!(vm->def->description = strdup(metadata)))
++                goto no_memory;
++            break;
++
++        case VIR_DOMAIN_METADATA_TITLE:
++            VIR_FREE(vm->def->title);
++            if (!(vm->def->title = strdup(metadata)))
++                goto no_memory;
++            break;
++
++        case VIR_DOMAIN_METADATA_ELEMENT:
++            virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
++                           _("<metadata> element is not supported"));
++            goto cleanup;
++            break;
++
++        default:
++            virReportError(VIR_ERR_INVALID_ARG, "%s",
++                           _("unknown metadata type"));
++            goto cleanup;
++            break;
++        }
++    }
++
++    if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
++        switch ((virDomainMetadataType) type) {
++        case VIR_DOMAIN_METADATA_DESCRIPTION:
++            VIR_FREE(persistentDef->description);
++            if (!(persistentDef->description = strdup(metadata)))
++                goto no_memory;
++            break;
++
++        case VIR_DOMAIN_METADATA_TITLE:
++            VIR_FREE(persistentDef->title);
++            if (!(persistentDef->title = strdup(metadata)))
++                goto no_memory;
++            break;
++
++        case VIR_DOMAIN_METADATA_ELEMENT:
++            virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
++                           _("<metadata> element is not supported"));
++            goto cleanup;
++
++         default:
++            virReportError(VIR_ERR_INVALID_ARG, "%s",
++                           _("unknown metadata type"));
++            goto cleanup;
++            break;
++        }
++
++        if (virDomainSaveConfig(configDir, persistentDef) < 0)
++            goto cleanup;
++    }
++
++    ret = 0;
++
++cleanup:
++    return ret;
++
++no_memory:
++    virReportOOMError();
++    return -1;
++}
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index ce0a793..4f70b7e 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2443,4 +2443,13 @@ char *virDomainObjGetMetadata(virDomainObjPtr vm,
+                               virCapsPtr caps,
+                               unsigned int flags);
+ 
++int virDomainObjSetMetadata(virDomainObjPtr vm,
++                            int type,
++                            const char *metadata,
++                            const char *key,
++                            const char *uri,
++                            virCapsPtr caps,
++                            const char *configDir,
++                            unsigned int flags);
++
+ #endif /* __DOMAIN_CONF_H */
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index affd1d4..8405b20 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -492,6 +492,7 @@ virDomainObjListNumOfDomains;
+ virDomainObjLock;
+ virDomainObjNew;
+ virDomainObjSetDefTransient;
++virDomainObjSetMetadata;
+ virDomainObjSetState;
+ virDomainObjTaint;
+ virDomainObjUnlock;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 5f98b7b..3e24f81 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -14833,13 +14833,12 @@ static int
+ qemuDomainSetMetadata(virDomainPtr dom,
+                       int type,
+                       const char *metadata,
+-                      const char *key ATTRIBUTE_UNUSED,
+-                      const char *uri ATTRIBUTE_UNUSED,
++                      const char *key,
++                      const char *uri,
+                       unsigned int flags)
+ {
+     struct qemud_driver *driver = dom->conn->privateData;
+     virDomainObjPtr vm;
+-    virDomainDefPtr persistentDef;
+     int ret = -1;
+ 
+     virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
+@@ -14857,77 +14856,13 @@ qemuDomainSetMetadata(virDomainPtr dom,
+         goto cleanup;
+     }
+ 
+-    if (virDomainLiveConfigHelperMethod(driver->caps, vm, &flags,
+-                                        &persistentDef) < 0)
+-        goto cleanup;
+-
+-    if (flags & VIR_DOMAIN_AFFECT_LIVE) {
+-        switch ((virDomainMetadataType) type) {
+-        case VIR_DOMAIN_METADATA_DESCRIPTION:
+-            VIR_FREE(vm->def->description);
+-            if (metadata &&
+-                !(vm->def->description = strdup(metadata)))
+-                goto no_memory;
+-            break;
+-        case VIR_DOMAIN_METADATA_TITLE:
+-            VIR_FREE(vm->def->title);
+-            if (metadata &&
+-                !(vm->def->title = strdup(metadata)))
+-                goto no_memory;
+-            break;
+-        case VIR_DOMAIN_METADATA_ELEMENT:
+-            virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
+-                           _("QEmu driver does not support modifying "
+-                             "<metadata> element"));
+-            goto cleanup;
+-            break;
+-        default:
+-            virReportError(VIR_ERR_INVALID_ARG, "%s",
+-                           _("unknown metadata type"));
+-            goto cleanup;
+-            break;
+-        }
+-    }
+-
+-    if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+-        switch ((virDomainMetadataType) type) {
+-        case VIR_DOMAIN_METADATA_DESCRIPTION:
+-            VIR_FREE(persistentDef->description);
+-            if (metadata &&
+-                !(persistentDef->description = strdup(metadata)))
+-                goto no_memory;
+-            break;
+-        case VIR_DOMAIN_METADATA_TITLE:
+-            VIR_FREE(persistentDef->title);
+-            if (metadata &&
+-                !(persistentDef->title = strdup(metadata)))
+-                goto no_memory;
+-            break;
+-        case VIR_DOMAIN_METADATA_ELEMENT:
+-            virReportError(VIR_ERR_ARGUMENT_UNSUPPORTED, "%s",
+-                           _("QEMU driver does not support "
+-                             "<metadata> element"));
+-            goto cleanup;
+-         default:
+-            virReportError(VIR_ERR_INVALID_ARG, "%s",
+-                           _("unknown metadata type"));
+-            goto cleanup;
+-            break;
+-        }
+-
+-        if (virDomainSaveConfig(driver->configDir, persistentDef) < 0)
+-            goto cleanup;
+-    }
+-
+-    ret = 0;
++    ret = virDomainObjSetMetadata(vm, type, metadata, key, uri, driver->caps,
++                                  driver->configDir, flags);
+ 
+ cleanup:
+     if (vm)
+         virDomainObjUnlock(vm);
+     return ret;
+-no_memory:
+-    virReportOOMError();
+-    goto cleanup;
+ }
+ 
+ static char *
+-- 
+2.0.0
+

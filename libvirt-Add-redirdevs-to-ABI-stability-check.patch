@@ -1,0 +1,93 @@
+From d4dfe1084f465dc00c24e3ab85f01265d845d91b Mon Sep 17 00:00:00 2001
+Message-Id: <d4dfe1084f465dc00c24e3ab85f01265d845d91b@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 14 Apr 2014 16:02:51 +0200
+Subject: [PATCH] Add redirdevs to ABI stability check
+
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1035529
+
+Check the bus, type of the source device (tcp vs. spicevmc)
+and the device address visible in the guest.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1035128
+(cherry picked from commit c9123fbe85430dab5e737b20f5657aab650a5d45)
+
+Missing commits:
+  f47b397 conf: Refactor ABI stability checking and break long lines
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 50 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 50 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 28ad416..a277e18 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -11402,6 +11402,42 @@ cleanup:
+     return identical;
+ }
+ 
++
++static bool
++virDomainRedirdevDefCheckABIStability(virDomainRedirdevDefPtr src,
++                                      virDomainRedirdevDefPtr dst)
++{
++    if (src->bus != dst->bus) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("Target redirected device bus %s does not match "
++                         "source %s"),
++                       virDomainRedirdevBusTypeToString(dst->bus),
++                       virDomainRedirdevBusTypeToString(src->bus));
++        return false;
++    }
++
++    switch ((enum virDomainRedirdevBus) src->bus) {
++    case VIR_DOMAIN_REDIRDEV_BUS_USB:
++        if (src->source.chr.type != dst->source.chr.type) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("Target redirected device source type %s does "
++                             "not match source device source type %s"),
++                           virDomainChrTypeToString(dst->source.chr.type),
++                           virDomainChrTypeToString(src->source.chr.type));
++            return false;
++        }
++        break;
++    case VIR_DOMAIN_REDIRDEV_BUS_LAST:
++        break;
++    }
++
++    if (!virDomainDeviceInfoCheckABIStability(&src->info, &dst->info))
++        return false;
++
++    return true;
++}
++
++
+ static bool
+ virDomainRedirFilterDefCheckABIStability(virDomainRedirFilterDefPtr src,
+                                          virDomainRedirFilterDefPtr dst)
+@@ -11725,6 +11761,20 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+         if (!virDomainHubDefCheckABIStability(src->hubs[i], dst->hubs[i]))
+             goto cleanup;
+ 
++    if (src->nredirdevs != dst->nredirdevs) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("Target domain redirected devices count %zu "
++                         "does not match source %zu"),
++                       dst->nconsoles, src->nconsoles);
++        goto cleanup;
++    }
++
++    for (i = 0; i < src->nredirdevs; i++) {
++        if (!virDomainRedirdevDefCheckABIStability(src->redirdevs[i],
++                                                   dst->redirdevs[i]))
++            goto cleanup;
++    }
++
+     if ((!src->redirfilter && dst->redirfilter) ||
+         (src->redirfilter && !dst->redirfilter)) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-- 
+1.9.2
+

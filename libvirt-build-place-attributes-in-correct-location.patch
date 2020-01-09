@@ -1,0 +1,59 @@
+From 266c80da12d396d842605dfa8e20bdb540bdacfd Mon Sep 17 00:00:00 2001
+Message-Id: <266c80da12d396d842605dfa8e20bdb540bdacfd.1352726475.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Wed, 7 Nov 2012 10:23:37 +0100
+Subject: [PATCH] build: place attributes in correct location
+
+https://bugzilla.redhat.com/show_bug.cgi?id=873934
+
+Ever since commit eefb881, ATTRIBUTE_NONNULL has normally been a
+no-op under gcc (since it tends to cause more bugs than it cures
+given gcc's current lame implementation of the attribute).  However,
+the macro is still useful to Coverity and other static-analysis
+tools, but only if we use it correctly.  Coverity follows gcc's lead
+in accepting function declarations with attributes at the end, but
+function bodies must attach attributes to the return type.  That is,
+these are valid:
+
+void foo(void *arg) ATTRIBUTE_NONNULL(1);
+void ATTRIBUTE_NONNULL(1) foo(void *arg);
+void ATTRIBUTE_NONNULL(1) foo(void *arg) {}
+
+but this is not:
+
+void foo(void *arg) ATTRIBUTE_NONNULL(1) {}
+
+even though you don't get a compile failure until you do static
+analysis.  Bug introduced in commit 80533ca, with these symptoms:
+
+nodeinfo.c:206: error: expected ',' or ';' before '{' token
+cc1: warning: unrecognized command line option "-Wno-suggest-attribute=const"
+cc1: warning: unrecognized command line option "-Wno-suggest-attribute=pure"
+make[3]: *** [libvirt_driver_la-nodeinfo.lo] Error 1
+
+* src/nodeinfo.c (virNodeParseNode): Fix syntax error when
+non-null attribute is in use.
+(cherry picked from commit c047f54749412bfcbdebfadc7950cfc9b02dbeb2)
+---
+ src/nodeinfo.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/nodeinfo.c b/src/nodeinfo.c
+index 280326a..693f91d 100644
+--- a/src/nodeinfo.c
++++ b/src/nodeinfo.c
+@@ -202,9 +202,9 @@ CPU_COUNT(cpu_set_t *set)
+ /* parses a node entry, returning number of processors in the node and
+  * filling arguments */
+ static int
++ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
++ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4)
+ virNodeParseNode(const char *node, int *sockets, int *cores, int *threads)
+-    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2)
+-    ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4)
+ {
+     int ret = -1;
+     int processors = 0;
+-- 
+1.8.0
+

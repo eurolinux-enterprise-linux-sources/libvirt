@@ -1,0 +1,36 @@
+From b543cab7e4112b3735678a0c150c898e13492b01 Mon Sep 17 00:00:00 2001
+Message-Id: <b543cab7e4112b3735678a0c150c898e13492b01@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:49 +0200
+Subject: [PATCH] virsh-snapshot: Fix XPath query to determine snapshot state
+
+https://bugzilla.redhat.com/show_bug.cgi?id=890457
+
+The query didn't match the external state correctly for offline internal
+snapshots.
+
+(cherry picked from commit e06816289ced9e34a88e56c371eee920047e30df)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh-snapshot.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/virsh-snapshot.c b/tools/virsh-snapshot.c
+index 87e89cc..0a7e2fe 100644
+--- a/tools/virsh-snapshot.c
++++ b/tools/virsh-snapshot.c
+@@ -865,8 +865,8 @@ cmdSnapshotInfo(vshControl *ctl, const vshCmd *cmd)
+      * external snapshot.  */
+     switch (virXPathBoolean("boolean(/domainsnapshot/memory)", ctxt)) {
+     case 1:
+-        external = virXPathBoolean("boolean(/domainsnapshot/memory/@snapshot=external "
+-                                   "| /domainsnapshot/disks/disk/@snapshot=external)",
++        external = virXPathBoolean("boolean(/domainsnapshot/memory[@snapshot='external'] "
++                                   "| /domainsnapshot/disks/disk[@snapshot='external'])",
+                                    ctxt);
+         break;
+     case 0:
+-- 
+1.9.2
+

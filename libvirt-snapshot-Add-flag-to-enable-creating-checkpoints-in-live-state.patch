@@ -1,0 +1,172 @@
+From eead23e679f69d250e46fcb0e43816616e657a45 Mon Sep 17 00:00:00 2001
+Message-Id: <eead23e679f69d250e46fcb0e43816616e657a45.1352118320.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Sun, 4 Nov 2012 20:47:34 +0100
+Subject: [PATCH] snapshot: Add flag to enable creating checkpoints in live
+ state
+
+https://bugzilla.redhat.com/show_bug.cgi?id=638512
+
+The default behavior while creating external checkpoints is to pause the
+guest while the memory state is captured. We want the users to sacrifice
+space saving for creating the memory save image while the guest is live
+to minimize downtime.
+
+This patch adds a flag that causes the guest not to be paused before
+taking the snapshot.
+ *include/libvirt/libvirt.h.in:
+    - add new paused reason: VIR_DOMAIN_PAUSED_SNAPSHOT
+    - add new flag for taking snapshot: VIR_DOMAIN_SNAPSHOT_CREATE_LIVE
+ *tools/virsh-domain-monitor.c:
+    - add string representation for VIR_DOMAIN_PAUSED_SNAPSHOT
+ *tools/virsh-snapshot.c:
+    - add support for VIR_DOMAIN_SNAPSHOT_CREATE_LIVE
+ *tools/virsh.pod:
+    - add docs for --live option added to use
+    VIR_DOMAIN_SNAPSHOT_CREATE_LIVE flag
+(cherry picked from commit 5f75bd4bbe605c8799e84acc7f6a1d6b41e6f1d1)
+---
+ include/libvirt/libvirt.h.in |  4 ++++
+ src/libvirt.c                |  6 ++++++
+ tools/virsh-domain-monitor.c |  2 ++
+ tools/virsh-snapshot.c       |  6 ++++++
+ tools/virsh.pod              | 12 ++++++++++--
+ 5 files changed, 28 insertions(+), 2 deletions(-)
+
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index 1f1ebe0..1db6e2f 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -179,6 +179,7 @@ typedef enum {
+     VIR_DOMAIN_PAUSED_WATCHDOG = 6,     /* paused due to a watchdog event */
+     VIR_DOMAIN_PAUSED_FROM_SNAPSHOT = 7, /* paused after restoring from snapshot */
+     VIR_DOMAIN_PAUSED_SHUTTING_DOWN = 8, /* paused during shutdown process */
++    VIR_DOMAIN_PAUSED_SNAPSHOT = 9,      /* paused while creating a snapshot */
+ 
+ #ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_PAUSED_LAST
+@@ -3673,6 +3674,9 @@ typedef enum {
+                                                           the domain */
+     VIR_DOMAIN_SNAPSHOT_CREATE_ATOMIC      = (1 << 7), /* atomically avoid
+                                                           partial changes */
++    VIR_DOMAIN_SNAPSHOT_CREATE_LIVE        = (1 << 8), /* create the snapshot
++                                                          while the guest is
++                                                          running */
+ } virDomainSnapshotCreateFlags;
+ 
+ /* Take a snapshot of the current VM state */
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 672c0be..562fe97 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -17757,6 +17757,12 @@ virDomainSnapshotGetConnect(virDomainSnapshotPtr snapshot)
+  * running after the snapshot.  This flag is invalid on transient domains,
+  * and is incompatible with VIR_DOMAIN_SNAPSHOT_CREATE_REDEFINE.
+  *
++ * If @flags includes VIR_DOMAIN_SNAPSHOT_CREATE_LIVE, then the domain
++ * is not paused while creating the snapshot. This increases the size
++ * of the memory dump file, but reduces downtime of the guest while
++ * taking the snapshot. Some hypervisors only support this flag during
++ * external checkpoints.
++ *
+  * If @flags includes VIR_DOMAIN_SNAPSHOT_CREATE_DISK_ONLY, then the
+  * snapshot will be limited to the disks described in @xmlDesc, and no
+  * VM state will be saved.  For an active guest, the disk image may be
+diff --git a/tools/virsh-domain-monitor.c b/tools/virsh-domain-monitor.c
+index b264f15..faf23fe 100644
+--- a/tools/virsh-domain-monitor.c
++++ b/tools/virsh-domain-monitor.c
+@@ -223,6 +223,8 @@ vshDomainStateReasonToString(int state, int reason)
+             return N_("from snapshot");
+         case VIR_DOMAIN_PAUSED_SHUTTING_DOWN:
+             return N_("shutting down");
++        case VIR_DOMAIN_PAUSED_SNAPSHOT:
++            return N_("creating snapshot");
+         case VIR_DOMAIN_PAUSED_UNKNOWN:
+         case VIR_DOMAIN_PAUSED_LAST:
+             ;
+diff --git a/tools/virsh-snapshot.c b/tools/virsh-snapshot.c
+index 1641f90..77364e8 100644
+--- a/tools/virsh-snapshot.c
++++ b/tools/virsh-snapshot.c
+@@ -127,6 +127,7 @@ static const vshCmdOptDef opts_snapshot_create[] = {
+     {"reuse-external", VSH_OT_BOOL, 0, N_("reuse any existing external files")},
+     {"quiesce", VSH_OT_BOOL, 0, N_("quiesce guest's file systems")},
+     {"atomic", VSH_OT_BOOL, 0, N_("require atomic operation")},
++    {"live", VSH_OT_BOOL, 0, N_("take a live snapshot")},
+     {NULL, 0, 0, NULL}
+ };
+ 
+@@ -155,6 +156,8 @@ cmdSnapshotCreate(vshControl *ctl, const vshCmd *cmd)
+         flags |= VIR_DOMAIN_SNAPSHOT_CREATE_QUIESCE;
+     if (vshCommandOptBool(cmd, "atomic"))
+         flags |= VIR_DOMAIN_SNAPSHOT_CREATE_ATOMIC;
++    if (vshCommandOptBool(cmd, "live"))
++        flags |= VIR_DOMAIN_SNAPSHOT_CREATE_LIVE;
+ 
+     dom = vshCommandOptDomain(ctl, cmd, NULL);
+     if (dom == NULL)
+@@ -263,6 +266,7 @@ static const vshCmdOptDef opts_snapshot_create_as[] = {
+     {"reuse-external", VSH_OT_BOOL, 0, N_("reuse any existing external files")},
+     {"quiesce", VSH_OT_BOOL, 0, N_("quiesce guest's file systems")},
+     {"atomic", VSH_OT_BOOL, 0, N_("require atomic operation")},
++    {"live", VSH_OT_BOOL, 0, N_("take a live snapshot")},
+     {"diskspec", VSH_OT_ARGV, 0,
+      N_("disk attributes: disk[,snapshot=type][,driver=type][,file=name]")},
+     {NULL, 0, 0, NULL}
+@@ -292,6 +296,8 @@ cmdSnapshotCreateAs(vshControl *ctl, const vshCmd *cmd)
+         flags |= VIR_DOMAIN_SNAPSHOT_CREATE_QUIESCE;
+     if (vshCommandOptBool(cmd, "atomic"))
+         flags |= VIR_DOMAIN_SNAPSHOT_CREATE_ATOMIC;
++    if (vshCommandOptBool(cmd, "live"))
++        flags |= VIR_DOMAIN_SNAPSHOT_CREATE_LIVE;
+ 
+     dom = vshCommandOptDomain(ctl, cmd, NULL);
+     if (dom == NULL)
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 75b8f20..fee6baa 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -2577,7 +2577,7 @@ used to represent properties of snapshots.
+ 
+ =item B<snapshot-create> I<domain> [I<xmlfile>] {[I<--redefine> [I<--current>]]
+ | [I<--no-metadata>] [I<--halt>] [I<--disk-only>] [I<--reuse-external>]
+-[I<--quiesce>] [I<--atomic>]}
++[I<--quiesce>] [I<--atomic>] [I<--live>]}
+ 
+ Create a snapshot for domain I<domain> with the properties specified in
+ I<xmlfile>.  Normally, the only properties settable for a domain snapshot
+@@ -2630,6 +2630,10 @@ this.  If this flag is not specified, then some hypervisors may fail
+ after partially performing the action, and B<dumpxml> must be used to
+ see whether any partial changes occurred.
+ 
++If I<--live> is specified, libvirt takes the snapshot while the guest is
++running. This increases the size of the memory image of the external
++checkpoint. This is currently supported only for external checkpoints.
++
+ Existence of snapshot metadata will prevent attempts to B<undefine>
+ a persistent domain.  However, for transient domains, snapshot
+ metadata is silently lost when the domain quits running (whether
+@@ -2638,7 +2642,7 @@ by command such as B<destroy> or by internal guest action).
+ =item B<snapshot-create-as> I<domain> {[I<--print-xml>]
+ | [I<--no-metadata>] [I<--halt>] [I<--reuse-external>]} [I<name>]
+ [I<description>] [I<--disk-only> [I<--quiesce>] [I<--atomic>]
+-[[I<--diskspec>] B<diskspec>]...]
++[I<--live>] [[I<--diskspec>] B<diskspec>]...]
+ 
+ Create a snapshot for domain I<domain> with the given <name> and
+ <description>; if either value is omitted, libvirt will choose a
+@@ -2683,6 +2687,10 @@ this.  If this flag is not specified, then some hypervisors may fail
+ after partially performing the action, and B<dumpxml> must be used to
+ see whether any partial changes occurred.
+ 
++If I<--live> is specified, libvirt takes the snapshot while the guest is
++running. This increases the size of the memory image of the external
++checkpoint. This is currently supported only for external checkpoints.
++
+ =item B<snapshot-current> I<domain> {[I<--name>] | [I<--security-info>]
+ | [I<snapshotname>]}
+ 
+-- 
+1.8.0
+

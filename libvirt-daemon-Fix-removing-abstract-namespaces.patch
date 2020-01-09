@@ -1,0 +1,36 @@
+From 73aff345d4f35abf1e7a7924ef0c3318241c7912 Mon Sep 17 00:00:00 2001
+Message-Id: <73aff345d4f35abf1e7a7924ef0c3318241c7912.1350425724.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Tue, 16 Oct 2012 16:57:59 +0200
+Subject: [PATCH] daemon: Fix removing abstract namespaces
+
+https://bugzilla.redhat.com/show_bug.cgi?id=859331
+
+In commit 4d085efe1d768cfffc8c017a18da3478dca158c4, there was one line
+missed when reverting commit 32a9aac2e04c991340b66c855a1095e4e6445e54
+with all other friends.  The problem there was that I accidentally
+added back abstract namespace usage for libvirt-sock in non-privileged
+(session) mode.  This one-liner removes just the abstract namespace
+naming (that was initially removed in commit 905be03).
+
+RHEL-only
+---
+ daemon/libvirtd.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/daemon/libvirtd.c b/daemon/libvirtd.c
+index b3e4a24..9036cde 100644
+--- a/daemon/libvirtd.c
++++ b/daemon/libvirtd.c
+@@ -287,7 +287,7 @@ daemonUnixSocketPaths(struct daemonConfig *config,
+             if (!rundir)
+                 goto error;
+ 
+-            if (virAsprintf(sockfile, "@%s/.libvirt/libvirt-sock", rundir) < 0) {
++            if (virAsprintf(sockfile, "%s/.libvirt/libvirt-sock", rundir) < 0) {
+                 VIR_FREE(rundir);
+                 goto no_memory;
+             }
+-- 
+1.7.12.3
+

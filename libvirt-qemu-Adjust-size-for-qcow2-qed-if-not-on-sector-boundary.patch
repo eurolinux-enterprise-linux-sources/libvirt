@@ -1,0 +1,48 @@
+From dc99d739912e2857cfee3e68e72ee5b9ed232392 Mon Sep 17 00:00:00 2001
+Message-Id: <dc99d739912e2857cfee3e68e72ee5b9ed232392@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Tue, 13 May 2014 08:04:49 -0400
+Subject: [PATCH] qemu: Adjust size for qcow2/qed if not on sector boundary
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1002813
+
+If qemuDomainBlockResize() is passed a size not on a KiB boundary - that
+is passed a size based in bytes (VIR_DOMAIN_BLOCK_RESIZE_BYTES), then
+depending on the source format (qcow2 or qed), the value passed must
+be on a sector (or 512 byte) boundary. Since other libvirt code quietly
+adjusts the capacity values, then do so here as well.
+
+(cherry picked from commit 87388d688d2dffd904f653b6860cf3df1633f6b0)
+
+Conflict resolution:
+  * Upstream code doesn't have '4f202266' (eblake's refactoring of
+    storage sources), thus access to 'format' string is not through
+    src.format, but directly to format
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index ec7451a..c946fd0 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -9124,6 +9124,13 @@ qemuDomainBlockResize(virDomainPtr dom,
+     }
+     disk = vm->def->disks[i];
+ 
++    /* qcow2 and qed must be sized on 512 byte blocks/sectors,
++     * so adjust size if necessary to round up.
++     */
++    if (disk->format == VIR_STORAGE_FILE_QCOW2 ||
++        disk->format == VIR_STORAGE_FILE_QED)
++        size = VIR_ROUND_UP(size, 512);
++
+     if (virAsprintf(&device, "%s%s", QEMU_DRIVE_HOST_PREFIX,
+                     disk->info.alias) < 0) {
+         virReportOOMError();
+-- 
+1.9.3
+

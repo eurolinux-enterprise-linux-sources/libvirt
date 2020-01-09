@@ -1,0 +1,86 @@
+From fb7594b64477a1e55fd905066c9e57a3c94a80ec Mon Sep 17 00:00:00 2001
+Message-Id: <fb7594b64477a1e55fd905066c9e57a3c94a80ec@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Feb 2016 06:59:36 -0500
+Subject: [PATCH] util: reduce debug log in virPCIGetVirtualFunctions()
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1276478
+
+Due to debug logs like this:
+
+  virPCIGetDeviceAddressFromSysfsLink:2432 : Attempting to resolve device path from device link '/sys/class/net/eth1/device/virtfn6'
+  logStrToLong_ui:2369 : Converted '0000:07:00.7' to unsigned int 0
+  logStrToLong_ui:2369 : Converted '07:00.7' to unsigned int 7
+  logStrToLong_ui:2369 : Converted '00.7' to unsigned int 0
+  logStrToLong_ui:2369 : Converted '7' to unsigned int 7
+  virPCIGetDeviceAddressFromSysfs:1947 : virPCIDeviceAddress 0000:07:00.7
+  virPCIGetVirtualFunctions:2554 : Found virtual function 7
+
+printed *once for each SR-IOV Virtual Function* of a Physical Function
+each time libvirt retrieved the list of VFs (so if the system has 128
+VFs, there would be 900 lines of log for each call), the debug logs on
+any system with a large number of VFs was dominated by "information"
+that was possibly useful for debugging when the code was being
+written, but is now useless for debugging of any problem on a running
+system, and only serves to obscure the real useful information. This
+overkill has no place in production code, so this patch removes it.
+
+(based on upstream commit 3d64a9d783a3023bb9ba8b02afbd1b958ecf1d61 but
+redone by hand since the filename and names of relevant functions (but
+not their content) have changed upstream).
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/pci.c | 19 ++-----------------
+ 1 file changed, 2 insertions(+), 17 deletions(-)
+
+diff --git a/src/util/pci.c b/src/util/pci.c
+index a3c1df7..9b9ca10 100644
+--- a/src/util/pci.c
++++ b/src/util/pci.c
+@@ -1857,12 +1857,8 @@ logStrToLong_ui(char const *s,
+     int ret = 0;
+ 
+     ret = virStrToLong_ui(s, end_ptr, base, result);
+-    if (ret != 0) {
++    if (ret != 0)
+         VIR_ERROR(_("Failed to convert '%s' to unsigned int"), s);
+-    } else {
+-        VIR_DEBUG("Converted '%s' to unsigned int %u", s, *result);
+-    }
+-
+     return ret;
+ }
+ 
+@@ -1908,11 +1904,8 @@ pciGetPciConfigAddressFromSysfsDeviceLink(const char *device_link,
+     char errbuf[64];
+     int ret = -1;
+ 
+-    VIR_DEBUG("Attempting to resolve device path from device link '%s'",
+-              device_link);
+-
+     if (!virFileExists(device_link)) {
+-        VIR_DEBUG("sysfs_path '%s' does not exist", device_link);
++        VIR_DEBUG("'%s' does not exist", device_link);
+         return ret;
+     }
+ 
+@@ -1939,15 +1932,7 @@ pciGetPciConfigAddressFromSysfsDeviceLink(const char *device_link,
+         VIR_FREE(*bdf);
+         goto out;
+     }
+-
+-    VIR_DEBUG("pci_config_address %.4x:%.2x:%.2x.%.1x",
+-              (*bdf)->domain,
+-              (*bdf)->bus,
+-              (*bdf)->slot,
+-              (*bdf)->function);
+-
+     ret = 0;
+-
+ out:
+     VIR_FREE(device_path);
+ 
+-- 
+2.7.1
+

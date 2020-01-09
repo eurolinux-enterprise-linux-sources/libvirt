@@ -1,0 +1,294 @@
+From acf71d38f8b834e9da63895cfe2aa8894ef0393f Mon Sep 17 00:00:00 2001
+Message-Id: <acf71d38f8b834e9da63895cfe2aa8894ef0393f@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 8 May 2014 10:26:52 -0400
+Subject: [PATCH] util: fix virFileOpenAs return value and resulting error logs
+
+This resolves:
+
+     https://bugzilla.redhat.com/show_bug.cgi?id=851411 - RHEL6
+     https://bugzilla.redhat.com/show_bug.cgi?id=955500 - RHEL7
+
+The first problem was that virFileOpenAs was returning fd (-1) in one
+of the error cases rather than ret (-errno), so the caller thought
+that the error was EPERM rather than ENOENT.
+
+The second problem was that some log messages in the general purpose
+qemuOpenFile() function would always say "Failed to create" even if
+the caller hadn't included O_CREAT (i.e. they were trying to open an
+existing file).
+
+This fixes virFileOpenAs to jump down to the error return (which
+returns ret instead of fd) in the previously mentioned incorrect
+failure case of virFileOpenAs(), removes all error logging from
+virFileOpenAs() (since the callers report it), and modifies
+qemuOpenFile to appropriately use "open" or "create" in its log
+messages.
+
+NB: I seriously considered removing logging from all callers of
+virFileOpenAs(), but there is at least one case where the caller
+doesn't want virFileOpenAs() to log any errors, because it's just
+going to try again (qemuOpenFile()). We can't simply make a silent
+variation of virFileOpenAs() though, because qemuOpenFile() can't make
+the decision about whether or not it wants to retry until after
+virFileOpenAs() has already returned an error code.
+
+Likewise, I also considered changing virFileOpenAs() to return -1 with
+errno set on return, and may still do that, but only as a separate
+patch, as it obscures the intent of this patch too much.
+
+(cherry-picked from upstream commit
+a2c1bedbd8fa977dc733266e88a1b57e28b50dd3)
+
+Conflicts:
+
+  src/libxl/libxl_driver.c - copyright notice changed upstream
+
+  src/qemu/qemu_driver.c - in qemuOpenFile() cfg->uid was replaced by
+      fallback_uid by upstream commit
+      849df2875d52aba4d8b82d883c545a7101476d52. That patch was *after*
+      this patch upstream, but *before* this patch in RHEL6. BTW, that
+      patch resolves
+      https://bugzilla.redhat.com/show_bug.cgi?id=869053 ).
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libxl/libxl_driver.c      |  6 ++---
+ src/qemu/qemu_driver.c        | 54 ++++++++++++++++++++++---------------------
+ src/storage/storage_backend.c |  2 +-
+ src/util/storage_file.c       |  4 ++--
+ src/util/util.c               | 35 ++++++++--------------------
+ 5 files changed, 44 insertions(+), 57 deletions(-)
+
+diff --git a/src/libxl/libxl_driver.c b/src/libxl/libxl_driver.c
+index 912cc22..e68bc32 100644
+--- a/src/libxl/libxl_driver.c
++++ b/src/libxl/libxl_driver.c
+@@ -1,5 +1,5 @@
+ /*---------------------------------------------------------------------------*/
+-/*  Copyright (C) 2006-2012 Red Hat, Inc.
++/*  Copyright (C) 2006-2013 Red Hat, Inc.
+  *  Copyright (c) 2011 SUSE LINUX Products GmbH, Nuernberg, Germany.
+  *  Copyright (C) 2011 Univention GmbH.
+  *
+@@ -223,8 +223,8 @@ libxlSaveImageOpen(libxlDriverPrivatePtr driver, const char *from,
+     char *xml = NULL;
+ 
+     if ((fd = virFileOpenAs(from, O_RDONLY, 0, -1, -1, 0)) < 0) {
+-        virReportError(VIR_ERR_OPERATION_FAILED,
+-                       "%s", _("cannot read domain image"));
++        virReportSystemError(-fd,
++                             _("Failed to open domain image file '%s'"), from);
+         goto error;
+     }
+ 
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 0f2e4e3..ec7451a 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2799,10 +2799,9 @@ qemuOpenFileAs(uid_t fallback_uid, gid_t fallback_gid,
+ 
+     /* First try creating the file as root */
+     if (!is_reg) {
+-        fd = open(path, oflags & ~O_CREAT);
+-        if (fd < 0) {
+-            virReportSystemError(errno, _("unable to open %s"), path);
+-            goto cleanup;
++        if ((fd = open(path, oflags & ~O_CREAT)) < 0) {
++            fd = -errno;
++            goto error;
+         }
+     } else {
+         if ((fd = virFileOpenAs(path, oflags, S_IRUSR | S_IWUSR, uid, gid,
+@@ -2813,35 +2812,30 @@ qemuOpenFileAs(uid_t fallback_uid, gid_t fallback_gid,
+                qemu user is non-root, just set a flag to
+                bypass security driver shenanigans, and retry the operation
+                after doing setuid to qemu user */
+-            if ((fd != -EACCES && fd != -EPERM) || fallback_uid == getuid()) {
+-                virReportSystemError(-fd,
+-                                     _("Failed to create file '%s'"),
+-                                     path);
+-                goto cleanup;
+-            }
++            if ((fd != -EACCES && fd != -EPERM) || fallback_uid == getuid())
++                goto error;
+ 
+             /* On Linux we can also verify the FS-type of the directory. */
+             switch (path_shared) {
+                 case 1:
+-                   /* it was on a network share, so we'll continue
+-                    * as outlined above
+-                    */
+-                   break;
++                    /* it was on a network share, so we'll continue
++                     * as outlined above
++                     */
++                    break;
+ 
+                 case -1:
+-                   virReportSystemError(errno,
+-                                        _("Failed to create file "
+-                                          "'%s': couldn't determine fs type"),
+-                                        path);
+-                   goto cleanup;
++                    virReportSystemError(-fd, oflags & O_CREAT
++                                         ? _("Failed to create file "
++                                             "'%s': couldn't determine fs type")
++                                         : _("Failed to open file "
++                                             "'%s': couldn't determine fs type"),
++                                         path);
++                    goto cleanup;
+ 
+                 case 0:
+                 default:
+-                   /* local file - log the error returned by virFileOpenAs */
+-                   virReportSystemError(-fd,
+-                                        _("Failed to create file '%s'"),
+-                                        path);
+-                   goto cleanup;
++                    /* local file - log the error returned by virFileOpenAs */
++                    goto error;
+             }
+ 
+             /* Retry creating the file as qemu user */
+@@ -2850,8 +2844,9 @@ qemuOpenFileAs(uid_t fallback_uid, gid_t fallback_gid,
+                                     S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP,
+                                     fallback_uid, fallback_gid,
+                                     vfoflags | VIR_FILE_OPEN_FORK)) < 0) {
+-                virReportSystemError(-fd,
+-                                   _("Error from child process creating '%s'"),
++                virReportSystemError(-fd, oflags & O_CREAT
++                                     ? _("Error from child process creating '%s'")
++                                     : _("Error from child process opening '%s'"),
+                                      path);
+                 goto cleanup;
+             }
+@@ -2870,6 +2865,13 @@ cleanup:
+         *bypassSecurityDriver = bypass_security;
+ 
+     return fd;
++
++error:
++    virReportSystemError(-fd, oflags & O_CREAT
++                         ? _("Failed to create file '%s'")
++                         : _("Failed to open file '%s'"),
++                         path);
++    goto cleanup;
+ }
+ 
+ /* Helper function to execute a migration to file with a correct save header
+diff --git a/src/storage/storage_backend.c b/src/storage/storage_backend.c
+index 81e00e1..c8effda 100644
+--- a/src/storage/storage_backend.c
++++ b/src/storage/storage_backend.c
+@@ -408,7 +408,7 @@ virStorageBackendCreateRaw(virConnectPtr conn ATTRIBUTE_UNUSED,
+                             vol->target.perms.gid,
+                             operation_flags)) < 0) {
+         virReportSystemError(-fd,
+-                             _("cannot create path '%s'"),
++                             _("Failed to create file '%s'"),
+                              vol->target.path);
+         goto cleanup;
+     }
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index 6b279f1..2eb781b 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -890,7 +890,7 @@ virStorageFileProbeFormat(const char *path, uid_t uid, gid_t gid)
+     int fd, ret;
+ 
+     if ((fd = virFileOpenAs(path, O_RDONLY, 0, uid, gid, 0)) < 0) {
+-        virReportSystemError(errno, _("cannot open file '%s'"), path);
++        virReportSystemError(-fd, _("Failed to open file '%s'"), path);
+         return -1;
+     }
+ 
+@@ -949,7 +949,7 @@ virStorageFileGetMetadataRecurse(const char *path, const char *directory,
+         return NULL;
+ 
+     if ((fd = virFileOpenAs(path, O_RDONLY, 0, uid, gid, 0)) < 0) {
+-        virReportSystemError(-fd, _("cannot open file '%s'"), path);
++        virReportSystemError(-fd, _("Failed to open file '%s'"), path);
+         return NULL;
+     }
+ 
+diff --git a/src/util/util.c b/src/util/util.c
+index 795b4fe..ce4e35d 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -1005,9 +1005,11 @@ virFileOpenForked(const char *path, int openflags, mode_t mode,
+  * uid:gid before returning (even if it already existed with a
+  * different owner). If @flags includes VIR_FILE_OPEN_FORCE_MODE,
+  * ensure it has those permissions before returning (again, even if
+- * the file already existed with different permissions).  The return
+- * value (if non-negative) is the file descriptor, left open.  Returns
+- * -errno on failure.  */
++ * the file already existed with different permissions).
++ *
++ * The return value (if non-negative) is the file descriptor, left
++ * open.  Returns -errno on failure.
++ */
+ int
+ virFileOpenAs(const char *path, int openflags, mode_t mode,
+               uid_t uid, gid_t gid, unsigned int flags)
+@@ -1031,6 +1033,8 @@ virFileOpenAs(const char *path, int openflags, mode_t mode,
+ 
+         if ((fd = open(path, openflags, mode)) < 0) {
+             ret = -errno;
++            if (!(flags & VIR_FILE_OPEN_FORK))
++                goto error;
+         } else {
+             ret = virFileOpenForceOwnerMode(path, fd, mode, uid, gid, flags);
+             if (ret < 0)
+@@ -1056,45 +1060,26 @@ virFileOpenAs(const char *path, int openflags, mode_t mode,
+ 
+             /* On Linux we can also verify the FS-type of the
+              * directory.  (this is a NOP on other platforms). */
+-            switch (virStorageFileIsSharedFS(path)) {
+-            case 1:
+-                /* it was on a network share, so we'll re-try */
+-                break;
+-            case -1:
+-                /* failure detecting fstype */
+-                virReportSystemError(errno, _("couldn't determine fs type "
+-                                              "of mount containing '%s'"), path);
+-                goto error;
+-            case 0:
+-            default:
+-                /* file isn't on a recognized network FS */
++            if (virStorageFileIsSharedFS(path) <= 0)
+                 goto error;
+-            }
+         }
+ 
+         /* passed all prerequisites - retry the open w/fork+setuid */
+         if ((fd = virFileOpenForked(path, openflags, mode, uid, gid, flags)) < 0) {
+             ret = fd;
+-            fd = -1;
+             goto error;
+         }
+     }
+ 
+     /* File is successfully opened */
+-
+     return fd;
+ 
+ error:
+-    if (fd < 0) {
+-        /* whoever failed the open last has already set ret = -errno */
+-        virReportSystemError(-ret, openflags & O_CREAT
+-                             ? _("failed to create file '%s'")
+-                             : _("failed to open file '%s'"),
+-                             path);
+-    } else {
++    if (fd >= 0) {
+         /* some other failure after the open succeeded */
+         VIR_FORCE_CLOSE(fd);
+     }
++    /* whoever failed the open last has already set ret = -errno */
+     return ret;
+ }
+ 
+-- 
+1.9.3
+

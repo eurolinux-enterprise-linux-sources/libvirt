@@ -1,0 +1,53 @@
+From d51b986d332fd91ddc0136313f81a2f5bf804b15 Mon Sep 17 00:00:00 2001
+Message-Id: <d51b986d332fd91ddc0136313f81a2f5bf804b15@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Thu, 5 Dec 2013 17:03:15 -0500
+Subject: [PATCH] Add virtio-scsi to fallback models of scsi controller
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1014943
+
+When user does not specify any model for scsi controller, or worse, no
+controller at all, but libvirt automatically adds scsi controller with
+no model, we are not searching for virtio-scsi and thus this can fail
+for example on qemu which doesn't support lsi logic adapter.
+
+This means that when qemu on x86 doesn't support lsi53c895a and the
+user adds the following to an XML without any scsi controller:
+
+<disk ...>
+  ...
+  <target dev='sda'>
+</disk>
+
+libvirt fails like this:
+ # virsh define asdf.xml
+ error: Failed to define domain from asdf.xml
+ error: internal error Unable to determine model for scsi controller
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=974943
+(cherry picked from commit b7f1c0c38729e5eba44ba134b93b1b95a4dae8d8)
+
+adjusted for differences in 6.6 code base
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index b85d896..0f2f8b7 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -536,6 +536,8 @@ qemuSetScsiControllerModel(virDomainDefPtr def,
+             *model = VIR_DOMAIN_CONTROLLER_MODEL_SCSI_IBMVSCSI;
+         } else if (qemuCapsGet(caps, QEMU_CAPS_SCSI_LSI)) {
+             *model = VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSILOGIC;
++        } else if (qemuCapsGet(caps, QEMU_CAPS_VIRTIO_SCSI_PCI)) {
++            *model = VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_SCSI;
+         } else {
+             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                            _("Unable to determine model for scsi controller"));
+-- 
+1.9.1
+

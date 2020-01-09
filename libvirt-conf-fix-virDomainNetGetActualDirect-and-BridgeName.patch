@@ -1,0 +1,104 @@
+From e654bc5e575adb39ff58040d4d7d15a5a37b614a Mon Sep 17 00:00:00 2001
+Message-Id: <e654bc5e575adb39ff58040d4d7d15a5a37b614a.1354720508.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 3 Dec 2012 14:09:17 -0500
+Subject: [PATCH] conf: fix virDomainNetGetActualDirect*() and BridgeName()
+
+This resolves:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=881480
+
+These three functions:
+
+  virDomainNetGetActualBridgeName
+  virDomainNetGetActualDirectDev
+  virDomainNetGetActualDirectMode
+
+return attributes that are in a union whose contents are interpreted
+differently depending on the actual->type and so they should only
+return non-0 when actual->type is 'bridge' (in the first case) or
+'direct' (in the other two cases, but I had neglected to do that, so
+...DirectDev() was returning bridge.brname (which happens to share the
+same spot in the union with direct.linkdev) if actual->type was
+'bridge', and ...BridgeName was returning direct.linkdev when
+actual->type was 'direct'.
+
+How does this involve Bug 881480 (which was about the inability to
+switch between two networks that both have "<forward mode='bridge'/>
+<bridge name='xxx'/>"? Whenever the return value of
+virDomainNetGetActualDirectDev() for the new and old network
+definitions doesn't match, qemuDomainChangeNet() requires a "complete
+reconnect" of the device, which qemu currently doesn't
+support. ...DirectDev() *should* have been returning NULL for old and
+new, but was instead returning the old and new bridge names, which
+differ.
+
+(The other two functions weren't causing any behavioral problems in
+virDomainChangeNet(), but their problem and fix was identical, so I
+included them in this same patch).
+(cherry picked from commit 3738cf41f1012eca419e8fa0fa0575cb1e0552e3)
+---
+ src/conf/domain_conf.c | 33 ++++++++++++++++++---------------
+ 1 file changed, 18 insertions(+), 15 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 50c33aa..ccc0ac6 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -15075,11 +15075,12 @@ virDomainNetGetActualBridgeName(virDomainNetDefPtr iface)
+ {
+     if (iface->type == VIR_DOMAIN_NET_TYPE_BRIDGE)
+         return iface->data.bridge.brname;
+-    if (iface->type != VIR_DOMAIN_NET_TYPE_NETWORK)
+-        return NULL;
+-    if (!iface->data.network.actual)
+-        return NULL;
+-    return iface->data.network.actual->data.bridge.brname;
++    if (iface->type == VIR_DOMAIN_NET_TYPE_NETWORK &&
++        iface->data.network.actual &&
++        iface->data.network.actual->type == VIR_DOMAIN_NET_TYPE_BRIDGE) {
++        return iface->data.network.actual->data.bridge.brname;
++    }
++    return NULL;
+ }
+ 
+ const char *
+@@ -15087,11 +15088,12 @@ virDomainNetGetActualDirectDev(virDomainNetDefPtr iface)
+ {
+     if (iface->type == VIR_DOMAIN_NET_TYPE_DIRECT)
+         return iface->data.direct.linkdev;
+-    if (iface->type != VIR_DOMAIN_NET_TYPE_NETWORK)
+-        return NULL;
+-    if (!iface->data.network.actual)
+-        return NULL;
+-    return iface->data.network.actual->data.direct.linkdev;
++    if (iface->type == VIR_DOMAIN_NET_TYPE_NETWORK &&
++        iface->data.network.actual &&
++        iface->data.network.actual->type == VIR_DOMAIN_NET_TYPE_DIRECT) {
++        return iface->data.network.actual->data.direct.linkdev;
++    }
++    return NULL;
+ }
+ 
+ int
+@@ -15099,11 +15101,12 @@ virDomainNetGetActualDirectMode(virDomainNetDefPtr iface)
+ {
+     if (iface->type == VIR_DOMAIN_NET_TYPE_DIRECT)
+         return iface->data.direct.mode;
+-    if (iface->type != VIR_DOMAIN_NET_TYPE_NETWORK)
+-        return 0;
+-    if (!iface->data.network.actual)
+-        return 0;
+-    return iface->data.network.actual->data.direct.mode;
++    if (iface->type == VIR_DOMAIN_NET_TYPE_NETWORK &&
++        iface->data.network.actual &&
++        iface->data.network.actual->type == VIR_DOMAIN_NET_TYPE_DIRECT) {
++        return iface->data.network.actual->data.direct.mode;
++    }
++    return 0;
+ }
+ 
+ virDomainHostdevDefPtr
+-- 
+1.8.0
+

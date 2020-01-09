@@ -1,0 +1,72 @@
+From a4e78f7d8d276dc97720a280027952899f5ca429 Mon Sep 17 00:00:00 2001
+Message-Id: <a4e78f7d8d276dc97720a280027952899f5ca429.1373271644.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Tue, 2 Jul 2013 03:58:49 -0400
+Subject: [PATCH] pci: initialize virtual_functions array pointer to avoid
+ segfault
+
+This fixes https://bugzilla.redhat.com/show_bug.cgi?id=980339
+
+The problem was that if virPCIGetVirtualFunctions was given the name
+of a non-existent interface, it would return to its caller without
+initializing the pointer to the array of virtual functions to NULL,
+and the caller (virNetDevGetVirtualFunctions) would try to VIR_FREE()
+the invalid pointer.
+
+The final error message before the crash would be:
+
+ virPCIGetVirtualFunctions:2088 :
+  Failed to open dir '/sys/class/net/eth2/device':
+  No such file or directory
+
+In this patch I move the initialization in virPCIGetVirtualFunctions()
+to the begining of the function, and also do an explicit
+initialization in virNetDevGetVirtualFunctions, just in case someone
+in the future adds code into that function prior to the call to
+virPCIGetVirtualFunctions.
+(cherry picked from commit 2c2525ab6a6f0ad5d75a6c60711e2e28cb1cebe9)
+---
+ src/util/pci.c       | 5 +++--
+ src/util/virnetdev.c | 3 +++
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/pci.c b/src/util/pci.c
+index 129c01a..a3c1df7 100644
+--- a/src/util/pci.c
++++ b/src/util/pci.c
+@@ -1997,6 +1997,9 @@ pciGetVirtualFunctions(const char *sysfs_path,
+     VIR_DEBUG("Attempting to get SR IOV virtual functions for device"
+               "with sysfs path '%s'", sysfs_path);
+ 
++    *virtual_functions = NULL;
++    *num_virtual_functions = 0;
++
+     dir = opendir(sysfs_path);
+     if (dir == NULL) {
+         memset(errbuf, '\0', sizeof(errbuf));
+@@ -2007,8 +2010,6 @@ pciGetVirtualFunctions(const char *sysfs_path,
+         return ret;
+     }
+ 
+-    *virtual_functions = NULL;
+-    *num_virtual_functions = 0;
+     while ((entry = readdir(dir))) {
+         if (STRPREFIX(entry->d_name, "virtfn")) {
+ 
+diff --git a/src/util/virnetdev.c b/src/util/virnetdev.c
+index f6f1794..76db9db 100644
+--- a/src/util/virnetdev.c
++++ b/src/util/virnetdev.c
+@@ -988,6 +988,9 @@ virNetDevGetVirtualFunctions(const char *pfname,
+     char *pci_sysfs_device_link = NULL;
+     char *pciConfigAddr;
+ 
++    *virt_fns = NULL;
++    *n_vfname = 0;
++
+     if (virNetDevSysfsFile(&pf_sysfs_device_link, pfname, "device") < 0)
+         return ret;
+ 
+-- 
+1.8.2.1
+

@@ -1,0 +1,48 @@
+From ce48ef26331803da7c39ddb8f3d50905f447f281 Mon Sep 17 00:00:00 2001
+Message-Id: <ce48ef26331803da7c39ddb8f3d50905f447f281.1377097597.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Wed, 21 Aug 2013 06:01:17 -0400
+Subject: [PATCH] network: allow <vlan> in type='hostdev' networks
+
+This resolves: https://bugzilla.redhat.com/show_bug.cgi?id=999107
+
+Although SRIOV network cards support setting a vlan tag on their
+virtual functions, and although setting this vlan tag via a <vlan>
+element in a domain's <interface> works, setting a vlan tag for these
+devices in a <network> definition, or in a network <portgroup>
+definition is also supposed to work (and the comment that validates
+<vlan> usage even says that!). However, the check to allow it only
+checked for an openvswitch network, so attempts to add <vlan> to a
+network of type='hostdev' would fail.
+
+(cherry pick from upstream commit
+4b42e3b97f47c5b9e40a21eaecd18bc785118f63. Only conflict was that
+attributes associated with forward element have been moved into a
+separate object upstream, so "forward.Type" in the upstream patch was
+changed to "forwardType" in the RHEL6.5 version)
+---
+ src/network/bridge_driver.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 16fc3df..9b1de2d 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -2694,9 +2694,11 @@ networkValidate(virNetworkDefPtr def)
+      * a pool, and those using an Open vSwitch bridge.
+      */
+ 
+-    vlanAllowed = (def->forwardType == VIR_NETWORK_FORWARD_BRIDGE &&
+-                   def->virtPortProfile &&
+-                   def->virtPortProfile->virtPortType == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH);
++    vlanAllowed = ((def->forwardType == VIR_NETWORK_FORWARD_BRIDGE &&
++                    def->virtPortProfile &&
++                    def->virtPortProfile->virtPortType
++                    == VIR_NETDEV_VPORT_PROFILE_OPENVSWITCH) ||
++                   def->forwardType == VIR_NETWORK_FORWARD_HOSTDEV);
+ 
+     vlanUsed = def->vlan.nTags > 0;
+     for (ii = 0; ii < def->nPortGroups; ii++) {
+-- 
+1.8.3.2
+

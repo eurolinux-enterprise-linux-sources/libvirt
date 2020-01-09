@@ -1,0 +1,109 @@
+From d915305eba5a077e2c14a31a363fd51bdf976b4a Mon Sep 17 00:00:00 2001
+Message-Id: <d915305eba5a077e2c14a31a363fd51bdf976b4a@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 11 Dec 2015 18:18:56 +0100
+Subject: [PATCH] qemu: snapshot: Fix modification of vm object without job
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1290647
+
+RHEL-only (too invasive to backport full fix)
+
+An attempt to redefine a snapshot that is being created at the exact
+point in a separate call (albeit really uselless) crashes the daemon as
+both of the functions actually creating the snapshot create their job
+very late whereas 'redefine' of a snapshot does not create any job.
+Since the code handling 'redefine' doesn't work on a incomplete snapshot
+object the operation crashed with the following backtrace:
+
+ Thread 11 (Thread 0x7f6e9afbe700 (LWP 23726)):
+ #0  virDomainSnapshotDropParent (snapshot=0x7f6e7800a0b0) at conf/snapshot_conf.c:1007
+ #1  0x000000000047135f in qemuDomainSnapshotCreateXML (domain=0x7f6e6c0c5ee0, xmlDesc=<value optimized out>,
+     flags=<value optimized out>) at qemu/qemu_driver.c:12541
+ #2  0x00007f6ea4216997 in virDomainSnapshotCreateXML (domain=0x7f6e6c0c5ee0,
+     xmlDesc=0x7f6e6c0c92e0 "<domainsnapshot>\n  <name>test</name>\n  <state>running</state>\n  <creationTime>1449849610</creationTime>\n  <memory snapshot='internal'/>\n  <disks>\n    <disk name='vda' snapshot='internal'/>\n  </disks>\n"..., flags=3) at libvirt.c:18016
+  [...]
+
+Thread 8 (Thread 0x7f6e991bb700 (LWP 23729)):
+ #0  pthread_cond_wait@@GLIBC_2.3.2 () at ../nptl/sysdeps/unix/sysv/linux/x86_64/pthread_cond_wait.S:183
+ #1  0x00007f6ea417a846 in virCondWait (c=<value optimized out>, m=<value optimized out>) at util/threads-pthread.c:117
+ #2  0x000000000049b4bc in qemuMonitorSend (mon=0x7f6e7400bc90, msg=<value optimized out>) at qemu/qemu_monitor.c:914
+    [...]
+ #7  0x00000000004a5f49 in qemuMonitorJSONCreateSnapshot (mon=0x7f6e7400bc90, name=0x7f6e78000bd0 "test")
+    at qemu/qemu_monitor_json.c:3399
+ 8  0x0000000000471447 in qemuDomainSnapshotCreateActiveInternal (domain=<value optimized out>, xmlDesc=<value optimized out>,
+    flags=136) at qemu/qemu_driver.c:11713
+ #9  qemuDomainSnapshotCreateXML (domain=<value optimized out>, xmlDesc=<value optimized out>, flags=136)
+    at qemu/qemu_driver.c:12631
+    [...]
+
+Reproducer:
+ virsh snapshot-create-as fedora22 --halt --name "test" & \
+ virsh snapshot-dumpxml fedora22 test | \
+ virsh snapshot-create --redefine --current /dev/stdin
+
+As the definition of the domain shouldn't ever be modified without using
+the job APIs the redefine operation needs to be guarded with it.
+
+Fortunately the two inactive operations can't cause a problem at this
+point since @vm isn't ever left in unlocked state while an API is
+running when the vm is offline.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index cc4fc5d..672a3dd 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -12341,6 +12341,7 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+     virDomainSnapshotObjPtr other = NULL;
+     int align_location = VIR_DOMAIN_SNAPSHOT_LOCATION_INTERNAL;
+     int align_match = true;
++    bool redefine_job = false;
+ 
+     virCheckFlags(VIR_DOMAIN_SNAPSHOT_CREATE_REDEFINE |
+                   VIR_DOMAIN_SNAPSHOT_CREATE_CURRENT |
+@@ -12430,6 +12431,14 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+     }
+ 
+     if (flags & VIR_DOMAIN_SNAPSHOT_CREATE_REDEFINE) {
++        /* RHEL: explicit job handling is necessary, since _REDEFINE could
++         * access incomplete snapshot while other snapshot job is running and
++         * in monitor */
++        if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_MODIFY) < 0)
++            goto cleanup;
++
++        redefine_job = true;
++
+         /* Prevent circular chains */
+         if (def->parent) {
+             if (STREQ(def->name, def->parent)) {
+@@ -12622,6 +12631,9 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+          * makes sense, such as checking that qemu-img recognizes the
+          * snapshot name in at least one of the domain's disks?  */
+     } else if (virDomainObjIsActive(vm)) {
++        /* RHEL note: both functions below do their own job handling, they
++         * unlock the domain object in the process */
++
+         if (flags & VIR_DOMAIN_SNAPSHOT_CREATE_DISK_ONLY ||
+             snap->def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL) {
+             /* external checkpoint or disk snapshot */
+@@ -12657,6 +12669,13 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+     snapshot = virGetDomainSnapshot(domain, snap->def->name);
+ 
+ cleanup:
++    /* RHEL: Proper job handling fix was hard to backport, thus downstream adds
++     * explicit job for the _REDEFINE operation. The job has to be removed here.
++     * Since the _REDEFINE operation doesn't kill the VM or enter monitor at any
++     * point vm is always valid */
++    if (redefine_job && qemuDomainObjEndJob(driver, vm) == 0)
++        vm = NULL;
++
+     if (vm) {
+         if (snapshot && !(flags & VIR_DOMAIN_SNAPSHOT_CREATE_NO_METADATA)) {
+             if (qemuDomainSnapshotWriteMetadata(vm, snap,
+-- 
+2.7.0
+

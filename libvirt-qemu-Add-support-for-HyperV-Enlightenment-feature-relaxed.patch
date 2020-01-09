@@ -1,0 +1,189 @@
+From cd0f994a55cf43d22b4899f517ddc627a65f75cc Mon Sep 17 00:00:00 2001
+Message-Id: <cd0f994a55cf43d22b4899f517ddc627a65f75cc.1350990677.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 18 Oct 2012 12:34:52 +0200
+Subject: [PATCH] qemu: Add support for HyperV Enlightenment feature "relaxed"
+
+https://bugzilla.redhat.com/show_bug.cgi?id=864606
+
+This patch adds QEMU support for the "relaxed" feature implemented by
+previous patch.
+(cherry picked from commit 09f10a12be46b1d7d5a8a610388155c22de27831)
+---
+ src/qemu/qemu_command.c                         | 58 ++++++++++++++++++++++++-
+ tests/qemuargv2xmltest.c                        |  2 +
+ tests/qemuxml2argvdata/qemuxml2argv-hyperv.args |  4 ++
+ tests/qemuxml2argvdata/qemuxml2argv-hyperv.xml  | 26 +++++++++++
+ tests/qemuxml2argvtest.c                        |  2 +
+ tests/qemuxml2xmltest.c                         |  2 +
+ 6 files changed, 92 insertions(+), 2 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-hyperv.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-hyperv.xml
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index ce7b32e..e4ac288 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4246,6 +4246,26 @@ qemuBuildCpuArgStr(const struct qemud_driver *driver,
+         have_cpu = true;
+     }
+ 
++    if (def->features & (1 << VIR_DOMAIN_FEATURE_HYPERV)) {
++        if (!have_cpu) {
++            virBufferAdd(&buf, default_model, -1);
++            have_cpu = true;
++        }
++
++        for (i = 0; i < VIR_DOMAIN_HYPERV_LAST; i++) {
++            switch ((enum virDomainHyperv) i) {
++            case VIR_DOMAIN_HYPERV_RELAXED:
++                if (def->hyperv_features[i] == VIR_DOMAIN_FEATURE_STATE_ON)
++                    virBufferAsprintf(&buf, ",hv_%s",
++                                      virDomainHypervTypeToString(i));
++                break;
++
++            case VIR_DOMAIN_HYPERV_LAST:
++                break;
++            }
++        }
++    }
++
+     if (virBufferError(&buf))
+         goto no_memory;
+ 
+@@ -7723,8 +7743,7 @@ qemuParseCommandLineCPU(virDomainDefPtr dom,
+                 cpu->model = model;
+                 model = NULL;
+             }
+-        }
+-        else if (*p == '+' || *p == '-') {
++        } else if (*p == '+' || *p == '-') {
+             char *feature;
+             int policy;
+             int ret = 0;
+@@ -7794,6 +7813,41 @@ qemuParseCommandLineCPU(virDomainDefPtr dom,
+             VIR_FREE(feature);
+             if (ret < 0)
+                 goto error;
++        } else if (STRPREFIX(p, "hv_")) {
++            char *feature;
++            int f;
++            p += 3; /* "hv_" */
++
++            if (*p == '\0' || *p == ',')
++                goto syntax;
++
++            if (next)
++                feature = strndup(p, next - p - 1);
++            else
++                feature = strdup(p);
++
++            if (!feature)
++                goto no_memory;
++
++            dom->features |= (1 << VIR_DOMAIN_FEATURE_HYPERV);
++
++            if ((f = virDomainHypervTypeFromString(feature)) < 0) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                               _("unsupported HyperV Enlightenment feature "
++                                 "'%s'"), feature);
++                goto error;
++            }
++
++            switch ((enum virDomainHyperv) f) {
++            case VIR_DOMAIN_HYPERV_RELAXED:
++                dom->hyperv_features[f] = VIR_DOMAIN_FEATURE_STATE_ON;
++                break;
++
++            case VIR_DOMAIN_HYPERV_LAST:
++                break;
++            }
++
++            VIR_FREE(feature);
+         }
+     } while ((p = next));
+ 
+diff --git a/tests/qemuargv2xmltest.c b/tests/qemuargv2xmltest.c
+index 5e51d32..70de8c3 100644
+--- a/tests/qemuargv2xmltest.c
++++ b/tests/qemuargv2xmltest.c
+@@ -241,6 +241,8 @@ mymain(void)
+ 
+     DO_TEST("smp");
+ 
++    DO_TEST("hyperv");
++
+     DO_TEST_FULL("restore-v1", 0, "stdio");
+     DO_TEST_FULL("restore-v2", 0, "stdio");
+     DO_TEST_FULL("restore-v2", 0, "exec:cat");
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-hyperv.args b/tests/qemuxml2argvdata/qemuxml2argv-hyperv.args
+new file mode 100644
+index 0000000..a414da0
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-hyperv.args
+@@ -0,0 +1,4 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu -S -M pc \
++-cpu qemu32,hv_relaxed -m 214 -smp 6 -nographic -monitor \
++unix:/tmp/test-monitor,server,nowait -boot n -net none -serial none \
++-parallel none -usb
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-hyperv.xml b/tests/qemuxml2argvdata/qemuxml2argv-hyperv.xml
+new file mode 100644
+index 0000000..9b7d8f2
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-hyperv.xml
+@@ -0,0 +1,26 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static'>6</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='network'/>
++  </os>
++  <features>
++    <acpi/>
++    <hyperv>
++      <relaxed state='on'/>
++    </hyperv>
++  </features>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <controller type='usb' index='0'/>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 7732ae1..418b738 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -409,6 +409,8 @@ mymain(void)
+     DO_TEST("eoi-enabled", NONE);
+     DO_TEST("kvmclock+eoi-disabled", QEMU_CAPS_ENABLE_KVM);
+ 
++    DO_TEST("hyperv", NONE);
++
+     DO_TEST("hugepages", QEMU_CAPS_MEM_PATH);
+     DO_TEST("disk-cdrom", NONE);
+     DO_TEST("disk-cdrom-empty", QEMU_CAPS_DRIVE);
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 21db5a4..1d366f1 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -150,6 +150,8 @@ mymain(void)
+     DO_TEST("eoi-disabled");
+     DO_TEST("eoi-enabled");
+ 
++    DO_TEST("hyperv");
++
+     DO_TEST("hugepages");
+     DO_TEST("disk-aio");
+     DO_TEST("disk-cdrom");
+-- 
+1.7.12.4
+

@@ -1,0 +1,125 @@
+From 046b835f1ed302e02c307682237253945ff38b88 Mon Sep 17 00:00:00 2001
+Message-Id: <046b835f1ed302e02c307682237253945ff38b88.1351526125.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Thu, 25 Oct 2012 10:58:16 +0800
+Subject: [PATCH] qemu: Keep the affinity when creating cgroup for emulator
+ thread
+
+https://bugzilla.redhat.com/show_bug.cgi?id=869096
+
+When the cpu placement model is "auto", it sets the affinity for
+domain process with the advisory nodeset from numad, however,
+creating cgroup for the domain process (called emulator thread
+in some contexts) later overrides that with pinning it to all
+available pCPUs.
+
+How to reproduce:
+
+  * Configure the domain with "auto" placement for <vcpu>, e.g.
+    <vcpu placement='auto'>4</vcpu>
+  * % virsh start dom
+  * % cat /proc/$dompid/status
+
+Though the emulator cgroup cause conflicts, but we can't simply
+prohibit creating it, as other tunables are still useful, such
+as "emulator_period", which is used by API
+virDomainSetSchedulerParameter. So this patch doesn't prohibit
+creating the emulator cgroup, but inherit the nodeset from numad,
+and reset the affinity for domain process.
+
+* src/qemu/qemu_cgroup.h: Modify definition of qemuSetupCgroupForEmulator
+                          to accept the passed nodenet
+* src/qemu/qemu_cgroup.c: Set the affinity with the passed nodeset
+(cherry picked from commit bb81021bfe97ac8e6fe22a4d435993db7044047a)
+---
+ src/qemu/qemu_cgroup.c  | 17 ++++++++++++++---
+ src/qemu/qemu_cgroup.h  |  3 ++-
+ src/qemu/qemu_process.c |  2 +-
+ 3 files changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index db371a0..5ce748a 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -25,6 +25,7 @@
+ 
+ #include "qemu_cgroup.h"
+ #include "qemu_domain.h"
++#include "qemu_process.h"
+ #include "cgroup.h"
+ #include "logging.h"
+ #include "memory.h"
+@@ -637,9 +638,11 @@ cleanup:
+ }
+ 
+ int qemuSetupCgroupForEmulator(struct qemud_driver *driver,
+-                               virDomainObjPtr vm)
++                               virDomainObjPtr vm,
++                               virBitmapPtr nodemask)
+ {
+     virBitmapPtr cpumask = NULL;
++    virBitmapPtr cpumap = NULL;
+     virCgroupPtr cgroup = NULL;
+     virCgroupPtr cgroup_emulator = NULL;
+     virDomainDefPtr def = vm->def;
+@@ -687,10 +690,15 @@ int qemuSetupCgroupForEmulator(struct qemud_driver *driver,
+         }
+     }
+ 
+-    if (def->cputune.emulatorpin)
++    if (def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO) {
++        if (!(cpumap = qemuPrepareCpumap(driver, nodemask)))
++            goto cleanup;
++        cpumask = cpumap;
++    } else if (def->cputune.emulatorpin) {
+         cpumask = def->cputune.emulatorpin->cpumask;
+-    else if (def->cpumask)
++    } else if (def->cpumask) {
+         cpumask = def->cpumask;
++    }
+ 
+     if (cpumask) {
+         if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_CPUSET)) {
+@@ -711,9 +719,12 @@ int qemuSetupCgroupForEmulator(struct qemud_driver *driver,
+ 
+     virCgroupFree(&cgroup_emulator);
+     virCgroupFree(&cgroup);
++    virBitmapFree(cpumap);
+     return 0;
+ 
+ cleanup:
++    virBitmapFree(cpumap);
++
+     if (cgroup_emulator) {
+         virCgroupRemove(cgroup_emulator);
+         virCgroupFree(&cgroup_emulator);
+diff --git a/src/qemu/qemu_cgroup.h b/src/qemu/qemu_cgroup.h
+index c552162..50ee092 100644
+--- a/src/qemu/qemu_cgroup.h
++++ b/src/qemu/qemu_cgroup.h
+@@ -58,7 +58,8 @@ int qemuSetupCgroupVcpuPin(virCgroupPtr cgroup,
+ int qemuSetupCgroupEmulatorPin(virCgroupPtr cgroup, virBitmapPtr cpumask);
+ int qemuSetupCgroupForVcpu(struct qemud_driver *driver, virDomainObjPtr vm);
+ int qemuSetupCgroupForEmulator(struct qemud_driver *driver,
+-                               virDomainObjPtr vm);
++                               virDomainObjPtr vm,
++                               virBitmapPtr nodemask);
+ int qemuRemoveCgroup(struct qemud_driver *driver,
+                      virDomainObjPtr vm,
+                      int quiet);
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index c0f0b4a..78dda1c 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3827,7 +3827,7 @@ int qemuProcessStart(virConnectPtr conn,
+         goto cleanup;
+ 
+     VIR_DEBUG("Setting cgroup for emulator (if required)");
+-    if (qemuSetupCgroupForEmulator(driver, vm) < 0)
++    if (qemuSetupCgroupForEmulator(driver, vm, nodemask) < 0)
+         goto cleanup;
+ 
+     VIR_DEBUG("Setting VCPU affinities");
+-- 
+1.7.12.4
+

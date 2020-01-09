@@ -1,0 +1,61 @@
+From ed6627910871ce418c6fd595a27883ad5d28a7ab Mon Sep 17 00:00:00 2001
+Message-Id: <ed6627910871ce418c6fd595a27883ad5d28a7ab.1350990680.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Mon, 22 Oct 2012 19:51:23 +0800
+Subject: [PATCH] selinux: relabel tapfd in qemuPhysIfaceConnect
+
+BZ:https://bugzilla.redhat.com/show_bug.cgi?id=851981
+(cherry picked from commit 4492ef7f485a7d42d84a714d2150e648b11e2740)
+
+Relabeling tapfd right after the tap device is created.
+qemuPhysIfaceConnect is common function called both for static
+netdevs and for hotplug netdevs.
+---
+ src/qemu/qemu_command.c | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 0e19760..62ee2ad 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -171,12 +171,26 @@ qemuPhysIfaceConnect(virDomainDefPtr def,
+         vmop, driver->stateDir,
+         virDomainNetGetActualBandwidth(net));
+     if (rc >= 0) {
++        if (virSecurityManagerSetTapFDLabel(driver->securityManager,
++                                            def, rc) < 0)
++            goto error;
++
+         virDomainAuditNetDevice(def, net, res_ifname, true);
+         VIR_FREE(net->ifname);
+         net->ifname = res_ifname;
+     }
+ 
+     return rc;
++
++error:
++    ignore_value(virNetDevMacVLanDeleteWithVPortProfile(
++                     res_ifname, &net->mac,
++                     virDomainNetGetActualDirectDev(net),
++                     virDomainNetGetActualDirectMode(net),
++                     virDomainNetGetActualVirtPortProfile(net),
++                     driver->stateDir));
++    VIR_FREE(res_ifname);
++    return -1;
+ }
+ 
+ 
+@@ -5465,10 +5479,6 @@ qemuBuildCommandLine(virConnectPtr conn,
+                 if (tapfd < 0)
+                     goto error;
+ 
+-                if (virSecurityManagerSetTapFDLabel(driver->securityManager,
+-                                                    def, tapfd) < 0)
+-                    goto error;
+-
+                 last_good_net = i;
+                 virCommandTransferFD(cmd, tapfd);
+ 
+-- 
+1.7.12.4
+

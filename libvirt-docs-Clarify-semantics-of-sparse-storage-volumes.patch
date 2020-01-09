@@ -1,0 +1,36 @@
+From 403e836081ac33376cb20b01b1419ecf3e986526 Mon Sep 17 00:00:00 2001
+Message-Id: <403e836081ac33376cb20b01b1419ecf3e986526.1373271639.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 13 Mar 2013 10:45:08 +0100
+Subject: [PATCH] docs: Clarify semantics of sparse storage volumes
+
+https://bugzilla.redhat.com/show_bug.cgi?id=912179
+
+Sparse LVM volumes do not behave in the way one would naively expect.
+The allocation does not automatically increase (which is different from
+how sparse files work).
+(cherry picked from commit 11677e081b3a22177f45f20b5aa128a74f514844)
+---
+ docs/formatstorage.html.in | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/docs/formatstorage.html.in b/docs/formatstorage.html.in
+index 9f93db8..8ac7ab1 100644
+--- a/docs/formatstorage.html.in
++++ b/docs/formatstorage.html.in
+@@ -250,7 +250,11 @@
+         allocated at time of creation. If set to a value smaller than the
+         capacity, the pool has the <strong>option</strong> of deciding
+         to sparsely allocate a volume. It does not have to honour requests
+-        for sparse allocation though.<br/>
++        for sparse allocation though. Different types of pools may treat
++        sparse volumes differently. For example, the <code>logical</code>
++        pool will not automatically expand volume's allocation when it
++        gets full; the user is responsible for doing that or configuring
++        dmeventd to do so automatically.<br/>
+         <br/>
+         By default this is specified in bytes, but an optional attribute
+         <code>unit</code> can be specified to adjust the passed value.
+-- 
+1.8.2.1
+

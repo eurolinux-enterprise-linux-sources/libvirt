@@ -1,0 +1,31 @@
+From 58ca7d318a5350c754a19badba729ae8c9e9fb19 Mon Sep 17 00:00:00 2001
+Message-Id: <58ca7d318a5350c754a19badba729ae8c9e9fb19.1373271644.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 22 Apr 2013 18:33:01 +0200
+Subject: [PATCH] logging: Make log regexp more compact (and readable)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=954248
+
+(cherry picked from commit fd2e55302b916689af96dcda75d23d1e0245a68b)
+---
+ src/util/logging.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/logging.c b/src/util/logging.c
+index 138ab65..242676d 100644
+--- a/src/util/logging.c
++++ b/src/util/logging.c
+@@ -60,8 +60,8 @@ static int virLogEnd = 0;
+ static regex_t *virLogRegex = NULL;
+ 
+ 
+-#define VIR_LOG_DATE_REGEX "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
+-#define VIR_LOG_TIME_REGEX "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\\.[0-9][0-9][0-9]\\+[0-9][0-9][0-9][0-9]"
++#define VIR_LOG_DATE_REGEX "[0-9]{4}-[0-9]{2}-[0-9]{2}"
++#define VIR_LOG_TIME_REGEX "[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}\\+[0-9]{4}"
+ #define VIR_LOG_PID_REGEX "[0-9]+"
+ #define VIR_LOG_LEVEL_REGEX "debug|info|warning|error"
+ 
+-- 
+1.8.2.1
+

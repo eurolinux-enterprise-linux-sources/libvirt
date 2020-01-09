@@ -1,0 +1,78 @@
+From 1a654bc6f241c2d8f650a4436b261a449ded8db6 Mon Sep 17 00:00:00 2001
+Message-Id: <1a654bc6f241c2d8f650a4436b261a449ded8db6@dist-git>
+From: Stefan Berger <stefanb@linux.vnet.ibm.com>
+Date: Fri, 12 Apr 2013 16:55:45 -0400
+Subject: [PATCH] Add function to find a needle in a string array
+
+Signed-off-by: Stefan Berger <stefanb@linux.vnet.ibm.com>
+Reviewed-by: Corey Bryant <coreyb@linux.vnet.ibm.com>
+Tested-by: Corey Bryant <coreyb@linux.vnet.ibm.com>
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit 069219577b58451a390b322821746f492ca5a6e2)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/libvirt_private.syms,
+	src/util/virstring.c,
+	src/util/virstring.h -- context
+---
+ src/libvirt_private.syms |  1 +
+ src/util/virstring.c     | 14 ++++++++++++++
+ src/util/virstring.h     |  3 ++-
+ 3 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index a0260a3..e44bab5 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1826,6 +1826,7 @@ virStrerror;
+ 
+ 
+ # virstring.h
++virStringArrayHasString;
+ virStringSplit;
+ virStringJoin;
+ virStringFreeList;
+diff --git a/src/util/virstring.c b/src/util/virstring.c
+index 98cfc0a..7ce6f84 100644
+--- a/src/util/virstring.c
++++ b/src/util/virstring.c
+@@ -167,6 +167,20 @@ void virStringFreeList(char **strings)
+     VIR_FREE(strings);
+ }
+ 
++
++bool
++virStringArrayHasString(char **strings, const char *needle)
++{
++    size_t i = 0;
++
++    while (strings[i]) {
++        if (STREQ(strings[i++], needle))
++            return true;
++    }
++
++    return false;
++}
++
+ size_t virStringListLength(char **strings)
+ {
+     size_t i = 0;
+diff --git a/src/util/virstring.h b/src/util/virstring.h
+index d68ed2f..8838e2e 100644
+--- a/src/util/virstring.h
++++ b/src/util/virstring.h
+@@ -35,6 +35,7 @@ char *virStringJoin(const char **strings,
+ 
+ void virStringFreeList(char **strings);
+ 
++bool virStringArrayHasString(char **strings, const char *needle);
++
+ size_t virStringListLength(char **strings);
+-
+ #endif /* __VIR_STRING_H__ */
+-- 
+2.0.0
+

@@ -1,0 +1,32 @@
+From 2a9e29bb3f03281cf730930200bf036e13a840bf Mon Sep 17 00:00:00 2001
+Message-Id: <2a9e29bb3f03281cf730930200bf036e13a840bf.1373271642.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 10 Jun 2013 15:07:20 +0200
+Subject: [PATCH] virSocketAddrIsWildcard: Use IN6_IS_ADDR_UNSPECIFIED
+ correctly
+
+https://bugzilla.redhat.com/show_bug.cgi?id=920441
+
+The IN6_IS_ADDR_UNSPECIFIED macro expects pointer to sin6_addr element
+instead of s6_addr element.
+(cherry picked from commit 7793d2a83e437fb5ebc7a35dd37455aa74a547b2)
+---
+ src/util/virsocketaddr.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/util/virsocketaddr.c b/src/util/virsocketaddr.c
+index 45260bf..f93158d 100644
+--- a/src/util/virsocketaddr.c
++++ b/src/util/virsocketaddr.c
+@@ -241,7 +241,7 @@ virSocketAddrIsWildcard(const virSocketAddrPtr addr)
+         return memcmp(&addr->data.inet4.sin_addr.s_addr, &tmp,
+                       sizeof(addr->data.inet4.sin_addr.s_addr)) == 0;
+     case AF_INET6:
+-        return IN6_IS_ADDR_UNSPECIFIED(&addr->data.inet6.sin6_addr.s6_addr);
++        return IN6_IS_ADDR_UNSPECIFIED(&addr->data.inet6.sin6_addr);
+     }
+     return false;
+ }
+-- 
+1.8.2.1
+

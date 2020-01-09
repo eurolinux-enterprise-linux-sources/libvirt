@@ -1,0 +1,152 @@
+From 1e15bf510b8f9ba0bfd79fe0841ce5645f9c9aeb Mon Sep 17 00:00:00 2001
+Message-Id: <1e15bf510b8f9ba0bfd79fe0841ce5645f9c9aeb.1350990681.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 22 Oct 2012 21:48:51 -0600
+Subject: [PATCH] blockjob: allow mirroring under SELinux and cgroup
+
+https://bugzilla.redhat.com/show_bug.cgi?id=856247
+[rebase of 6.3 https://bugzilla.redhat.com/show_bug.cgi?id=638506]
+
+Use the recent addition of qemuDomainPrepareDiskChainElement to
+obtain locking manager lease, permit a block device through cgroups,
+and set the SELinux label; then audit the fact that we hand a new
+file over to qemu.  Alas, releasing the lease and label at the end
+of the mirroring is a trickier prospect (we would have to trace the
+backing chain of both source and destination, and be sure not to
+revoke rights to any part of the chain that is shared), so for now,
+virDomainBlockJobAbort still leaves things with additional access
+granted (as block-pull and block-commit have the same problem of
+not clamping access after completion, a future cleanup would cover
+all three commands).
+
+* src/qemu/qemu_driver.c (qemuDomainBlockCopy): Set up labeling.
+(cherry picked from TBD)
+---
+ src/qemu/qemu_driver.c | 71 ++++++++++++++++++++++++++++++++++++--------------
+ 1 file changed, 52 insertions(+), 19 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index a635a52..add7df5 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -12857,6 +12857,9 @@ qemuDomainBlockCopy(virDomainPtr dom, const char *path,
+     int idx;
+     bool reopen;
+     struct stat st;
++    bool need_unlink = false;
++    char *mirror = NULL;
++    virCgroupPtr cgroup = NULL;
+ 
+     /* Preliminaries: find the disk we are editing, sanity checks */
+     virCheckFlags(VIR_DOMAIN_BLOCK_REBASE_SHALLOW |
+@@ -12871,6 +12874,13 @@ qemuDomainBlockCopy(virDomainPtr dom, const char *path,
+                        _("domain is not running"));
+         goto cleanup;
+     }
++    if (qemuCgroupControllerActive(driver, VIR_CGROUP_CONTROLLER_DEVICES) &&
++        virCgroupForDomain(driver->cgroup, vm->def->name, &cgroup, 0) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("Unable to find cgroup for %s"),
++                       vm->def->name);
++        goto cleanup;
++    }
+ 
+     device = qemuDiskPathToAlias(vm, path, &idx);
+     if (!device) {
+@@ -12943,51 +12953,74 @@ qemuDomainBlockCopy(virDomainPtr dom, const char *path,
+         goto endjob;
+     }
+ 
+-    /* XXX We also need to add security labeling, lock manager lease,
+-     * and auditing of those events.  */
+-    if (!format) {
+-        if (flags & VIR_DOMAIN_BLOCK_REBASE_REUSE_EXT) {
+-            /* If the user passed the REUSE_EXT flag, then either they
+-             * also passed the RAW flag (and format is non-NULL), or
+-             * it is safe for us to probe the format from the file
+-             * that we will be using.  */
+-            disk->mirrorFormat = virStorageFileProbeFormat(dest, driver->user,
+-                                                           driver->group);
+-        } else {
++    if (!(flags & VIR_DOMAIN_BLOCK_REBASE_REUSE_EXT)) {
++        int fd = qemuOpenFile(driver, dest, O_WRONLY | O_TRUNC | O_CREAT,
++                              &need_unlink, NULL);
++        if (fd < 0)
++            goto endjob;
++        VIR_FORCE_CLOSE(fd);
++        if (!format)
+             disk->mirrorFormat = disk->format;
+-        }
+-        if (disk->mirrorFormat > 0)
+-            format = virStorageFileFormatTypeToString(disk->mirrorFormat);
+-    } else {
++    } else if (format) {
+         disk->mirrorFormat = virStorageFileFormatTypeFromString(format);
+         if (disk->mirrorFormat <= 0) {
+             virReportError(VIR_ERR_INVALID_ARG, _("unrecognized format '%s'"),
+                            format);
+             goto endjob;
+         }
+-    }
++    } else {
++        /* If the user passed the REUSE_EXT flag, then either they
++         * also passed the RAW flag (and format is non-NULL), or it is
++         * safe for us to probe the format from the file that we will
++         * be using.  */
++        disk->mirrorFormat = virStorageFileProbeFormat(dest, driver->user,
++                                                       driver->group);
++    }
++    if (!format && disk->mirrorFormat > 0)
++        format = virStorageFileFormatTypeToString(disk->mirrorFormat);
+     if (!(disk->mirror = strdup(dest))) {
+         virReportOOMError();
+         goto endjob;
+     }
+ 
++    if (qemuDomainPrepareDiskChainElement(driver, vm, cgroup, disk, dest,
++                                          VIR_DISK_CHAIN_READ_WRITE) < 0) {
++        qemuDomainPrepareDiskChainElement(driver, vm, cgroup, disk, dest,
++                                          VIR_DISK_CHAIN_NO_ACCESS);
++        goto endjob;
++    }
++
+     /* Actually start the mirroring */
+     qemuDomainObjEnterMonitor(driver, vm);
+     ret = qemuMonitorDriveMirror(priv->mon, device, dest, format, bandwidth,
+                                  reopen, flags);
++    virDomainAuditDisk(vm, NULL, dest, "mirror", ret >= 0);
+     qemuDomainObjExitMonitor(driver, vm);
++    if (ret < 0) {
++        qemuDomainPrepareDiskChainElement(driver, vm, cgroup, disk, dest,
++                                          VIR_DISK_CHAIN_NO_ACCESS);
++        goto endjob;
++    }
++
++    /* Update vm in place to match changes.  */
++    need_unlink = false;
++    disk->mirror = mirror;
++    mirror = NULL;
+ 
+ endjob:
+-    if (ret < 0) {
+-        VIR_FREE(disk->mirror);
++    if (need_unlink && unlink(dest))
++        VIR_WARN("unable to unlink just-created %s", dest);
++    if (ret < 0)
+         disk->mirrorFormat = VIR_STORAGE_FILE_NONE;
+-    }
++    VIR_FREE(mirror);
+     if (qemuDomainObjEndJob(driver, vm) == 0) {
+         vm = NULL;
+         goto cleanup;
+     }
+ 
+ cleanup:
++    if (cgroup)
++        virCgroupFree(&cgroup);
+     VIR_FREE(device);
+     if (vm)
+         virDomainObjUnlock(vm);
+-- 
+1.7.12.4
+

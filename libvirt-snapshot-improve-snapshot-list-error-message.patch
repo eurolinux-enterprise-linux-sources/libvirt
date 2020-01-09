@@ -1,0 +1,51 @@
+From dd36ef68248ba096948ed85900e34056f9fe503e Mon Sep 17 00:00:00 2001
+Message-Id: <dd36ef68248ba096948ed85900e34056f9fe503e.1351526126.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Sat, 27 Oct 2012 09:00:55 -0600
+Subject: [PATCH] snapshot: improve snapshot-list error message
+
+https://bugzilla.redhat.com/show_bug.cgi?id=869100 mentioned some
+confusion about 'virsh snapshot-list' errors.  Clean up a
+misleading error message, and add some documentation.
+
+* tools/virsh-snapshot.c (cmdSnapshotList): Mention --current
+rather than --from when appropriate.
+* tools/virsh.pod (snapshot-list): Mention that the named starting
+point is NOT part of the list except under --tree.
+(cherry picked from commit 3cdf4dd49a1f15443def09752c206802ec32ef97)
+---
+ tools/virsh-snapshot.c | 2 ++
+ tools/virsh.pod        | 4 +++-
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/tools/virsh-snapshot.c b/tools/virsh-snapshot.c
+index 53de2b3..1641f90 100644
+--- a/tools/virsh-snapshot.c
++++ b/tools/virsh-snapshot.c
+@@ -1197,6 +1197,8 @@ cmdSnapshotList(vshControl *ctl, const vshCmd *cmd)
+         }
+         if (from) {
+             vshError(ctl, "%s",
++                     vshCommandOptBool(cmd, "current") ?
++                     _("--roots and --current are mutually exclusive") :
+                      _("--roots and --from are mutually exclusive"));
+             goto cleanup;
+         }
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 1b488d1..dead838 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -2747,7 +2747,9 @@ start at the current snapshot.  When used in isolation or with
+ I<--parent>, the list is limited to direct children unless
+ I<--descendants> is also present.  When used with I<--tree>, the
+ use of I<--descendants> is implied.  This option is not compatible
+-with I<--roots>.
++with I<--roots>.  Note that the starting point of I<--from> or
++I<--current> is not included in the list unless the I<--tree>
++option is also present.
+ 
+ If I<--leaves> is specified, the list will be filtered to just
+ snapshots that have no children.  Likewise, if I<--no-leaves> is
+-- 
+1.7.12.4
+

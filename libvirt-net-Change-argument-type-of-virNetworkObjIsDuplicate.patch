@@ -1,0 +1,71 @@
+From f081a1da523c1c27f3b1762a2b00650760429cc4 Mon Sep 17 00:00:00 2001
+Message-Id: <f081a1da523c1c27f3b1762a2b00650760429cc4@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 29 Apr 2014 13:01:38 +0200
+Subject: [PATCH] net: Change argument type of virNetworkObjIsDuplicate()
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1057321
+
+The argument check_active is used only as a boolean so this patch
+changes the type and updates callers.
+
+(cherry picked from commit a3258c0eb9e8f2bbb2d03e124d0b83469209fdb7)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/network_conf.c     | 2 +-
+ src/conf/network_conf.h     | 2 +-
+ src/network/bridge_driver.c | 4 ++--
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index a3e7279..6089b92 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -3304,7 +3304,7 @@ cleanup:
+ int
+ virNetworkObjIsDuplicate(virNetworkObjListPtr doms,
+                          virNetworkDefPtr def,
+-                         unsigned int check_active)
++                         bool check_active)
+ {
+     int ret = -1;
+     int dupVM = 0;
+diff --git a/src/conf/network_conf.h b/src/conf/network_conf.h
+index fbac6d6..e645adb 100644
+--- a/src/conf/network_conf.h
++++ b/src/conf/network_conf.h
+@@ -355,7 +355,7 @@ virNetworkObjUpdate(virNetworkObjPtr obj,
+ 
+ int virNetworkObjIsDuplicate(virNetworkObjListPtr doms,
+                              virNetworkDefPtr def,
+-                             unsigned int check_active);
++                             bool check_active);
+ 
+ void virNetworkObjLock(virNetworkObjPtr obj);
+ void virNetworkObjUnlock(virNetworkObjPtr obj);
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index e915aa7..7abc3c0 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -2763,7 +2763,7 @@ static virNetworkPtr networkCreate(virConnectPtr conn, const char *xml) {
+     if (!(def = virNetworkDefParseString(xml)))
+         goto cleanup;
+ 
+-    if (virNetworkObjIsDuplicate(&driver->networks, def, 1) < 0)
++    if (virNetworkObjIsDuplicate(&driver->networks, def, true) < 0)
+         goto cleanup;
+ 
+     /* Only the three L3 network types that are configured by libvirt
+@@ -2822,7 +2822,7 @@ static virNetworkPtr networkDefine(virConnectPtr conn, const char *xml) {
+     if (!(def = virNetworkDefParseString(xml)))
+         goto cleanup;
+ 
+-    if (virNetworkObjIsDuplicate(&driver->networks, def, 0) < 0)
++    if (virNetworkObjIsDuplicate(&driver->networks, def, false) < 0)
+         goto cleanup;
+ 
+     /* Only the three L3 network types that are configured by libvirt
+-- 
+1.9.2
+

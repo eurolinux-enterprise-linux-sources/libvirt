@@ -1,0 +1,33 @@
+From bbf8188d510e762deeb8e9c010d970aab0fab588 Mon Sep 17 00:00:00 2001
+Message-Id: <bbf8188d510e762deeb8e9c010d970aab0fab588.1352118320.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 2 Nov 2012 21:50:33 +0100
+Subject: [PATCH] cpu: Add AMD Opteron G5 cpu model
+
+https://bugzilla.redhat.com/show_bug.cgi?id=838127
+
+(cherry picked from commit d38b934c4910c8bfa79a8622157f5a89effda23e)
+---
+ src/cpu/cpu_map.xml | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 5bc026c..4095078 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -560,5 +560,12 @@
+       <feature name='xop'/>
+       <feature name='fma4'/>
+     </model>
++
++    <model name='Opteron_G5'>
++      <model name='Opteron_G4'/>
++      <feature name='f16c'/>
++      <feature name='fma'/>
++      <feature name='tbm'/>
++    </model>
+   </arch>
+ </cpus>
+-- 
+1.8.0
+

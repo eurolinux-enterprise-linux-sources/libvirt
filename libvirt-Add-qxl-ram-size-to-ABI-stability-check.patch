@@ -1,0 +1,43 @@
+From a3721229cea583271d1ad9a8b1eb5333ea9ce23f Mon Sep 17 00:00:00 2001
+Message-Id: <a3721229cea583271d1ad9a8b1eb5333ea9ce23f@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 7 Apr 2014 13:30:51 +0200
+Subject: [PATCH] Add qxl ram size to ABI stability check
+
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1035134
+
+55bfd02 added a 'ram' attribute for qxl video devices
+but didn't update the ABI check.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1035123
+(cherry picked from commit 952ab4c993b88a324c5910346efa4e75a72293b7)
+
+Missing commits:
+f47b397 conf: Refactor ABI stability checking and break long lines
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index beb2503..ee97b4b 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -11083,6 +11083,13 @@ static bool virDomainVideoDefCheckABIStability(virDomainVideoDefPtr src,
+         goto cleanup;
+     }
+ 
++    if (src->ram != dst->ram) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("Target video card ram %u does not match source %u"),
++                       dst->ram, src->ram);
++        goto cleanup;
++    }
++
+     if (src->vram != dst->vram) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target video card vram %u does not match source %u"),
+-- 
+1.9.1
+

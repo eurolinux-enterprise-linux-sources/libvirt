@@ -1,0 +1,129 @@
+From d10abfa350a1dc2ec8d6427035e26f506cd5b49c Mon Sep 17 00:00:00 2001
+Message-Id: <d10abfa350a1dc2ec8d6427035e26f506cd5b49c.1350990679.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:37 -0600
+Subject: [PATCH] storage: make it easier to find file within chain
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+In order to temporarily label files read/write during a commit
+operation, we need to crawl the backing chain and find the absolute
+file name that needs labeling in the first place, as well as the
+name of the file that owns the backing file.
+
+* src/util/storage_file.c (virStorageFileChainLookup): New
+function.
+* src/util/storage_file.h: Declare it.
+* src/libvirt_private.syms (storage_file.h): Export it.
+(cherry picked from commit 5eaf6054473cf0a1f4753e5e43280f89ec91c4d1)
+---
+ src/libvirt_private.syms |  1 +
+ src/util/storage_file.c  | 64 ++++++++++++++++++++++++++++++++++++++++++++++++
+ src/util/storage_file.h  |  7 ++++++
+ 3 files changed, 72 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 551a55b..31d8c45 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1136,6 +1136,7 @@ virStorageGenerateQcowPassphrase;
+ 
+ 
+ # storage_file.h
++virStorageFileChainLookup;
+ virStorageFileFormatTypeFromString;
+ virStorageFileFormatTypeToString;
+ virStorageFileFreeMetadata;
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index 2ff444c..882df6e 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -1262,3 +1262,67 @@ const char *virStorageFileGetSCSIKey(const char *path)
+     return NULL;
+ }
+ #endif
++
++/* Given a CHAIN that starts at the named file START, return a string
++ * pointing to either START or within CHAIN that gives the preferred
++ * name for the backing file NAME within that chain.  Pass NULL for
++ * NAME to find the base of the chain.  If META is not NULL, set *META
++ * to the point in the chain that describes NAME (or to NULL if the
++ * backing element is not a file).  If PARENT is not NULL, set *PARENT
++ * to the preferred name of the parent (or to NULL if NAME matches
++ * START).  Since the results point within CHAIN, they must not be
++ * independently freed.  */
++const char *
++virStorageFileChainLookup(virStorageFileMetadataPtr chain, const char *start,
++                          const char *name, virStorageFileMetadataPtr *meta,
++                          const char **parent)
++{
++    virStorageFileMetadataPtr owner;
++    const char *tmp;
++
++    if (!parent)
++        parent = &tmp;
++
++    *parent = NULL;
++    if (name ? STREQ(start, name) || virFileLinkPointsTo(start, name) :
++        !chain->backingStore) {
++        if (meta)
++            *meta = chain;
++        return start;
++    }
++
++    owner = chain;
++    *parent = start;
++    while (owner) {
++        if (!owner->backingStore)
++            goto error;
++        if (!name) {
++            if (!owner->backingMeta ||
++                !owner->backingMeta->backingStore)
++                break;
++        } else if (STREQ_NULLABLE(name, owner->backingStoreRaw) ||
++                   STREQ(name, owner->backingStore)) {
++            break;
++        } else if (owner->backingStoreIsFile) {
++            char *absName = absolutePathFromBaseFile(*parent, name);
++            if (absName && STREQ(absName, owner->backingStore)) {
++                VIR_FREE(absName);
++                break;
++            }
++            VIR_FREE(absName);
++        }
++        *parent = owner->backingStore;
++        owner = owner->backingMeta;
++    }
++    if (!owner)
++        goto error;
++    if (meta)
++        *meta = owner->backingMeta;
++    return owner->backingStore;
++
++error:
++    *parent = NULL;
++    if (meta)
++        *meta = NULL;
++    return NULL;
++}
+diff --git a/src/util/storage_file.h b/src/util/storage_file.h
+index 685fcb8..9b00dba 100644
+--- a/src/util/storage_file.h
++++ b/src/util/storage_file.h
+@@ -78,6 +78,13 @@ virStorageFileMetadataPtr virStorageFileGetMetadataFromFD(const char *path,
+                                                           int fd,
+                                                           int format);
+ 
++const char *virStorageFileChainLookup(virStorageFileMetadataPtr chain,
++                                      const char *start,
++                                      const char *name,
++                                      virStorageFileMetadataPtr *meta,
++                                      const char **parent)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
++
+ void virStorageFileFreeMetadata(virStorageFileMetadataPtr meta);
+ 
+ int virStorageFileResize(const char *path, unsigned long long capacity);
+-- 
+1.7.12.4
+

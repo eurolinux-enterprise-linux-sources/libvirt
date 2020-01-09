@@ -1,0 +1,105 @@
+From 198516a6b4bdc812a1621f75d5f070f9da8c72be Mon Sep 17 00:00:00 2001
+Message-Id: <198516a6b4bdc812a1621f75d5f070f9da8c72be@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 2 Jul 2014 15:49:30 +0200
+Subject: [PATCH] test: Add <metadata> support into the test drivera
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115039
+
+(cherry picked from commit f616fbf2a4a31a2f944aae0b75d6e2ab3bef3573)
+
+Conflicts:
+	src/test/test_driver.c - context, domain locking and lookup
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/test/test_driver.c | 66 ++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 66 insertions(+)
+
+diff --git a/src/test/test_driver.c b/src/test/test_driver.c
+index 51c6b3a..1d0fd44 100644
+--- a/src/test/test_driver.c
++++ b/src/test/test_driver.c
+@@ -2518,6 +2518,70 @@ cleanup:
+     return ret;
+ }
+ 
++static char *testDomainGetMetadata(virDomainPtr dom,
++                                   int type,
++                                   const char *uri,
++                                   unsigned int flags)
++{
++    testConnPtr privconn = dom->conn->privateData;
++    virDomainObjPtr privdom;
++    char *ret = NULL;
++
++    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
++                  VIR_DOMAIN_AFFECT_CONFIG, NULL);
++
++    testDriverLock(privconn);
++    privdom = virDomainFindByName(&privconn->domains, dom->name);
++    testDriverUnlock(privconn);
++
++    if (privdom == NULL) {
++        virReportError(VIR_ERR_INVALID_ARG, __FUNCTION__);
++        goto cleanup;
++    }
++
++    ret = virDomainObjGetMetadata(privdom, type, uri, privconn->caps,
++                                  flags);
++
++cleanup:
++    if (privdom)
++        virDomainObjUnlock(privdom);
++    return ret;
++}
++
++static int testDomainSetMetadata(virDomainPtr dom,
++                                 int type,
++                                 const char *metadata,
++                                 const char *key,
++                                 const char *uri,
++                                 unsigned int flags)
++{
++    testConnPtr privconn = dom->conn->privateData;
++    virDomainObjPtr privdom;
++    int ret = -1;
++
++    virCheckFlags(VIR_DOMAIN_AFFECT_LIVE |
++                  VIR_DOMAIN_AFFECT_CONFIG, -1);
++
++    testDriverLock(privconn);
++    privdom = virDomainFindByName(&privconn->domains, dom->name);
++    testDriverUnlock(privconn);
++
++    if (privdom == NULL) {
++        virReportError(VIR_ERR_INVALID_ARG, __FUNCTION__);
++        goto cleanup;
++    }
++
++    ret = virDomainObjSetMetadata(privdom, type, metadata, key, uri,
++                                  privconn->caps,
++                                  NULL, flags);
++
++cleanup:
++    if (privdom)
++        virDomainObjUnlock(privdom);
++    return ret;
++}
++
++
+ static int testNodeGetCellsFreeMemory(virConnectPtr conn,
+                                       unsigned long long *freemems,
+                                       int startCell, int maxCells) {
+@@ -5774,6 +5838,8 @@ static virDriver testDriver = {
+     .domainEventRegisterAny = testDomainEventRegisterAny, /* 0.8.0 */
+     .domainEventDeregisterAny = testDomainEventDeregisterAny, /* 0.8.0 */
+     .isAlive = testIsAlive, /* 0.9.8 */
++    .domainGetMetadata = testDomainGetMetadata, /* 1.1.3 */
++    .domainSetMetadata = testDomainSetMetadata, /* 1.1.3 */
+ };
+ 
+ static virNetworkDriver testNetworkDriver = {
+-- 
+2.0.0
+

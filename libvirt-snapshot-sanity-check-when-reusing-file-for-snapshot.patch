@@ -1,0 +1,57 @@
+From aef4363b6acb195190bdb2338955afd6a14f3c25 Mon Sep 17 00:00:00 2001
+Message-Id: <aef4363b6acb195190bdb2338955afd6a14f3c25.1350990680.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 22 Oct 2012 21:48:43 -0600
+Subject: [PATCH] snapshot: sanity check when reusing file for snapshot
+
+https://bugzilla.redhat.com/show_bug.cgi?id=856247
+[rebase of 6.3 https://bugzilla.redhat.com/show_bug.cgi?id=638506]
+
+The snapshot code when reusing an existing file had hard-to-read
+logic, as well as a missing sanity check: REUSE_EXT should require
+the destination to already be present.
+
+* src/qemu/qemu_driver.c (qemuDomainSnapshotDiskPrepare): Require
+destination on REUSE_EXT, rename variable for legibility.
+(cherry picked from commit 33eaebe48e9215da6bc7d5bd426593821cc18cb9)
+---
+ src/qemu/qemu_driver.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 4db92e8..619d53c 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -10700,12 +10700,12 @@ qemuDomainSnapshotDiskPrepare(virDomainObjPtr vm, virDomainSnapshotDefPtr def,
+     bool found = false;
+     bool active = virDomainObjIsActive(vm);
+     struct stat st;
+-    bool allow_reuse = (*flags & VIR_DOMAIN_SNAPSHOT_CREATE_REUSE_EXT) != 0;
++    bool reuse = (*flags & VIR_DOMAIN_SNAPSHOT_CREATE_REUSE_EXT) != 0;
+     bool atomic = (*flags & VIR_DOMAIN_SNAPSHOT_CREATE_ATOMIC) != 0;
+     int external = 0;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+ 
+-    if (allow_reuse && !qemuCapsGet(priv->caps, QEMU_CAPS_TRANSACTION)) {
++    if (reuse && !qemuCapsGet(priv->caps, QEMU_CAPS_TRANSACTION)) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                        _("reuse is not supported with this QEMU binary"));
+         goto cleanup;
+@@ -10754,8 +10754,13 @@ qemuDomainSnapshotDiskPrepare(virDomainObjPtr vm, virDomainSnapshotDefPtr def,
+                                          _("unable to stat for disk %s: %s"),
+                                          disk->name, disk->file);
+                     goto cleanup;
++                } else if (reuse) {
++                    virReportSystemError(errno,
++                                         _("missing existing file for disk %s: %s"),
++                                         disk->name, disk->file);
++                    goto cleanup;
+                 }
+-            } else if (!(S_ISBLK(st.st_mode) || !st.st_size || allow_reuse)) {
++            } else if (!S_ISBLK(st.st_mode) && st.st_size && !reuse) {
+                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                                _("external snapshot file for disk %s already "
+                                  "exists and is not a block device: %s"),
+-- 
+1.7.12.4
+

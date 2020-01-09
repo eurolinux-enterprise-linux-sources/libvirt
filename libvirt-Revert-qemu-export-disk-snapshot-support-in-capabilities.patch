@@ -1,0 +1,110 @@
+From 86d0a26c8b032df3207ba89dd1962645400f1ff7 Mon Sep 17 00:00:00 2001
+Message-Id: <86d0a26c8b032df3207ba89dd1962645400f1ff7@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Tue, 14 Oct 2014 16:29:30 +0200
+Subject: [PATCH] Revert "qemu: export disk snapshot support in capabilities"
+
+This reverts commit 7d4a06f151e7d050b952c1baf3e40b1451b9f4ed.
+It has never worked properly in RHEL-6 since we only probe
+for QMP commands on domain startup.
+
+6.7: https://bugzilla.redhat.com/show_bug.cgi?id=1149667
+6.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1150609
+
+Conflicts:
+  src/qemu/qemu_capabilities.c
+    'qemu: extract guest capabilities initialization' not reverted
+
+  This also removes the capability from the tests introduced by
+  commit qemu: add unit tests for the capabilities xml
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/schemas/capability.rng                       | 6 ------
+ src/qemu/qemu_capabilities.c                      | 7 -------
+ tests/qemucaps2xmldata/all_1.6.0-1.caps           | 1 -
+ tests/qemucaps2xmldata/all_1.6.0-1.xml            | 1 -
+ tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.xml | 1 -
+ 5 files changed, 16 deletions(-)
+
+diff --git a/docs/schemas/capability.rng b/docs/schemas/capability.rng
+index 95f4400..734ed81 100644
+--- a/docs/schemas/capability.rng
++++ b/docs/schemas/capability.rng
+@@ -347,12 +347,6 @@
+             <empty/>
+           </element>
+         </optional>
+-        <optional>
+-          <element name='disksnapshot'>
+-            <ref name='featuretoggle'/>
+-            <empty/>
+-          </element>
+-        </optional>
+       </interleave>
+     </element>
+   </define>
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 2d7b565..d7afa2e 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -697,7 +697,6 @@ virQEMUCapsInitGuestFromBinary(virCapsPtr caps,
+     virCapsGuestMachinePtr *machines = NULL;
+     size_t nmachines = 0;
+     int ret = -1;
+-    bool hasdisksnapshot = false;
+ 
+     if (!binary)
+         return 0;
+@@ -740,12 +739,6 @@ virQEMUCapsInitGuestFromBinary(virCapsPtr caps,
+         !virCapabilitiesAddGuestFeature(guest, "deviceboot", 1, 0))
+         goto cleanup;
+ 
+-    if (qemuCapsGet(qemubinCaps, QEMU_CAPS_DISK_SNAPSHOT))
+-        hasdisksnapshot = true;
+-
+-    if (!virCapabilitiesAddGuestFeature(guest, "disksnapshot", hasdisksnapshot, 0))
+-        goto cleanup;
+-
+     if (virCapabilitiesAddGuestDomain(guest,
+                                       "qemu",
+                                       NULL,
+diff --git a/tests/qemucaps2xmldata/all_1.6.0-1.caps b/tests/qemucaps2xmldata/all_1.6.0-1.caps
+index 1d36518..32f0bba 100644
+--- a/tests/qemucaps2xmldata/all_1.6.0-1.caps
++++ b/tests/qemucaps2xmldata/all_1.6.0-1.caps
+@@ -97,7 +97,6 @@
+     <flag name='seamless-migration'/>
+     <flag name='block-commit'/>
+     <flag name='drive-mirror'/>
+-    <flag name='blockdev-snapshot-sync'/>
+     <flag name='qxl'/>
+     <flag name='VGA'/>
+     <flag name='cirrus-vga'/>
+diff --git a/tests/qemucaps2xmldata/all_1.6.0-1.xml b/tests/qemucaps2xmldata/all_1.6.0-1.xml
+index 425b22e..f17f8f5 100644
+--- a/tests/qemucaps2xmldata/all_1.6.0-1.xml
++++ b/tests/qemucaps2xmldata/all_1.6.0-1.xml
+@@ -20,7 +20,6 @@
+     </arch>
+     <features>
+       <deviceboot/>
+-      <disksnapshot default='on' toggle='no'/>
+       <acpi default='on' toggle='yes'/>
+       <apic default='on' toggle='no'/>
+       <pae/>
+diff --git a/tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.xml b/tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.xml
+index cd19814..f17f8f5 100644
+--- a/tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.xml
++++ b/tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.xml
+@@ -20,7 +20,6 @@
+     </arch>
+     <features>
+       <deviceboot/>
+-      <disksnapshot default='off' toggle='no'/>
+       <acpi default='on' toggle='yes'/>
+       <apic default='on' toggle='no'/>
+       <pae/>
+-- 
+2.2.0
+

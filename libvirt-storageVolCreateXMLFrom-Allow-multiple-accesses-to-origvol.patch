@@ -1,0 +1,124 @@
+From b84933c85040aa69fc14d0a1fcd89539c4078531 Mon Sep 17 00:00:00 2001
+Message-Id: <b84933c85040aa69fc14d0a1fcd89539c4078531@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 6 May 2014 13:41:25 +0200
+Subject: [PATCH] storageVolCreateXMLFrom: Allow multiple accesses to origvol
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1058700
+
+When creating a new volume, it is possible to copy data into it from
+another already existing volume (referred to as @origvol). Obviously,
+the read-only access to @origvol is required, which is thread safe
+(probably not performance-wise though). However, with current code
+both @newvol and @origvol are marked as building for the time of
+copying data from the @origvol to @newvol. The rationale behind
+is to disallow some operations on both @origvol and @newvol, e.g.
+vol-wipe, vol-delete, vol-download. While it makes sense to not allow
+such operations on partly copied mirror, but it doesn't make sense to
+disallow vol-create or vol-download on the source (@origvol).
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit eb54426659888bf04fdef409afaccf8c0fd199a0)
+
+Conflicts:
+	src/storage/storage_driver.c: Context, as ACLs are not backported
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/storage_conf.h      |  1 +
+ src/storage/storage_driver.c | 32 ++++++++++++++++++++++++++++++--
+ 2 files changed, 31 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/storage_conf.h b/src/conf/storage_conf.h
+index 743b768..977c34a 100644
+--- a/src/conf/storage_conf.h
++++ b/src/conf/storage_conf.h
+@@ -104,6 +104,7 @@ struct _virStorageVolDef {
+     int type; /* virStorageVolType enum */
+ 
+     unsigned int building;
++    unsigned int in_use;
+ 
+     unsigned long long allocation; /* bytes */
+     unsigned long long capacity; /* bytes */
+diff --git a/src/storage/storage_driver.c b/src/storage/storage_driver.c
+index 5f5e86c..1b3c9f5 100644
+--- a/src/storage/storage_driver.c
++++ b/src/storage/storage_driver.c
+@@ -1448,6 +1448,13 @@ storageVolumeDelete(virStorageVolPtr obj,
+         goto cleanup;
+     }
+ 
++    if (vol->in_use) {
++        virReportError(VIR_ERR_OPERATION_INVALID,
++                       _("volume '%s' is still in use."),
++                       vol->name);
++        goto cleanup;
++    }
++
+     if (vol->building) {
+         virReportError(VIR_ERR_OPERATION_INVALID,
+                        _("volume '%s' is still being allocated."),
+@@ -1708,8 +1715,8 @@ storageVolumeCreateXMLFrom(virStoragePoolPtr obj,
+ 
+     /* Drop the pool lock during volume allocation */
+     pool->asyncjobs++;
+-    origvol->building = 1;
+     newvol->building = 1;
++    origvol->in_use++;
+     virStoragePoolObjUnlock(pool);
+ 
+     if (origpool) {
+@@ -1725,7 +1732,7 @@ storageVolumeCreateXMLFrom(virStoragePoolPtr obj,
+         virStoragePoolObjLock(origpool);
+     storageDriverUnlock(driver);
+ 
+-    origvol->building = 0;
++    origvol->in_use--;
+     newvol->building = 0;
+     allocation = newvol->allocation;
+     pool->asyncjobs--;
+@@ -1864,6 +1871,13 @@ storageVolumeUpload(virStorageVolPtr obj,
+         goto out;
+     }
+ 
++    if (vol->in_use) {
++        virReportError(VIR_ERR_OPERATION_INVALID,
++                       _("volume '%s' is still in use."),
++                       vol->name);
++        goto out;
++    }
++
+     if (vol->building) {
+         virReportError(VIR_ERR_OPERATION_INVALID,
+                        _("volume '%s' is still being allocated."),
+@@ -1930,6 +1944,13 @@ storageVolumeResize(virStorageVolPtr obj,
+         goto out;
+     }
+ 
++    if (vol->in_use) {
++        virReportError(VIR_ERR_OPERATION_INVALID,
++                       _("volume '%s' is still in use."),
++                       vol->name);
++        goto out;
++    }
++
+     if (vol->building) {
+         virReportError(VIR_ERR_OPERATION_INVALID,
+                        _("volume '%s' is still being allocated."),
+@@ -2226,6 +2247,13 @@ storageVolumeWipePattern(virStorageVolPtr obj,
+         goto out;
+     }
+ 
++    if (vol->in_use) {
++        virReportError(VIR_ERR_OPERATION_INVALID,
++                       _("volume '%s' is still in use."),
++                       vol->name);
++        goto out;
++    }
++
+     if (vol->building) {
+         virReportError(VIR_ERR_OPERATION_INVALID,
+                        _("volume '%s' is still being allocated."),
+-- 
+1.9.2
+

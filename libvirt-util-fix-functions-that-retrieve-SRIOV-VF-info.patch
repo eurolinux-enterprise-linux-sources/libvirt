@@ -1,0 +1,84 @@
+From ac1dc01265c9bc2e7505601196dfbe2237a2a31c Mon Sep 17 00:00:00 2001
+Message-Id: <ac1dc01265c9bc2e7505601196dfbe2237a2a31c.1357206167.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 20 Dec 2012 16:29:44 -0500
+Subject: [PATCH] util: fix functions that retrieve SRIOV VF info
+
+This patch resolves:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=889319
+
+When assigning an SRIOV virtual function to a guest using "intelligent
+PCI passthrough" (<interface type='hostdev'>, which sets the MAC
+address and vlan tag of the VF before passing its info to qemu),
+libvirt first learns the current MAC address and vlan tag by sending
+an NLM_F_REQUEST message for the VF's PF (physical function) to the
+kernel via a NETLINK_ROUTE socket (see virNetDevLinkDump()); the
+response message's IFLA_VFINFO_LIST section is examined to extract the
+info for the particular VF being assigned.
+
+This worked fine with kernels up until kernel commit
+115c9b81928360d769a76c632bae62d15206a94a (first appearing in upstream
+kernel 3.3) which changed the ABI to not return IFLA_VFINFO_LIST in
+the response until a newly introduced IFLA_EXT_MASK field was included
+in the request, with the (newly introduced, of course) RTEXT_FILTER_VF
+flag set.
+
+The justification for this ABI change was that new fields had been
+added to the VFINFO, causing NLM_F_REQUEST messages to fail on systems
+with large numbers of VFs if the requesting application didn't have a
+large enough buffer for all the info. The idea is that most
+applications doing an NLM_F_REQUEST don't care about VFINFO anyway, so
+eliminating it from the response would lower the requirements on
+buffer size. Apparently, the people who pushed this patch made the
+mistaken assumption that iproute2 (the "ip" command) was the only
+package that used IFLA_VFINFO_LIST, so it wouldn't break anything else
+(and they made sure that iproute2 was fixed.
+
+The logic of this "fix" is debatable at best (one could claim that the
+proper fix would be for the applications in question to be fixed so
+that they properly sized the buffer, which is what libvirt does
+(purely by virtue of using libnl), but it is what it is and we have to
+deal with it.
+
+In order for <interface type='hostdev'> to work properly on systems
+with a kernel 3.3 or later, libvirt needs to add the afore-mentioned
+IFLA_EXT_MASK field with RTEXT_FILTER_VF set.
+
+Of course we also need to continue working on systems with older
+kernels, so that one bit of code is compiled conditionally. The one
+time this could cause problems is if the libvirt binary was built on a
+system without IFLA_EXT_MASK which was subsequently updated to a
+kernel that *did* have it. That could be solved by manually providing
+the values of IFLA_EXT_MASK and RTEXT_FILTER_VF and adding it to the
+message anyway, but I'm uncertain what that might actually do on a
+system that didn't support the message, so for the time being we'll
+just fail in that case (which will very likely never happen anyway).
+(cherry picked from commit ac2797cf2af2fd0e64c58a48409a8175d24d6f86)
+---
+ src/util/virnetdev.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/util/virnetdev.c b/src/util/virnetdev.c
+index db0db1b..f5f4562 100644
+--- a/src/util/virnetdev.c
++++ b/src/util/virnetdev.c
+@@ -1275,6 +1275,15 @@ virNetDevLinkDump(const char *ifname, int ifindex,
+             goto buffer_too_small;
+     }
+ 
++# if defined(IFLA_EXT_MASK) && defined(RTEXT_FILTER_VF)
++    /* if this filter exists in the kernel's netlink implementation,
++     * we need to set it, otherwise the response message will not
++     * contain the IFLA_VFINFO_LIST that we're looking for.
++     */
++    if (nla_put(nl_msg, IFLA_EXT_MASK, RTEXT_FILTER_VF) < 0)
++       goto buffer_too_small;
++# endif
++
+     if (virNetlinkCommand(nl_msg, recvbuf, &recvbuflen,
+                           src_pid, dst_pid, NETLINK_ROUTE, 0) < 0)
+         goto cleanup;
+-- 
+1.8.0.2
+

@@ -1,0 +1,163 @@
+From 0b72ca77db81f4ee56f69583668392812baf9e35 Mon Sep 17 00:00:00 2001
+Message-Id: <0b72ca77db81f4ee56f69583668392812baf9e35.1350990678.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:32 -0600
+Subject: [PATCH] storage: use enum for snapshot driver type
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+This is the last use of raw strings for disk formats throughout
+the src/conf directory.
+
+* src/conf/snapshot_conf.h (_virDomainSnapshotDiskDef): Store enum
+rather than string for disk type.
+* src/conf/snapshot_conf.c (virDomainSnapshotDiskDefClear)
+(virDomainSnapshotDiskDefParseXML, virDomainSnapshotDefFormat):
+Adjust users.
+* src/qemu/qemu_driver.c (qemuDomainSnapshotDiskPrepare)
+(qemuDomainSnapshotCreateSingleDiskActive): Likewise.
+(cherry picked from commit 1246640b3d4e1330450a29b8d33472c243b6f6f7)
+---
+ src/conf/snapshot_conf.c | 23 ++++++++++++++++-------
+ src/conf/snapshot_conf.h |  2 +-
+ src/qemu/qemu_driver.c   | 30 +++++++++++-------------------
+ 3 files changed, 28 insertions(+), 27 deletions(-)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index 0085352..16c844d 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -82,7 +82,6 @@ virDomainSnapshotDiskDefClear(virDomainSnapshotDiskDefPtr disk)
+ {
+     VIR_FREE(disk->name);
+     VIR_FREE(disk->file);
+-    VIR_FREE(disk->driverType);
+ }
+ 
+ void virDomainSnapshotDefFree(virDomainSnapshotDefPtr def)
+@@ -134,15 +133,24 @@ virDomainSnapshotDiskDefParseXML(xmlNodePtr node,
+             if (!def->file &&
+                 xmlStrEqual(cur->name, BAD_CAST "source")) {
+                 def->file = virXMLPropString(cur, "file");
+-            } else if (!def->driverType &&
++            } else if (!def->format &&
+                        xmlStrEqual(cur->name, BAD_CAST "driver")) {
+-                def->driverType = virXMLPropString(cur, "type");
++                char *driver = virXMLPropString(cur, "type");
++                def->format = virStorageFileFormatTypeFromString(driver);
++                if (def->format <= 0) {
++                    virReportError(VIR_ERR_INTERNAL_ERROR,
++                                   _("unknown disk snapshot driver '%s'"),
++                                   driver);
++                    VIR_FREE(driver);
++                    goto cleanup;
++                }
++                VIR_FREE(driver);
+             }
+         }
+         cur = cur->next;
+     }
+ 
+-    if (!def->snapshot && (def->file || def->driverType))
++    if (!def->snapshot && (def->file || def->format))
+         def->snapshot = VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL;
+ 
+     ret = 0;
+@@ -536,11 +544,12 @@ char *virDomainSnapshotDefFormat(const char *domain_uuid,
+             if (disk->snapshot)
+                 virBufferAsprintf(&buf, " snapshot='%s'",
+                                   virDomainSnapshotLocationTypeToString(disk->snapshot));
+-            if (disk->file || disk->driverType) {
++            if (disk->file || disk->format > 0) {
+                 virBufferAddLit(&buf, ">\n");
+-                if (disk->driverType)
++                if (disk->format > 0)
+                     virBufferEscapeString(&buf, "      <driver type='%s'/>\n",
+-                                          disk->driverType);
++                                          virStorageFileFormatTypeToString(
++                                              disk->format));
+                 if (disk->file)
+                     virBufferEscapeString(&buf, "      <source file='%s'/>\n",
+                                           disk->file);
+diff --git a/src/conf/snapshot_conf.h b/src/conf/snapshot_conf.h
+index efb0bf7..c00347f 100644
+--- a/src/conf/snapshot_conf.h
++++ b/src/conf/snapshot_conf.h
+@@ -52,7 +52,7 @@ struct _virDomainSnapshotDiskDef {
+     int index; /* index within snapshot->dom->disks that matches name */
+     int snapshot; /* enum virDomainSnapshotLocation */
+     char *file; /* new source file when snapshot is external */
+-    char *driverType; /* file format type of new file */
++    int format; /* enum virStorageFileFormat */
+ };
+ 
+ /* Stores the complete snapshot metadata */
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 329ff06..a34e530 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -10677,17 +10677,15 @@ qemuDomainSnapshotDiskPrepare(virDomainObjPtr vm, virDomainSnapshotDefPtr def,
+             break;
+ 
+         case VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL:
+-            if (!disk->driverType) {
+-                if (!(disk->driverType = strdup("qcow2"))) {
+-                    virReportOOMError();
+-                    goto cleanup;
+-                }
+-            } else if (STRNEQ(disk->driverType, "qcow2") &&
+-                       STRNEQ(disk->driverType, "qed")) {
++            if (!disk->format) {
++                disk->format = VIR_STORAGE_FILE_QCOW2;
++            } else if (disk->format != VIR_STORAGE_FILE_QCOW2 &&
++                       disk->format != VIR_STORAGE_FILE_QED) {
+                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                                _("external snapshot format for disk %s "
+                                  "is unsupported: %s"),
+-                               disk->name, disk->driverType);
++                               disk->name,
++                               virStorageFileFormatTypeToString(disk->format));
+                 goto cleanup;
+             }
+             if (stat(disk->file, &st) < 0) {
+@@ -10757,7 +10755,8 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     char *device = NULL;
+     char *source = NULL;
+-    int format = VIR_STORAGE_FILE_NONE;
++    int format = snap->format;
++    const char *formatStr = NULL;
+     char *persistSource = NULL;
+     int ret = -1;
+     int fd = -1;
+@@ -10771,15 +10770,6 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+         return -1;
+     }
+ 
+-    if (snap->driverType) {
+-        format = virStorageFileFormatTypeFromString(snap->driverType);
+-        if (format <= 0) {
+-            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                           _("unknown driver type %s"), snap->driverType);
+-            goto cleanup;
+-        }
+-    }
+-
+     if (virAsprintf(&device, "drive-%s", disk->info.alias) < 0 ||
+         !(source = strdup(snap->file)) ||
+         (persistDisk &&
+@@ -10825,8 +10815,10 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+     disk->format = origdriver;
+ 
+     /* create the actual snapshot */
++    if (snap->format)
++        formatStr = virStorageFileFormatTypeToString(snap->format);
+     ret = qemuMonitorDiskSnapshot(priv->mon, actions, device, source,
+-                                  snap->driverType, reuse);
++                                  formatStr, reuse);
+     virDomainAuditDisk(vm, disk->src, source, "snapshot", ret >= 0);
+     if (ret < 0)
+         goto cleanup;
+-- 
+1.7.12.4
+

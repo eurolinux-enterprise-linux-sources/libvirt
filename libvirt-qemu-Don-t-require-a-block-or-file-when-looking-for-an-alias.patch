@@ -1,0 +1,35 @@
+From bfe808fc1ed99c81573523e2dab2397e83707bc1 Mon Sep 17 00:00:00 2001
+Message-Id: <bfe808fc1ed99c81573523e2dab2397e83707bc1@dist-git>
+From: Wido den Hollander <wido@widodh.nl>
+Date: Fri, 5 Apr 2013 18:07:25 +0200
+Subject: [PATCH] qemu: Don't require a block or file when looking for an alias
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1078328
+
+This for example prohibits you to use iotune for Ceph or Sheepdog devices.
+
+Signed-off-by: Wido den Hollander <wido@widodh.nl>
+(cherry picked from commit e3e866aee0f8b0b125da74e1afcfe7242c2fe3d2)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 9451afd..03d30fe 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -13517,10 +13517,6 @@ qemuDiskPathToAlias(virDomainObjPtr vm, const char *path, int *idx)
+     if (idx)
+         *idx = i;
+ 
+-    if (disk->type != VIR_DOMAIN_DISK_TYPE_BLOCK &&
+-        disk->type != VIR_DOMAIN_DISK_TYPE_FILE)
+-        goto cleanup;
+-
+     if (disk->src) {
+         if (virAsprintf(&ret, "drive-%s", disk->info.alias) < 0) {
+             virReportOOMError();
+-- 
+1.9.2
+

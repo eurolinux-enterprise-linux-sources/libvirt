@@ -1,0 +1,32 @@
+From be76cfd57b3db1e73a2c3545009e727d36612a09 Mon Sep 17 00:00:00 2001
+Message-Id: <be76cfd57b3db1e73a2c3545009e727d36612a09.1354720507.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 3 Dec 2012 15:20:17 +0100
+Subject: [PATCH] conf: snapshot: check return value of
+ virDomainSnapshotObjListNum
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=878376
+
+If it's negative, this might result in a request to allocate lots of
+memory.
+(cherry picked from commit 0361917619963d4bc6e9c8215368beaab9db2c5f)
+---
+ src/conf/snapshot_conf.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index e61d7cd..e2bdf82 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -1030,7 +1030,7 @@ virDomainListSnapshots(virDomainSnapshotObjListPtr snapshots,
+     int ret = -1;
+     int i;
+ 
+-    if (!snaps)
++    if (!snaps || count < 0)
+         return count;
+     if (VIR_ALLOC_N(names, count) < 0 ||
+         VIR_ALLOC_N(list, count + 1) < 0) {
+-- 
+1.8.0
+

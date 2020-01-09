@@ -1,0 +1,191 @@
+From 76b9fdd9c94b6f6d3c6abc0d9907deb68fa0bef0 Mon Sep 17 00:00:00 2001
+Message-Id: <76b9fdd9c94b6f6d3c6abc0d9907deb68fa0bef0@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 22 Jan 2015 10:51:11 +0100
+Subject: [PATCH] qemu: support live update of an interface's filter
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1126487
+
+Since we can't (currently) rely on the ability to provide blanket
+support for all possible network changes by calling the toplevel
+netdev hostside disconnect/connect functions (due to qemu only
+supporting a lockstep between initialization of host side and guest
+side of devices), in order to support live change of an interface's
+nwfilter we need to make a special purpose function to only call the
+nwfilter teardown and setup functions if the filter for an interface
+(or its parameters) changes. The pattern is nearly identical to that
+used to change the bridge that an interface is connected to.
+
+This patch was inspired by a request from Guido Winkelmann
+<guido@sagersystems.de>, who tested an earlier version.
+
+(cherry picked from commit 258fb278f2f63953cb991172b27bb8efc96b3f7d)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_hotplug.c: Context as we still have 'struct
+        qemud_driver' instead of 'virQEMUDriverPtr'
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/nwfilter_params.c | 21 ++++++++++++++++++
+ src/conf/nwfilter_params.h |  4 +++-
+ src/libvirt_private.syms   |  1 +
+ src/qemu/qemu_hotplug.c    | 55 +++++++++++++++++++++++++++++++++++++++++++---
+ 4 files changed, 77 insertions(+), 4 deletions(-)
+
+diff --git a/src/conf/nwfilter_params.c b/src/conf/nwfilter_params.c
+index 3ac1303..7254519 100644
+--- a/src/conf/nwfilter_params.c
++++ b/src/conf/nwfilter_params.c
+@@ -795,6 +795,27 @@ err_exit:
+     return -1;
+ }
+ 
++/* The general purpose function virNWFilterVarValueEqual returns a
++ * bool, but the comparison callback for virHashEqual (called below)
++ * needs to return an int of 0 for == and non-0 for !=
++ */
++static int
++virNWFilterVarValueCompare(const void *a, const void *b)
++{
++    return virNWFilterVarValueEqual((const virNWFilterVarValuePtr) a,
++                                    (const virNWFilterVarValuePtr) b) ? 0 : 1;
++}
++
++bool
++virNWFilterHashTableEqual(virNWFilterHashTablePtr a,
++                          virNWFilterHashTablePtr b)
++{
++    if (!(a || b))
++        return true;
++    if (!(a && b))
++        return false;
++    return virHashEqual(a->hashTable, b->hashTable, virNWFilterVarValueCompare);
++}
+ 
+ static bool
+ isValidVarName(const char *var)
+diff --git a/src/conf/nwfilter_params.h b/src/conf/nwfilter_params.h
+index 96d3033..6c3ce54 100644
+--- a/src/conf/nwfilter_params.h
++++ b/src/conf/nwfilter_params.h
+@@ -1,7 +1,7 @@
+ /*
+  * nwfilter_params.h: parsing and data maintenance of filter parameters
+  *
+- * Copyright (C) 2011 Red Hat, Inc.
++ * Copyright (C) 2011-2012 Red Hat, Inc.
+  * Copyright (C) 2010 IBM Corporation
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -87,6 +87,8 @@ void *virNWFilterHashTableRemoveEntry(virNWFilterHashTablePtr table,
+                                       const char *name);
+ int virNWFilterHashTablePutAll(virNWFilterHashTablePtr src,
+                                virNWFilterHashTablePtr dest);
++bool virNWFilterHashTableEqual(virNWFilterHashTablePtr a,
++                               virNWFilterHashTablePtr b);
+ 
+ # define VALID_VARNAME \
+   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 6d06c6e..640bd99 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -985,6 +985,7 @@ virNWFilterIPAddrMapShutdown;
+ 
+ # nwfilter_params.h
+ virNWFilterHashTableCreate;
++virNWFilterHashTableEqual;
+ virNWFilterHashTableFree;
+ virNWFilterHashTablePut;
+ virNWFilterHashTablePutAll;
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 982f0c1..c9acbef 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1306,6 +1306,43 @@ cleanup:
+     return ret;
+ }
+ 
++static int
++qemuDomainChangeNetFilter(virConnectPtr conn,
++                          virDomainObjPtr vm,
++                          virDomainNetDefPtr olddev,
++                          virDomainNetDefPtr newdev)
++{
++    /* make sure this type of device supports filters. */
++    switch (virDomainNetGetActualType(newdev)) {
++    case VIR_DOMAIN_NET_TYPE_ETHERNET:
++    case VIR_DOMAIN_NET_TYPE_BRIDGE:
++    case VIR_DOMAIN_NET_TYPE_NETWORK:
++        break;
++    default:
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("filters not supported on interfaces of type %s"),
++                       virDomainNetTypeToString(virDomainNetGetActualType(newdev)));
++        return -1;
++    }
++
++    virDomainConfNWFilterTeardown(olddev);
++
++    if (virDomainConfNWFilterInstantiate(conn, vm->def->uuid, newdev) < 0) {
++        virErrorPtr errobj;
++
++        virReportError(VIR_ERR_OPERATION_FAILED,
++                       _("failed to add new filter rules to '%s' "
++                         "- attempting to restore old rules"),
++                       olddev->ifname);
++        errobj = virSaveLastError();
++        ignore_value(virDomainConfNWFilterInstantiate(conn, vm->def->uuid, olddev));
++        virSetError(errobj);
++        virFreeError(errobj);
++        return -1;
++    }
++    return 0;
++}
++
+ int qemuDomainChangeNetLinkState(struct qemud_driver *driver,
+                                  virDomainObjPtr vm,
+                                  virDomainNetDefPtr dev,
+@@ -1349,6 +1386,7 @@ qemuDomainChangeNet(struct qemud_driver *driver,
+     int oldType, newType;
+     bool needReconnect = false;
+     bool needBridgeChange = false;
++    bool needFilterChange = false;
+     bool needLinkStateChange = false;
+     bool needReplaceDevDef = false;
+     bool needBandwidthSet = false;
+@@ -1483,8 +1521,10 @@ qemuDomainChangeNet(struct qemud_driver *driver,
+     }
+     /* (end of device info checks) */
+ 
+-    if (STRNEQ_NULLABLE(olddev->filter, newdev->filter))
+-        needReconnect = true;
++    if (STRNEQ_NULLABLE(olddev->filter, newdev->filter) ||
++        !virNWFilterHashTableEqual(olddev->filterparams, newdev->filterparams)) {
++        needFilterChange = true;
++    }
+ 
+     /* bandwidth can be modified, and will be checked later */
+     /* vlan can be modified, and will be checked later */
+@@ -1656,7 +1696,16 @@ qemuDomainChangeNet(struct qemud_driver *driver,
+             goto cleanup;
+         /* we successfully switched to the new bridge, and we've
+          * determined that the rest of newdev is equivalent to olddev,
+-         * so move newdev into place, so that the  */
++         * so move newdev into place */
++        needReplaceDevDef = true;
++    }
++
++    if (needFilterChange) {
++        if (qemuDomainChangeNetFilter(dom->conn, vm, olddev, newdev) < 0)
++            goto cleanup;
++        /* we successfully switched to the new filter, and we've
++         * determined that the rest of newdev is equivalent to olddev,
++         * so move newdev into place */
+         needReplaceDevDef = true;
+     }
+ 
+-- 
+2.2.2
+

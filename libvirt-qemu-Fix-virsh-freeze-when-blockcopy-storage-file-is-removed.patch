@@ -1,0 +1,51 @@
+From 773702258561189044029a1ea6d05a082ba92e14 Mon Sep 17 00:00:00 2001
+Message-Id: <773702258561189044029a1ea6d05a082ba92e14@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Wed, 19 Oct 2016 13:38:58 +0200
+Subject: [PATCH] qemu: Fix virsh freeze when blockcopy storage file is removed
+
+If someone removes blockcopy storage file when still in mirroring phase
+and then requesting blockjob abort using pivot, virsh cmd freezes. This
+is not an issue with older qemu versions which did not support
+asynchronous jobs (which we prefer by default).
+As we have reached the mirroring phase successfully, polling monitor for
+blockjob info always returns 1 and the loop never ends.
+This fix introduces a check for qemuDomainBlockPivot return code, possibly
+skipping the asynchronous waiting completely, if an error occurred and
+asynchronous waiting was the preferred method.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1139567
+(cherry picked from commit fe3691f66348d55e88c9811fd79ff9314e053977)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1300159
+
+Note that the patch above also fixes a much more serious and more likely issue
+than removing source during blockcopy mirroring phase when there's an attempt
+to perform pivot prior to completing the active commit.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+
+ Conflicts:
+	src/qemu/qemu_driver.c - conflicts only reflect the fact that the
+        codebase in 0.10.2 changed significantly compared to 1.2.11 which
+        this patch is backported from, but the fix works nonetheless
+---
+ src/qemu/qemu_driver.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 6ab6beb..c0be272 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -14019,6 +14019,8 @@ qemuDomainBlockJobImpl(virDomainPtr dom, const char *path, const char *base,
+     if (disk->mirror && mode == BLOCK_JOB_ABORT &&
+         (flags & VIR_DOMAIN_BLOCK_JOB_ABORT_PIVOT)) {
+         ret = qemuDomainBlockPivot(dom->conn, driver, vm, device, disk);
++        if (ret < 0 && async)
++            goto endjob;
+         goto waitjob;
+     }
+ 
+-- 
+2.10.2
+

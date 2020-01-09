@@ -1,0 +1,271 @@
+From 533d15ba8cc12a98e6c2d94d10294e6881fa0e86 Mon Sep 17 00:00:00 2001
+Message-Id: <533d15ba8cc12a98e6c2d94d10294e6881fa0e86.1350990679.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Sun, 21 Oct 2012 10:56:58 -0400
+Subject: [PATCH] network: always create dnsmasq hosts and addnhosts files,
+ even if empty
+
+This fixes the problem reported in:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=868389
+
+Previously, the dnsmasq hosts file (used for static dhcp entries, and
+addnhosts file (used for additional dns host entries) were only
+created/referenced on the dnsmasq commandline if there was something
+to put in them at the time the network was started. Once we can update
+a network definition while it's active (which is now possible with
+virNetworkUpdate), this is no longer a valid strategy - if there were
+0 dhcp static hosts (resulting in no reference to the hosts file on the
+commandline), then one was later added, the commandline wouldn't have
+linked dnsmasq up to the file, so even though we create it, dnsmasq
+doesn't pay any attention.
+
+The solution is to just always create these files and reference them
+on the dnsmasq commandline (almost always, anyway). That way dnsmasq
+can notice when a new entry is added at runtime (a SIGHUP is sent to
+dnsmasq by virNetworkUdpate whenever a host entry is added or removed)
+
+The exception to this is that the dhcp static hosts file isn't created
+if there are no lease ranges *and* no static hosts. This is because in
+this case dnsmasq won't be setup to listen for dhcp requests anyway -
+in that case, if the count of dhcp hosts goes from 0 to 1, dnsmasq
+will need to be restarted anyway (to get it listening on the dhcp
+port). Likewise, if the dhcp hosts count goes from 1 to 0 (and there
+are no dhcp ranges) we need to restart dnsmasq so that it will stop
+listening on port 67. These special situations are handled in the
+bridge driver's networkUpdate() by checking for ((bool)
+nranges||nhosts) both before and after the update, and triggering a
+dnsmasq restart if the before and after don't match.
+(cherry picked from commit 1cb1f9dabf8e9c9fc8dfadbb3097776ca5f2c68c)
+---
+ src/network/bridge_driver.c                        | 56 +++++++++++++++++++---
+ src/util/dnsmasq.c                                 | 12 +++--
+ tests/networkxml2argvdata/isolated-network.argv    |  4 +-
+ .../nat-network-dns-srv-record-minimal.argv        |  3 +-
+ .../nat-network-dns-srv-record.argv                |  3 +-
+ .../nat-network-dns-txt-record.argv                |  3 +-
+ tests/networkxml2argvdata/nat-network.argv         |  3 +-
+ tests/networkxml2argvdata/netboot-network.argv     |  5 +-
+ .../networkxml2argvdata/netboot-proxy-network.argv |  2 +
+ tests/networkxml2argvdata/routed-network.argv      |  3 +-
+ 10 files changed, 75 insertions(+), 19 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 8ad4b7f..33c3f9e 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -748,12 +748,19 @@ networkBuildDnsmasqArgv(virNetworkObjPtr network,
+         if (networkBuildDnsmasqHostsfile(dctx, ipdef, network->def->dns) < 0)
+             goto cleanup;
+ 
+-        if (dctx->hostsfile->nhosts)
++        /* Even if there are currently no static hosts, if we're
++         * listening for DHCP, we should write a 0-length hosts
++         * file to allow for runtime additions.
++         */
++        if (ipdef->nranges || ipdef->nhosts)
+             virCommandAddArgPair(cmd, "--dhcp-hostsfile",
+                                  dctx->hostsfile->path);
+-        if (dctx->addnhostsfile->nhosts)
+-            virCommandAddArgPair(cmd, "--addn-hosts",
+-                                 dctx->addnhostsfile->path);
++
++        /* Likewise, always create this file and put it on the commandline, to allow for
++         * for runtime additions.
++         */
++        virCommandAddArgPair(cmd, "--addn-hosts",
++                             dctx->addnhostsfile->path);
+ 
+         if (ipdef->tftproot) {
+             virCommandAddArgList(cmd, "--enable-tftp",
+@@ -2862,7 +2869,10 @@ networkUpdate(virNetworkPtr net,
+ {
+     struct network_driver *driver = net->conn->networkPrivateData;
+     virNetworkObjPtr network = NULL;
+-    int isActive, ret = -1;
++    int isActive, ret = -1, ii;
++    virNetworkIpDefPtr ipdef;
++    bool oldDhcpActive = false;
++
+ 
+     virCheckFlags(VIR_NETWORK_UPDATE_AFFECT_LIVE |
+                   VIR_NETWORK_UPDATE_AFFECT_CONFIG,
+@@ -2877,6 +2887,16 @@ networkUpdate(virNetworkPtr net,
+         goto cleanup;
+     }
+ 
++    /* see if we are listening for dhcp pre-modification */
++    for (ii = 0;
++         (ipdef = virNetworkDefGetIpByIndex(network->def, AF_INET, ii));
++         ii++) {
++        if (ipdef->nranges || ipdef->nhosts) {
++            oldDhcpActive = true;
++            break;
++        }
++    }
++
+     /* VIR_NETWORK_UPDATE_AFFECT_CURRENT means "change LIVE if network
+      * is active, else change CONFIG
+     */
+@@ -2918,8 +2938,30 @@ networkUpdate(virNetworkPtr net,
+             if (networkRestartDhcpDaemon(network) < 0)
+                 goto cleanup;
+ 
+-        } else if (section == VIR_NETWORK_SECTION_IP_DHCP_HOST ||
+-                   section == VIR_NETWORK_SECTION_DNS_HOST ||
++        } else if (section == VIR_NETWORK_SECTION_IP_DHCP_HOST) {
++            /* if we previously weren't listening for dhcp and now we
++             * are (or vice-versa) then we need to do a restart,
++             * otherwise we just need to do a refresh (redo the config
++             * files and send SIGHUP)
++             */
++            bool newDhcpActive = false;
++
++            for (ii = 0;
++                 (ipdef = virNetworkDefGetIpByIndex(network->def, AF_INET, ii));
++                 ii++) {
++                if (ipdef->nranges || ipdef->nhosts) {
++                    newDhcpActive = true;
++                    break;
++                }
++            }
++
++            if ((newDhcpActive != oldDhcpActive &&
++                networkRestartDhcpDaemon(network) < 0) ||
++                networkRefreshDhcpDaemon(network) < 0) {
++                goto cleanup;
++            }
++
++        } else if (section == VIR_NETWORK_SECTION_DNS_HOST ||
+                    section == VIR_NETWORK_SECTION_DNS_TXT ||
+                    section == VIR_NETWORK_SECTION_DNS_SRV) {
+             /* these sections only change things in config files, so we
+diff --git a/src/util/dnsmasq.c b/src/util/dnsmasq.c
+index 91bf2c5..9d1c07b 100644
+--- a/src/util/dnsmasq.c
++++ b/src/util/dnsmasq.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2007-2011 Red Hat, Inc.
++ * Copyright (C) 2007-2012 Red Hat, Inc.
+  * Copyright (C) 2010 Satoru SATOH <satoru.satoh@gmail.com>
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -176,8 +176,9 @@ addnhostsWrite(const char *path,
+     unsigned int i, ii;
+     int rc = 0;
+ 
+-    if (nhosts == 0)
+-        return rc;
++    /* even if there are 0 hosts, create a 0 length file, to allow
++     * for runtime addition.
++     */
+ 
+     if (virAsprintf(&tmp, "%s.new", path) < 0)
+         return -ENOMEM;
+@@ -364,8 +365,9 @@ hostsfileWrite(const char *path,
+     unsigned int i;
+     int rc = 0;
+ 
+-    if (nhosts == 0)
+-        return rc;
++    /* even if there are 0 hosts, create a 0 length file, to allow
++     * for runtime addition.
++     */
+ 
+     if (virAsprintf(&tmp, "%s.new", path) < 0)
+         return -ENOMEM;
+diff --git a/tests/networkxml2argvdata/isolated-network.argv b/tests/networkxml2argvdata/isolated-network.argv
+index 048c72b..13e77b2 100644
+--- a/tests/networkxml2argvdata/isolated-network.argv
++++ b/tests/networkxml2argvdata/isolated-network.argv
+@@ -4,4 +4,6 @@
+ --listen-address 192.168.152.1 \
+ --dhcp-range 192.168.152.2,192.168.152.254 \
+ --dhcp-leasefile=/var/lib/libvirt/dnsmasq/private.leases --dhcp-lease-max=253 \
+---dhcp-no-override\
++--dhcp-no-override \
++--dhcp-hostsfile=/var/lib/libvirt/dnsmasq/private.hostsfile \
++--addn-hosts=/var/lib/libvirt/dnsmasq/private.addnhosts\
+diff --git a/tests/networkxml2argvdata/nat-network-dns-srv-record-minimal.argv b/tests/networkxml2argvdata/nat-network-dns-srv-record-minimal.argv
+index a1e4200..210a60c 100644
+--- a/tests/networkxml2argvdata/nat-network-dns-srv-record-minimal.argv
++++ b/tests/networkxml2argvdata/nat-network-dns-srv-record-minimal.argv
+@@ -13,4 +13,5 @@
+ --dhcp-leasefile=/var/lib/libvirt/dnsmasq/default.leases \
+ --dhcp-lease-max=253 \
+ --dhcp-no-override \
+---dhcp-hostsfile=/var/lib/libvirt/dnsmasq/default.hostsfile\
++--dhcp-hostsfile=/var/lib/libvirt/dnsmasq/default.hostsfile \
++--addn-hosts=/var/lib/libvirt/dnsmasq/default.addnhosts\
+diff --git a/tests/networkxml2argvdata/nat-network-dns-srv-record.argv b/tests/networkxml2argvdata/nat-network-dns-srv-record.argv
+index 8af38c4..833d3cd 100644
+--- a/tests/networkxml2argvdata/nat-network-dns-srv-record.argv
++++ b/tests/networkxml2argvdata/nat-network-dns-srv-record.argv
+@@ -13,4 +13,5 @@
+ --dhcp-leasefile=/var/lib/libvirt/dnsmasq/default.leases \
+ --dhcp-lease-max=253 \
+ --dhcp-no-override \
+---dhcp-hostsfile=/var/lib/libvirt/dnsmasq/default.hostsfile\
++--dhcp-hostsfile=/var/lib/libvirt/dnsmasq/default.hostsfile \
++--addn-hosts=/var/lib/libvirt/dnsmasq/default.addnhosts\
+diff --git a/tests/networkxml2argvdata/nat-network-dns-txt-record.argv b/tests/networkxml2argvdata/nat-network-dns-txt-record.argv
+index 404b56a..3481507 100644
+--- a/tests/networkxml2argvdata/nat-network-dns-txt-record.argv
++++ b/tests/networkxml2argvdata/nat-network-dns-txt-record.argv
+@@ -7,4 +7,5 @@
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+ --dhcp-leasefile=/var/lib/libvirt/dnsmasq/default.leases \
+ --dhcp-lease-max=253 --dhcp-no-override \
+---dhcp-hostsfile=/var/lib/libvirt/dnsmasq/default.hostsfile\
++--dhcp-hostsfile=/var/lib/libvirt/dnsmasq/default.hostsfile \
++--addn-hosts=/var/lib/libvirt/dnsmasq/default.addnhosts\
+diff --git a/tests/networkxml2argvdata/nat-network.argv b/tests/networkxml2argvdata/nat-network.argv
+index 1dc8f73..37fd2fc 100644
+--- a/tests/networkxml2argvdata/nat-network.argv
++++ b/tests/networkxml2argvdata/nat-network.argv
+@@ -6,4 +6,5 @@
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+ --dhcp-leasefile=/var/lib/libvirt/dnsmasq/default.leases \
+ --dhcp-lease-max=253 --dhcp-no-override \
+---dhcp-hostsfile=/var/lib/libvirt/dnsmasq/default.hostsfile\
++--dhcp-hostsfile=/var/lib/libvirt/dnsmasq/default.hostsfile \
++--addn-hosts=/var/lib/libvirt/dnsmasq/default.addnhosts\
+diff --git a/tests/networkxml2argvdata/netboot-network.argv b/tests/networkxml2argvdata/netboot-network.argv
+index 5a85ec2..5408eb7 100644
+--- a/tests/networkxml2argvdata/netboot-network.argv
++++ b/tests/networkxml2argvdata/netboot-network.argv
+@@ -3,5 +3,8 @@
+ --except-interface lo --listen-address 192.168.122.1 \
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+ --dhcp-leasefile=/var/lib/libvirt/dnsmasq/netboot.leases \
+---dhcp-lease-max=253 --dhcp-no-override --expand-hosts --enable-tftp \
++--dhcp-lease-max=253 --dhcp-no-override --expand-hosts \
++--dhcp-hostsfile=/var/lib/libvirt/dnsmasq/netboot.hostsfile \
++--addn-hosts=/var/lib/libvirt/dnsmasq/netboot.addnhosts \
++--enable-tftp \
+ --tftp-root /var/lib/tftproot --dhcp-boot pxeboot.img\
+diff --git a/tests/networkxml2argvdata/netboot-proxy-network.argv b/tests/networkxml2argvdata/netboot-proxy-network.argv
+index 36836b0..21e01e3 100644
+--- a/tests/networkxml2argvdata/netboot-proxy-network.argv
++++ b/tests/networkxml2argvdata/netboot-proxy-network.argv
+@@ -4,4 +4,6 @@
+ --dhcp-range 192.168.122.2,192.168.122.254 \
+ --dhcp-leasefile=/var/lib/libvirt/dnsmasq/netboot.leases \
+ --dhcp-lease-max=253 --dhcp-no-override --expand-hosts \
++--dhcp-hostsfile=/var/lib/libvirt/dnsmasq/netboot.hostsfile \
++--addn-hosts=/var/lib/libvirt/dnsmasq/netboot.addnhosts \
+ --dhcp-boot pxeboot.img,,10.20.30.40\
+diff --git a/tests/networkxml2argvdata/routed-network.argv b/tests/networkxml2argvdata/routed-network.argv
+index 77e802f..9fedb2b 100644
+--- a/tests/networkxml2argvdata/routed-network.argv
++++ b/tests/networkxml2argvdata/routed-network.argv
+@@ -1,3 +1,4 @@
+ @DNSMASQ@ --strict-order --bind-interfaces \
+ --local=// --domain-needed --conf-file= \
+---except-interface lo --listen-address 192.168.122.1\
++--except-interface lo --listen-address 192.168.122.1 \
++--addn-hosts=/var/lib/libvirt/dnsmasq/local.addnhosts\
+-- 
+1.7.12.4
+

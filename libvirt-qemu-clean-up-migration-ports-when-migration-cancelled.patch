@@ -1,0 +1,63 @@
+From 72ba72c228e0cc7373e4173a14d8c1e8061896cc Mon Sep 17 00:00:00 2001
+Message-Id: <72ba72c228e0cc7373e4173a14d8c1e8061896cc@dist-git>
+From: Zeng Junliang <zengjunliang@huawei.com>
+Date: Fri, 16 May 2014 13:43:07 +0200
+Subject: [PATCH] qemu: clean up migration ports when migration cancelled
+
+If there's a migration cancelled, the bitmap of migration port should be
+cleaned up too.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1018695
+
+Signed-off-by: Zeng Junliang <zengjunliang@huawei.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit c92ca769af2bacefdd451802d7eb1adac5e6597c)
+
+Conflicts:
+	src/qemu/qemu_migration.c -- context
+---
+ src/qemu/qemu_migration.c | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index f86381c..2f02fd3 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -3136,12 +3136,16 @@ qemuMigrationFinish(struct qemud_driver *driver,
+     virErrorPtr orig_err = NULL;
+     int cookie_flags = 0;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
++    unsigned short port;
+ 
+     VIR_DEBUG("driver=%p, dconn=%p, vm=%p, cookiein=%s, cookieinlen=%d, "
+               "cookieout=%p, cookieoutlen=%p, flags=%lx, retcode=%d",
+               driver, dconn, vm, NULLSTR(cookiein), cookieinlen,
+               cookieout, cookieoutlen, flags, retcode);
+ 
++    port = priv->migrationPort;
++    priv->migrationPort = 0;
++
+     if (!qemuMigrationJobIsActive(vm, QEMU_ASYNC_JOB_MIGRATION_IN))
+         goto cleanup;
+ 
+@@ -3178,9 +3182,6 @@ qemuMigrationFinish(struct qemud_driver *driver,
+             goto endjob;
+         }
+ 
+-        virPortAllocatorRelease(driver->migrationPorts, priv->migrationPort);
+-        priv->migrationPort = 0;
+-
+         if (flags & VIR_MIGRATE_PERSIST_DEST) {
+             virDomainDefPtr vmdef;
+             if (vm->persistent)
+@@ -3305,6 +3306,7 @@ endjob:
+     }
+ 
+ cleanup:
++    virPortAllocatorRelease(driver->migrationPorts, port);
+     if (vm) {
+         VIR_FREE(priv->origname);
+         virDomainObjUnlock(vm);
+-- 
+1.9.3
+

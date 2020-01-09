@@ -1,0 +1,198 @@
+From 6114ebf18fdaed53358bb2c62db19d36c254a606 Mon Sep 17 00:00:00 2001
+Message-Id: <6114ebf18fdaed53358bb2c62db19d36c254a606.1350990680.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 22 Oct 2012 21:48:49 -0600
+Subject: [PATCH] blockjob: implement block copy for qemu
+
+https://bugzilla.redhat.com/show_bug.cgi?id=856247
+[rebase of 6.3 https://bugzilla.redhat.com/show_bug.cgi?id=638506]
+
+Minimal patch to wire up all the pieces in the previous patches
+to actually enable a block copy job.  By minimal, I mean that
+qemu creates the file (that is, no REUSE_EXT flag support yet),
+SELinux must be disabled, a lock manager is not informed, and the
+audit logs aren't updated.  But those will be added as
+improvements in future patches.
+
+This patch is designed so that if we ever add a future API
+virDomainBlockCopy with more bells and whistles (such as letting
+the user specify a destination image format different than the
+source), where virDomainBlockRebase is a wrapper around the
+simpler portions of the new functionality, then the new API can
+just reuse the new qemuDomainBlockCopy function and already
+support _SHALLOW and _REUSE_EXT flags.  Also note that libvirt.c
+already filtered the new flags if _COPY is not present, so that
+we are not impacting the case of BlockRebase being a wrapper
+around BlockPull.
+
+* src/qemu/qemu_driver.c (qemuDomainBlockCopy): New function.
+(qemuDomainBlockRebase): Call it when appropriate.
+(cherry picked from TBD)
+---
+ src/qemu/qemu_driver.c | 140 ++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 138 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 7aa7428..6164b05 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -12844,10 +12844,144 @@ qemuDomainBlockJobSetSpeed(virDomainPtr dom, const char *path,
+ }
+ 
+ static int
++qemuDomainBlockCopy(virDomainPtr dom, const char *path,
++                    const char *dest, const char *format,
++                    unsigned long bandwidth, unsigned int flags)
++{
++    struct qemud_driver *driver = dom->conn->privateData;
++    virDomainObjPtr vm;
++    qemuDomainObjPrivatePtr priv;
++    char *device = NULL;
++    virDomainDiskDefPtr disk;
++    int ret = -1;
++    int idx;
++    bool reopen;
++
++    /* Preliminaries: find the disk we are editing, sanity checks */
++    virCheckFlags(VIR_DOMAIN_BLOCK_REBASE_SHALLOW, -1);
++
++    if (!(vm = qemuDomObjFromDomain(dom)))
++        goto cleanup;
++    priv = vm->privateData;
++
++    if (!virDomainObjIsActive(vm)) {
++        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
++                       _("domain is not running"));
++        goto cleanup;
++    }
++
++    device = qemuDiskPathToAlias(vm, path, &idx);
++    if (!device) {
++        goto cleanup;
++    }
++    disk = vm->def->disks[idx];
++    if (disk->mirror) {
++        virReportError(VIR_ERR_BLOCK_COPY_ACTIVE,
++                       _("disk '%s' already in active block copy job"),
++                       disk->dst);
++        goto cleanup;
++    }
++
++    reopen = qemuCapsGet(priv->caps, QEMU_CAPS_DRIVE_REOPEN);
++    if (!(qemuCapsGet(priv->caps, QEMU_CAPS_DRIVE_MIRROR) &&
++          qemuCapsGet(priv->caps, QEMU_CAPS_BLOCKJOB_ASYNC))) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("block copy is not supported with this QEMU binary"));
++        goto cleanup;
++    }
++    if (vm->persistent) {
++        /* XXX if qemu ever lets us start a new domain with mirroring
++         * already active, we can relax this; but for now, the risk of
++         * 'managedsave' due to libvirt-guests means we can't risk
++         * this on persistent domains.  */
++        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
++                       _("domain is not transient"));
++        goto cleanup;
++    }
++
++    if (qemuDomainObjBeginJob(driver, vm, QEMU_JOB_MODIFY) < 0)
++        goto cleanup;
++
++    if (!virDomainObjIsActive(vm)) {
++        virReportError(VIR_ERR_OPERATION_INVALID, "%s",
++                       _("domain is not running"));
++        goto endjob;
++    }
++    if (qemuDomainDetermineDiskChain(driver, disk, false) < 0)
++        goto endjob;
++
++    if ((flags & VIR_DOMAIN_BLOCK_REBASE_SHALLOW) &&
++        STREQ_NULLABLE(format, "raw") &&
++        disk->backingChain->backingStore) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("disk '%s' has backing file, so raw shallow copy "
++                         "is not possible"),
++                       disk->dst);
++        goto endjob;
++    }
++
++    /* Prepare the destination file.  */
++    /* XXX We also need to add security labeling, lock manager lease,
++     * and auditing of those events, as well as to support reuse of
++     * existing images, including probing the existing format of an
++     * existing image.  */
++    if (!format) {
++        disk->mirrorFormat = disk->format;
++        if (disk->mirrorFormat > 0)
++            format = virStorageFileFormatTypeToString(disk->mirrorFormat);
++    } else {
++        disk->mirrorFormat = virStorageFileFormatTypeFromString(format);
++        if (disk->mirrorFormat <= 0) {
++            virReportError(VIR_ERR_INVALID_ARG, _("unrecognized format '%s'"),
++                           format);
++            goto endjob;
++        }
++    }
++    if (!(disk->mirror = strdup(dest))) {
++        virReportOOMError();
++        goto endjob;
++    }
++
++    /* Actually start the mirroring */
++    qemuDomainObjEnterMonitor(driver, vm);
++    ret = qemuMonitorDriveMirror(priv->mon, device, dest, format, bandwidth,
++                                 reopen, flags);
++    qemuDomainObjExitMonitor(driver, vm);
++
++endjob:
++    if (ret < 0) {
++        VIR_FREE(disk->mirror);
++        disk->mirrorFormat = VIR_STORAGE_FILE_NONE;
++    }
++    if (qemuDomainObjEndJob(driver, vm) == 0) {
++        vm = NULL;
++        goto cleanup;
++    }
++
++cleanup:
++    VIR_FREE(device);
++    if (vm)
++        virDomainObjUnlock(vm);
++    return ret;
++}
++
++static int
+ qemuDomainBlockRebase(virDomainPtr dom, const char *path, const char *base,
+                       unsigned long bandwidth, unsigned int flags)
+ {
+-    virCheckFlags(0, -1);
++    virCheckFlags(VIR_DOMAIN_BLOCK_REBASE_SHALLOW |
++                  VIR_DOMAIN_BLOCK_REBASE_COPY |
++                  VIR_DOMAIN_BLOCK_REBASE_COPY_RAW, -1);
++
++    if (flags & VIR_DOMAIN_BLOCK_REBASE_COPY) {
++        const char *format = NULL;
++        if (flags & VIR_DOMAIN_BLOCK_REBASE_COPY_RAW)
++            format = "raw";
++        flags &= ~(VIR_DOMAIN_BLOCK_REBASE_COPY |
++                   VIR_DOMAIN_BLOCK_REBASE_COPY_RAW);
++        return qemuDomainBlockCopy(dom, path, base, format, bandwidth, flags);
++    }
++
+     return qemuDomainBlockJobImpl(dom, path, base, bandwidth, NULL,
+                                   BLOCK_JOB_PULL, flags);
+ }
+@@ -12856,7 +12990,9 @@ static int
+ qemuDomainBlockPull(virDomainPtr dom, const char *path, unsigned long bandwidth,
+                     unsigned int flags)
+ {
+-    return qemuDomainBlockRebase(dom, path, NULL, bandwidth, flags);
++    virCheckFlags(0, -1);
++    return qemuDomainBlockJobImpl(dom, path, NULL, bandwidth, NULL,
++                                  BLOCK_JOB_PULL, flags);
+ }
+ 
+ 
+-- 
+1.7.12.4
+

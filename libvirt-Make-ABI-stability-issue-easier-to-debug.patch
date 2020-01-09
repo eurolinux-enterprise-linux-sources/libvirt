@@ -1,0 +1,432 @@
+From 29a2de77470554042fce5b9f515937da95e8905b Mon Sep 17 00:00:00 2001
+Message-Id: <29a2de77470554042fce5b9f515937da95e8905b@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 12 Mar 2014 11:50:12 +0100
+Subject: [PATCH] Make ABI stability issue easier to debug
+
+When ABI stability check fails, we only log the error message describing
+the incompatibility. Let's log both XMLs in case of an error to make it
+easier to analyze where and why the stability check failed.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 287e2b395aa5357491e80e06ea82ba63c3a1075e)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/conf/domain_conf.c -- missing f47b397 and a few other
+        commits
+
+The changes to virDomainDefCheckABIStability from commit f47b397 are
+effectively squashed in this patch since backporting all changes from
+that cleanup patch does not make sense (it would only cause lots of
+other conflicts).
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1141838
+https://bugzilla.redhat.com/show_bug.cgi?id=1155564
+---
+ src/conf/domain_conf.c | 131 +++++++++++++++++++++++++++----------------------
+ 1 file changed, 73 insertions(+), 58 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 8b20c9f..ba351f1 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -11692,15 +11692,17 @@ virDomainPanicCheckABIStability(virDomainPanicDefPtr src,
+ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+                                    virDomainDefPtr dst)
+ {
+-    bool identical = false;
+     int i;
++    virErrorPtr err;
++    char *strSrc;
++    char *strDst;
+ 
+     if (src->virtType != dst->virtType) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain virt type %s does not match source %s"),
+                        virDomainVirtTypeToString(dst->virtType),
+                        virDomainVirtTypeToString(src->virtType));
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (memcmp(src->uuid, dst->uuid, VIR_UUID_BUFLEN) != 0) {
+@@ -11711,59 +11713,59 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain uuid %s does not match source %s"),
+                        uuiddst, uuidsrc);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (src->mem.max_balloon != dst->mem.max_balloon) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain max memory %lld does not match source %lld"),
+                        dst->mem.max_balloon, src->mem.max_balloon);
+-        goto cleanup;
++        goto error;
+     }
+     if (src->mem.cur_balloon != dst->mem.cur_balloon) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain current memory %lld does not match source %lld"),
+                        dst->mem.cur_balloon, src->mem.cur_balloon);
+-        goto cleanup;
++        goto error;
+     }
+     if (src->mem.hugepage_backed != dst->mem.hugepage_backed) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain huge page backing %d does not match source %d"),
+                        dst->mem.hugepage_backed,
+                        src->mem.hugepage_backed);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (src->vcpus != dst->vcpus) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain vCPU count %d does not match source %d"),
+                        dst->vcpus, src->vcpus);
+-        goto cleanup;
++        goto error;
+     }
+     if (src->maxvcpus != dst->maxvcpus) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain vCPU max %d does not match source %d"),
+                        dst->maxvcpus, src->maxvcpus);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (STRNEQ(src->os.type, dst->os.type)) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain OS type %s does not match source %s"),
+                        dst->os.type, src->os.type);
+-        goto cleanup;
++        goto error;
+     }
+     if (STRNEQ(src->os.arch, dst->os.arch)) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain architecture %s does not match source %s"),
+                        dst->os.arch, src->os.arch);
+-        goto cleanup;
++        goto error;
+     }
+     if (STRNEQ(src->os.machine, dst->os.machine)) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain OS type %s does not match source %s"),
+                        dst->os.machine, src->os.machine);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (src->os.smbios_mode != dst->os.smbios_mode) {
+@@ -11771,199 +11773,199 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+                        _("Target domain SMBIOS mode %s does not match source %s"),
+                        virDomainSmbiosModeTypeToString(dst->os.smbios_mode),
+                        virDomainSmbiosModeTypeToString(src->os.smbios_mode));
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (src->features != dst->features) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain features %d does not match source %d"),
+                        dst->features, src->features);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (src->clock.ntimers != dst->clock.ntimers) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                        _("Target domain timers do not match source"));
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->clock.ntimers ; i++) {
+         if (!virDomainTimerDefCheckABIStability(src->clock.timers[i], dst->clock.timers[i]))
+-            goto cleanup;
++            goto error;
+     }
+ 
+     if (!virCPUDefIsEqual(src->cpu, dst->cpu))
+-        goto cleanup;
++        goto error;
+ 
+     if (!virSysinfoIsEqual(src->sysinfo, dst->sysinfo))
+-        goto cleanup;
++        goto error;
+ 
+     if (src->ndisks != dst->ndisks) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain disk count %zu does not match source %zu"),
+                        dst->ndisks, src->ndisks);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->ndisks ; i++)
+         if (!virDomainDiskDefCheckABIStability(src->disks[i], dst->disks[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->ncontrollers != dst->ncontrollers) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain disk controller count %zu does not match source %zu"),
+                        dst->ncontrollers, src->ncontrollers);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->ncontrollers ; i++)
+         if (!virDomainControllerDefCheckABIStability(src->controllers[i], dst->controllers[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nfss != dst->nfss) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain filesystem count %zu does not match source %zu"),
+                        dst->nfss, src->nfss);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nfss ; i++)
+         if (!virDomainFsDefCheckABIStability(src->fss[i], dst->fss[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nnets != dst->nnets) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain net card count %zu does not match source %zu"),
+                        dst->nnets, src->nnets);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nnets ; i++)
+         if (!virDomainNetDefCheckABIStability(src->nets[i], dst->nets[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->ninputs != dst->ninputs) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain input device count %zu does not match source %zu"),
+                        dst->ninputs, src->ninputs);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->ninputs ; i++)
+         if (!virDomainInputDefCheckABIStability(src->inputs[i], dst->inputs[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nsounds != dst->nsounds) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain sound card count %zu does not match source %zu"),
+                        dst->nsounds, src->nsounds);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nsounds ; i++)
+         if (!virDomainSoundDefCheckABIStability(src->sounds[i], dst->sounds[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nvideos != dst->nvideos) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain video card count %zu does not match source %zu"),
+                        dst->nvideos, src->nvideos);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nvideos ; i++)
+         if (!virDomainVideoDefCheckABIStability(src->videos[i], dst->videos[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nhostdevs != dst->nhostdevs) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain host device count %zu does not match source %zu"),
+                        dst->nhostdevs, src->nhostdevs);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nhostdevs ; i++)
+         if (!virDomainHostdevDefCheckABIStability(src->hostdevs[i], dst->hostdevs[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nsmartcards != dst->nsmartcards) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain smartcard count %zu does not match source %zu"),
+                        dst->nsmartcards, src->nsmartcards);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nsmartcards ; i++)
+         if (!virDomainSmartcardDefCheckABIStability(src->smartcards[i], dst->smartcards[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nserials != dst->nserials) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain serial port count %zu does not match source %zu"),
+                        dst->nserials, src->nserials);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nserials ; i++)
+         if (!virDomainSerialDefCheckABIStability(src->serials[i], dst->serials[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nparallels != dst->nparallels) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain parallel port count %zu does not match source %zu"),
+                        dst->nparallels, src->nparallels);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nparallels ; i++)
+         if (!virDomainParallelDefCheckABIStability(src->parallels[i], dst->parallels[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nchannels != dst->nchannels) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain channel count %zu does not match source %zu"),
+                        dst->nchannels, src->nchannels);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nchannels ; i++)
+         if (!virDomainChannelDefCheckABIStability(src->channels[i], dst->channels[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nconsoles != dst->nconsoles) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain console count %zu does not match source %zu"),
+                        dst->nconsoles, src->nconsoles);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nconsoles ; i++)
+         if (!virDomainConsoleDefCheckABIStability(src->consoles[i], dst->consoles[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nhubs != dst->nhubs) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain hub device count %zu does not match source %zu"),
+                        dst->nhubs, src->nhubs);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0 ; i < src->nhubs ; i++)
+         if (!virDomainHubDefCheckABIStability(src->hubs[i], dst->hubs[i]))
+-            goto cleanup;
++            goto error;
+ 
+     if (src->nredirdevs != dst->nredirdevs) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain redirected devices count %zu "
+                          "does not match source %zu"),
+                        dst->nredirdevs, src->nredirdevs);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     for (i = 0; i < src->nredirdevs; i++) {
+         if (!virDomainRedirdevDefCheckABIStability(src->redirdevs[i],
+                                                    dst->redirdevs[i]))
+-            goto cleanup;
++            goto error;
+     }
+ 
+     if ((!src->redirfilter && dst->redirfilter) ||
+@@ -11971,46 +11973,59 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain USB redirection filter count %d does not match source %d"),
+                        dst->redirfilter ? 1 : 0, src->redirfilter ? 1 : 0);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (src->redirfilter &&
+         !virDomainRedirFilterDefCheckABIStability(src->redirfilter, dst->redirfilter))
+-        goto cleanup;
++        goto error;
+ 
+     if ((!src->watchdog && dst->watchdog) ||
+         (src->watchdog && !dst->watchdog)) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain watchdog count %d does not match source %d"),
+                        dst->watchdog ? 1 : 0, src->watchdog ? 1 : 0);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (src->watchdog &&
+         !virDomainWatchdogDefCheckABIStability(src->watchdog, dst->watchdog))
+-        goto cleanup;
++        goto error;
+ 
+     if ((!src->memballoon && dst->memballoon) ||
+         (src->memballoon && !dst->memballoon)) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain memory balloon count %d does not match source %d"),
+                        dst->memballoon ? 1 : 0, src->memballoon ? 1 : 0);
+-        goto cleanup;
++        goto error;
+     }
+ 
+     if (src->memballoon &&
+         !virDomainMemballoonDefCheckABIStability(src->memballoon, dst->memballoon))
+-        goto cleanup;
++        goto error;
+ 
+     if (!virDomainRNGDefCheckABIStability(src->rng, dst->rng))
+-        goto cleanup;
++        goto error;
+     if (!virDomainPanicCheckABIStability(src->panic, dst->panic))
+-        goto cleanup;
++        goto error;
+ 
+-    identical = true;
++    return true;
+ 
+-cleanup:
+-    return identical;
++error:
++    err = virSaveLastError();
++
++    strSrc = virDomainDefFormat(src, 0);
++    strDst = virDomainDefFormat(dst, 0);
++    VIR_DEBUG("XMLs that failed stability check were: src=\"%s\", dst=\"%s\"",
++              NULLSTR(strSrc), NULLSTR(strDst));
++    VIR_FREE(strSrc);
++    VIR_FREE(strDst);
++
++    if (err) {
++        virSetError(err);
++        virFreeError(err);
++    }
++    return false;
+ }
+ 
+ 
+-- 
+2.2.0
+

@@ -1,0 +1,76 @@
+From 42ba8a7784186d17316253908dc654786312fcd0 Mon Sep 17 00:00:00 2001
+Message-Id: <42ba8a7784186d17316253908dc654786312fcd0.1373271642.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 13 Jun 2013 11:12:24 +0200
+Subject: [PATCH] conf: don't fail to parse <boot> when parsing a single device
+
+This resolves:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=895294
+
+The symptom was that attempts to modify a network device using
+virDomainUpdateDeviceFlags() would fail if the original device had a
+<boot> element (e.g. "<boot order='1'/>"), even if the updated device
+had the same <boot> element. Instead, the following error would be logged:
+
+  cannot modify network device boot index setting
+
+It's true that it's not possible to change boot order (internally
+known as bootIndex) of a live device; qemuDomainChangeNet checks for
+that, but the problem was that the information it was checking was
+incorrect.
+
+Explanation:
+
+When a complete domain is parsed, a global (to the domain) "bootMap"
+is passed down to the parse for each device; the bootMap is used to
+make sure that devices don't have conflicting settings for their boot
+orders.
+
+When a single device is parsed by itself (as in the case of
+virDomainUpdateDeviceFlags), there is no global bootMap that would be
+appropriate to send, so NULL is sent instead. However, although the
+lowest level function that parses just the boot order *does* simply
+skip the sanity check in that case, the next higher level
+"virDomainDeviceInfoParseXML" function refuses to call down to the
+lower "virDomainDeviceBootParseXML" if bootMap is NULL. So, the boot
+order is never set in the "new" device object, and when it is compared
+to the original (which does have a boot order), they don't match.
+
+The fix is to patch virDomainDeviceInfoParseXML to not care about
+bootMap, and just always call virDomainDeviceInfoBootParseXML whenever
+there is a <boot> element. When we are only parsing a single device,
+we don't care whether or not any specified boot order is consistent
+with the rest of the domain; we will always do this check later (in
+the current case, we do it by verifying that the net bootIndex exactly
+matches the old bootIndex).
+(cherry picked from commit 877dab6ccf9ce79e28c1e5f9b70459a9f9a8a6c2)
+---
+ src/conf/domain_conf.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 0de208b..ba722fe 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -1,7 +1,7 @@
+ /*
+  * domain_conf.c: domain XML processing
+  *
+- * Copyright (C) 2006-2012 Red Hat, Inc.
++ * Copyright (C) 2006-2013 Red Hat, Inc.
+  * Copyright (C) 2006-2008 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -2603,7 +2603,7 @@ virDomainDeviceInfoParseXML(xmlNodePtr node,
+             } else if (master == NULL &&
+                        xmlStrEqual(cur->name, BAD_CAST "master")) {
+                 master = cur;
+-            } else if (boot == NULL && bootMap &&
++            } else if (boot == NULL &&
+                        (flags & VIR_DOMAIN_XML_INTERNAL_ALLOW_BOOT) &&
+                        xmlStrEqual(cur->name, BAD_CAST "boot")) {
+                 boot = cur;
+-- 
+1.8.2.1
+

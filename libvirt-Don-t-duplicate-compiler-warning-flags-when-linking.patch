@@ -1,0 +1,121 @@
+From ef1718d8686e9a93d5fde63175e53c5593a8ba3f Mon Sep 17 00:00:00 2001
+Message-Id: <ef1718d8686e9a93d5fde63175e53c5593a8ba3f@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 13 May 2013 12:50:22 +0100
+Subject: [PATCH] Don't duplicate compiler warning flags when linking
+
+Automake already passes all CFLAGS to the linker too, so it
+is not necessary to set WARN_LDFLAGS in addition to the
+WARN_CFLAGS variable.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 71b54636f045bbc712e267084d5f1ef7431798b2)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1242156
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ daemon/Makefile.am          | 1 -
+ m4/virt-compile-warnings.m4 | 4 ----
+ src/Makefile.am             | 5 -----
+ tools/Makefile.am           | 4 +---
+ 4 files changed, 1 insertion(+), 13 deletions(-)
+
+diff --git a/daemon/Makefile.am b/daemon/Makefile.am
+index fac1d9e..29a4e3f 100644
+--- a/daemon/Makefile.am
++++ b/daemon/Makefile.am
+@@ -101,7 +101,6 @@ libvirtd_CFLAGS = \
+ 	-DQEMUD_PID_FILE="\"$(QEMUD_PID_FILE)\""
+ 
+ libvirtd_LDFLAGS =					\
+-	$(WARN_LDFLAGS)					\
+ 	$(PIE_LDFLAGS)					\
+ 	$(RELRO_LDFLAGS)				\
+ 	$(COVERAGE_LDFLAGS)
+diff --git a/m4/virt-compile-warnings.m4 b/m4/virt-compile-warnings.m4
+index d1173eb..3cc63fb 100644
+--- a/m4/virt-compile-warnings.m4
++++ b/m4/virt-compile-warnings.m4
+@@ -168,10 +168,6 @@ AC_DEFUN([LIBVIRT_COMPILE_WARNINGS],[
+       gl_WARN_ADD([-Werror])
+     fi
+ 
+-    WARN_LDFLAGS=$WARN_CFLAGS
+-    AC_SUBST([WARN_CFLAGS])
+-    AC_SUBST([WARN_LDFLAGS])
+-
+     dnl Needed to keep compile quiet on python 2.4
+     save_WARN_CFLAGS=$WARN_CFLAGS
+     WARN_CFLAGS=
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 4ae7d0b..13c2b52 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -1629,7 +1629,6 @@ if WITH_LIBVIRTD
+ libexec_PROGRAMS += libvirt_iohelper
+ libvirt_iohelper_SOURCES = $(UTIL_IO_HELPER_SOURCES)
+ libvirt_iohelper_LDFLAGS = \
+-		$(WARN_LDFLAGS) \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+ 		$(RELRO_LDFLAGS) \
+@@ -1653,7 +1652,6 @@ libexec_PROGRAMS += libvirt_parthelper
+ 
+ libvirt_parthelper_SOURCES = $(STORAGE_HELPER_DISK_SOURCES)
+ libvirt_parthelper_LDFLAGS = \
+-		$(WARN_LDFLAGS) \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+ 		$(RELRO_LDFLAGS) \
+@@ -1686,7 +1684,6 @@ libvirt_sanlock_helper_CFLAGS = \
+ 		$(PIE_CFLAGS) \
+ 		$(NULL)
+ libvirt_sanlock_helper_LDFLAGS = \
+-		$(WARN_LDFLAGS) \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+ 		$(RELRO_LDFLAGS) \
+@@ -1703,7 +1700,6 @@ libvirt_lxc_SOURCES =						\
+ 		$(NODE_INFO_SOURCES)				\
+ 		$(DATATYPES_SOURCES)
+ libvirt_lxc_LDFLAGS = \
+-		$(WARN_LDFLAGS) \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+ 		$(RELRO_LDFLAGS) \
+@@ -1751,7 +1747,6 @@ libexec_PROGRAMS += virt-aa-helper
+ virt_aa_helper_SOURCES = $(SECURITY_DRIVER_APPARMOR_HELPER_SOURCES)
+ 
+ virt_aa_helper_LDFLAGS = \
+-		$(WARN_LDFLAGS) \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+ 		$(RELRO_LDFLAGS) \
+diff --git a/tools/Makefile.am b/tools/Makefile.am
+index e4fdd73..b6e7880 100644
+--- a/tools/Makefile.am
++++ b/tools/Makefile.am
+@@ -89,7 +89,6 @@ virt_host_validate_SOURCES = \
+ 		$(NULL)
+ 
+ virt_host_validate_LDFLAGS = \
+-		$(WARN_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+ 		$(RELRO_LDFLAGS) \
+ 		$(COVERAGE_LDFLAGS) \
+@@ -122,10 +121,9 @@ virsh_SOURCES =							\
+ 		virsh-volume.c virsh-volume.h			\
+ 		$(NULL)
+ 
+-virsh_LDFLAGS = $(WARN_LDFLAGS) $(COVERAGE_LDFLAGS)
++virsh_LDFLAGS = $(COVERAGE_LDFLAGS)
+ virsh_LDADD =							\
+ 		$(STATIC_BINARIES)				\
+-		$(WARN_LDFLAGS)					\
+ 		$(PIE_LDFLAGS)					\
+ 		$(RELRO_LDFLAGS) \
+ 		../src/libvirt.la				\
+-- 
+2.7.0
+

@@ -1,0 +1,40 @@
+From 60072c7cd42796287851186ec84f184b7a66214e Mon Sep 17 00:00:00 2001
+Message-Id: <60072c7cd42796287851186ec84f184b7a66214e.1354720507.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 3 Dec 2012 15:20:15 +0100
+Subject: [PATCH] virsh: check the return value of virStoragePoolGetAutostart
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=878376
+
+On error, virStoragePoolGetAutostart would return -1 leaving autostart
+untouched.
+
+Removed the misleading debug message as well.
+
+Error: CHECKED_RETURN (CWE-252):
+libvirt-0.10.2/tools/virsh-pool.c:1386: unchecked_value: No check of the
+    return value of "virStoragePoolGetAutostart(pool, &autostart)".
+(cherry picked from commit e9d74a7a8238f082cf0f0285ce4d2547a72eaa01)
+---
+ tools/virsh-pool.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/tools/virsh-pool.c b/tools/virsh-pool.c
+index 22df323..642b078 100644
+--- a/tools/virsh-pool.c
++++ b/tools/virsh-pool.c
+@@ -1383,10 +1383,7 @@ cmdPoolInfo(vshControl *ctl, const vshCmd *cmd)
+             vshPrint(ctl, "%-15s %s\n", _("Persistent:"), persistent ? _("yes") : _("no"));
+ 
+         /* Check and display whether the pool is autostarted or not */
+-        virStoragePoolGetAutostart(pool, &autostart);
+-        vshDebug(ctl, VSH_ERR_DEBUG, "Pool autostart flag value: %d\n",
+-                 autostart);
+-        if (autostart < 0)
++        if (virStoragePoolGetAutostart(pool, &autostart) < 0)
+             vshPrint(ctl, "%-15s %s\n", _("Autostart:"), _("no autostart"));
+         else
+             vshPrint(ctl, "%-15s %s\n", _("Autostart:"), autostart ? _("yes") : _("no"));
+-- 
+1.8.0
+

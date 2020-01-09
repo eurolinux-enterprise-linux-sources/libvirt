@@ -1,0 +1,77 @@
+From 17b7af594f6cb7f222c87b4a80f5440fff94a28c Mon Sep 17 00:00:00 2001
+Message-Id: <17b7af594f6cb7f222c87b4a80f5440fff94a28c@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 23 Apr 2014 14:38:53 +0200
+Subject: [PATCH] Document behavior of setvcpus during guest boot
+
+Fixes https://bugzilla.redhat.com/show_bug.cgi?id=1088748
+
+The hotplugged vcpus could fail to show up in the guest if
+they were added during boot, see:
+https://bugzilla.redhat.com/show_bug.cgi?id=807508
+
+Also change arbitrary to arbitrarily.
+
+(cherry picked from commit 22a92eb0a79f398c88bec4bb5e59804029ad7ca0)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt.c   | 10 ++++++++--
+ tools/virsh.pod |  4 +++-
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index c4730e0..f3a151f 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -8660,9 +8660,12 @@ error:
+  *
+  * Dynamically change the number of virtual CPUs used by the domain.
+  * Note that this call may fail if the underlying virtualization hypervisor
+- * does not support it or if growing the number is arbitrary limited.
++ * does not support it or if growing the number is arbitrarily limited.
+  * This function may require privileged access to the hypervisor.
+  *
++ * Note that if this call is executed before the guest has finished booting,
++ * the guest may fail to process the change.
++ *
+  * This command only changes the runtime configuration of the domain,
+  * so can only be called on an active domain.  It is hypervisor-dependent
+  * whether it also affects persistent configuration; for more control,
+@@ -8717,7 +8720,7 @@ error:
+  *
+  * Dynamically change the number of virtual CPUs used by the domain.
+  * Note that this call may fail if the underlying virtualization hypervisor
+- * does not support it or if growing the number is arbitrary limited.
++ * does not support it or if growing the number is arbitrarily limited.
+  * This function may require privileged access to the hypervisor.
+  *
+  * @flags may include VIR_DOMAIN_AFFECT_LIVE to affect a running
+@@ -8729,6 +8732,9 @@ error:
+  * is hypervisor-dependent on whether just live or both live and persistent
+  * state is changed.
+  *
++ * Note that if this call is executed before the guest has finished booting,
++ * the guest may fail to process the change.
++ *
+  * If @flags includes VIR_DOMAIN_VCPU_MAXIMUM, then
+  * VIR_DOMAIN_AFFECT_LIVE must be clear, and only the maximum virtual
+  * CPU limit is altered; generally, this value must be less than or
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 198c223..e10e34d 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -1525,7 +1525,9 @@ domain is next started.
+ 
+ If I<--live> is specified, the guest domain must be active, and the change
+ takes place immediately.  Both the I<--config> and I<--live> flags may be
+-specified together if supported by the hypervisor.
++specified together if supported by the hypervisor.  If this command is run
++before the guest has finished booting, the guest may fail to process
++the change.
+ 
+ If I<--current> is specified, affect the current guest state.
+ 
+-- 
+1.9.2
+

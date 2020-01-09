@@ -1,0 +1,82 @@
+From 0a6bcc976a5174238a61b20d022f141ec1dfb856 Mon Sep 17 00:00:00 2001
+Message-Id: <0a6bcc976a5174238a61b20d022f141ec1dfb856@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:54:06 +0100
+Subject: [PATCH] conf: Fix XML formatting of RNG device info
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408 [RHEL-6.6]
+https://bugzilla.redhat.com/show_bug.cgi?id=1035118 [RHEL-7.0]
+
+When outputting the XML for the RNG device, the code didn't format the
+PCI address info. Additionally the schema wasn't expecting the inf
+although it was being parsed and used internally. Fix those mistakes and
+add test for the PCI info section.
+
+(cherry picked from commit be904e4eeb83cb5513af8dad01fdfbb924f87bb1)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/schemas/domaincommon.rng                               | 6 ++++++
+ src/conf/domain_conf.c                                      | 5 +++++
+ tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.args | 2 +-
+ tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.xml  | 1 +
+ 4 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index fbb6f0d..b74845d 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -3428,6 +3428,12 @@
+         <optional>
+           <ref name="rng-rate"/>
+         </optional>
++        <optional>
++          <ref name="alias"/>
++        </optional>
++        <optional>
++          <ref name="address"/>
++        </optional>
+       </interleave>
+     </element>
+   </define>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index ca0e4ef..e16c6ff 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -13427,6 +13427,11 @@ virDomainRNGDefFormat(virBufferPtr buf,
+         break;
+     }
+ 
++    if (virDomainDeviceInfoIsSet(&def->info, flags)) {
++        if (virDomainDeviceInfoFormat(buf, &def->info, flags) < 0)
++            return -1;
++    }
++
+     virBufferAddLit(buf, "    </rng>\n");
+ 
+     return 0;
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.args b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.args
+index a5f04fd..ccf63eb 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.args
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.args
+@@ -3,4 +3,4 @@ LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu \
+ -monitor unix:/tmp/test-monitor,server,nowait -no-acpi -boot c -usb \
+ -device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3 \
+ -object rng-random,id=rng0 \
+--device virtio-rng-pci,rng=rng0,bus=pci.0,addr=0x4
++-device virtio-rng-pci,rng=rng0,bus=pci.0,addr=0x7
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.xml b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.xml
+index 0852dea..0a7bf61 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.xml
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-default.xml
+@@ -18,6 +18,7 @@
+     <memballoon model='virtio'/>
+     <rng model='virtio'>
+       <backend model='random'/>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x07' function='0x0'/>
+     </rng>
+   </devices>
+ </domain>
+-- 
+1.9.1
+

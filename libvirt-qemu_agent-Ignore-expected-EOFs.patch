@@ -1,0 +1,65 @@
+From a6382c636c0fc77d3af89aa087dec604db104823 Mon Sep 17 00:00:00 2001
+Message-Id: <a6382c636c0fc77d3af89aa087dec604db104823.1373271636.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 25 Feb 2013 16:21:32 +0100
+Subject: [PATCH] qemu_agent: Ignore expected EOFs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=892079
+
+One of my previous patches (f2a4e5f176c408) tried to fix crashing
+libvirtd on domain detroy. However, we need to copy pattern from
+qemuProcessHandleMonitorEOF() instead of decrementing reference
+counter. The rationale for this is, if qemu process is dying due
+to domain being destroyed, we obtain EOF on both the monitor and
+agent sockets. However, if the exit is expected, qemuProcessStop
+is called, which cleans both agent and monitor sockets up. We
+want qemuAgentClose() to be called iff the EOF is not expected,
+so we don't leak an FD and memory. Moreover, there could be race
+with qemuProcessHandleMonitorEOF() which could have already
+closed the agent socket, in which case we don't want to do
+anything.
+(cherry picked from commit d960d06fc06a448f495c465caf06d3d0c74ea587)
+---
+ src/qemu/qemu_process.c | 21 ++++++++++++++++++---
+ 1 file changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 48030e8..f410569 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -128,14 +128,29 @@ qemuProcessHandleAgentEOF(qemuAgentPtr agent,
+     virDomainObjLock(vm);
+ 
+     priv = vm->privateData;
+-    if (priv->agent == agent &&
+-        !virObjectUnref(priv->agent))
+-        priv->agent = NULL;
++
++    if (!priv->agent) {
++        VIR_DEBUG("Agent freed already");
++        goto unlock;
++    }
++
++    if (priv->beingDestroyed) {
++        VIR_DEBUG("Domain is being destroyed, agent EOF is expected");
++        goto unlock;
++    }
++
++    priv->agent = NULL;
+ 
+     virDomainObjUnlock(vm);
+     qemuDriverUnlock(driver);
+ 
+     qemuAgentClose(agent);
++    return;
++
++unlock:
++    virDomainObjUnlock(vm);
++    qemuDriverUnlock(driver);
++    return;
+ }
+ 
+ 
+-- 
+1.8.2.1
+

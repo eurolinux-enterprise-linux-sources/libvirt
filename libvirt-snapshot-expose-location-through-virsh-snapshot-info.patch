@@ -1,0 +1,117 @@
+From 7ca1eb85efd002e9aaf0848d50a2dec0ca1e51e8 Mon Sep 17 00:00:00 2001
+Message-Id: <7ca1eb85efd002e9aaf0848d50a2dec0ca1e51e8.1353944811.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 19 Nov 2012 15:22:31 -0700
+Subject: [PATCH] snapshot: expose location through virsh snapshot-info
+
+https://bugzilla.redhat.com/show_bug.cgi?id=876817
+
+Now that we can filter on this information, we should also make
+it easy to get at.
+
+* tools/virsh-snapshot.c (cmdSnapshotInfo): Add another output
+row, and switch to XPath queries rather than strstr.
+(cherry picked from commit 0f9b6ee42d1bf2e60eb01f92d5cef76ab02af9d9)
+---
+ tools/virsh-snapshot.c | 57 +++++++++++++++++++++++++++++++++++++++++++-------
+ 1 file changed, 49 insertions(+), 8 deletions(-)
+
+diff --git a/tools/virsh-snapshot.c b/tools/virsh-snapshot.c
+index ea1c4c6..398730c 100644
+--- a/tools/virsh-snapshot.c
++++ b/tools/virsh-snapshot.c
+@@ -793,7 +793,10 @@ cmdSnapshotInfo(vshControl *ctl, const vshCmd *cmd)
+     virDomainSnapshotPtr snapshot = NULL;
+     const char *name;
+     char *doc = NULL;
+-    char *tmp;
++    xmlDocPtr xmldoc = NULL;
++    xmlXPathContextPtr ctxt = NULL;
++    char *state = NULL;
++    int external;
+     char *parent = NULL;
+     bool ret = false;
+     int count;
+@@ -835,18 +838,48 @@ cmdSnapshotInfo(vshControl *ctl, const vshCmd *cmd)
+     if (!doc)
+         goto cleanup;
+ 
+-    tmp = strstr(doc, "<state>");
+-    if (!tmp) {
++    xmldoc = virXMLParseStringCtxt(doc, _("(domain_snapshot)"), &ctxt);
++    if (!xmldoc)
++        goto cleanup;
++
++    state = virXPathString("string(/domainsnapshot/state)", ctxt);
++    if (!state) {
+         vshError(ctl, "%s",
+                  _("unexpected problem reading snapshot xml"));
+         goto cleanup;
+     }
+-    tmp += strlen("<state>");
+-    vshPrint(ctl, "%-15s %.*s\n", _("State:"),
+-             (int) (strchr(tmp, '<') - tmp), tmp);
++    vshPrint(ctl, "%-15s %s\n", _("State:"), state);
++
++    /* In addition to state, location is useful.  If the snapshot has
++     * a <memory> element, then the existence of snapshot='external'
++     * prior to <domain> is the deciding factor; for snapshots
++     * created prior to 1.0.1, a state of disk-only is the only
++     * external snapshot.  */
++    switch (virXPathBoolean("boolean(/domainsnapshot/memory)", ctxt)) {
++    case 1:
++        external = virXPathBoolean("boolean(/domainsnapshot/memory/@snapshot=external "
++                                   "| /domainsnapshot/disks/disk/@snapshot=external)",
++                                   ctxt);
++        break;
++    case 0:
++        external = STREQ(state, "disk-snapshot");
++        break;
++    default:
++        external = -1;
++        break;
+ 
+-    if (vshGetSnapshotParent(ctl, snapshot, &parent) < 0)
++    }
++    if (external < 0) {
++        vshError(ctl, "%s",
++                 _("unexpected problem reading snapshot xml"));
+         goto cleanup;
++    }
++    vshPrint(ctl, "%-15s %s\n", _("Location:"),
++             external ? _("external") : _("internal"));
++
++    /* Since we already have the XML, there's no need to call
++     * virDomainSnapshotGetParent */
++    parent = virXPathString("string(/domainsnapshot/parent/name)", ctxt);
+     vshPrint(ctl, "%-15s %s\n", _("Parent:"), parent ? parent : "-");
+ 
+     /* Children, Descendants.  After this point, the fallback to
+@@ -858,8 +891,13 @@ cmdSnapshotInfo(vshControl *ctl, const vshCmd *cmd)
+     }
+     flags = 0;
+     count = virDomainSnapshotNumChildren(snapshot, flags);
+-    if (count < 0)
++    if (count < 0) {
++        if (last_error->code == VIR_ERR_NO_SUPPORT) {
++            vshResetLibvirtError();
++            ret = true;
++        }
+         goto cleanup;
++    }
+     vshPrint(ctl, "%-15s %d\n", _("Children:"), count);
+     flags = VIR_DOMAIN_SNAPSHOT_LIST_DESCENDANTS;
+     count = virDomainSnapshotNumChildren(snapshot, flags);
+@@ -882,6 +920,9 @@ cmdSnapshotInfo(vshControl *ctl, const vshCmd *cmd)
+     ret = true;
+ 
+ cleanup:
++    VIR_FREE(state);
++    xmlXPathFreeContext(ctxt);
++    xmlFreeDoc(xmldoc);
+     VIR_FREE(doc);
+     VIR_FREE(parent);
+     if (snapshot)
+-- 
+1.8.0
+

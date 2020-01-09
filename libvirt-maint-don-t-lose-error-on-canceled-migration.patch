@@ -1,0 +1,154 @@
+From 95939b6fb5d3621944a87bdef2de34e52adfd0f4 Mon Sep 17 00:00:00 2001
+Message-Id: <95939b6fb5d3621944a87bdef2de34e52adfd0f4@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 28 Apr 2014 11:10:29 +0200
+Subject: [PATCH] maint: don't lose error on canceled migration
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1073227
+
+While auditing the error reporting, I noticed that migration
+had some issues.  Some of the static helper functions tried
+to call virDispatchError(), even though their caller will also
+report the error.  Also, if a migration is cancelled early
+because a uri was not set, we did not guarantee that the finish
+stage would not overwrite the first error message.
+
+* src/qemu/qemu_migration.c (doPeer2PeerMigrate2)
+(doPeer2PeerMigrate3): Preserve first error when cancelling.
+* src/libvirt.c (virDomainMigrateVersion3Full): Likewise.
+(virDomainMigrateVersion1, virDomainMigrateVersion2)
+(virDomainMigrateDirect): Avoid redundant error dispatch.
+(virDomainMigrateFinish2, virDomainMigrateFinish3)
+(virDomainMigrateFinish3Params): Don't report error on cleanup
+path.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit c8ed177af473016a35130e6ac154cdab0b6c8501)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/libvirt.c - context + no migration params in RHEL-6
+	src/qemu/qemu_migration.c - context + no migration params
+---
+ src/libvirt.c             | 16 ++++++++++------
+ src/qemu/qemu_migration.c |  6 ++++++
+ 2 files changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index f3a151f..94e7125 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -4650,7 +4650,6 @@ virDomainMigrateVersion2 (virDomainPtr domain,
+      */
+     if (!domain->conn->driver->domainGetXMLDesc) {
+         virLibConnError(VIR_ERR_INTERNAL_ERROR, __FUNCTION__);
+-        virDispatchError(domain->conn);
+         return NULL;
+     }
+ 
+@@ -4682,8 +4681,9 @@ virDomainMigrateVersion2 (virDomainPtr domain,
+     if (uri == NULL && uri_out == NULL) {
+         virLibConnError(VIR_ERR_INTERNAL_ERROR, "%s",
+                          _("domainMigratePrepare2 did not set uri"));
+-        virDispatchError(domain->conn);
+         cancelled = 1;
++        /* Make sure Finish doesn't overwrite the error */
++        orig_err = virSaveLastError();
+         goto finish;
+     }
+     if (uri_out)
+@@ -4714,6 +4714,8 @@ finish:
+     VIR_DEBUG("Finish2 %p ret=%d", dconn, ret);
+     ddomain = dconn->driver->domainMigrateFinish2
+         (dconn, dname, cookie, cookielen, uri, destflags, cancelled);
++    if (cancelled && ddomain)
++        VIR_ERROR(_("finish step ignored that migration was cancelled"));
+ 
+  done:
+     if (orig_err) {
+@@ -4831,7 +4833,8 @@ virDomainMigrateVersion3(virDomainPtr domain,
+     if (uri == NULL && uri_out == NULL) {
+         virLibConnError(VIR_ERR_INTERNAL_ERROR, "%s",
+                         _("domainMigratePrepare3 did not set uri"));
+-        virDispatchError(domain->conn);
++        cancelled = 1;
++        orig_err = virSaveLastError();
+         goto finish;
+     }
+     if (uri_out)
+@@ -4885,6 +4888,8 @@ finish:
+     ddomain = dconn->driver->domainMigrateFinish3
+         (dconn, dname, cookiein, cookieinlen, &cookieout, &cookieoutlen,
+          NULL, uri, destflags, cancelled);
++    if (cancelled && ddomain)
++        VIR_ERROR(_("finish step ignored that migration was cancelled"));
+ 
+     /* If ddomain is NULL, then we were unable to start
+      * the guest on the target, and must restart on the
+@@ -5059,7 +5064,6 @@ virDomainMigrateDirect (virDomainPtr domain,
+ 
+     if (!domain->conn->driver->domainMigratePerform) {
+         virLibConnError(VIR_ERR_NO_SUPPORT, __FUNCTION__);
+-        virDispatchError(domain->conn);
+         return -1;
+     }
+ 
+@@ -5993,7 +5997,7 @@ virDomainMigrateFinish2 (virConnectPtr dconn,
+                                                    cookie, cookielen,
+                                                    uri, flags,
+                                                    retcode);
+-        if (!ret)
++        if (!ret && !retcode)
+             goto error;
+         return ret;
+     }
+@@ -6330,7 +6334,7 @@ virDomainMigrateFinish3(virConnectPtr dconn,
+                                                   cookieout, cookieoutlen,
+                                                   dconnuri, uri, flags,
+                                                   cancelled);
+-        if (!ret)
++        if (!ret && !cancelled)
+             goto error;
+         return ret;
+     }
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 522e7a2..32b26bd 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -2436,6 +2436,7 @@ static int doPeer2PeerMigrate2(struct qemud_driver *driver,
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("domainMigratePrepare2 did not set uri"));
+         cancelled = 1;
++        orig_err = virSaveLastError();
+         goto finish;
+     }
+ 
+@@ -2475,6 +2476,8 @@ finish:
+         (dconn, dname, cookie, cookielen,
+          uri_out ? uri_out : dconnuri, destflags, cancelled);
+     qemuDomainObjExitRemoteWithDriver(driver, vm);
++    if (cancelled && ddomain)
++        VIR_ERROR(_("finish step ignored that migration was cancelled"));
+ 
+ cleanup:
+     if (ddomain) {
+@@ -2576,6 +2579,7 @@ static int doPeer2PeerMigrate3(struct qemud_driver *driver,
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("domainMigratePrepare3 did not set uri"));
+         cancelled = 1;
++        orig_err = virSaveLastError();
+         goto finish;
+     }
+ 
+@@ -2634,6 +2638,8 @@ finish:
+         (dconn, dname, cookiein, cookieinlen, &cookieout, &cookieoutlen,
+          dconnuri, uri_out ? uri_out : uri, destflags, cancelled);
+     qemuDomainObjExitRemoteWithDriver(driver, vm);
++    if (cancelled && ddomain)
++        VIR_ERROR(_("finish step ignored that migration was cancelled"));
+ 
+     /* If ddomain is NULL, then we were unable to start
+      * the guest on the target, and must restart on the
+-- 
+1.9.2
+

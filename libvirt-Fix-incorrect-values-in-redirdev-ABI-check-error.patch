@@ -1,0 +1,37 @@
+From e3a47310069a593f4ec4924a9895d1719f39e4ba Mon Sep 17 00:00:00 2001
+Message-Id: <e3a47310069a593f4ec4924a9895d1719f39e4ba@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 14 Apr 2014 16:02:52 +0200
+Subject: [PATCH] Fix incorrect values in redirdev ABI check error
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1035529
+
+My commit c9123fb introduced this copy-and-paste error.
+
+(cherry picked from commit 27fbfc2a17eb1fb19961d0f5cd95670dbcbf36b7)
+
+Conflicts:
+  src/conf/domain_conf.c - missing f47b397:
+    conf: Refactor ABI stability checking and break long lines
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index a277e18..4116782 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -11765,7 +11765,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Target domain redirected devices count %zu "
+                          "does not match source %zu"),
+-                       dst->nconsoles, src->nconsoles);
++                       dst->nredirdevs, src->nredirdevs);
+         goto cleanup;
+     }
+ 
+-- 
+1.9.2
+

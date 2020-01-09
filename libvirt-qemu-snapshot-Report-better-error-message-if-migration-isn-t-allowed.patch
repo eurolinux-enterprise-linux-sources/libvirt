@@ -1,0 +1,42 @@
+From 1a34782b7664bfc62b74b71674bcd736ad45c98b Mon Sep 17 00:00:00 2001
+Message-Id: <1a34782b7664bfc62b74b71674bcd736ad45c98b@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:47 +0200
+Subject: [PATCH] qemu: snapshot: Report better error message if migration
+ isn't allowed
+
+https://bugzilla.redhat.com/show_bug.cgi?id=884926
+
+Qemu doesn't support migration on guests with host devices. This patch
+adds a check to ensure migration is safe before actually doing so.
+
+(cherry picked from commit 98e92ba83b7ed01515d7243a0012f4571800027b)
+
+Downstream edit: Upstream commit cf6d56ac433273b7e4e087bb861ebced06
+(downstream as 25b95e62905d6b6ae63e84d934f5f9c3d89ec134) was backported
+out of order and thus now creates a compile conflict. To resolve, update
+this patch to add enough params for this function.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index ab2f573..bb7f15d 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11967,6 +11967,10 @@ qemuDomainSnapshotCreateActiveExternal(virConnectPtr conn,
+ 
+     /* do the memory snapshot if necessary */
+     if (memory) {
++        /* check if migration is possible */
++        if (!qemuMigrationIsAllowed(driver, vm, vm->def, false, false))
++            goto endjob;
++
+         /* allow the migration job to be cancelled or the domain to be paused */
+         qemuDomainObjSetAsyncJobMask(vm, DEFAULT_JOB_MASK |
+                                      JOB_MASK(QEMU_JOB_SUSPEND) |
+-- 
+1.9.2
+

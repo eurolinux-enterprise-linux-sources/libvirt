@@ -1,0 +1,37 @@
+From 706e513c2f5137f91c8224267f4b9d103d309ad3 Mon Sep 17 00:00:00 2001
+Message-Id: <706e513c2f5137f91c8224267f4b9d103d309ad3.1353944811.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 26 Nov 2012 14:41:06 +0100
+Subject: [PATCH] cpu: Add Intel Haswell cpu model (fix previous downstream
+ definition)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=879282
+
+The new model supports following features in addition to those supported
+by SandyBridge:
+
+fma, pcid, movbe, fsgsbase, bmi1, hle, avx2, smep, bmi2, erms, invpcid,
+rtm
+(cherry picked from commit bb2704e7b5e027fb325f71128cccee777fd6b080)
+
+Conflicts:
+	src/cpu/cpu_map.xml - previous downstream-only definition of Haswell
+---
+ src/cpu/cpu_map.xml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 65792af..29a3282 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -498,6 +498,7 @@
+     <model name='Haswell'>
+       <model name='SandyBridge'/>
+       <feature name='fma'/>
++      <feature name='pcid'/>
+       <feature name='movbe'/>
+       <feature name='fsgsbase'/>
+       <feature name='bmi1'/>
+-- 
+1.8.0
+

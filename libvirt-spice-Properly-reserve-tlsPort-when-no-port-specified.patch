@@ -1,0 +1,44 @@
+From b0a8ef0276585db7ff4935280db75eb5a5d9b50e Mon Sep 17 00:00:00 2001
+Message-Id: <b0a8ef0276585db7ff4935280db75eb5a5d9b50e.1373271636.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Fri, 22 Feb 2013 15:09:29 +0100
+Subject: [PATCH] spice: Properly reserve tlsPort when no port specified
+
+https://bugzilla.redhat.com/show_bug.cgi?id=913244
+
+When neither port nor autoport were specified, but tlsPort equaled -1,
+the tlsPort was reserved as port (being zero) plus one and that made
+qemu fail due to not being able to bind socket on the port.
+
+This issue was fixed upstream in the "port-allocator series" by danpb,
+specifically in upstream commit dfb1022 [1], but the series is not
+suitable for backporting due to its size, so I'm sending this patch
+RHEL-only.
+
+[1] http://libvirt.org/git/?p=libvirt.git;a=commitdiff;h=dfb1022
+---
+ src/qemu/qemu_process.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 8ebb67d..48030e8 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3656,8 +3656,12 @@ int qemuProcessStart(virConnectPtr conn,
+             if (driver->spiceTLS &&
+                 (vm->def->graphics[0]->data.spice.autoport ||
+                  vm->def->graphics[0]->data.spice.tlsPort == -1)) {
+-                int tlsPort = qemuProcessNextFreePort(driver,
+-                                                      vm->def->graphics[0]->data.spice.port + 1);
++                int tlsPort;
++                if (vm->def->graphics[0]->data.spice.port)
++                    tlsPort = qemuProcessNextFreePort(driver, vm->def->graphics[0]->data.spice.port + 1);
++                else
++                    tlsPort = qemuProcessNextFreePort(driver, driver->remotePortMin);
++
+                 if (tlsPort < 0) {
+                     virReportError(VIR_ERR_INTERNAL_ERROR,
+                                    "%s", _("Unable to find an unused port for SPICE TLS"));
+-- 
+1.8.2.1
+

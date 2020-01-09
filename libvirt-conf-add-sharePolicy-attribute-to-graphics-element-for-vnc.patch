@@ -1,0 +1,198 @@
+From fa3fed7e5f2b93cc1175aeccfe7dcc9c65ae6084 Mon Sep 17 00:00:00 2001
+Message-Id: <fa3fed7e5f2b93cc1175aeccfe7dcc9c65ae6084.1373885147.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Thu, 4 Jul 2013 22:53:05 +0800
+Subject: [PATCH] conf: add 'sharePolicy' attribute to graphics element for vnc
+
+Resolves:https://bugzilla.redhat.com/show_bug.cgi?id=803602
+(cherry picked from commit 2a58d076541b82cef4859ac18812876a5dd3b541)
+
+ -vnc :5900,share=allow-exclusive
+allows clients to ask for exclusive access which is
+implemented by dropping other connections Connecting
+multiple clients in parallel requires all clients asking
+for a shared session (vncviewer: -shared switch)
+
+ -vnc :5900,share=force-shared
+disables exclusive client access.  Useful for shared
+desktop sessions, where you don't want someone forgetting
+specify -shared disconnect everybody else.
+
+ -vnc :5900,share=ignore
+completely ignores the shared flag and allows everybody
+connect unconditionally
+
+Conflicts:
+	src/conf/domain_conf.c
+	src/conf/domain_conf.h
+---
+ docs/formatdomain.html.in     | 13 +++++++++++--
+ docs/schemas/domaincommon.rng |  9 +++++++++
+ src/conf/domain_conf.c        | 28 ++++++++++++++++++++++++++++
+ src/conf/domain_conf.h        | 11 +++++++++++
+ src/libvirt_private.syms      |  2 ++
+ 5 files changed, 61 insertions(+), 2 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index d638a47..0be7293 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -3229,7 +3229,7 @@ qemu-kvm -net nic,model=? /dev/null
+   ...
+   &lt;devices&gt;
+     &lt;graphics type='sdl' display=':0.0'/&gt;
+-    &lt;graphics type='vnc' port='5904'&gt;
++    &lt;graphics type='vnc' port='5904' sharePolicy='allow-exclusive'&gt;
+       &lt;listen type='address' address='1.2.3.4'/&gt;
+     &lt;/graphics&gt;
+     &lt;graphics type='rdp' autoport='yes' multiUser='yes' /&gt;
+@@ -3272,7 +3272,16 @@ qemu-kvm -net nic,model=? /dev/null
+             allows control of connected client during password changes.
+             VNC accepts <code>keep</code> value only.
+             <span class="since">since 0.9.3</span>
+-            NB, this may not be supported by all hypervisors.<br/>  <br/>
++            NB, this may not be supported by all hypervisors.<br/>
++            The optional <code>sharePolicy</code> attribute specifies vnc server
++            display sharing policy. "allow-exclusive" allows clients to ask
++            for exclusive access by dropping other connections. Connecting
++            multiple clients in parallel requires all clients asking for a
++            shared session (vncviewer: -Shared switch). This is the default
++            value. "force-shared" disables exclusive client access, every
++            connection has to specify -Shared switch for vncviewer. "ignore"
++            welcomes every connection unconditionally
++            <span class="since">since 1.0.6</span>. <br/> <br/>
+             Rather than using listen/port, QEMU supports a
+             <code>socket</code> attribute for listening on a unix
+             domain socket path.<span class="since">Since 0.8.8</span>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 5082c2a..2c19531 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -1923,6 +1923,15 @@
+                   <ref name="addrIPorName"/>
+                 </attribute>
+               </optional>
++              <optional>
++                <attribute name='sharePolicy'>
++                  <choice>
++                    <value>allow-exclusive</value>
++                    <value>force-shared</value>
++                    <value>ignore</value>
++                  </choice>
++                </attribute>
++              </optional>
+             </group>
+             <group>
+               <optional>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 11f7b05..7cf3588 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -462,6 +462,13 @@ VIR_ENUM_IMPL(virDomainGraphicsAuthConnected,
+               "disconnect",
+               "keep")
+ 
++VIR_ENUM_IMPL(virDomainGraphicsVNCSharePolicy,
++              VIR_DOMAIN_GRAPHICS_VNC_SHARE_LAST,
++              "default",
++              "allow-exclusive",
++              "force-shared",
++              "ignore")
++
+ VIR_ENUM_IMPL(virDomainGraphicsSpiceChannelName,
+               VIR_DOMAIN_GRAPHICS_SPICE_CHANNEL_LAST,
+               "main",
+@@ -6482,6 +6489,7 @@ virDomainGraphicsDefParseXML(xmlNodePtr node,
+ 
+     if (def->type == VIR_DOMAIN_GRAPHICS_TYPE_VNC) {
+         char *port = virXMLPropString(node, "port");
++        char *sharePolicy = virXMLPropString(node, "sharePolicy");
+         char *autoport;
+ 
+         if (port) {
+@@ -6512,6 +6520,21 @@ virDomainGraphicsDefParseXML(xmlNodePtr node,
+             VIR_FREE(autoport);
+         }
+ 
++        if (sharePolicy) {
++            int policy =
++               virDomainGraphicsVNCSharePolicyTypeFromString(sharePolicy);
++
++            if (policy < 0) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                               _("unknown vnc display sharing policy '%s'"), sharePolicy);
++                VIR_FREE(sharePolicy);
++                goto error;
++            } else {
++                def->data.vnc.sharePolicy = policy;
++            }
++            VIR_FREE(sharePolicy);
++        }
++
+         def->data.vnc.socket = virXMLPropString(node, "socket");
+         def->data.vnc.keymap = virXMLPropString(node, "keymap");
+ 
+@@ -13396,6 +13419,11 @@ virDomainGraphicsDefFormat(virBufferPtr buf,
+             virBufferEscapeString(buf, " keymap='%s'",
+                                   def->data.vnc.keymap);
+ 
++        if (def->data.vnc.sharePolicy)
++            virBufferAsprintf(buf, " sharePolicy='%s'",
++                              virDomainGraphicsVNCSharePolicyTypeToString(
++                              def->data.vnc.sharePolicy));
++
+         virDomainGraphicsAuthDefFormatAttr(buf, &def->data.vnc.auth, flags);
+         break;
+ 
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 18b621f..f870539 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1133,6 +1133,15 @@ enum virDomainGraphicsType {
+     VIR_DOMAIN_GRAPHICS_TYPE_LAST
+ };
+ 
++enum virDomainGraphicsVNCSharePolicy {
++    VIR_DOMAIN_GRAPHICS_VNC_SHARE_DEFAULT = 0,
++    VIR_DOMAIN_GRAPHICS_VNC_SHARE_ALLOW_EXCLUSIVE,
++    VIR_DOMAIN_GRAPHICS_VNC_SHARE_FORCE_SHARED,
++    VIR_DOMAIN_GRAPHICS_VNC_SHARE_IGNORE,
++
++    VIR_DOMAIN_GRAPHICS_VNC_SHARE_LAST
++};
++
+ enum virDomainGraphicsAuthConnectedType {
+     VIR_DOMAIN_GRAPHICS_AUTH_CONNECTED_DEFAULT = 0,
+     VIR_DOMAIN_GRAPHICS_AUTH_CONNECTED_FAIL,
+@@ -1272,6 +1281,7 @@ struct _virDomainGraphicsDef {
+             char *keymap;
+             char *socket;
+             virDomainGraphicsAuthDef auth;
++            int sharePolicy;
+         } vnc;
+         struct {
+             char *display;
+@@ -2268,6 +2278,7 @@ VIR_ENUM_DECL(virDomainGraphicsSpicePlaybackCompression)
+ VIR_ENUM_DECL(virDomainGraphicsSpiceStreamingMode)
+ VIR_ENUM_DECL(virDomainGraphicsSpiceClipboardCopypaste)
+ VIR_ENUM_DECL(virDomainGraphicsSpiceMouseMode)
++VIR_ENUM_DECL(virDomainGraphicsVNCSharePolicy)
+ VIR_ENUM_DECL(virDomainNumatuneMemMode)
+ VIR_ENUM_DECL(virDomainNumatuneMemPlacementMode)
+ VIR_ENUM_DECL(virDomainHyperv)
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 754a347..81f8b5a 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -410,6 +410,8 @@ virDomainGraphicsSpiceZlibCompressionTypeFromString;
+ virDomainGraphicsSpiceZlibCompressionTypeToString;
+ virDomainGraphicsTypeFromString;
+ virDomainGraphicsTypeToString;
++virDomainGraphicsVNCSharePolicyTypeFromString;
++virDomainGraphicsVNCSharePolicyTypeToString;
+ virDomainHasDiskMirror;
+ virDomainHostdevDefAlloc;
+ virDomainHostdevDefClear;
+-- 
+1.8.3.2
+

@@ -1,0 +1,39 @@
+From 403db01fc8ea1779aec8a07d2a23db751feb716b Mon Sep 17 00:00:00 2001
+Message-Id: <403db01fc8ea1779aec8a07d2a23db751feb716b.1373271636.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 25 Feb 2013 18:38:27 +0100
+Subject: [PATCH] Don't ignore return value of qemuProcessKill
+
+https://bugzilla.redhat.com/show_bug.cgi?id=903238
+
+When calling qemuProcessKill from the virDomainDestroy impl
+in QEMU, do not ignore the return value. This ensures that
+if QEMU fails to respond to SIGKILL, the caller will know
+about the failure.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit f1b4021b38f9485c50d386af6f682ecfc8025af5)
+---
+ src/qemu/qemu_driver.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index a01d574..9e3776c 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2058,7 +2058,11 @@ qemuDomainDestroyFlags(virDomainPtr dom,
+             goto cleanup;
+         }
+     } else {
+-        ignore_value(qemuProcessKill(driver, vm, VIR_QEMU_PROCESS_KILL_FORCE));
++        if (qemuProcessKill(driver, vm, VIR_QEMU_PROCESS_KILL_FORCE) < 0) {
++            virReportError(VIR_ERR_OPERATION_FAILED, "%s",
++                           _("failed to kill qemu process with SIGTERM"));
++            goto cleanup;
++        }
+     }
+ 
+     /* We need to prevent monitor EOF callback from doing our work (and sending
+-- 
+1.8.2.1
+

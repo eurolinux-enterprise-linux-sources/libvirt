@@ -1,0 +1,84 @@
+From 71a46cd37f4272d7898b5a07a74507511a9d4de8 Mon Sep 17 00:00:00 2001
+Message-Id: <71a46cd37f4272d7898b5a07a74507511a9d4de8@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 16 Jun 2014 13:25:35 +0200
+Subject: [PATCH] Initialize threading & error layer in LXC controller
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1109120
+
+In Fedora 20, libvirt_lxc crashes immediately at startup with a
+trace
+
+ #0  0x00007f0cddb653ec in free () from /lib64/libc.so.6
+ #1  0x00007f0ce0e16f4a in virFree (ptrptr=ptrptr@entry=0x7f0ce1830058) at util/viralloc.c:580
+ #2  0x00007f0ce0e2764b in virResetError (err=0x7f0ce1830030) at util/virerror.c:354
+ #3  0x00007f0ce0e27a5a in virResetLastError () at util/virerror.c:387
+ #4  0x00007f0ce0e28858 in virEventRegisterDefaultImpl () at util/virevent.c:233
+ #5  0x00007f0ce0db47c6 in main (argc=11, argv=0x7fff4596c328) at lxc/lxc_controller.c:2352
+
+Normally virInitialize calls virErrorInitialize and
+virThreadInitialize, but we don't link to libvirt.so
+in libvirt_lxc, and nor did we ever call the error
+or thread initializers.
+
+I have absolutely no idea how this has ever worked, let alone
+what caused it to stop working in Fedora 20.
+
+In addition not all code paths from virLogSetFromEnv will
+ensure virLogInitialize is called correctly, which is another
+possible crash scenario.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 97973ebb7a64a3be6710ddd38d124307991ad7cb)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/lxc/lxc_controller.c | 4 +++-
+ src/util/logging.c       | 6 ++++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/lxc/lxc_controller.c b/src/lxc/lxc_controller.c
+index f988189..3139476 100644
+--- a/src/lxc/lxc_controller.c
++++ b/src/lxc/lxc_controller.c
+@@ -1474,7 +1474,9 @@ int main(int argc, char *argv[])
+ 
+     if (setlocale(LC_ALL, "") == NULL ||
+         bindtextdomain(PACKAGE, LOCALEDIR) == NULL ||
+-        textdomain(PACKAGE) == NULL) {
++        textdomain(PACKAGE) == NULL ||
++        virThreadInitialize() < 0 ||
++        virErrorInitialize() < 0) {
+         fprintf(stderr, _("%s: initialization failed\n"), argv[0]);
+         exit(EXIT_FAILURE);
+     }
+diff --git a/src/util/logging.c b/src/util/logging.c
+index 242676d..5e8d1bd 100644
+--- a/src/util/logging.c
++++ b/src/util/logging.c
+@@ -486,6 +486,9 @@ int virLogDefineFilter(const char *match, int priority,
+ 
+     virCheckFlags(VIR_LOG_STACK_TRACE, -1);
+ 
++    if (virLogInitialize() < 0)
++        return -1;
++
+     if ((match == NULL) || (priority < VIR_LOG_DEBUG) ||
+         (priority > VIR_LOG_ERROR))
+         return -1;
+@@ -590,6 +593,9 @@ int virLogDefineOutput(virLogOutputFunc f, virLogCloseFunc c, void *data,
+ 
+     virCheckFlags(0, -1);
+ 
++    if (virLogInitialize() < 0)
++        return -1;
++
+     if (f == NULL)
+         return -1;
+ 
+-- 
+2.0.0
+

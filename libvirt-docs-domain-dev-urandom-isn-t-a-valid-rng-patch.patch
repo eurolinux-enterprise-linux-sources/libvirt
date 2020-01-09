@@ -1,0 +1,32 @@
+From 1974cea138cb00637a383b225e67ec7acdadb5d8 Mon Sep 17 00:00:00 2001
+Message-Id: <1974cea138cb00637a383b225e67ec7acdadb5d8@dist-git>
+From: Cole Robinson <crobinso@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:53 +0100
+Subject: [PATCH] docs: domain: /dev/urandom isn't a valid rng patch
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+Only /dev/random and /dev/hwrng are accepted, list them explicitly.
+(cherry picked from commit e4de214b3824c67045dcd080340230caf9d3cf36)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index f726091..4d1651b 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -4230,7 +4230,7 @@ qemu-kvm -net nic,model=? /dev/null
+       <dd>
+         <p>
+           This backend type expects a non-blocking character device as input.
+-          Examples of such devices are /dev/random and /dev/urandom. The file
++          The only accepted paths are /dev/random and /dev/hwrng. The file
+           name is specified as contents of the <code>backend</code> element.
+           When no file name is specified the hypervisor default is used.
+         </p>
+-- 
+1.9.1
+

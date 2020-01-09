@@ -1,0 +1,73 @@
+From 5476ee6bde557a9f85d8de9d8e8f14b8655cdc2a Mon Sep 17 00:00:00 2001
+Message-Id: <5476ee6bde557a9f85d8de9d8e8f14b8655cdc2a.1373271637.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Mon, 25 Feb 2013 18:38:28 +0100
+Subject: [PATCH] Fix race condition when destroying guests
+
+https://bugzilla.redhat.com/show_bug.cgi?id=903238
+
+When running virDomainDestroy, we need to make sure that no other
+background thread cleans up the domain while we're doing our work.
+This can happen if we release the domain object while in the
+middle of work, because the monitor might detect EOF in this window.
+For this reason we have a 'beingDestroyed' flag to stop the monitor
+from doing its normal cleanup. Unfortunately this flag was only
+being used to protect qemuDomainBeginJob, and not qemuProcessKill
+
+This left open a race condition where either libvirtd could crash,
+or alternatively report bogus error messages about the domain already
+having been destroyed to the caller
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 81621f3e6e45e8681cc18ae49404736a0e772a11)
+
+Conflicts:
+	src/qemu/qemu_driver.c: Context as 8fd3823 is not backported.
+---
+ src/qemu/qemu_driver.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 9e3776c..e327f0f 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2046,6 +2046,12 @@ qemuDomainDestroyFlags(virDomainPtr dom,
+ 
+     qemuDomainSetFakeReboot(driver, vm, false);
+ 
++
++    /* We need to prevent monitor EOF callback from doing our work (and sending
++     * misleading events) while the vm is unlocked inside BeginJob/ProcessKill API
++     */
++    priv->beingDestroyed = true;
++
+     /* Although qemuProcessStop does this already, there may
+      * be an outstanding job active. We want to make sure we
+      * can kill the process even if a job is active. Killing
+@@ -2055,21 +2061,18 @@ qemuDomainDestroyFlags(virDomainPtr dom,
+         if (qemuProcessKill(driver, vm, 0) < 0) {
+             virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+                            _("failed to kill qemu process with SIGTERM"));
++            priv->beingDestroyed = false;
+             goto cleanup;
+         }
+     } else {
+         if (qemuProcessKill(driver, vm, VIR_QEMU_PROCESS_KILL_FORCE) < 0) {
+             virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+                            _("failed to kill qemu process with SIGTERM"));
++            priv->beingDestroyed = false;
+             goto cleanup;
+         }
+     }
+ 
+-    /* We need to prevent monitor EOF callback from doing our work (and sending
+-     * misleading events) while the vm is unlocked inside BeginJob API
+-     */
+-    priv->beingDestroyed = true;
+-
+     if (qemuDomainObjBeginJobWithDriver(driver, vm, QEMU_JOB_DESTROY) < 0)
+         goto cleanup;
+ 
+-- 
+1.8.2.1
+

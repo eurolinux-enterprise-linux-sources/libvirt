@@ -1,0 +1,108 @@
+From 9a2a61fe3debcbdc9c1c45dc004ccc4e757c5b13 Mon Sep 17 00:00:00 2001
+Message-Id: <9a2a61fe3debcbdc9c1c45dc004ccc4e757c5b13@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Tue, 29 Apr 2014 13:01:41 +0200
+Subject: [PATCH] network: prevent a few invalid configuration combinations
+
+RHEL-6.6: https://bugzilla.redhat.com/show_bug.cgi?id=1057321
+RHEL-7.0: https://bugzilla.redhat.com/show_bug.cgi?id=767057
+
+It was possible to define a network with <forward mode='bridge'> that
+had both a bridge device and a forward device defined. These two are
+mutually exclusive by definition (if you are using a bridge device,
+then this is a host bridge, and if you have a forward dev defined,
+this is using macvtap). It was also possible to put <ip>, <dns>, and
+<domain> elements in this definition, although those aren't supported
+by the current driver (although it's conceivable that some other
+driver might support that).
+
+The items that are invalid by definition, are now checked in the XML
+parser (since they will definitely *always* be wrong), and the others
+are checked in networkValidate() in the network driver (since, as
+mentioned, it's possible that some other network driver, or even this
+one, could some day support setting those).
+
+(cherry picked from commit fd54f1de536ebd5f7566285b83029e6c73725d03)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/network_conf.c     |  9 +++++++++
+ src/libvirt_private.syms    |  1 +
+ src/network/bridge_driver.c | 29 +++++++++++++++++++++++++++++
+ 3 files changed, 39 insertions(+)
+
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index 6089b92..bc9690e 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -1736,6 +1736,15 @@ virNetworkDefParseXML(xmlXPathContextPtr ctxt)
+                                def->name);
+                 goto error;
+             }
++            if (def->bridge && (def->nForwardIfs || nForwardPfs)) {
++                virReportError(VIR_ERR_XML_ERROR,
++                               _("A network with forward mode='%s' can specify "
++                                 "a  bridge name or a forward dev, but not "
++                                 "both (network '%s')"),
++                               virNetworkForwardTypeToString(def->forwardType),
++                               def->name);
++                goto error;
++            }
+             break;
+         }
+     }
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 4ef4987..8494c3a 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -875,6 +875,7 @@ virNetworkDefParseString;
+ virNetworkDeleteConfig;
+ virNetworkFindByName;
+ virNetworkFindByUUID;
++virNetworkForwardTypeToString;
+ virNetworkIpDefNetmask;
+ virNetworkIpDefPrefix;
+ virNetworkList;
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index ce2a579..a0db095 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -2727,6 +2727,35 @@ networkValidate(struct network_driver *driver,
+             return -1;
+ 
+         virNetworkSetBridgeMacAddr(def);
++    } else {
++        /* They are also the only types that currently support setting
++         * an IP address for the host-side device (bridge)
++         */
++        if (virNetworkDefGetIpByIndex(def, AF_UNSPEC, 0)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("Unsupported <ip> element in network %s "
++                             "with forward mode='%s'"),
++                           def->name,
++                           virNetworkForwardTypeToString(def->forwardType));
++            return -1;
++        }
++        if (def->dns &&
++            (def->dns->ntxtrecords || def->dns->nhosts || def->dns->nsrvrecords)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("Unsupported <dns> element in network %s "
++                             "with forward mode='%s'"),
++                           def->name,
++                           virNetworkForwardTypeToString(def->forwardType));
++            return -1;
++        }
++        if (def->domain) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("Unsupported <domain> element in network %s "
++                             "with forward mode='%s'"),
++                           def->name,
++                           virNetworkForwardTypeToString(def->forwardType));
++            return -1;
++        }
+     }
+ 
+     /* We only support dhcp on one IPv4 address per defined network */
+-- 
+1.9.2
+

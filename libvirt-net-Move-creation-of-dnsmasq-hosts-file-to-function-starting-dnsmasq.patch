@@ -1,0 +1,85 @@
+From 458d395fc41d4e836b8cd487c36ea6dfed171ac9 Mon Sep 17 00:00:00 2001
+Message-Id: <458d395fc41d4e836b8cd487c36ea6dfed171ac9@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 29 Apr 2014 13:01:39 +0200
+Subject: [PATCH] net: Move creation of dnsmasq hosts file to function starting
+ dnsmasq
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1057321
+
+The hosts file was created in the network definition function. This
+patch moves the place the file is being created to the point where
+dnsmasq is being started.
+
+(cherry picked from commit 23ae3fe4256ba634babc6818b8cb7bbd3664a95a)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 24 ++++++++++++++----------
+ 1 file changed, 14 insertions(+), 10 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 7abc3c0..b704b8a 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -894,6 +894,8 @@ networkStartDhcpDaemon(struct network_driver *driver,
+     char *pidfile = NULL;
+     int ret = -1;
+     dnsmasqContext *dctx = NULL;
++    virNetworkIpDefPtr ipdef;
++    int i;
+ 
+     if (!virNetworkDefGetIpByIndex(network->def, AF_UNSPEC, 0)) {
+         /* no IPv6 addresses, so we don't need to run radvd */
+@@ -937,6 +939,18 @@ networkStartDhcpDaemon(struct network_driver *driver,
+     if (ret < 0)
+         goto cleanup;
+ 
++    /* populate dnsmasq hosts file */
++    for (i = 0; (ipdef = virNetworkDefGetIpByIndex(network->def, AF_UNSPEC, i)); i++) {
++        if (VIR_SOCKET_ADDR_IS_FAMILY(&ipdef->address, AF_INET) &&
++            (ipdef->nranges || ipdef->nhosts)) {
++            if (networkBuildDnsmasqHostsfile(dctx, ipdef,
++                                             network->def->dns) < 0)
++                goto cleanup;
++
++            break;
++        }
++    }
++
+     ret = dnsmasqSave(dctx);
+     if (ret < 0)
+         goto cleanup;
+@@ -2815,7 +2829,6 @@ static virNetworkPtr networkDefine(virConnectPtr conn, const char *xml) {
+     virNetworkObjPtr network = NULL;
+     virNetworkPtr ret = NULL;
+     int ii;
+-    dnsmasqContext* dctx = NULL;
+ 
+     networkDriverLock(driver);
+ 
+@@ -2872,21 +2885,12 @@ static virNetworkPtr networkDefine(virConnectPtr conn, const char *xml) {
+         goto cleanup;
+     }
+ 
+-    if (ipv4def) {
+-        dctx = dnsmasqContextNew(def->name, DNSMASQ_STATE_DIR);
+-        if (dctx == NULL ||
+-            networkBuildDnsmasqHostsfile(dctx, ipv4def, def->dns) < 0 ||
+-            dnsmasqSave(dctx) < 0)
+-            goto cleanup;
+-    }
+-
+     VIR_INFO("Defining network '%s'", def->name);
+     ret = virGetNetwork(conn, def->name, def->uuid);
+ 
+ cleanup:
+     if (freeDef)
+        virNetworkDefFree(def);
+-    dnsmasqContextFree(dctx);
+     if (network)
+         virNetworkObjUnlock(network);
+     networkDriverUnlock(driver);
+-- 
+1.9.2
+

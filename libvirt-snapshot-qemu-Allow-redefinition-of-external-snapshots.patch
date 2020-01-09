@@ -1,0 +1,31 @@
+From 6700af3cb24e3cb902551310936327fbe2d0f641 Mon Sep 17 00:00:00 2001
+Message-Id: <6700af3cb24e3cb902551310936327fbe2d0f641.1357740563.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Sat, 5 Jan 2013 08:59:30 +0100
+Subject: [PATCH] snapshot: qemu: Allow redefinition of external snapshots
+
+https://bugzilla.redhat.com/show_bug.cgi?id=889407
+
+A redefinition of an external inactive snapshot/checkpoint wasn't
+possible without this change.
+(cherry picked from commit 731a5a4df7739e18f1837e9d8da0c315e4150135)
+---
+ src/qemu/qemu_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 8be9586..857115d 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11612,7 +11612,7 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+ 
+             if (def->dom) {
+                 if (def->state == VIR_DOMAIN_DISK_SNAPSHOT ||
+-                    def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL) {
++                    virDomainSnapshotDefIsExternal(def)) {
+                     align_location = VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL;
+                     align_match = false;
+                 }
+-- 
+1.8.1
+

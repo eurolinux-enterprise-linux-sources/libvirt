@@ -1,0 +1,211 @@
+From de9edbb3885b148e070d6911b8d3a3ab48287aa0 Mon Sep 17 00:00:00 2001
+Message-Id: <de9edbb3885b148e070d6911b8d3a3ab48287aa0@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 6 Mar 2015 15:58:55 +0100
+Subject: [PATCH] sanlock: Don't spam logs with "target pid not found"
+
+Commit v1.2.4-52-gda879e5 fixed issues with domains started before
+sanlock driver was enabled by checking whether a running domain is
+registered with sanlock and if it's not, sanlock driver is basically
+ignored for the domain.
+
+However, it was checking this even for domain which has just been
+started and no sanlock_* API was called for them yet. This results in
+
+    cmd 9 target pid 2135544 not found
+
+error messages to appear in sanlock.log whenever we start a new domain.
+
+This patch avoids this useless check for freshly started domains.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 54972be8430c709a338c0716ebc48b02be25dcb7)
+
+Conflicts:
+	src/locking/lock_driver_lockd.c - no lockd driver in RHEL6
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1189414
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/locking/domain_lock.c         | 22 ++++++++++++----------
+ src/locking/lock_driver.h         | 12 +++++++++++-
+ src/locking/lock_driver_sanlock.c |  9 ++++++---
+ src/locking/lock_manager.c        |  2 +-
+ 4 files changed, 30 insertions(+), 15 deletions(-)
+
+diff --git a/src/locking/domain_lock.c b/src/locking/domain_lock.c
+index 1e3da5f..158c50a 100644
+--- a/src/locking/domain_lock.c
++++ b/src/locking/domain_lock.c
+@@ -99,7 +99,8 @@ static int virDomainLockManagerAddDisk(virLockManagerPtr lock,
+ static virLockManagerPtr virDomainLockManagerNew(virLockManagerPluginPtr plugin,
+                                                  const char *uri,
+                                                  virDomainObjPtr dom,
+-                                                 bool withResources)
++                                                 bool withResources,
++                                                 unsigned int flags)
+ {
+     virLockManagerPtr lock;
+     int i;
+@@ -133,7 +134,7 @@ static virLockManagerPtr virDomainLockManagerNew(virLockManagerPluginPtr plugin,
+                                    VIR_LOCK_MANAGER_OBJECT_TYPE_DOMAIN,
+                                    ARRAY_CARDINALITY(params),
+                                    params,
+-                                   0)))
++                                   flags)))
+         goto error;
+ 
+     if (withResources) {
+@@ -169,7 +170,8 @@ int virDomainLockProcessStart(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p paused=%d fd=%p",
+               plugin, dom, paused, fd);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, true)))
++    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, true,
++                                         VIR_LOCK_MANAGER_NEW_STARTED)))
+         return -1;
+ 
+     if (paused)
+@@ -193,7 +195,7 @@ int virDomainLockProcessPause(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p state=%p",
+               plugin, dom, state);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, true)))
++    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, true, 0)))
+         return -1;
+ 
+     ret = virLockManagerRelease(lock, state, 0);
+@@ -213,7 +215,7 @@ int virDomainLockProcessResume(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p state=%s",
+               plugin, dom, NULLSTR(state));
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, true)))
++    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, true, 0)))
+         return -1;
+ 
+     ret = virLockManagerAcquire(lock, state, 0, dom->def->onLockFailure, NULL);
+@@ -232,7 +234,7 @@ int virDomainLockProcessInquire(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p state=%p",
+               plugin, dom, state);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, true)))
++    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, true, 0)))
+         return -1;
+ 
+     ret = virLockManagerInquire(lock, state, 0);
+@@ -253,7 +255,7 @@ int virDomainLockDiskAttach(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p disk=%p",
+               plugin, dom, disk);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, false)))
++    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, false, 0)))
+         return -1;
+ 
+     if (virDomainLockManagerAddDisk(lock, disk) < 0)
+@@ -281,7 +283,7 @@ int virDomainLockDiskDetach(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p disk=%p",
+               plugin, dom, disk);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, false)))
++    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, false, 0)))
+         return -1;
+ 
+     if (virDomainLockManagerAddDisk(lock, disk) < 0)
+@@ -310,7 +312,7 @@ int virDomainLockLeaseAttach(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p lease=%p",
+               plugin, dom, lease);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, false)))
++    if (!(lock = virDomainLockManagerNew(plugin, uri, dom, false, 0)))
+         return -1;
+ 
+     if (virDomainLockManagerAddLease(lock, lease) < 0)
+@@ -338,7 +340,7 @@ int virDomainLockLeaseDetach(virLockManagerPluginPtr plugin,
+     VIR_DEBUG("plugin=%p dom=%p lease=%p",
+               plugin, dom, lease);
+ 
+-    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, false)))
++    if (!(lock = virDomainLockManagerNew(plugin, NULL, dom, false, 0)))
+         return -1;
+ 
+     if (virDomainLockManagerAddLease(lock, lease) < 0)
+diff --git a/src/locking/lock_driver.h b/src/locking/lock_driver.h
+index e8ee226..d922b08 100644
+--- a/src/locking/lock_driver.h
++++ b/src/locking/lock_driver.h
+@@ -65,6 +65,11 @@ typedef enum {
+     VIR_LOCK_MANAGER_ACQUIRE_RESTRICT = (1 << 1),
+ } virLockManagerAcquireFlags;
+ 
++typedef enum {
++    /* virLockManagerNew called for a freshly started domain */
++    VIR_LOCK_MANAGER_NEW_STARTED = (1 << 0),
++} virLockManagerNewFlags;
++
+ enum {
+     VIR_LOCK_MANAGER_PARAM_TYPE_STRING,
+     VIR_LOCK_MANAGER_PARAM_TYPE_CSTRING,
+@@ -142,13 +147,18 @@ typedef int (*virLockDriverDeinit)(void);
+  * @type: the type of process to be supervised
+  * @nparams: number of metadata parameters
+  * @params: extra metadata parameters
+- * @flags: optional flags, currently unused
++ * @flags: bitwise-OR of virLockManagerNewFlags
+  *
+  * Initialize a new context to supervise a process, usually
+  * a virtual machine. The lock driver implementation can use
+  * the <code>privateData</code> field of <code>man</code>
+  * to store a pointer to any driver specific state.
+  *
++ * If @flags contains VIR_LOCK_MANAGER_NEW_STARTED, this API is called for
++ * a domain that has just been started and may therefore skip some actions.
++ * Specifically, checking whether the domain is registered with a lock
++ * daemon is useless in this case.
++ *
+  * A process of VIR_LOCK_MANAGER_START_DOMAIN will be
+  * given the following parameters
+  *
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index 2b5c2cf..d2fdcf5 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -453,7 +453,7 @@ static int virLockManagerSanlockNew(virLockManagerPtr lock,
+     int i;
+     int resCount = 0;
+ 
+-    virCheckFlags(0, -1);
++    virCheckFlags(VIR_LOCK_MANAGER_NEW_STARTED, -1);
+ 
+     if (!driver) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+@@ -499,8 +499,11 @@ static int virLockManagerSanlockNew(virLockManagerPtr lock,
+      * if it returns any other error (rv < 0), then we cannot fail due
+      * to back-compat.  So this whole call is non-fatal, because it's
+      * called from all over the place (it will usually fail).  It merely
+-     * updates privateData. */
+-    if (sanlock_inquire(-1, priv->vm_pid, 0, &resCount, NULL) >= 0)
++     * updates privateData.
++     * If the process has just been started, we are pretty sure it is not
++     * registered. */
++    if (!(flags & VIR_LOCK_MANAGER_NEW_STARTED) &&
++        sanlock_inquire(-1, priv->vm_pid, 0, &resCount, NULL) >= 0)
+         priv->registered = true;
+ 
+     lock->privateData = priv;
+diff --git a/src/locking/lock_manager.c b/src/locking/lock_manager.c
+index 423997b..20d36c4 100644
+--- a/src/locking/lock_manager.c
++++ b/src/locking/lock_manager.c
+@@ -289,7 +289,7 @@ virLockDriverPtr virLockManagerPluginGetDriver(virLockManagerPluginPtr plugin)
+  * virLockManagerNew:
+  * @driver: the lock manager implementation to use
+  * @type: the type of process to be supervised
+- * @flags: optional flags, currently unused
++ * @flags: bitwise-OR of virLockManagerNewFlags
+  *
+  * Create a new context to supervise a process, usually
+  * a virtual machine.
+-- 
+2.3.3
+

@@ -1,0 +1,390 @@
+From 12066ea0a901b4278da065a9463c8befe4bde1e0 Mon Sep 17 00:00:00 2001
+Message-Id: <12066ea0a901b4278da065a9463c8befe4bde1e0.1379585484.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 12 Sep 2013 17:00:05 +0100
+Subject: [PATCH] Include process start time when doing polkit checks
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1006266
+
+Since PIDs can be reused, polkit prefers to be given
+a (PID,start time) pair. If given a PID on its own,
+it will attempt to lookup the start time in /proc/pid/stat,
+though this is subject to races.
+
+It is safer if the client app resolves the PID start
+time itself, because as long as the app has the client
+socket open, the client PID won't be reused.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 979e9c56a7aadf2dcfbddd1abfbad594b78b4468)
+
+Conflicts:
+	src/libvirt_private.syms
+	src/locking/lock_daemon.c
+	src/rpc/virnetserverclient.c
+	src/rpc/virnetsocket.c
+	src/rpc/virnetsocket.h
+	src/util/viridentity.h
+	src/util/virprocess.c
+	src/util/virprocess.h
+	src/util/virstring.c
+	src/util/virstring.h
+
+Resolution:
+
+  Dropped files viridentity.h and lock_daemon.c and
+  dropped changes from libvirt_private.syms
+---
+ daemon/remote.c              |  12 +++--
+ src/rpc/virnetserverclient.c |   7 ++-
+ src/rpc/virnetserverclient.h |   3 +-
+ src/rpc/virnetsocket.c       |  19 +++++--
+ src/rpc/virnetsocket.h       |   3 +-
+ src/util/virprocess.c        | 123 +++++++++++++++++++++++++++++++++++++++++++
+ src/util/virprocess.h        |   2 +
+ src/util/virstring.c         |  10 ++++
+ src/util/virstring.h         |   2 +
+ 9 files changed, 169 insertions(+), 12 deletions(-)
+
+diff --git a/daemon/remote.c b/daemon/remote.c
+index 9acf6f8..47a4eaa 100644
+--- a/daemon/remote.c
++++ b/daemon/remote.c
+@@ -2376,6 +2376,7 @@ remoteDispatchAuthList(virNetServerPtr server ATTRIBUTE_UNUSED,
+     uid_t callerUid;
+     gid_t callerGid;
+     pid_t callerPid;
++    unsigned long long timestamp;
+ 
+     /* If the client is root then we want to bypass the
+      * policykit auth to avoid root being denied if
+@@ -2383,7 +2384,7 @@ remoteDispatchAuthList(virNetServerPtr server ATTRIBUTE_UNUSED,
+      */
+     if (auth == VIR_NET_SERVER_SERVICE_AUTH_POLKIT) {
+         if (virNetServerClientGetUNIXIdentity(client, &callerUid, &callerGid,
+-                                              &callerPid) < 0) {
++                                              &callerPid, &timestamp) < 0) {
+             /* Don't do anything on error - it'll be validated at next
+              * phase of auth anyway */
+             virResetLastError();
+@@ -2811,6 +2812,7 @@ remoteDispatchAuthPolkit(virNetServerPtr server ATTRIBUTE_UNUSED,
+     pid_t callerPid = -1;
+     gid_t callerGid = -1;
+     uid_t callerUid = -1;
++    unsigned long long timestamp;
+     const char *action;
+     int status = -1;
+     char *ident = NULL;
+@@ -2836,7 +2838,7 @@ remoteDispatchAuthPolkit(virNetServerPtr server ATTRIBUTE_UNUSED,
+     }
+ 
+     if (virNetServerClientGetUNIXIdentity(client, &callerUid, &callerGid,
+-                                          &callerPid) < 0) {
++                                          &callerPid, &timestamp) < 0) {
+         goto authfail;
+     }
+ 
+@@ -2844,7 +2846,11 @@ remoteDispatchAuthPolkit(virNetServerPtr server ATTRIBUTE_UNUSED,
+              (long long) callerPid, callerUid);
+ 
+     virCommandAddArg(cmd, "--process");
+-    virCommandAddArgFormat(cmd, "%lld", (long long) callerPid);
++    if (timestamp != 0) {
++        virCommandAddArgFormat(cmd, "%lld,%llu", (long long) callerPid, timestamp);
++    } else {
++        virCommandAddArgFormat(cmd, "%lld", (long long) callerPid);
++    }
+     virCommandAddArg(cmd, "--allow-user-interaction");
+ 
+     if (virAsprintf(&ident, "pid:%lld,uid:%d",
+diff --git a/src/rpc/virnetserverclient.c b/src/rpc/virnetserverclient.c
+index 1ac5677..678f85b 100644
+--- a/src/rpc/virnetserverclient.c
++++ b/src/rpc/virnetserverclient.c
+@@ -466,12 +466,15 @@ int virNetServerClientGetFD(virNetServerClientPtr client)
+ }
+ 
+ int virNetServerClientGetUNIXIdentity(virNetServerClientPtr client,
+-                                      uid_t *uid, gid_t *gid, pid_t *pid)
++                                      uid_t *uid, gid_t *gid, pid_t *pid,
++                                      unsigned long long *timestamp)
+ {
+     int ret = -1;
+     virNetServerClientLock(client);
+     if (client->sock)
+-        ret = virNetSocketGetUNIXIdentity(client->sock, uid, gid, pid);
++        ret = virNetSocketGetUNIXIdentity(client->sock,
++                                          uid, gid, pid,
++                                          timestamp);
+     virNetServerClientUnlock(client);
+     return ret;
+ }
+diff --git a/src/rpc/virnetserverclient.h b/src/rpc/virnetserverclient.h
+index 3ce1889..2e97b42 100644
+--- a/src/rpc/virnetserverclient.h
++++ b/src/rpc/virnetserverclient.h
+@@ -78,7 +78,8 @@ int virNetServerClientSetIdentity(virNetServerClientPtr client,
+ const char *virNetServerClientGetIdentity(virNetServerClientPtr client);
+ 
+ int virNetServerClientGetUNIXIdentity(virNetServerClientPtr client,
+-                                      uid_t *uid, gid_t *gid, pid_t *pid);
++                                      uid_t *uid, gid_t *gid, pid_t *pid,
++                                      unsigned long long *timestamp);
+ 
+ void *virNetServerClientGetPrivateData(virNetServerClientPtr client);
+ 
+diff --git a/src/rpc/virnetsocket.c b/src/rpc/virnetsocket.c
+index 55d5ca8..b1d7f23 100644
+--- a/src/rpc/virnetsocket.c
++++ b/src/rpc/virnetsocket.c
+@@ -987,31 +987,40 @@ int virNetSocketGetPort(virNetSocketPtr sock)
+ int virNetSocketGetUNIXIdentity(virNetSocketPtr sock,
+                                 uid_t *uid,
+                                 gid_t *gid,
+-                                pid_t *pid)
++                                pid_t *pid,
++                                unsigned long long *timestamp)
+ {
+     struct ucred cr;
+     socklen_t cr_len = sizeof(cr);
++    int ret = -1;
++
+     virMutexLock(&sock->lock);
+ 
+     if (getsockopt(sock->fd, SOL_SOCKET, SO_PEERCRED, &cr, &cr_len) < 0) {
+         virReportSystemError(errno, "%s",
+                              _("Failed to get client socket identity"));
+-        virMutexUnlock(&sock->lock);
+-        return -1;
++        goto cleanup;
+     }
+ 
++    if (virProcessGetStartTime(cr.pid, timestamp) < 0)
++        goto cleanup;
++
+     *pid = cr.pid;
+     *uid = cr.uid;
+     *gid = cr.gid;
+ 
++    ret = 0;
++
++cleanup:
+     virMutexUnlock(&sock->lock);
+-    return 0;
++    return ret;
+ }
+ #else
+ int virNetSocketGetUNIXIdentity(virNetSocketPtr sock ATTRIBUTE_UNUSED,
+                                 uid_t *uid ATTRIBUTE_UNUSED,
+                                 gid_t *gid ATTRIBUTE_UNUSED,
+-                                pid_t *pid ATTRIBUTE_UNUSED)
++                                pid_t *pid ATTRIBUTE_UNUSED,
++                                unsigned long long *timestamp ATTRIBUTE_UNUSED)
+ {
+     /* XXX Many more OS support UNIX socket credentials we could port to. See dbus ....*/
+     virReportSystemError(ENOSYS, "%s",
+diff --git a/src/rpc/virnetsocket.h b/src/rpc/virnetsocket.h
+index 261d923..3d88cc3 100644
+--- a/src/rpc/virnetsocket.h
++++ b/src/rpc/virnetsocket.h
+@@ -105,7 +105,8 @@ int virNetSocketGetPort(virNetSocketPtr sock);
+ int virNetSocketGetUNIXIdentity(virNetSocketPtr sock,
+                                 uid_t *uid,
+                                 gid_t *gid,
+-                                pid_t *pid);
++                                pid_t *pid,
++                                unsigned long long *timestamp);
+ 
+ int virNetSocketSetBlocking(virNetSocketPtr sock,
+                             bool blocking);
+diff --git a/src/util/virprocess.c b/src/util/virprocess.c
+index 958f5f7..55201d8 100644
+--- a/src/util/virprocess.c
++++ b/src/util/virprocess.c
+@@ -22,15 +22,29 @@
+ 
+ #include <config.h>
+ 
++#include <dirent.h>
++#include <fcntl.h>
+ #include <signal.h>
+ #include <errno.h>
+ #include <sys/wait.h>
++#if HAVE_SETRLIMIT
++# include <sys/time.h>
++# include <sys/resource.h>
++#endif
++#include <sched.h>
++
++#ifdef __FreeBSD__
++# include <sys/param.h>
++# include <sys/sysctl.h>
++# include <sys/user.h>
++#endif
+ 
+ #include "virprocess.h"
+ #include "virterror_internal.h"
+ #include "memory.h"
+ #include "logging.h"
+ #include "util.h"
++#include "virstring.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_NONE
+ 
+@@ -235,3 +249,112 @@ int virProcessKill(pid_t pid, int sig)
+     return kill(pid, sig);
+ #endif
+ }
++
++#ifdef __linux__
++/*
++ * Port of code from polkitunixprocess.c under terms
++ * of the LGPLv2+
++ */
++int virProcessGetStartTime(pid_t pid,
++                           unsigned long long *timestamp)
++{
++    char *filename = NULL;
++    char *buf = NULL;
++    char *tmp;
++    int ret = -1;
++    int len;
++    char **tokens = NULL;
++
++    if (virAsprintf(&filename, "/proc/%llu/stat",
++                    (unsigned long long)pid) < 0) {
++        virReportOOMError();
++        return -1;
++    }
++
++    if ((len = virFileReadAll(filename, 1024, &buf)) < 0)
++        goto cleanup;
++
++    /* start time is the token at index 19 after the '(process name)' entry - since only this
++     * field can contain the ')' character, search backwards for this to avoid malicious
++     * processes trying to fool us
++     */
++
++    if (!(tmp = strrchr(buf, ')'))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("Cannot find start time in %s"),
++                       filename);
++        goto cleanup;
++    }
++    tmp += 2; /* skip ') ' */
++    if ((tmp - buf) >= len) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("Cannot find start time in %s"),
++                       filename);
++        goto cleanup;
++    }
++
++    tokens = virStringSplit(tmp, " ", 0);
++
++    if (virStringListLength(tokens) < 20) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("Cannot find start time in %s"),
++                       filename);
++        goto cleanup;
++    }
++
++    if (virStrToLong_ull(tokens[19],
++                         NULL,
++                         10,
++                         timestamp) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("Cannot parse start time %s in %s"),
++                       tokens[19], filename);
++        goto cleanup;
++    }
++
++    ret = 0;
++
++cleanup:
++    virStringFreeList(tokens);
++    VIR_FREE(filename);
++    VIR_FREE(buf);
++    return ret;
++}
++#elif defined(__FreeBSD__)
++int virProcessGetStartTime(pid_t pid,
++                           unsigned long long *timestamp)
++{
++    struct kinfo_proc p;
++    int mib[4];
++    size_t len = 4;
++
++    sysctlnametomib("kern.proc.pid", mib, &len);
++
++    len = sizeof(struct kinfo_proc);
++    mib[3] = pid;
++
++    if (sysctl(mib, 4, &p, &len, NULL, 0) < 0) {
++        virReportSystemError(errno, "%s",
++                             _("Unable to query process ID start time"));
++        return -1;
++    }
++
++    *timestamp = (unsigned long long)p.ki_start.tv_sec;
++
++    return 0;
++
++}
++#else
++int virProcessGetStartTime(pid_t pid,
++                           unsigned long long *timestamp)
++{
++    static int warned = 0;
++    if (virAtomicIntInc(&warned) == 1) {
++        VIR_WARN("Process start time of pid %llu not available on this platform",
++                 (unsigned long long)pid);
++        warned = true;
++    }
++    *timestamp = 0;
++    return 0;
++}
++#endif
+diff --git a/src/util/virprocess.h b/src/util/virprocess.h
+index 048a73c..d26f4f7 100644
+--- a/src/util/virprocess.h
++++ b/src/util/virprocess.h
+@@ -38,5 +38,7 @@ virProcessWait(pid_t pid, int *exitstatus)
+ 
+ int virProcessKill(pid_t pid, int sig);
+ 
++int virProcessGetStartTime(pid_t pid,
++                           unsigned long long *timestamp);
+ 
+ #endif /* __VIR_PROCESS_H__ */
+diff --git a/src/util/virstring.c b/src/util/virstring.c
+index 1917e9a..98cfc0a 100644
+--- a/src/util/virstring.c
++++ b/src/util/virstring.c
+@@ -166,3 +166,13 @@ void virStringFreeList(char **strings)
+     }
+     VIR_FREE(strings);
+ }
++
++size_t virStringListLength(char **strings)
++{
++    size_t i = 0;
++
++    while (strings && strings[i])
++        i++;
++
++    return i;
++}
+diff --git a/src/util/virstring.h b/src/util/virstring.h
+index a569fe0..d68ed2f 100644
+--- a/src/util/virstring.h
++++ b/src/util/virstring.h
+@@ -35,4 +35,6 @@ char *virStringJoin(const char **strings,
+ 
+ void virStringFreeList(char **strings);
+ 
++size_t virStringListLength(char **strings);
++
+ #endif /* __VIR_STRING_H__ */
+-- 
+1.8.3.2
+

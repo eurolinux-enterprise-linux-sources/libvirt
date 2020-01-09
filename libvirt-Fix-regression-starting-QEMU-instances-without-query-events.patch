@@ -1,0 +1,40 @@
+From 2cebd4a9c807515a7a002dd61743ba27e734ae37 Mon Sep 17 00:00:00 2001
+Message-Id: <2cebd4a9c807515a7a002dd61743ba27e734ae37.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:46 -0600
+Subject: [PATCH] Fix regression starting QEMU instances without query-events
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+If QEMU reports CommandNotFound for the 'query-events' command,
+we must treat that as success, returning a zero-length array
+of events
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 7ccc4d52bd341f005b69cf1b08f1290fb686096c)
+---
+ src/qemu/qemu_monitor_json.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 2060842..b77a2fe 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -4261,8 +4261,13 @@ int qemuMonitorJSONGetEvents(qemuMonitorPtr mon,
+ 
+     ret = qemuMonitorJSONCommand(mon, cmd, &reply);
+ 
+-    if (ret == 0)
++    if (ret == 0) {
++        if (qemuMonitorJSONHasError(reply, "CommandNotFound")) {
++            ret = 0;
++            goto cleanup;
++        }
+         ret = qemuMonitorJSONCheckError(cmd, reply);
++    }
+ 
+     if (ret < 0)
+         goto cleanup;
+-- 
+1.7.12.3
+

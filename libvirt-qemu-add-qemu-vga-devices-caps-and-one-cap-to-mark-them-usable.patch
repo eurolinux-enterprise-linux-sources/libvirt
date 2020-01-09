@@ -1,0 +1,195 @@
+From f6e91044f13b5734b678f31915da6a1410c6ebfe Mon Sep 17 00:00:00 2001
+Message-Id: <f6e91044f13b5734b678f31915da6a1410c6ebfe.1373271639.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Wed, 6 Mar 2013 15:03:52 -0700
+Subject: [PATCH] qemu: add qemu vga devices caps and one cap to mark them
+ usable
+
+https://bugzilla.redhat.com/show_bug.cgi?id=896604
+
+QEMU_CAPS_DEVICE_QXL          -device qxl
+QEMU_CAPS_DEVICE_VGA          -device VGA
+QEMU_CAPS_DEVICE_CIRRUS_VGA   -device cirrus-vga
+QEMU_CAPS_DEVICE_VMWARE_SVGA  -device vmware-svga
+
+QEMU_CAPS_DEVICE_VIDEO_PRIMARY  /* safe to use -device XXX
+                                 for primary video device */
+
+Fix a typo in qemuCapsObjectTypes, the string 'qxl' here
+should be -device qxl rather than -vga [...|qxl|..]
+(cherry picked from commit 4c993d8ab5473334e9d4155faa913476ada39069)
+
+Conflicts:
+	src/qemu/qemu_capabilities.c - context with rhel capabilities
+	src/qemu/qemu_capabilities.h - likewise
+	tests/qemuhelptest.c - likewise, and one fewer test in rhel
+---
+ src/qemu/qemu_capabilities.c | 13 ++++++++++++-
+ src/qemu/qemu_capabilities.h |  6 ++++++
+ tests/qemuhelptest.c         | 42 ++++++++++++++++++++++++++++++++++--------
+ 3 files changed, 52 insertions(+), 9 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 7cd5bf2..46e429f 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -192,6 +192,11 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "drive-mirror",
+               "drive-reopen",
+               "blockdev-snapshot-sync",
++              "qxl",
++              "VGA",
++              "cirrus-vga",
++              "vmware-svga",
++              "device-video-primary",
+     );
+ 
+ struct _qemuCaps {
+@@ -1135,6 +1140,9 @@ qemuCapsComputeCmdFlags(const char *help,
+ 
+     if (version >= 11000)
+         qemuCapsSet(caps, QEMU_CAPS_CPU_HOST);
++
++    if (version >= 1002000)
++        qemuCapsSet(caps, QEMU_CAPS_DEVICE_VIDEO_PRIMARY);
+     return 0;
+ }
+ 
+@@ -1280,11 +1288,14 @@ struct qemuCapsStringFlags qemuCapsObjectTypes[] = {
+     { "virtio-scsi-pci", QEMU_CAPS_VIRTIO_SCSI_PCI },
+     { "spicevmc", QEMU_CAPS_DEVICE_SPICEVMC },
+     { "qxl-vga", QEMU_CAPS_DEVICE_QXL_VGA },
+-    { "qxl", QEMU_CAPS_VGA_QXL },
++    { "qxl", QEMU_CAPS_DEVICE_QXL },
+     { "sga", QEMU_CAPS_SGA },
+     { "scsi-block", QEMU_CAPS_SCSI_BLOCK },
+     { "scsi-cd", QEMU_CAPS_SCSI_CD },
+     { "ide-cd", QEMU_CAPS_IDE_CD },
++    { "VGA", QEMU_CAPS_DEVICE_VGA },
++    { "cirrus-vga", QEMU_CAPS_DEVICE_CIRRUS_VGA },
++    { "vmware-svga", QEMU_CAPS_DEVICE_VMWARE_SVGA },
+ };
+ 
+ 
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 7f81a9a..be53b26 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -158,6 +158,12 @@ enum qemuCapsFlags {
+     QEMU_CAPS_DRIVE_MIRROR,             /* drive-mirror monitor command */
+     QEMU_CAPS_DRIVE_REOPEN,             /* drive-reopen vs block-job-complete */
+     QEMU_CAPS_DISK_SNAPSHOT,            /* blockdev-snapshot-sync command */
++    QEMU_CAPS_DEVICE_QXL,               /* -device qxl */
++    QEMU_CAPS_DEVICE_VGA,               /* -device VGA */
++    QEMU_CAPS_DEVICE_CIRRUS_VGA,        /* -device cirrus-vga */
++    QEMU_CAPS_DEVICE_VMWARE_SVGA,       /* -device vmware-svga */
++    QEMU_CAPS_DEVICE_VIDEO_PRIMARY,     /* safe to use -device XXX
++                                           for primary video device */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/tests/qemuhelptest.c b/tests/qemuhelptest.c
+index 94828cc..6fdc1b5 100644
+--- a/tests/qemuhelptest.c
++++ b/tests/qemuhelptest.c
+@@ -382,7 +382,11 @@ mymain(void)
+             QEMU_CAPS_PCI_ROMBAR,
+             QEMU_CAPS_NO_ACPI,
+             QEMU_CAPS_VIRTIO_BLK_SG_IO,
+-            QEMU_CAPS_CPU_HOST);
++            QEMU_CAPS_CPU_HOST,
++            QEMU_CAPS_DEVICE_QXL,
++            QEMU_CAPS_DEVICE_VGA,
++            QEMU_CAPS_DEVICE_CIRRUS_VGA,
++            QEMU_CAPS_DEVICE_VMWARE_SVGA);
+     DO_TEST("qemu-kvm-0.12.3", 12003, 1, 0,
+             QEMU_CAPS_VNC_COLON,
+             QEMU_CAPS_NO_REBOOT,
+@@ -467,7 +471,6 @@ mymain(void)
+             QEMU_CAPS_NESTING,
+             QEMU_CAPS_NAME_PROCESS,
+             QEMU_CAPS_SMBIOS_TYPE,
+-            QEMU_CAPS_VGA_QXL,
+             QEMU_CAPS_SPICE,
+             QEMU_CAPS_VGA_NONE,
+             QEMU_CAPS_MIGRATE_QEMU_FD,
+@@ -484,7 +487,11 @@ mymain(void)
+             QEMU_CAPS_NO_ACPI,
+             QEMU_CAPS_VIRTIO_BLK_SG_IO,
+             QEMU_CAPS_CPU_HOST,
+-            QEMU_CAPS_SCSI_LSI);
++            QEMU_CAPS_SCSI_LSI,
++            QEMU_CAPS_DEVICE_QXL,
++            QEMU_CAPS_DEVICE_VGA,
++            QEMU_CAPS_DEVICE_CIRRUS_VGA,
++            QEMU_CAPS_DEVICE_VMWARE_SVGA);
+     DO_TEST("qemu-kvm-0.12.1.2-rhel61", 12001, 1, 0,
+             QEMU_CAPS_VNC_COLON,
+             QEMU_CAPS_NO_REBOOT,
+@@ -543,7 +550,11 @@ mymain(void)
+             QEMU_CAPS_VIRTIO_BLK_SG_IO,
+             QEMU_CAPS_CPU_HOST,
+             QEMU_CAPS_BLOCKIO,
+-            QEMU_CAPS_DISABLE_KSM);
++            QEMU_CAPS_DISABLE_KSM,
++            QEMU_CAPS_DEVICE_QXL,
++            QEMU_CAPS_DEVICE_VGA,
++            QEMU_CAPS_DEVICE_CIRRUS_VGA,
++            QEMU_CAPS_DEVICE_VMWARE_SVGA);
+     DO_TEST("qemu-kvm-0.12.1.2-rhel62-beta", 12001, 1, 0,
+             QEMU_CAPS_VNC_COLON,
+             QEMU_CAPS_NO_REBOOT,
+@@ -612,7 +623,10 @@ mymain(void)
+             QEMU_CAPS_CPU_HOST,
+             QEMU_CAPS_SCSI_CD,
+             QEMU_CAPS_BLOCKIO,
+-            QEMU_CAPS_DISABLE_KSM);
++            QEMU_CAPS_DISABLE_KSM,
++            QEMU_CAPS_DEVICE_QXL,
++            QEMU_CAPS_DEVICE_VGA,
++            QEMU_CAPS_DEVICE_CIRRUS_VGA);
+     DO_TEST("qemu-1.0", 1000000, 0, 0,
+             QEMU_CAPS_VNC_COLON,
+             QEMU_CAPS_NO_REBOOT,
+@@ -685,7 +699,11 @@ mymain(void)
+             QEMU_CAPS_SCSI_CD,
+             QEMU_CAPS_IDE_CD,
+             QEMU_CAPS_SCSI_LSI,
+-            QEMU_CAPS_BLOCKIO);
++            QEMU_CAPS_BLOCKIO,
++            QEMU_CAPS_DEVICE_QXL,
++            QEMU_CAPS_DEVICE_VGA,
++            QEMU_CAPS_DEVICE_CIRRUS_VGA,
++            QEMU_CAPS_DEVICE_VMWARE_SVGA);
+     DO_TEST("qemu-1.1.0", 1001000, 0, 0,
+             QEMU_CAPS_VNC_COLON,
+             QEMU_CAPS_NO_REBOOT,
+@@ -766,7 +784,11 @@ mymain(void)
+             QEMU_CAPS_NETDEV_BRIDGE,
+             QEMU_CAPS_SCSI_LSI,
+             QEMU_CAPS_VIRTIO_SCSI_PCI,
+-            QEMU_CAPS_BLOCKIO);
++            QEMU_CAPS_BLOCKIO,
++            QEMU_CAPS_DEVICE_QXL,
++            QEMU_CAPS_DEVICE_VGA,
++            QEMU_CAPS_DEVICE_CIRRUS_VGA,
++            QEMU_CAPS_DEVICE_VMWARE_SVGA);
+     DO_TEST("qemu-1.2.0", 1002000, 0, 0,
+             QEMU_CAPS_VNC_COLON,
+             QEMU_CAPS_NO_REBOOT,
+@@ -850,7 +872,11 @@ mymain(void)
+             QEMU_CAPS_BLOCKIO,
+             QEMU_CAPS_SCSI_DISK_WWN,
+             QEMU_CAPS_SECCOMP_SANDBOX,
+-            QEMU_CAPS_DUMP_GUEST_CORE);
++            QEMU_CAPS_DUMP_GUEST_CORE,
++            QEMU_CAPS_DEVICE_VGA,
++            QEMU_CAPS_DEVICE_CIRRUS_VGA,
++            QEMU_CAPS_DEVICE_VMWARE_SVGA,
++            QEMU_CAPS_DEVICE_VIDEO_PRIMARY);
+ 
+     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+-- 
+1.8.2.1
+

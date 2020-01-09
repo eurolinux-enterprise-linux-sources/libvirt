@@ -1,0 +1,81 @@
+From 5cd6c7db6a0c1b889dddea286e7949f13431c0b7 Mon Sep 17 00:00:00 2001
+Message-Id: <5cd6c7db6a0c1b889dddea286e7949f13431c0b7@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 2 Jul 2014 11:55:18 +0200
+Subject: [PATCH] Add invariant TSC cpu flag
+
+https://bugzilla.redhat.com/show_bug.cgi?id=996772
+
+Add suport for invariant TSC flag (CPUID 0x80000007, bit 8 of EDX).
+If this flag is enabled, the TSC ticks at a constant rate across
+all ACPI P-, C- and T-states.
+
+This can be enabled by adding:
+<feature name='invtsc'/>
+to the <cpu> element.
+
+Migration and saving the domain does not work with this flag.
+
+QEMU support: http://git.qemu.org/?p=qemu.git;a=commitdiff;h=303752a
+
+The feature name "invtsc" differs from the name "" used by the linux kernel:
+https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/tree/arch/x86/kernel/cpu/powerflags.c?id=30321c7b#n18
+
+(cherry picked from commit fba6bc47cbcabbe08d42279691efb0dff3b9c997)
+
+Conflicts:
+	src/qemu/qemu_migration.c - NBD support missing downstream
+	src/qemu/qemu_process.c - downstream doesn't have
+      qemuProcessVerifyGuestCPU
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/cpu/cpu_map.xml       |  5 +++++
+ src/qemu/qemu_migration.c | 15 +++++++++++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index bb9e99f..246e702 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -327,6 +327,11 @@
+       <cpuid function='0x00000007' ebx='0x00100000'/>
+     </feature>
+ 
++    <!-- Advanced Power Management edx features -->
++    <feature name='invtsc'>
++      <cpuid function='0x80000007' edx='0x00000100'/>
++    </feature>
++
+     <!-- models -->
+     <model name='486'>
+       <feature name='fpu'/>
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index b816f9a..d5fd309 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -868,6 +868,21 @@ qemuMigrationIsAllowed(struct qemud_driver *driver, virDomainObjPtr vm,
+         return false;
+     }
+ 
++    for (i = 0; i < def->cpu->nfeatures; i++) {
++        virCPUFeatureDefPtr feature = &def->cpu->features[i];
++
++        if (feature->policy != VIR_CPU_FEATURE_REQUIRE)
++            continue;
++
++        /* QEMU blocks migration and save with invariant TSC enabled */
++        if (STREQ(feature->name, "invtsc")) {
++            virReportError(VIR_ERR_OPERATION_INVALID,
++                           _("domain has CPU feature: %s"),
++                           feature->name);
++            return false;
++        }
++    }
++
+     return true;
+ }
+ 
+-- 
+2.0.0
+

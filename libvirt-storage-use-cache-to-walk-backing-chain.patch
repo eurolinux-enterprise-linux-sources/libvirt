@@ -1,0 +1,335 @@
+From 67acdb63f6b983cb66874e2dd7b0a78a9cedb9a9 Mon Sep 17 00:00:00 2001
+Message-Id: <67acdb63f6b983cb66874e2dd7b0a78a9cedb9a9.1350990679.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:39 -0600
+Subject: [PATCH] storage: use cache to walk backing chain
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+We used to walk the backing file chain at least twice per disk,
+once to set up cgroup device whitelisting, and once to set up
+security labeling.  Rather than walk the chain every iteration,
+which possibly includes calls to fork() in order to open root-squashed
+NFS files, we can exploit the cache of the previous patch.
+
+* src/conf/domain_conf.h (virDomainDiskDefForeachPath): Alter
+signature.
+* src/conf/domain_conf.c (virDomainDiskDefForeachPath): Require caller
+to supply backing chain via disk, if recursion is desired.
+* src/security/security_dac.c
+(virSecurityDACSetSecurityImageLabel): Adjust caller.
+* src/security/security_selinux.c
+(virSecuritySELinuxSetSecurityImageLabel): Likewise.
+* src/security/virt-aa-helper.c (get_files): Likewise.
+* src/qemu/qemu_cgroup.c (qemuSetupDiskCgroup)
+(qemuTeardownDiskCgroup): Likewise.
+(qemuSetupCgroup): Pre-populate chain.
+(cherry picked from commit 38c4a9cc40476bd2e598a1876b1254e88a09c760)
+---
+ src/conf/domain_conf.c          | 100 +++++++---------------------------------
+ src/conf/domain_conf.h          |   2 -
+ src/qemu/qemu_cgroup.c          |  12 ++---
+ src/security/security_dac.c     |   7 ---
+ src/security/security_selinux.c |  11 -----
+ src/security/virt-aa-helper.c   |  20 ++++----
+ 6 files changed, 32 insertions(+), 120 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index fe3bd81..a4a7f32 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -14846,110 +14846,42 @@ done:
+ }
+ 
+ 
++/* Call iter(disk, name, depth, opaque) for each element of disk and
++ * its backing chain in the pre-populated disk->backingChain.
++ * ignoreOpenFailure determines whether to warn about a chain that
++ * mentions a backing file without also having metadata on that
++ * file.  */
+ int virDomainDiskDefForeachPath(virDomainDiskDefPtr disk,
+-                                bool allowProbing,
+                                 bool ignoreOpenFailure,
+-                                uid_t uid, gid_t gid,
+                                 virDomainDiskDefPathIterator iter,
+                                 void *opaque)
+ {
+-    virHashTablePtr paths = NULL;
+-    int format;
+     int ret = -1;
+     size_t depth = 0;
+-    char *nextpath = NULL;
+-    virStorageFileMetadata *meta = NULL;
++    virStorageFileMetadata *tmp;
+ 
+     if (!disk->src || disk->type == VIR_DOMAIN_DISK_TYPE_NETWORK)
+         return 0;
+ 
+-    if (disk->format > 0) {
+-        format = disk->format;
+-    } else {
+-        if (allowProbing) {
+-            format = VIR_STORAGE_FILE_AUTO;
+-        } else {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("no disk format for %s and probing is disabled"),
+-                           disk->src);
+-            goto cleanup;
+-        }
+-    }
+-
+-    paths = virHashCreate(5, NULL);
+-
+-    do {
+-        const char *path = nextpath ? nextpath : disk->src;
+-        int fd;
+-
+-        if (iter(disk, path, depth, opaque) < 0)
+-            goto cleanup;
++    if (iter(disk, disk->src, 0, opaque) < 0)
++        goto cleanup;
+ 
+-        if (virHashLookup(paths, path)) {
++    tmp = disk->backingChain;
++    while (tmp && tmp->backingStoreIsFile) {
++        if (!ignoreOpenFailure && !tmp->backingMeta) {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("backing store for %s is self-referential"),
+-                           disk->src);
++                           _("unable to visit backing chain file %s"),
++                           tmp->backingStore);
+             goto cleanup;
+         }
+-
+-        if ((fd = virFileOpenAs(path, O_RDONLY, 0, uid, gid, 0)) < 0) {
+-            if (ignoreOpenFailure) {
+-                char ebuf[1024];
+-                VIR_WARN("Ignoring open failure on %s: %s", path,
+-                         virStrerror(-fd, ebuf, sizeof(ebuf)));
+-                break;
+-            } else {
+-                virReportSystemError(-fd, _("unable to open disk path %s"),
+-                                     path);
+-                goto cleanup;
+-            }
+-        }
+-
+-        if (!(meta = virStorageFileGetMetadataFromFD(path, fd, format))) {
+-            VIR_FORCE_CLOSE(fd);
+-            goto cleanup;
+-        }
+-
+-        if (VIR_CLOSE(fd) < 0)
+-            virReportSystemError(errno,
+-                                 _("could not close file %s"),
+-                                 path);
+-
+-        if (virHashAddEntry(paths, path, (void*)0x1) < 0)
++        if (iter(disk, tmp->backingStore, ++depth, opaque) < 0)
+             goto cleanup;
+-
+-        depth++;
+-        VIR_FREE(nextpath);
+-        nextpath = meta->backingStore;
+-        meta->backingStore = NULL;
+-
+-        /* Stop iterating if we reach a non-file backing store */
+-        if (nextpath && !meta->backingStoreIsFile) {
+-            VIR_DEBUG("Stopping iteration on non-file backing store: %s",
+-                      nextpath);
+-            break;
+-        }
+-
+-        format = meta->backingStoreFormat;
+-
+-        if (format == VIR_STORAGE_FILE_AUTO &&
+-            !allowProbing)
+-            format = VIR_STORAGE_FILE_RAW; /* Stops further recursion */
+-
+-        /* Allow probing for image formats that are safe */
+-        if (format == VIR_STORAGE_FILE_AUTO_SAFE)
+-            format = VIR_STORAGE_FILE_AUTO;
+-        virStorageFileFreeMetadata(meta);
+-        meta = NULL;
+-    } while (nextpath);
++        tmp = tmp->backingMeta;
++    }
+ 
+     ret = 0;
+ 
+ cleanup:
+-    virHashFree(paths);
+-    VIR_FREE(nextpath);
+-    virStorageFileFreeMetadata(meta);
+-
+     return ret;
+ }
+ 
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index fb174c5..43663ce 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2151,9 +2151,7 @@ typedef int (*virDomainDiskDefPathIterator)(virDomainDiskDefPtr disk,
+                                             void *opaque);
+ 
+ int virDomainDiskDefForeachPath(virDomainDiskDefPtr disk,
+-                                bool allowProbing,
+                                 bool ignoreOpenFailure,
+-                                uid_t uid, gid_t gid,
+                                 virDomainDiskDefPathIterator iter,
+                                 void *opaque);
+ 
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index 6b94686..428befd 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -87,16 +87,14 @@ qemuSetupDiskPathAllow(virDomainDiskDefPtr disk,
+ }
+ 
+ 
+-int qemuSetupDiskCgroup(struct qemud_driver *driver,
++int qemuSetupDiskCgroup(struct qemud_driver *driver ATTRIBUTE_UNUSED,
+                         virDomainObjPtr vm,
+                         virCgroupPtr cgroup,
+                         virDomainDiskDefPtr disk)
+ {
+     qemuCgroupData data = { vm, cgroup };
+     return virDomainDiskDefForeachPath(disk,
+-                                       driver->allowDiskFormatProbing,
+                                        true,
+-                                       driver->user, driver->group,
+                                        qemuSetupDiskPathAllow,
+                                        &data);
+ }
+@@ -129,16 +127,14 @@ qemuTeardownDiskPathDeny(virDomainDiskDefPtr disk ATTRIBUTE_UNUSED,
+ }
+ 
+ 
+-int qemuTeardownDiskCgroup(struct qemud_driver *driver,
++int qemuTeardownDiskCgroup(struct qemud_driver *driver ATTRIBUTE_UNUSED,
+                            virDomainObjPtr vm,
+                            virCgroupPtr cgroup,
+                            virDomainDiskDefPtr disk)
+ {
+     qemuCgroupData data = { vm, cgroup };
+     return virDomainDiskDefForeachPath(disk,
+-                                       driver->allowDiskFormatProbing,
+                                        true,
+-                                       driver->user, driver->group,
+                                        qemuTeardownDiskPathDeny,
+                                        &data);
+ }
+@@ -232,7 +228,9 @@ int qemuSetupCgroup(struct qemud_driver *driver,
+         }
+ 
+         for (i = 0; i < vm->def->ndisks ; i++) {
+-            if (qemuSetupDiskCgroup(driver, vm, cgroup, vm->def->disks[i]) < 0)
++            if (qemuDomainDetermineDiskChain(driver, vm->def->disks[i],
++                                             false) < 0 ||
++                qemuSetupDiskCgroup(driver, vm, cgroup, vm->def->disks[i]) < 0)
+                 goto cleanup;
+         }
+ 
+diff --git a/src/security/security_dac.c b/src/security/security_dac.c
+index f126aa5..5f11810 100644
+--- a/src/security/security_dac.c
++++ b/src/security/security_dac.c
+@@ -358,8 +358,6 @@ virSecurityDACSetSecurityImageLabel(virSecurityManagerPtr mgr,
+                                     virDomainDiskDefPtr disk)
+ 
+ {
+-    uid_t user;
+-    gid_t group;
+     void *params[2];
+     virSecurityDACDataPtr priv = virSecurityManagerGetPrivateData(mgr);
+ 
+@@ -369,15 +367,10 @@ virSecurityDACSetSecurityImageLabel(virSecurityManagerPtr mgr,
+     if (disk->type == VIR_DOMAIN_DISK_TYPE_NETWORK)
+         return 0;
+ 
+-    if (virSecurityDACGetImageIds(def, priv, &user, &group))
+-        return -1;
+-
+     params[0] = mgr;
+     params[1] = def;
+     return virDomainDiskDefForeachPath(disk,
+-                                       virSecurityManagerGetAllowDiskFormatProbing(mgr),
+                                        false,
+-                                       user, group,
+                                        virSecurityDACSetSecurityFileLabel,
+                                        params);
+ }
+diff --git a/src/security/security_selinux.c b/src/security/security_selinux.c
+index d55c60d..4cd8f23 100644
+--- a/src/security/security_selinux.c
++++ b/src/security/security_selinux.c
+@@ -1022,13 +1022,10 @@ virSecuritySELinuxSetSecurityImageLabel(virSecurityManagerPtr mgr,
+                                         virDomainDiskDefPtr disk)
+ 
+ {
+-    bool allowDiskFormatProbing;
+     virSecuritySELinuxCallbackData cbdata;
+     cbdata.manager = mgr;
+     cbdata.secdef = virDomainDefGetSecurityLabelDef(def, SECURITY_SELINUX_NAME);
+ 
+-    allowDiskFormatProbing = virSecurityManagerGetAllowDiskFormatProbing(mgr);
+-
+     if (cbdata.secdef == NULL)
+         return -1;
+ 
+@@ -1038,16 +1035,8 @@ virSecuritySELinuxSetSecurityImageLabel(virSecurityManagerPtr mgr,
+     if (disk->type == VIR_DOMAIN_DISK_TYPE_NETWORK)
+         return 0;
+ 
+-    /* XXX On one hand, it would be nice to have the driver's uid:gid
+-     * here so we could retry opens with it. On the other hand, it
+-     * probably doesn't matter because in practice that's only useful
+-     * for files on root-squashed NFS shares, and NFS doesn't properly
+-     * support selinux anyway.
+-     */
+     return virDomainDiskDefForeachPath(disk,
+-                                       allowDiskFormatProbing,
+                                        true,
+-                                       -1, -1, /* current process uid:gid */
+                                        virSecuritySELinuxSetSecurityFileLabel,
+                                        &cbdata);
+ }
+diff --git a/src/security/virt-aa-helper.c b/src/security/virt-aa-helper.c
+index 51daa4b..263fc92 100644
+--- a/src/security/virt-aa-helper.c
++++ b/src/security/virt-aa-helper.c
+@@ -919,20 +919,22 @@ get_files(vahControl * ctl)
+     }
+ 
+     for (i = 0; i < ctl->def->ndisks; i++) {
++        virDomainDiskDefPtr disk = ctl->def->disks[i];
++
++        /* XXX - if we knew the qemu user:group here we could send it in
++         *        so that the open could be re-tried as that user:group.
++         */
++        disk->chain = virStorageFileGetMetadata(disk->src, disk->format,
++                                                -1, -1,
++                                                ctl->allowDiskFormatProbing,
++                                                NULL);
++
+         /* XXX passing ignoreOpenFailure = true to get back to the behavior
+          * from before using virDomainDiskDefForeachPath. actually we should
+          * be passing ignoreOpenFailure = false and handle open errors more
+          * careful than just ignoring them.
+-         * XXX2 - if we knew the qemu user:group here we could send it in
+-         *        so that the open could be re-tried as that user:group.
+          */
+-        int ret = virDomainDiskDefForeachPath(ctl->def->disks[i],
+-                                              ctl->allowDiskFormatProbing,
+-                                              true,
+-                                              -1, -1, /* current uid:gid */
+-                                              add_file_path,
+-                                              &buf);
+-        if (ret != 0)
++        if (virDomainDiskDefForeachPath(disk, true, add_file_path, &buf) < 0)
+             goto clean;
+     }
+ 
+-- 
+1.7.12.4
+

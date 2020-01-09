@@ -1,0 +1,174 @@
+From 4a30f4124c6f1d388cd928c98860e0e4da295f10 Mon Sep 17 00:00:00 2001
+Message-Id: <4a30f4124c6f1d388cd928c98860e0e4da295f10.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:42 -0600
+Subject: [PATCH] Add a qemuMonitorGetObjectProps() method for QMP
+ device-list-properties command
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+Add a new qemuMonitorGetObjectProps() method to support invocation
+of the 'device-list-properties' JSON monitor command. No HMP equivalent
+is required, since this will only be present for QEMU >= 1.2
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit b785cec0dc53653054647e246c314ea115a60d0d)
+---
+ src/qemu/qemu_monitor.c      | 23 +++++++++++++
+ src/qemu/qemu_monitor.h      |  3 ++
+ src/qemu/qemu_monitor_json.c | 82 ++++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_monitor_json.h |  4 +++
+ 4 files changed, 112 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 335f525..972c4d4 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -3203,3 +3203,26 @@ int qemuMonitorGetObjectTypes(qemuMonitorPtr mon,
+ 
+     return qemuMonitorJSONGetObjectTypes(mon, types);
+ }
++
++
++int qemuMonitorGetObjectProps(qemuMonitorPtr mon,
++                              const char *type,
++                              char ***props)
++{
++    VIR_DEBUG("mon=%p type=%s props=%p",
++              mon, type, props);
++
++    if (!mon) {
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("monitor must not be NULL"));
++        return -1;
++    }
++
++    if (!mon->json) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("JSON monitor is required"));
++        return -1;
++    }
++
++    return qemuMonitorJSONGetObjectProps(mon, type, props);
++}
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 05cb03f..919d0a8 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -609,6 +609,9 @@ int qemuMonitorGetEvents(qemuMonitorPtr mon,
+ 
+ int qemuMonitorGetObjectTypes(qemuMonitorPtr mon,
+                               char ***types);
++int qemuMonitorGetObjectProps(qemuMonitorPtr mon,
++                              const char *type,
++                              char ***props);
+ 
+ 
+ /**
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 6ce1226..bc9f188 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -4448,3 +4448,85 @@ cleanup:
+     virJSONValueFree(reply);
+     return ret;
+ }
++
++
++int qemuMonitorJSONGetObjectProps(qemuMonitorPtr mon,
++                                  const char *type,
++                                  char ***props)
++{
++    int ret;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++    virJSONValuePtr data;
++    char **proplist = NULL;
++    int n = 0;
++    size_t i;
++
++    *props = NULL;
++
++    if (!(cmd = qemuMonitorJSONMakeCommand("device-list-properties",
++                                           "s:typename", type,
++                                           NULL)))
++        return -1;
++
++    ret = qemuMonitorJSONCommand(mon, cmd, &reply);
++
++    if (ret == 0 &&
++        qemuMonitorJSONHasError(reply, "DeviceNotFound")) {
++        goto cleanup;
++    }
++
++    if (ret == 0)
++        ret = qemuMonitorJSONCheckError(cmd, reply);
++
++    if (ret < 0)
++        goto cleanup;
++
++    ret = -1;
++
++    if (!(data = virJSONValueObjectGet(reply, "return"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("device-list-properties reply was missing return data"));
++        goto cleanup;
++    }
++
++    if ((n = virJSONValueArraySize(data)) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("device-list-properties reply data was not an array"));
++        goto cleanup;
++    }
++
++    if (VIR_ALLOC_N(proplist, n) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    for (i = 0 ; i < n ; i++) {
++        virJSONValuePtr child = virJSONValueArrayGet(data, i);
++        const char *tmp;
++
++        if (!(tmp = virJSONValueObjectGetString(child, "name"))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("device-list-properties reply data was missing 'name'"));
++            goto cleanup;
++        }
++
++        if (!(proplist[i] = strdup(tmp))) {
++            virReportOOMError();
++            goto cleanup;
++        }
++    }
++
++    ret = n;
++    *props = proplist;
++
++cleanup:
++    if (ret < 0 && proplist) {
++        for (i = 0 ; i < n ; i++)
++            VIR_FREE(proplist[i]);
++        VIR_FREE(proplist);
++    }
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index babc6b0..d7e8a11 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -317,5 +317,9 @@ int qemuMonitorJSONGetEvents(qemuMonitorPtr mon,
+ int qemuMonitorJSONGetObjectTypes(qemuMonitorPtr mon,
+                                   char ***types)
+     ATTRIBUTE_NONNULL(2);
++int qemuMonitorJSONGetObjectProps(qemuMonitorPtr mon,
++                                  const char *type,
++                                  char ***props)
++    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+ 
+ #endif /* QEMU_MONITOR_JSON_H */
+-- 
+1.7.12.3
+

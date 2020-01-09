@@ -1,0 +1,30 @@
+From 419f63a1b2babe1e3c9affead9004c0bac1afd90 Mon Sep 17 00:00:00 2001
+Message-Id: <419f63a1b2babe1e3c9affead9004c0bac1afd90@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 8 Oct 2014 14:29:22 +0200
+Subject: [PATCH] sanlock: Avoid freeing uninitialized value
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1136788
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 760cf5d30e44803268a7103175056a3203d52527)
+---
+ src/locking/lock_driver_sanlock.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index 3edcc95..2b5c2cf 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -905,7 +905,7 @@ static int virLockManagerSanlockAcquire(virLockManagerPtr lock,
+                                         int *fd)
+ {
+     virLockManagerSanlockPrivatePtr priv = lock->privateData;
+-    struct sanlk_options *opt;
++    struct sanlk_options *opt = NULL;
+     struct sanlk_resource **res_args;
+     int res_count;
+     bool res_free = false;
+-- 
+2.2.0
+

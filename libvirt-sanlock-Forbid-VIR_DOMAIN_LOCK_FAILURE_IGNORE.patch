@@ -1,0 +1,68 @@
+From cb28cf7d86c80625a259327e05303520459480d5 Mon Sep 17 00:00:00 2001
+Message-Id: <cb28cf7d86c80625a259327e05303520459480d5@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 24 Mar 2014 14:22:36 +0100
+Subject: [PATCH] sanlock: Forbid VIR_DOMAIN_LOCK_FAILURE_IGNORE
+
+https://bugzilla.redhat.com/show_bug.cgi?id=905280
+https://bugzilla.redhat.com/show_bug.cgi?id=967493
+
+Sanlock expects that the configured kill script either kills the PID on
+lock failure or removes all locks the PID owns. If none of the two
+options happen, sanlock will reboot the host. Although IGNORE action is
+supposed to ignore the request to kill the PID or remove all leases,
+it's certainly not designed to cause the host to be rebooted. That said,
+IGNORE action is incompatible with sanlock and should be forbidden by
+libvirt.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit e3dd35e881614e6f08a35e1e714336268764d5ba)
+---
+ src/locking/lock_driver_sanlock.c | 12 +++++++++++-
+ src/locking/sanlock_helper.c      |  6 ++----
+ 2 files changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index 17b6971..de838fc 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -810,7 +810,17 @@ virLockManagerSanlockRegisterKillscript(int sock,
+     int ret = -1;
+     int rv;
+ 
+-    if (action > VIR_DOMAIN_LOCK_FAILURE_IGNORE) {
++    switch (action) {
++    case VIR_DOMAIN_LOCK_FAILURE_DEFAULT:
++        return 0;
++
++    case VIR_DOMAIN_LOCK_FAILURE_POWEROFF:
++    case VIR_DOMAIN_LOCK_FAILURE_RESTART:
++    case VIR_DOMAIN_LOCK_FAILURE_PAUSE:
++        break;
++
++    case VIR_DOMAIN_LOCK_FAILURE_IGNORE:
++    case VIR_DOMAIN_LOCK_FAILURE_LAST:
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("Failure action %s is not supported by sanlock"),
+                        virDomainLockFailureTypeToString(action));
+diff --git a/src/locking/sanlock_helper.c b/src/locking/sanlock_helper.c
+index a73b49c..4d9c5ec 100644
+--- a/src/locking/sanlock_helper.c
++++ b/src/locking/sanlock_helper.c
+@@ -117,11 +117,9 @@ main(int argc, char **argv)
+             ret = EXIT_SUCCESS;
+         break;
+ 
++    case VIR_DOMAIN_LOCK_FAILURE_DEFAULT:
+     case VIR_DOMAIN_LOCK_FAILURE_IGNORE:
+-        ret = EXIT_SUCCESS;
+-        break;
+-
+-    default:
++    case VIR_DOMAIN_LOCK_FAILURE_LAST:
+         fprintf(stderr, _("unsupported failure action: '%s'\n"),
+                 virDomainLockFailureTypeToString(action));
+         break;
+-- 
+1.9.2
+

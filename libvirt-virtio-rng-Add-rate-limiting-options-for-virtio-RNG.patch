@@ -1,0 +1,201 @@
+From 749c3cc62cf480d507d545d1d62362eace504500 Mon Sep 17 00:00:00 2001
+Message-Id: <749c3cc62cf480d507d545d1d62362eace504500@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:54:00 +0100
+Subject: [PATCH] virtio-rng: Add rate limiting options for virtio-RNG
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+Qemu's implementation of virtio RNG supports rate limiting of the
+entropy used. This patch exposes the option to tune this functionality.
+
+This patch is based on qemu commit 904d6f588063fb5ad2b61998acdf1e73fb4
+
+The rate limiting is exported in the XML as:
+<devices>
+  ...
+  <rng model='virtio'>
+    <rate bytes='123' period='1234'/>
+    <backend model='random'/>
+  </rng>
+  ...
+(cherry picked from commit 32bd699f5547841677608577a5c9c597ed0f6647)
+
+Conflicts:
+	src/qemu/qemu_command.c - context from previous changes
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in                           | 13 +++++++++++++
+ docs/schemas/domaincommon.rng                       | 21 ++++++++++++++++++++-
+ src/conf/domain_conf.c                              | 19 +++++++++++++++++++
+ src/conf/domain_conf.h                              |  2 ++
+ src/qemu/qemu_command.c                             |  8 ++++++++
+ .../qemuxml2argv-virtio-rng-random.args             |  2 +-
+ .../qemuxml2argv-virtio-rng-random.xml              |  1 +
+ 7 files changed, 64 insertions(+), 2 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 31a1a07..e2e5b89 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -4192,6 +4192,7 @@ qemu-kvm -net nic,model=? /dev/null
+   ...
+   &lt;devices&gt;
+     &lt;rng model='virtio'&gt;
++      &lt;rate period="2000" bytes="1234"/&gt;
+       &lt;backend model='random'&gt;/dev/random&lt;/backend&gt;
+       &lt;!-- OR --&gt;
+       &lt;backend model='egd' type='udp'&gt;
+@@ -4214,6 +4215,18 @@ qemu-kvm -net nic,model=? /dev/null
+           <li>'virtio' &mdash; supported by qemu and virtio-rng kernel module</li>
+         </ul>
+       </dd>
++      <dt><code>rate</code></dt>
++      <dd>
++        <p>
++          The optional <code>rate</code> element allows limiting the rate at
++          which entropy can be consumed from the source.  The mandatory
++          attribute <code>bytes</code> specifies how many bytes are permitted
++          to be consumed per period.  An optional <code>period</code> attribute
++          specifies the duration of a period in milliseconds; if omitted, the
++          period is taken as 1000 milliseconds (1 second).
++          <span class='since'>Since 1.0.4</span>
++        </p>
++      </dd>
+       <dt><code>backend</code></dt>
+       <dd>
+         <p>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index d5685d5..fbb6f0d 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -3423,7 +3423,12 @@
+           <value>virtio</value>
+         </choice>
+       </attribute>
+-      <ref name="rng-backend"/>
++      <interleave>
++        <ref name="rng-backend"/>
++        <optional>
++          <ref name="rng-rate"/>
++        </optional>
++      </interleave>
+     </element>
+   </define>
+ 
+@@ -3451,6 +3456,20 @@
+     </element>
+   </define>
+ 
++  <define name="rng-rate">
++    <element name="rate">
++      <attribute name="bytes">
++        <ref name="positiveInteger"/>
++      </attribute>
++      <optional>
++        <attribute name="period">
++          <ref name="positiveInteger"/>
++        </attribute>
++      </optional>
++      <empty/>
++    </element>
++  </define>
++
+   <define name="usbmaster">
+     <element name="master">
+       <attribute name="startport">
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index a95aacf..ca0e4ef 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -7142,6 +7142,19 @@ virDomainRNGDefParseXML(const xmlNodePtr node,
+ 
+     ctxt->node = node;
+ 
++    if (virXPathUInt("string(./rate/@bytes)", ctxt, &def->rate) < -1) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("invalid RNG rate bytes value"));
++        goto error;
++    }
++
++    if (def->rate > 0 &&
++        virXPathUInt("string(./rate/@period)", ctxt, &def->period) < -1) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("invalid RNG rate period value"));
++        goto error;
++    }
++
+     if ((nbackends = virXPathNodeSet("./backend", ctxt, &backends)) < 0)
+         goto error;
+ 
+@@ -13385,6 +13398,12 @@ virDomainRNGDefFormat(virBufferPtr buf,
+     const char *backend = virDomainRNGBackendTypeToString(def->backend);
+ 
+     virBufferAsprintf(buf, "    <rng model='%s'>\n", model);
++    if (def->rate) {
++        virBufferAsprintf(buf, "      <rate bytes='%u'", def->rate);
++        if (def->period)
++            virBufferAsprintf(buf, " period='%u'", def->period);
++        virBufferAddLit(buf, "/>\n");
++    }
+     virBufferAsprintf(buf, "      <backend model='%s'", backend);
+ 
+     switch ((enum virDomainRNGBackend) def->backend) {
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 27bc881..d2ae8a0 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1701,6 +1701,8 @@ enum virDomainRNGBackend {
+ struct _virDomainRNGDef {
+     int model;
+     int backend;
++    unsigned int rate; /* bytes per period */
++    unsigned int period; /* milliseconds */
+ 
+     union {
+         char *file; /* file name for 'random' source */
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 4346123..4296ea3 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4206,6 +4206,14 @@ qemuBuildRNGDeviceArgs(virCommandPtr cmd,
+ 
+     virBufferAsprintf(&buf, "virtio-rng-pci,rng=%s", dev->info.alias);
+ 
++    if (dev->rate > 0) {
++        virBufferAsprintf(&buf, ",max-bytes=%u", dev->rate);
++        if (dev->period)
++            virBufferAsprintf(&buf, ",period=%u", dev->period);
++        else
++            virBufferAddLit(&buf, ",period=1000");
++    }
++
+     if (qemuBuildDeviceAddressStr(&buf, &dev->info, caps) < 0)
+         goto cleanup;
+ 
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args
+index 7ab9dbc..5d296e8 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.args
+@@ -3,4 +3,4 @@ LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu \
+ -monitor unix:/tmp/test-monitor,server,nowait -no-acpi -boot c -usb \
+ -device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3 \
+ -object rng-random,id=rng0,filename=/dev/hwrng \
+--device virtio-rng-pci,rng=rng0,bus=pci.0,addr=0x4
++-device virtio-rng-pci,rng=rng0,max-bytes=123,period=1234,bus=pci.0,addr=0x4
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml
+index 1e2c4be..354ae42 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-random.xml
+@@ -17,6 +17,7 @@
+     <controller type='usb' index='0'/>
+     <memballoon model='virtio'/>
+     <rng model='virtio'>
++      <rate bytes='123' period='1234'/>
+       <backend model='random'>/dev/hwrng</backend>
+     </rng>
+   </devices>
+-- 
+1.9.1
+

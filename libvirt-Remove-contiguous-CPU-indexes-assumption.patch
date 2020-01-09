@@ -1,0 +1,118 @@
+From ef00f041094cd5162760fef0b5f18d6d4b18f026 Mon Sep 17 00:00:00 2001
+Message-Id: <ef00f041094cd5162760fef0b5f18d6d4b18f026@dist-git>
+From: Li Zhang <zhlcindy@linux.vnet.ibm.com>
+Date: Tue, 4 Mar 2014 15:01:48 +0100
+Subject: [PATCH] Remove contiguous CPU indexes assumption
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1066473
+
+When getting CPUs' information, it assumes that CPU indexes
+are not contiguous. But for ppc64 platform, CPU indexes are not
+contiguous because SMT is needed to be disabled, so CPU information
+is not right on ppc64 and vpuinfo, vcpupin can't work corretly.
+
+This patch is to remove the assumption to be compatible with ppc64.
+
+Test:
+   4 vcpus are assigned to one VM and execute vcpuinfo command.
+
+   Without patch: There is only one vcpu informaion can be listed.
+   With patch: All vcpus' information can be listed correctly.
+
+Signed-off-by: Li Zhang <zhlcindy@linux.vnet.ibm.com>
+(cherry picked from commit cc78d7ba0e64b870013ad7753c3d24cc88905712)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_monitor_json.c | 14 --------------
+ src/qemu/qemu_monitor_text.c | 13 ++-----------
+ 2 files changed, 2 insertions(+), 25 deletions(-)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index a147b1a..bb5e738 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -1216,7 +1216,6 @@ qemuMonitorJSONExtractCPUInfo(virJSONValuePtr reply,
+ 
+     for (i = 0 ; i < ncpus ; i++) {
+         virJSONValuePtr entry = virJSONValueArrayGet(data, i);
+-        int cpu;
+         int thread;
+         if (!entry) {
+             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+@@ -1224,12 +1223,6 @@ qemuMonitorJSONExtractCPUInfo(virJSONValuePtr reply,
+             goto cleanup;
+         }
+ 
+-        if (virJSONValueObjectGetNumberInt(entry, "CPU", &cpu) < 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-                           _("cpu information was missing cpu number"));
+-            goto cleanup;
+-        }
+-
+         if (virJSONValueObjectGetNumberInt(entry, "thread_id", &thread) < 0) {
+             /* Only qemu-kvm tree includs thread_id, so treat this as
+                non-fatal, simply returning no data */
+@@ -1237,13 +1230,6 @@ qemuMonitorJSONExtractCPUInfo(virJSONValuePtr reply,
+             goto cleanup;
+         }
+ 
+-        if (cpu != i) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("unexpected cpu index %d expecting %d"),
+-                           i, cpu);
+-            goto cleanup;
+-        }
+-
+         threads[i] = thread;
+     }
+ 
+diff --git a/src/qemu/qemu_monitor_text.c b/src/qemu/qemu_monitor_text.c
+index ef2aff7..bb245c1 100644
+--- a/src/qemu/qemu_monitor_text.c
++++ b/src/qemu/qemu_monitor_text.c
+@@ -510,7 +510,6 @@ int qemuMonitorTextGetCPUInfo(qemuMonitorPtr mon,
+ {
+     char *qemucpus = NULL;
+     char *line;
+-    int lastVcpu = -1;
+     pid_t *cpupids = NULL;
+     size_t ncpupids = 0;
+ 
+@@ -530,16 +529,12 @@ int qemuMonitorTextGetCPUInfo(qemuMonitorPtr mon,
+     do {
+         char *offset = strchr(line, '#');
+         char *end = NULL;
+-        int vcpu = 0, tid = 0;
++        int tid = 0;
+ 
+         /* See if we're all done */
+         if (offset == NULL)
+             break;
+ 
+-        /* Extract VCPU number */
+-        if (virStrToLong_i(offset + 1, &end, 10, &vcpu) < 0)
+-            goto error;
+-
+         if (end == NULL || *end != ':')
+             goto error;
+ 
+@@ -552,15 +547,11 @@ int qemuMonitorTextGetCPUInfo(qemuMonitorPtr mon,
+         if (end == NULL || !c_isspace(*end))
+             goto error;
+ 
+-        if (vcpu != (lastVcpu + 1))
+-            goto error;
+-
+         if (VIR_REALLOC_N(cpupids, ncpupids+1) < 0)
+             goto error;
+ 
+-        VIR_DEBUG("vcpu=%d pid=%d", vcpu, tid);
++        VIR_DEBUG("pid=%d", tid);
+         cpupids[ncpupids++] = tid;
+-        lastVcpu = vcpu;
+ 
+         /* Skip to next data line */
+         line = strchr(offset, '\r');
+-- 
+1.9.1
+

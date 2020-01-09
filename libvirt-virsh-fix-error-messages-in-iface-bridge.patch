@@ -1,0 +1,37 @@
+From ad317f6cfddf142a3c99dee358b527a5520b7b1b Mon Sep 17 00:00:00 2001
+Message-Id: <ad317f6cfddf142a3c99dee358b527a5520b7b1b.1354720507.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 3 Dec 2012 15:20:14 +0100
+Subject: [PATCH] virsh: fix error messages in iface-bridge
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=878376
+
+The error messages did not correspond to the attributes they printed.
+(cherry picked from commit 924a6c7f6ad3fb3c3bb91feadccd12e6e471856f)
+---
+ tools/virsh-interface.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tools/virsh-interface.c b/tools/virsh-interface.c
+index c27b6bc..9f898c8 100644
+--- a/tools/virsh-interface.c
++++ b/tools/virsh-interface.c
+@@ -813,13 +813,13 @@ cmdInterfaceBridge(vshControl *ctl, const vshCmd *cmd)
+      */
+     if (!xmlSetProp(if_node, BAD_CAST "type", BAD_CAST if_type)) {
+         vshError(ctl, _("Failed to set new slave interface type to '%s' in xml document"),
+-                 if_name);
++                 if_type);
+         goto cleanup;
+     }
+ 
+     if (!xmlSetProp(if_node, BAD_CAST "name", BAD_CAST if_name)) {
+         vshError(ctl, _("Failed to set new slave interface name to '%s' in xml document"),
+-            br_name);
++                 if_name);
+         goto cleanup;
+     }
+ 
+-- 
+1.8.0
+

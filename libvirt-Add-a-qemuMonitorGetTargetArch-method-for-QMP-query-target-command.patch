@@ -1,0 +1,131 @@
+From e0ddc872f41c699ce66569d4d90d637c31b028b5 Mon Sep 17 00:00:00 2001
+Message-Id: <e0ddc872f41c699ce66569d4d90d637c31b028b5.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:43 -0600
+Subject: [PATCH] Add a qemuMonitorGetTargetArch() method for QMP query-target
+ command
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+Add a new qemuMonitorGetTargetArch() method to support invocation
+of the 'query-target' JSON monitor command. No HMP equivalent
+is required, since this will only be present for QEMU >= 1.2
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 364a77ff0fbd6205826cc321d26d586ad9595123)
+---
+ src/qemu/qemu_monitor.c      | 21 +++++++++++++++++++++
+ src/qemu/qemu_monitor.h      |  2 +-
+ src/qemu/qemu_monitor_json.c | 45 ++++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_monitor_json.h |  1 +
+ 4 files changed, 68 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 972c4d4..129734a 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -3226,3 +3226,24 @@ int qemuMonitorGetObjectProps(qemuMonitorPtr mon,
+ 
+     return qemuMonitorJSONGetObjectProps(mon, type, props);
+ }
++
++
++char *qemuMonitorGetTargetArch(qemuMonitorPtr mon)
++{
++    VIR_DEBUG("mon=%p",
++              mon);
++
++    if (!mon) {
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("monitor must not be NULL"));
++        return NULL;
++    }
++
++    if (!mon->json) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("JSON monitor is required"));
++        return NULL;
++    }
++
++    return qemuMonitorJSONGetTargetArch(mon);
++}
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 919d0a8..85f5e7a 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -612,7 +612,7 @@ int qemuMonitorGetObjectTypes(qemuMonitorPtr mon,
+ int qemuMonitorGetObjectProps(qemuMonitorPtr mon,
+                               const char *type,
+                               char ***props);
+-
++char *qemuMonitorGetTargetArch(qemuMonitorPtr mon);
+ 
+ /**
+  * When running two dd process and using <> redirection, we need a
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index bc9f188..60f6ff1 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -4530,3 +4530,48 @@ cleanup:
+     virJSONValueFree(reply);
+     return ret;
+ }
++
++
++char *
++qemuMonitorJSONGetTargetArch(qemuMonitorPtr mon)
++{
++    char *ret = NULL;
++    int rv;
++    const char *arch;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++    virJSONValuePtr data;
++
++    if (!(cmd = qemuMonitorJSONMakeCommand("query-target", NULL)))
++        return NULL;
++
++    rv = qemuMonitorJSONCommand(mon, cmd, &reply);
++
++    if (rv == 0)
++        rv = qemuMonitorJSONCheckError(cmd, reply);
++
++    if (rv < 0)
++        goto cleanup;
++
++    if (!(data = virJSONValueObjectGet(reply, "return"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-target reply was missing return data"));
++        goto cleanup;
++    }
++
++    if (!(arch = virJSONValueObjectGetString(data, "arch"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-target reply was missing arch data"));
++        goto cleanup;
++    }
++
++    if (!(ret = strdup(arch))) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++cleanup:
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index d7e8a11..defa3ff 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -321,5 +321,6 @@ int qemuMonitorJSONGetObjectProps(qemuMonitorPtr mon,
+                                   const char *type,
+                                   char ***props)
+     ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
++char *qemuMonitorJSONGetTargetArch(qemuMonitorPtr mon);
+ 
+ #endif /* QEMU_MONITOR_JSON_H */
+-- 
+1.7.12.3
+

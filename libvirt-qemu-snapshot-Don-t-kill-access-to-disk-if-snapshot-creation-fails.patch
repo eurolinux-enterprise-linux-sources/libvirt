@@ -1,0 +1,43 @@
+From 94ee920c7260190cb1e80f4b744672d992ba84b0 Mon Sep 17 00:00:00 2001
+Message-Id: <94ee920c7260190cb1e80f4b744672d992ba84b0@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:52 +0200
+Subject: [PATCH] qemu: snapshot: Don't kill access to disk if snapshot
+ creation fails
+
+If snapshot creation failed for example due to invalid use of the
+"REUSE_EXTERNAL" flag, libvirt killed access to the original image file
+instead of the new image file. On machines with selinux this kills the
+whole VM as the selinux context is enforced immediately.
+
+* qemu_driver.c:qemuDomainSnapshotUndoSingleDiskActive():
+    - Kill access to the new image file instead of the old one.
+
+Partially resolves: https://bugzilla.redhat.com/show_bug.cgi?id=906639
+
+(cherry picked from commit 177046753fa427609f217c319dba6fa465a4add4)
+
+Conflicts:
+	src/qemu/qemu_driver.c - cgroup changes not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index cb16d53..c14e46d 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11760,7 +11760,7 @@ qemuDomainSnapshotUndoSingleDiskActive(struct qemud_driver *driver,
+         goto cleanup;
+     }
+ 
+-    qemuDomainPrepareDiskChainElement(driver, vm, cgroup, disk, origdisk->src,
++    qemuDomainPrepareDiskChainElement(driver, vm, cgroup, disk, disk->src,
+                                       VIR_DISK_CHAIN_NO_ACCESS);
+     if (need_unlink && stat(disk->src, &st) == 0 &&
+         S_ISREG(st.st_mode) && unlink(disk->src) < 0)
+-- 
+1.9.2
+

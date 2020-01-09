@@ -1,0 +1,298 @@
+From 151ffe5f63b031da2578c5b1aad238af5d6a0a3d Mon Sep 17 00:00:00 2001
+Message-Id: <151ffe5f63b031da2578c5b1aad238af5d6a0a3d.1350297259.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:36 -0600
+Subject: [PATCH] Add a qemuMonitorGetVersion() method for QMP query-version
+ command
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+Add a new qemuMonitorGetVersion() method to support invocation
+of the 'query-version' JSON monitor command. No HMP equivalent
+is provided, since this will only be used for QEMU >= 1.2
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 3dce0a829a4baeca6053d0e96378b6af6dbb662a)
+---
+ src/qemu/qemu_monitor.c      |  24 ++++++++++
+ src/qemu/qemu_monitor.h      |   7 +++
+ src/qemu/qemu_monitor_json.c |  78 +++++++++++++++++++++++++++++++++
+ src/qemu/qemu_monitor_json.h |   7 +++
+ tests/qemumonitorjsontest.c  | 102 +++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 218 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index e15a59b..bcd16b1 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -3062,3 +3062,27 @@ int qemuMonitorSystemWakeup(qemuMonitorPtr mon)
+ 
+     return qemuMonitorJSONSystemWakeup(mon);
+ }
++
++int qemuMonitorGetVersion(qemuMonitorPtr mon,
++                          int *major,
++                          int *minor,
++                          int *micro,
++                          char **package)
++{
++    VIR_DEBUG("mon=%p major=%p minor=%p micro=%p package=%p",
++              mon, major, minor, micro, package);
++
++    if (!mon) {
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("monitor must not be NULL"));
++        return -1;
++    }
++
++    if (!mon->json) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("JSON monitor is required"));
++        return -1;
++    }
++
++    return qemuMonitorJSONGetVersion(mon, major, minor, micro, package);
++}
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 2d5ab6d..0b5e339 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -577,6 +577,13 @@ int qemuMonitorGetBlockIoThrottle(qemuMonitorPtr mon,
+ 
+ int qemuMonitorSystemWakeup(qemuMonitorPtr mon);
+ 
++int qemuMonitorGetVersion(qemuMonitorPtr mon,
++                          int *major,
++                          int *minor,
++                          int *micro,
++                          char **package)
++    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4);
++
+ /**
+  * When running two dd process and using <> redirection, we need a
+  * shell that will not truncate files.  These two strings serve that
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 68d3474..aa5c4b7 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -4019,3 +4019,81 @@ int qemuMonitorJSONSystemWakeup(qemuMonitorPtr mon)
+     virJSONValueFree(reply);
+     return ret;
+ }
++
++int qemuMonitorJSONGetVersion(qemuMonitorPtr mon,
++                              int *major,
++                              int *minor,
++                              int *micro,
++                              char **package)
++{
++    int ret;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++    virJSONValuePtr data;
++    virJSONValuePtr qemu;
++
++    *major = *minor = *micro = 0;
++    if (package)
++        *package = NULL;
++
++    if (!(cmd = qemuMonitorJSONMakeCommand("query-version", NULL)))
++        return -1;
++
++    ret = qemuMonitorJSONCommand(mon, cmd, &reply);
++
++    if (ret == 0)
++        ret = qemuMonitorJSONCheckError(cmd, reply);
++
++    if (ret < 0)
++        goto cleanup;
++
++    ret = -1;
++
++    if (!(data = virJSONValueObjectGet(reply, "return"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-version reply was missing 'return' data"));
++        goto cleanup;
++    }
++
++    if (!(qemu = virJSONValueObjectGet(data, "qemu"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-version reply was missing 'qemu' data"));
++        goto cleanup;
++    }
++
++    if (virJSONValueObjectGetNumberInt(qemu, "major", major) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-version reply was missing 'major' version"));
++        goto cleanup;
++    }
++    if (virJSONValueObjectGetNumberInt(qemu, "minor", minor) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-version reply was missing 'minor' version"));
++        goto cleanup;
++    }
++    if (virJSONValueObjectGetNumberInt(qemu, "micro", micro) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-version reply was missing 'micro' version"));
++        goto cleanup;
++    }
++
++    if (package) {
++        const char *tmp;
++        if (!(tmp = virJSONValueObjectGetString(data, "package"))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("query-version reply was missing 'package' version"));
++            goto cleanup;
++        }
++        if (!(*package = strdup(tmp))) {
++            virReportOOMError();
++            goto cleanup;
++        }
++    }
++
++    ret = 0;
++
++cleanup:
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index 33b380b..d527d07 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -292,4 +292,11 @@ int qemuMonitorJSONGetBlockIoThrottle(qemuMonitorPtr mon,
+ 
+ int qemuMonitorJSONSystemWakeup(qemuMonitorPtr mon);
+ 
++int qemuMonitorJSONGetVersion(qemuMonitorPtr mon,
++                              int *major,
++                              int *minor,
++                              int *micro,
++                              char **package)
++    ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4);
++
+ #endif /* QEMU_MONITOR_JSON_H */
+diff --git a/tests/qemumonitorjsontest.c b/tests/qemumonitorjsontest.c
+index 48e78e7..c3a0c45 100644
+--- a/tests/qemumonitorjsontest.c
++++ b/tests/qemumonitorjsontest.c
+@@ -123,6 +123,107 @@ cleanup:
+ }
+ 
+ static int
++testQemuMonitorJSONGetVersion(const void *data)
++{
++    virCapsPtr caps = (virCapsPtr)data;
++    qemuMonitorTestPtr test = qemuMonitorTestNew(true, caps);
++    int ret = -1;
++    int major;
++    int minor;
++    int micro;
++    char *package;
++
++    if (!test)
++        return -1;
++
++    if (qemuMonitorTestAddItem(test, "query-version",
++                               "{ "
++                               "  \"return\":{ "
++                               "     \"qemu\":{ "
++                               "        \"major\":1, "
++                               "        \"minor\":2, "
++                               "        \"micro\":3 "
++                               "      },"
++                               "     \"package\":\"\""
++                               "  }"
++                               "}") < 0)
++        goto cleanup;
++
++    if (qemuMonitorTestAddItem(test, "query-version",
++                               "{ "
++                               "  \"return\":{ "
++                               "     \"qemu\":{ "
++                               "        \"major\":0, "
++                               "        \"minor\":11, "
++                               "        \"micro\":6 "
++                               "      },"
++                               "     \"package\":\"2.283.el6\""
++                               "  }"
++                               "}") < 0)
++        goto cleanup;
++
++    if (qemuMonitorGetVersion(qemuMonitorTestGetMonitor(test),
++                              &major, &minor, &micro,
++                              &package) < 0)
++        goto cleanup;
++
++    if (major != 1) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "Major %d was not 1", major);
++        goto cleanup;
++    }
++    if (minor != 2) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "Minor %d was not 2", major);
++        goto cleanup;
++    }
++    if (micro != 3) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "Micro %d was not 3", major);
++        goto cleanup;
++    }
++
++    if (STRNEQ(package, "")) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "Package %s was not ''", package);
++        goto cleanup;
++    }
++
++    if (qemuMonitorGetVersion(qemuMonitorTestGetMonitor(test),
++                              &major, &minor, &micro,
++                              &package) < 0)
++        goto cleanup;
++
++    if (major != 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "Major %d was not 0", major);
++        goto cleanup;
++    }
++    if (minor != 11) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "Minor %d was not 11", major);
++        goto cleanup;
++    }
++    if (micro != 6) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "Micro %d was not 6", major);
++        goto cleanup;
++    }
++
++    if (STRNEQ(package, "2.283.el6")) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "Package %s was not '2.283.el6'", package);
++        goto cleanup;
++    }
++
++    ret = 0;
++
++cleanup:
++    qemuMonitorTestFree(test);
++    return ret;
++}
++
++static int
+ mymain(void)
+ {
+     int ret = 0;
+@@ -141,6 +242,7 @@ mymain(void)
+         ret = -1
+ 
+     DO_TEST(GetStatus);
++    DO_TEST(GetVersion);
+ 
+     virCapabilitiesFree(caps);
+ 
+-- 
+1.7.12.3
+

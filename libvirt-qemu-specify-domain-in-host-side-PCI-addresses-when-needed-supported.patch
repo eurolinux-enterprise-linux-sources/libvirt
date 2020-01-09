@@ -1,0 +1,292 @@
+From 8b2da7450e63c6a3ece407b7f2efa926514261fd Mon Sep 17 00:00:00 2001
+Message-Id: <8b2da7450e63c6a3ece407b7f2efa926514261fd@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 8 May 2014 10:25:50 -0400
+Subject: [PATCH] qemu: specify domain in host-side PCI addresses when
+ needed/supported
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1092390
+(part 2 of 2)
+
+This uses the new QEMU_CAPS_HOST_PCI_MULTIDOMAIN capability when
+present, for -devivce pci-assign, -device vfio-pci, and -pcidevice.
+
+While creating tests for this new functionality, I noticed that the
+xmls for two existing tests had erroneously specified an
+until-now-ignored domain="0x0002", so I corrected those two tests, and
+also added two failure tests to be sure that we alert users who
+attempt to use a non-zero domain with a qemu that doesn't support it.
+
+(cherry-pick from upstream commit 1e947cf7d864b97d45764c6dfaaf9f6837e3a55e)
+
+Conflicts:
+
+ tests/qemuxml2argvtest.c, tests/qemuxml2argvdata/*vfio*
+   - vfio isn't supported in RHEL6, so these tests don't exist
+
+ src/qemu/qemu_command.c
+ src/qemu/qemu_command.h
+ src/qemu/qemu_hotplug.c
+ src/qemu/qemu_monitor_text.c
+   - slight difference in data structure containing PCI addresses
+   - difference in function/variable names virQEMUCaps vs qemuCaps vs
+     caps
+   - upstream virAsprintf() auto-logs errors, but downstream is silent
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c                            | 46 +++++++++++++++++-----
+ src/qemu/qemu_command.h                            |  3 +-
+ src/qemu/qemu_hotplug.c                            | 17 +++++---
+ src/qemu/qemu_monitor_text.c                       | 22 ++++++++---
+ .../qemuxml2argv-net-hostdev-multidomain.args      |  6 +++
+ .../qemuxml2argv-net-hostdev-multidomain.xml       | 38 ++++++++++++++++++
+ .../qemuxml2argvdata/qemuxml2argv-net-hostdev.xml  |  2 +-
+ tests/qemuxml2argvtest.c                           |  6 +++
+ 8 files changed, 119 insertions(+), 21 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-net-hostdev-multidomain.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-net-hostdev-multidomain.xml
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 643c37b..5a9a6ab 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -3627,7 +3627,18 @@ qemuBuildPCIHostdevDevStr(virDomainHostdevDefPtr dev, const char *configfd,
+     virBuffer buf = VIR_BUFFER_INITIALIZER;
+ 
+     virBufferAddLit(&buf, "pci-assign");
+-    virBufferAsprintf(&buf, ",host=%.2x:%.2x.%.1x",
++    virBufferAddLit(&buf, ",host=");
++    if (dev->source.subsys.u.pci.domain) {
++        if (!qemuCapsGet(caps, QEMU_CAPS_HOST_PCI_MULTIDOMAIN)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("non-zero domain='%.4x' in host device PCI address "
++                             "not supported in this QEMU binary"),
++                           dev->source.subsys.u.pci.domain);
++            goto error;
++        }
++        virBufferAsprintf(&buf, "%.4x:", dev->source.subsys.u.pci.domain);
++    }
++    virBufferAsprintf(&buf, "%.2x:%.2x.%.1x",
+                       dev->source.subsys.u.pci.bus,
+                       dev->source.subsys.u.pci.slot,
+                       dev->source.subsys.u.pci.function);
+@@ -3655,16 +3666,33 @@ error:
+ 
+ 
+ char *
+-qemuBuildPCIHostdevPCIDevStr(virDomainHostdevDefPtr dev)
++qemuBuildPCIHostdevPCIDevStr(virDomainHostdevDefPtr dev,
++                             qemuCapsPtr caps)
+ {
+     char *ret = NULL;
+ 
+-    if (virAsprintf(&ret, "host=%.2x:%.2x.%.1x",
+-                    dev->source.subsys.u.pci.bus,
+-                    dev->source.subsys.u.pci.slot,
+-                    dev->source.subsys.u.pci.function) < 0)
+-        virReportOOMError();
+-
++    if (dev->source.subsys.u.pci.domain) {
++        if (!qemuCapsGet(caps, QEMU_CAPS_HOST_PCI_MULTIDOMAIN)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("non-zero domain='%.4x' in host device PCI address "
++                             "not supported in this QEMU binary"),
++                           dev->source.subsys.u.pci.domain);
++            goto cleanup;
++        }
++        if (virAsprintf(&ret, "host=%.4x:%.2x:%.2x.%.1x",
++                        dev->source.subsys.u.pci.domain,
++                        dev->source.subsys.u.pci.bus,
++                        dev->source.subsys.u.pci.slot,
++                        dev->source.subsys.u.pci.function) < 0)
++           virReportOOMError();
++    } else {
++        if (virAsprintf(&ret, "host=%.2x:%.2x.%.1x",
++                        dev->source.subsys.u.pci.bus,
++                        dev->source.subsys.u.pci.slot,
++                        dev->source.subsys.u.pci.function) < 0)
++            virReportOOMError();
++    }
++ cleanup:
+     return ret;
+ }
+ 
+@@ -7003,7 +7031,7 @@ qemuBuildCommandLine(virConnectPtr conn,
+                 VIR_FREE(devstr);
+             } else if (qemuCapsGet(caps, QEMU_CAPS_PCIDEVICE)) {
+                 virCommandAddArg(cmd, "-pcidevice");
+-                if (!(devstr = qemuBuildPCIHostdevPCIDevStr(hostdev)))
++                if (!(devstr = qemuBuildPCIHostdevPCIDevStr(hostdev, caps)))
+                     goto error;
+                 virCommandAddArg(cmd, devstr);
+                 VIR_FREE(devstr);
+diff --git a/src/qemu/qemu_command.h b/src/qemu/qemu_command.h
+index a6305ce..741f769 100644
+--- a/src/qemu/qemu_command.h
++++ b/src/qemu/qemu_command.h
+@@ -125,7 +125,8 @@ char * qemuBuildSoundDevStr(virDomainSoundDefPtr sound,
+                             qemuCapsPtr caps);
+ 
+ /* Legacy, pre device support */
+-char * qemuBuildPCIHostdevPCIDevStr(virDomainHostdevDefPtr dev);
++char * qemuBuildPCIHostdevPCIDevStr(virDomainHostdevDefPtr dev,
++                                    qemuCapsPtr caps);
+ /* Current, best practice */
+ char * qemuBuildPCIHostdevDevStr(virDomainHostdevDefPtr dev,
+                                  const char *configfd,
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 5849e13..c9f8a5c 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -972,16 +972,23 @@ int qemuDomainAttachHostPciDevice(struct qemud_driver *driver,
+                                          configfd, configfd_name);
+         qemuDomainObjExitMonitorWithDriver(driver, vm);
+     } else {
+-        virDevicePCIAddress guestAddr = hostdev->info->addr.pci;
++        virDevicePCIAddressPtr guestAddr = &hostdev->info->addr.pci;
++        virDevicePCIAddressPtr hostAddr = &hostdev->source.subsys.u.pci;
++
++        if (hostAddr->domain &&
++            !qemuCapsGet(priv->caps, QEMU_CAPS_HOST_PCI_MULTIDOMAIN)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("non-zero domain='%.4x' in host device "
++                             "PCI address not supported in this QEMU binary"),
++                           hostAddr->domain);
++            goto error;
++        }
+ 
+         qemuDomainObjEnterMonitorWithDriver(driver, vm);
+-        ret = qemuMonitorAddPCIHostDevice(priv->mon,
+-                                          &hostdev->source.subsys.u.pci,
+-                                          &guestAddr);
++        ret = qemuMonitorAddPCIHostDevice(priv->mon, hostAddr, guestAddr);
+         qemuDomainObjExitMonitorWithDriver(driver, vm);
+ 
+         hostdev->info->type = VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI;
+-        memcpy(&hostdev->info->addr.pci, &guestAddr, sizeof(guestAddr));
+     }
+     virDomainAuditHostdev(vm, hostdev, "attach", ret == 0);
+     if (ret < 0)
+diff --git a/src/qemu/qemu_monitor_text.c b/src/qemu/qemu_monitor_text.c
+index bb245c1..1d6a3d1 100644
+--- a/src/qemu/qemu_monitor_text.c
++++ b/src/qemu/qemu_monitor_text.c
+@@ -1881,11 +1881,23 @@ int qemuMonitorTextAddPCIHostDevice(qemuMonitorPtr mon,
+ 
+     memset(guestAddr, 0, sizeof(*guestAddr));
+ 
+-    /* XXX hostAddr->domain */
+-    if (virAsprintf(&cmd, "pci_add pci_addr=auto host host=%.2x:%.2x.%.1x",
+-                    hostAddr->bus, hostAddr->slot, hostAddr->function) < 0) {
+-        virReportOOMError();
+-        goto cleanup;
++    if (hostAddr->domain) {
++        /* if domain > 0, the caller has already verified that this qemu
++         * supports specifying domain in pci_add command
++         */
++        if (virAsprintf(&cmd,
++                        "pci_add pci_addr=auto host host=%.4x:%.2x:%.2x.%.1x",
++                        hostAddr->domain, hostAddr->bus,
++                        hostAddr->slot, hostAddr->function) < 0) {
++            virReportOOMError();
++            goto cleanup;
++        }
++    } else {
++        if (virAsprintf(&cmd, "pci_add pci_addr=auto host host=%.2x:%.2x.%.1x",
++                        hostAddr->bus, hostAddr->slot, hostAddr->function) < 0) {
++            virReportOOMError();
++            goto cleanup;
++        }
+     }
+ 
+     if (qemuMonitorHMPCommand(mon, cmd, &reply) < 0)
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-net-hostdev-multidomain.args b/tests/qemuxml2argvdata/qemuxml2argv-net-hostdev-multidomain.args
+new file mode 100644
+index 0000000..58b1d89
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-net-hostdev-multidomain.args
+@@ -0,0 +1,6 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu -S \
++-M pc -m 214 -smp 1 -nographic -nodefconfig -nodefaults -monitor \
++unix:/tmp/test-monitor,server,nowait -no-acpi -boot c \
++-usb -hda /dev/HostVG/QEMUGuest1 \
++-device pci-assign,host=2424:21:1c.6,id=hostdev0,bus=pci.0,addr=0x3 \
++-device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x4
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-net-hostdev-multidomain.xml b/tests/qemuxml2argvdata/qemuxml2argv-net-hostdev-multidomain.xml
+new file mode 100644
+index 0000000..446310b
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-net-hostdev-multidomain.xml
+@@ -0,0 +1,38 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='ide' index='0'/>
++    <interface type='hostdev' managed='yes'>
++      <mac address='00:11:22:33:44:55'/>
++      <source>
++        <address type='pci' domain='0x2424' bus='0x21' slot='0x1c' function='0x6'/>
++      </source>
++      <vlan>
++        <tag id='42'/>
++      </vlan>
++      <virtualport type='802.1Qbg'>
++        <parameters managerid='11' typeid='1193047' typeidversion='2' instanceid='09b11c53-8b5c-4eeb-8f00-d84eaa0aaa4f'/>
++      </virtualport>
++    </interface>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-net-hostdev.xml b/tests/qemuxml2argvdata/qemuxml2argv-net-hostdev.xml
+index 81f70d0..49775fc 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-net-hostdev.xml
++++ b/tests/qemuxml2argvdata/qemuxml2argv-net-hostdev.xml
+@@ -24,7 +24,7 @@
+     <interface type='hostdev' managed='yes'>
+       <mac address='00:11:22:33:44:55'/>
+       <source>
+-        <address type='pci' domain='0x0002' bus='0x03' slot='0x07' function='0x1'/>
++        <address type='pci' domain='0x0000' bus='0x03' slot='0x07' function='0x1'/>
+       </source>
+       <vlan>
+         <tag id='42'/>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index ef60194..9df89ab 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -625,6 +625,12 @@ mymain(void)
+     DO_TEST("net-mcast", NONE);
+     DO_TEST("net-hostdev",
+             QEMU_CAPS_PCIDEVICE, QEMU_CAPS_DEVICE, QEMU_CAPS_NODEFCONFIG);
++    DO_TEST("net-hostdev-multidomain",
++            QEMU_CAPS_PCIDEVICE, QEMU_CAPS_DEVICE, QEMU_CAPS_NODEFCONFIG,
++            QEMU_CAPS_HOST_PCI_MULTIDOMAIN);
++    DO_TEST_FAILURE("net-hostdev-multidomain",
++                    QEMU_CAPS_PCIDEVICE, QEMU_CAPS_DEVICE,
++                    QEMU_CAPS_NODEFCONFIG);
+ 
+     DO_TEST("serial-vc", NONE);
+     DO_TEST("serial-pty", NONE);
+-- 
+1.9.3
+

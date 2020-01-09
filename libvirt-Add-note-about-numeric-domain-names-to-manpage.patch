@@ -1,0 +1,45 @@
+From 6f91841b9d11b0a3306e8f37a7faf92af8dac43f Mon Sep 17 00:00:00 2001
+Message-Id: <6f91841b9d11b0a3306e8f37a7faf92af8dac43f.1353944810.git.jdenemar@redhat.com>
+From: Dave Allan <dallan@redhat.com>
+Date: Tue, 20 Nov 2012 20:29:57 +0800
+Subject: [PATCH] Add note about numeric domain names to manpage
+
+Resolves:https://bugzilla.redhat.com/show_bug.cgi?id=824253
+(cherry picked from commit 13c69cd0b446669dc53417cb5207c51167a9c14f)
+
+Clarify that domains with numeric names can only be identified by
+their domain id.
+---
+ tools/virsh.pod | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 5888a95..ac7d7cf 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -26,12 +26,16 @@ The basic structure of most virsh usage is:
+ 
+   virsh [OPTION]... <command> <domain> [ARG]...
+ 
+-Where I<command> is one of the commands listed below, I<domain> is the numeric
+-domain id, or the domain name, or the domain UUID and I<ARGS> are command
+-specific options.  There are a few exceptions to this rule in the cases where
+-the command in question acts on all domains, the entire machine, or directly
+-on the xen hypervisor.  Those exceptions will be clear for each of those
+-commands.
++Where I<command> is one of the commands listed below; I<domain> is the
++numeric domain id, or the domain name, or the domain UUID; and I<ARGS>
++are command specific options.  There are a few exceptions to this rule
++in the cases where the command in question acts on all domains, the
++entire machine, or directly on the xen hypervisor.  Those exceptions
++will be clear for each of those commands.  Note: it is permissible to
++give numeric names to domains, however, doing so will result in a
++domain that can only be identified by domain id. In other words, if a
++numeric value is supplied it will be interpreted as a domain id, not
++as a name.
+ 
+ The B<virsh> program can be used either to run one I<COMMAND> by giving the
+ command and its arguments on the shell command line, or a I<COMMAND_STRING>
+-- 
+1.8.0
+

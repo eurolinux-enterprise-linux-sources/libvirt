@@ -1,0 +1,125 @@
+From 299a15d354f3c0321ede49ab8e01544bbadf23a4 Mon Sep 17 00:00:00 2001
+Message-Id: <299a15d354f3c0321ede49ab8e01544bbadf23a4@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 24 Apr 2014 15:21:44 +0200
+Subject: [PATCH] qemu: Split out SPICE port allocation into a separate
+ function
+
+https://bugzilla.redhat.com/show_bug.cgi?id=953126
+
+Later on this function will be used to do more sophisticated checks and
+determination if port allocation is needed.
+
+(cherry picked from commit 23090823f1c161dfbca1b34d63d41d2adcce467b)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_process.c -- driver->cfg and some other ones
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c | 80 ++++++++++++++++++++++++++++++-------------------
+ 1 file changed, 49 insertions(+), 31 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index e6d49e9..7cb8837 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3562,6 +3562,53 @@ qemuSetUnprivSGIO(virDomainDiskDefPtr disk)
+     return ret;
+ }
+ 
++
++static int
++qemuProcessSPICEAllocatePorts(struct qemud_driver* driver,
++                              virDomainGraphicsDefPtr graphics)
++{
++    int ret = -1;
++    int port = 0;
++    int tlsPort;
++
++    if (graphics->data.spice.autoport ||
++        graphics->data.spice.port == -1) {
++        port = qemuProcessNextFreePort(driver, driver->remotePortMin);
++
++        if (port < 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("Unable to find an unused port for SPICE"));
++            goto cleanup;
++        }
++
++        graphics->data.spice.port = port;
++    }
++
++    if (driver->spiceTLS &&
++        (graphics->data.spice.autoport ||
++         graphics->data.spice.tlsPort == -1)) {
++        if (graphics->data.spice.port)
++            tlsPort = qemuProcessNextFreePort(driver, graphics->data.spice.port + 1);
++        else
++            tlsPort = qemuProcessNextFreePort(driver, driver->remotePortMin);
++
++        if (tlsPort < 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           "%s", _("Unable to find an unused port for SPICE TLS"));
++            qemuProcessReturnPort(driver, port);
++            goto cleanup;
++        }
++
++        graphics->data.spice.tlsPort = tlsPort;
++    }
++
++    ret = 0;
++
++cleanup:
++    return ret;
++}
++
++
+ int qemuProcessStart(virConnectPtr conn,
+                      struct qemud_driver *driver,
+                      virDomainObjPtr vm,
+@@ -3682,37 +3729,8 @@ int qemuProcessStart(virConnectPtr conn,
+             }
+             graphics->data.vnc.port = port;
+         } else if (graphics->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE) {
+-            int port = -1;
+-            if (graphics->data.spice.autoport ||
+-                graphics->data.spice.port == -1) {
+-                port = qemuProcessNextFreePort(driver, driver->remotePortMin);
+-
+-                if (port < 0) {
+-                    virReportError(VIR_ERR_INTERNAL_ERROR,
+-                                   "%s", _("Unable to find an unused port for SPICE"));
+-                    goto cleanup;
+-                }
+-
+-                graphics->data.spice.port = port;
+-            }
+-            if (driver->spiceTLS &&
+-                (graphics->data.spice.autoport ||
+-                 graphics->data.spice.tlsPort == -1)) {
+-                int tlsPort;
+-                if (graphics->data.spice.port)
+-                    tlsPort = qemuProcessNextFreePort(driver, graphics->data.spice.port + 1);
+-                else
+-                    tlsPort = qemuProcessNextFreePort(driver, driver->remotePortMin);
+-
+-                if (tlsPort < 0) {
+-                    virReportError(VIR_ERR_INTERNAL_ERROR,
+-                                   "%s", _("Unable to find an unused port for SPICE TLS"));
+-                    qemuProcessReturnPort(driver, port);
+-                    goto cleanup;
+-                }
+-
+-                graphics->data.spice.tlsPort = tlsPort;
+-            }
++            if (qemuProcessSPICEAllocatePorts(driver, graphics) < 0)
++                goto cleanup;
+         }
+ 
+         if (graphics->type == VIR_DOMAIN_GRAPHICS_TYPE_VNC ||
+-- 
+1.9.2
+

@@ -1,0 +1,191 @@
+From 4643091a9c64e3a5ca157965e249f04106bef54c Mon Sep 17 00:00:00 2001
+Message-Id: <4643091a9c64e3a5ca157965e249f04106bef54c@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Feb 2016 06:19:41 -0500
+Subject: [PATCH] network: fix connections count in case of allocate failure
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1300843 (RHEL6)
+          https://bugzilla.redhat.com/show_bug.cgi?id=1020135 (RHEL7)
+
+If networkAllocateActualDevice() had failed due to a pool of hostdev
+or direct devices being depleted, the calling function could still
+call networkReleaseActualDevice() as part of its cleanup, and that
+function would then unconditionally decrement the connections count
+for the network, even though it hadn't been incremented (due to
+failure of allocate). This *was* necessary because the .actual member
+of the netdef was allocated with a "lazy" algorithm, only being
+created if there was a need to store data there (e.g. if a device was
+allocated from a pool, or bandwidth was allocated for the device), so
+there was no simple way for networkReleaseActualDevice() to tell if
+something really had been allocated (i.e. if "connections++" had been
+executed).
+
+This patch changes networkAllocateDevice() to *always* allocate an
+actual device for any netdef of type='network', even if it isn't
+needed for any other reason. This has no ill effects anywhere else in
+the code (except for using a small amount of memory), and
+networkReleaseActualDevice() can then determine if there was a
+previous successful allocate by checking for .actual != NULL (if not,
+it skips the "connections--").
+
+(cherry pick from upstream b4e0299d4ff059c8707a760b7ec2063ccd57cc21
+with several merge conflicts due to network bandwidth plug/unplug
+being added upstream but not here (upstream commit
+07d1b6b5b1d8c81c15d9ce3d6c420c74eb74ae72). In particular, this patch
+combines a small part of upstream commit
+eed46d4cfe449e6a36a473c6386c11e9ae6d8525, which could not itself be
+applied due to absence of network bandwidth plug - it seemed
+inappropriate to backport that patch, since it could be misleading in
+the future if bandwidth plugging was added to RHEL6 (it would appear
+as though everything in that patch had been backported when it in fact
+had not).
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 72 ++++++++++++++++-----------------------------
+ 1 file changed, 25 insertions(+), 47 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 344619b..ac89818 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -3633,6 +3633,7 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+     enum virDomainNetType actualType = iface->type;
+     virNetworkObjPtr network = NULL;
+     virNetworkDefPtr netdef = NULL;
++    virNetDevBandwidthPtr bandwidth = NULL;
+     virPortGroupDefPtr portgroup = NULL;
+     virNetDevVPortProfilePtr virtport = iface->virtPortProfile;
+     virNetDevVlanPtr vlan = NULL;
+@@ -3657,6 +3658,11 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+     }
+     netdef = network->def;
+ 
++    if (VIR_ALLOC(iface->data.network.actual) < 0) {
++        virReportOOMError();
++        goto error;
++    }
++
+     /* portgroup can be present for any type of network, in particular
+      * for bandwidth information, so we need to check for that and
+      * fill it in appropriately for all forward types.
+@@ -3667,17 +3673,14 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+      * (already in NetDef). Otherwise, if there is bandwidth info in
+      * the portgroup, fill that into the ActualDef.
+      */
+-    if (portgroup && !iface->bandwidth) {
+-        if (!iface->data.network.actual
+-            && (VIR_ALLOC(iface->data.network.actual) < 0)) {
+-            virReportOOMError();
+-            goto error;
+-        }
++    if (iface->bandwidth)
++        bandwidth = iface->bandwidth;
++    else if (portgroup && portgroup->bandwidth)
++        bandwidth = portgroup->bandwidth;
+ 
+-        if (virNetDevBandwidthCopy(&iface->data.network.actual->bandwidth,
+-                                   portgroup->bandwidth) < 0)
+-            goto error;
+-    }
++    if (bandwidth && virNetDevBandwidthCopy(&iface->data.network.actual->bandwidth,
++                                            bandwidth) < 0)
++        goto error;
+ 
+     /* copy appropriate vlan info to actualNet */
+     if (iface->vlan.nTags > 0)
+@@ -3687,15 +3690,8 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+     else if (netdef->vlan.nTags > 0)
+         vlan = &netdef->vlan;
+ 
+-    if (vlan) {
+-        if (!iface->data.network.actual
+-            && (VIR_ALLOC(iface->data.network.actual) < 0)) {
+-            virReportOOMError();
+-            goto error;
+-        }
+-        if (virNetDevVlanCopy(&iface->data.network.actual->vlan, vlan) < 0)
+-           goto error;
+-    }
++    if (vlan && virNetDevVlanCopy(&iface->data.network.actual->vlan, vlan) < 0)
++        goto error;
+ 
+     if ((netdef->forwardType == VIR_NETWORK_FORWARD_NONE) ||
+         (netdef->forwardType == VIR_NETWORK_FORWARD_NAT) ||
+@@ -3704,8 +3700,7 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+          *NETWORK; we just keep the info from the portgroup in
+          * iface->data.network.actual
+         */
+-        if (iface->data.network.actual)
+-            iface->data.network.actual->type = VIR_DOMAIN_NET_TYPE_NETWORK;
++        iface->data.network.actual->type = VIR_DOMAIN_NET_TYPE_NETWORK;
+     } else if ((netdef->forwardType == VIR_NETWORK_FORWARD_BRIDGE) &&
+                netdef->bridge) {
+ 
+@@ -3713,12 +3708,6 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+          * is VIR_DOMAIN_NET_TYPE_BRIDGE
+          */
+ 
+-        if (!iface->data.network.actual
+-            && (VIR_ALLOC(iface->data.network.actual) < 0)) {
+-            virReportOOMError();
+-            goto error;
+-        }
+-
+         iface->data.network.actual->type = actualType = VIR_DOMAIN_NET_TYPE_BRIDGE;
+         iface->data.network.actual->data.bridge.brname = strdup(netdef->bridge);
+         if (!iface->data.network.actual->data.bridge.brname) {
+@@ -3751,12 +3740,6 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+ 
+     } else if (netdef->forwardType == VIR_NETWORK_FORWARD_HOSTDEV) {
+ 
+-        if (!iface->data.network.actual
+-            && (VIR_ALLOC(iface->data.network.actual) < 0)) {
+-            virReportOOMError();
+-            goto error;
+-        }
+-
+         iface->data.network.actual->type = actualType = VIR_DOMAIN_NET_TYPE_HOSTDEV;
+         if (netdef->nForwardPfs > 0 && netdef->nForwardIfs <= 0 &&
+             networkCreateInterfacePool(netdef) < 0) {
+@@ -3819,12 +3802,6 @@ networkAllocateActualDevice(virDomainDefPtr dom,
+          * VIR_DOMAIN_NET_TYPE_DIRECT.
+          */
+ 
+-        if (!iface->data.network.actual
+-            && (VIR_ALLOC(iface->data.network.actual) < 0)) {
+-            virReportOOMError();
+-            goto error;
+-        }
+-
+         /* Set type=direct and appropriate <source mode='xxx'/> */
+         iface->data.network.actual->type = actualType = VIR_DOMAIN_NET_TYPE_DIRECT;
+         switch (netdef->forwardType) {
+@@ -4319,15 +4296,16 @@ networkReleaseActualDevice(virDomainDefPtr dom,
+                   dev->connections);
+    }
+ 
+-success:
+-    netdef->connections--;
++ success:
++    if (iface->data.network.actual) {
++        netdef->connections--;
++        VIR_DEBUG("Releasing network %s, %d connections",
++                  netdef->name, netdef->connections);
+ 
+-    /* finally we can call the 'unplugged' hook script if any */
+-    networkRunHook(network, dom, iface, VIR_HOOK_NETWORK_OP_IFACE_UNPLUGGED,
+-                   VIR_HOOK_SUBOP_BEGIN);
+-
+-    VIR_DEBUG("Releasing network %s, %d connections",
+-              netdef->name, netdef->connections);
++        /* finally we can call the 'unplugged' hook script if any */
++        networkRunHook(network, dom, iface, VIR_HOOK_NETWORK_OP_IFACE_UNPLUGGED,
++                       VIR_HOOK_SUBOP_BEGIN);
++    }
+     ret = 0;
+ cleanup:
+     if (network)
+-- 
+2.7.1
+

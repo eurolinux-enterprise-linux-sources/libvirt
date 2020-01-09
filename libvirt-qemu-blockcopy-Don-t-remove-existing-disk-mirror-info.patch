@@ -1,0 +1,86 @@
+From c680656f4d43398dff7ca2798d2e1d965f333571 Mon Sep 17 00:00:00 2001
+Message-Id: <c680656f4d43398dff7ca2798d2e1d965f333571@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 26 Jun 2014 21:38:06 -0600
+Subject: [PATCH] qemu: blockcopy: Don't remove existing disk mirror info
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1113828
+
+When creating a new disk mirror the new struct is stored in a separate
+variable until everything went well. The removed hunk would actually
+remove existing mirror information for example when the api would be run
+if a mirror still exists.
+
+(cherry picked from commit 02b364e186d487f54ed410c01af042f23e812d42)
+
+This fixes a regression introduced in commit ff5f30b.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_driver.c - no refactoring of commits 7b7bf001, 4f20226, a88fb30, 632f78c, b090aa7
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 435f2c9..5ee003b 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -14023,6 +14023,7 @@ qemuDomainBlockCopy(virDomainPtr dom, const char *path,
+     struct stat st;
+     bool need_unlink = false;
+     char *mirror = NULL;
++    int mirrorFormat;
+     virCgroupPtr cgroup = NULL;
+ 
+     /* Preliminaries: find the disk we are editing, sanity checks */
+@@ -14118,10 +14119,10 @@ qemuDomainBlockCopy(virDomainPtr dom, const char *path,
+             goto endjob;
+         VIR_FORCE_CLOSE(fd);
+         if (!format)
+-            disk->mirrorFormat = disk->format;
++            mirrorFormat = disk->format;
+     } else if (format) {
+-        disk->mirrorFormat = virStorageFileFormatTypeFromString(format);
+-        if (disk->mirrorFormat <= 0) {
++        mirrorFormat = virStorageFileFormatTypeFromString(format);
++        if (mirrorFormat <= 0) {
+             virReportError(VIR_ERR_INVALID_ARG, _("unrecognized format '%s'"),
+                            format);
+             goto endjob;
+@@ -14131,11 +14132,11 @@ qemuDomainBlockCopy(virDomainPtr dom, const char *path,
+          * also passed the RAW flag (and format is non-NULL), or it is
+          * safe for us to probe the format from the file that we will
+          * be using.  */
+-        disk->mirrorFormat = virStorageFileProbeFormat(dest, driver->user,
+-                                                       driver->group);
++        mirrorFormat = virStorageFileProbeFormat(dest, driver->user,
++                                                 driver->group);
+     }
+-    if (!format && disk->mirrorFormat > 0)
+-        format = virStorageFileFormatTypeToString(disk->mirrorFormat);
++    if (!format && mirrorFormat > 0)
++        format = virStorageFileFormatTypeToString(mirrorFormat);
+     if (!(mirror = strdup(dest))) {
+         virReportOOMError();
+         goto endjob;
+@@ -14163,13 +14164,12 @@ qemuDomainBlockCopy(virDomainPtr dom, const char *path,
+     /* Update vm in place to match changes.  */
+     need_unlink = false;
+     disk->mirror = mirror;
++    disk->mirrorFormat = mirrorFormat;
+     mirror = NULL;
+ 
+ endjob:
+     if (need_unlink && unlink(dest))
+         VIR_WARN("unable to unlink just-created %s", dest);
+-    if (ret < 0 && disk)
+-        disk->mirrorFormat = VIR_STORAGE_FILE_NONE;
+     VIR_FREE(mirror);
+     if (qemuDomainObjEndJob(driver, vm) == 0) {
+         vm = NULL;
+-- 
+2.0.0
+

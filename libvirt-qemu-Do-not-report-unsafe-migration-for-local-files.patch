@@ -1,0 +1,44 @@
+From c9f4498036a7890cddd8437f15a89afe80d837eb Mon Sep 17 00:00:00 2001
+Message-Id: <c9f4498036a7890cddd8437f15a89afe80d837eb.1373271644.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 11 Apr 2013 18:28:35 +0200
+Subject: [PATCH] qemu: Do not report unsafe migration for local files
+
+https://bugzilla.redhat.com/show_bug.cgi?id=913363
+
+When migrating a domain with disk images stored locally (and using
+storage migration), we should not complain about unsafe migration no
+matter what cache policy is used for that disk.
+(cherry picked from commit 88624b5d4c96e9423d34de53909e65b5fff0c549)
+---
+ src/qemu/qemu_migration.c | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index f66aab3..40ba15a 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -864,13 +864,17 @@ qemuMigrationIsSafe(virDomainDefPtr def)
+             !disk->shared &&
+             !disk->readonly &&
+             disk->cachemode != VIR_DOMAIN_DISK_CACHE_DISABLE) {
+-            int cfs;
++            int rc;
+ 
+             if (disk->type == VIR_DOMAIN_DISK_TYPE_FILE) {
+-                if ((cfs = virStorageFileIsClusterFS(disk->src)) == 1)
++                if ((rc = virStorageFileIsSharedFS(disk->src)) < 0)
++                    return false;
++                else if (rc == 0)
+                     continue;
+-                else if (cfs < 0)
++                if ((rc = virStorageFileIsClusterFS(disk->src)) < 0)
+                     return false;
++                else if (rc == 1)
++                    continue;
+             } else if (disk->type == VIR_DOMAIN_DISK_TYPE_NETWORK &&
+                        disk->protocol == VIR_DOMAIN_DISK_PROTOCOL_RBD) {
+                 continue;
+-- 
+1.8.2.1
+

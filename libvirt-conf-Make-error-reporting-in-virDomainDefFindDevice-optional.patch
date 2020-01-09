@@ -1,0 +1,74 @@
+From dad4a806ac246c324a4788bbbbe3f5ffbb24064e Mon Sep 17 00:00:00 2001
+Message-Id: <dad4a806ac246c324a4788bbbbe3f5ffbb24064e@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 19 Jul 2013 14:59:36 +0200
+Subject: [PATCH] conf: Make error reporting in virDomainDefFindDevice optional
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit d327ac53282abc91ad563375bcb89333ac5bc31b)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c  | 11 ++++++++---
+ src/conf/domain_conf.h  |  3 ++-
+ src/qemu/qemu_process.c |  2 +-
+ 3 files changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index fe09b56..6e5f6b7 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -16556,7 +16556,8 @@ virDomainDefFindDeviceCallback(virDomainDefPtr def ATTRIBUTE_UNUSED,
+ int
+ virDomainDefFindDevice(virDomainDefPtr def,
+                        const char *devAlias,
+-                       virDomainDeviceDefPtr dev)
++                       virDomainDeviceDefPtr dev,
++                       bool reportError)
+ {
+     virDomainDefFindDeviceCallbackData data = { devAlias, dev };
+ 
+@@ -16564,8 +16565,12 @@ virDomainDefFindDevice(virDomainDefPtr def,
+     virDomainDeviceInfoIterate(def, virDomainDefFindDeviceCallback, &data);
+ 
+     if (dev->type == VIR_DOMAIN_DEVICE_NONE) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("no device found with alias %s"), devAlias);
++        if (reportError) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("no device found with alias %s"), devAlias);
++        } else {
++            VIR_DEBUG("no device found with alias %s", devAlias);
++        }
+         return -1;
+     }
+ 
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 0c5dd09..2e72afc 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2434,6 +2434,7 @@ int virDomainList(virConnectPtr conn, virHashTablePtr domobjs,
+ 
+ int virDomainDefFindDevice(virDomainDefPtr def,
+                            const char *devAlias,
+-                           virDomainDeviceDefPtr dev);
++                           virDomainDeviceDefPtr dev,
++                           bool reportError);
+ 
+ #endif /* __DOMAIN_CONF_H */
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index ddf74e5..22c9e90 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1373,7 +1373,7 @@ qemuProcessHandleDeviceDeleted(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+ 
+     qemuDomainSignalDeviceRemoval(vm, devAlias);
+ 
+-    if (virDomainDefFindDevice(vm->def, devAlias, &dev) < 0)
++    if (virDomainDefFindDevice(vm->def, devAlias, &dev, true) < 0)
+         goto cleanup;
+ 
+     qemuDomainRemoveDevice(driver, vm, &dev);
+-- 
+2.0.0
+

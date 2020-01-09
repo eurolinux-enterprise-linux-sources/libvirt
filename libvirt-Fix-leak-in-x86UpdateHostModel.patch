@@ -1,0 +1,39 @@
+From c18b00a41c0e657860cffbe13a3babd6a15e60ef Mon Sep 17 00:00:00 2001
+Message-Id: <c18b00a41c0e657860cffbe13a3babd6a15e60ef@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 19 Jan 2015 14:19:58 +0100
+Subject: [PATCH] Fix leak in x86UpdateHostModel
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1144304
+
+Commit de0aeaf introduced a memory leak.
+
+(cherry picked from commit 5b5631dedf59e540661bfeac774e543d8d38531b)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/cpu/cpu_x86.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/cpu/cpu_x86.c b/src/cpu/cpu_x86.c
+index a176f9c..f5bd9bb 100644
+--- a/src/cpu/cpu_x86.c
++++ b/src/cpu/cpu_x86.c
+@@ -1839,8 +1839,10 @@ x86UpdateHostModel(virCPUDefPtr guest,
+      * features directly */
+     for (i = 0; i < guest->nfeatures; i++) {
+         for (feat = map->migrate_blockers; feat; feat = feat->next) {
+-            if (STREQ(feat->name, guest->features[i].name))
++            if (STREQ(feat->name, guest->features[i].name)) {
++                VIR_FREE(guest->features[i].name);
+                 VIR_DELETE_ELEMENT_INPLACE(guest->features, i, guest->nfeatures);
++            }
+         }
+     }
+ 
+-- 
+2.2.2
+

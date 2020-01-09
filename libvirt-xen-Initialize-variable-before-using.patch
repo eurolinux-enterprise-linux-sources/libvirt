@@ -1,0 +1,33 @@
+From 7dda1b09ad357094b865855390a39331c325c4ff Mon Sep 17 00:00:00 2001
+Message-Id: <7dda1b09ad357094b865855390a39331c325c4ff.1373271636.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 7 Feb 2013 18:28:24 +0100
+Subject: [PATCH] xen: Initialize variable before using
+
+https://bugzilla.redhat.com/show_bug.cgi?id=888503
+
+Commit 87b4c10c6cf02251dd8c29b5b895bebc6ec297f9 added code that may call
+the virCapabilitiesClearHostNUMACellCPUTopology function with
+uninitialized second argument. Although the value wouldn't be used some
+compilers whine about that.
+(cherry picked from commit 0eedb1d9bff672b24d6957dfaa0a8b42d9e851a7)
+---
+ src/xen/xend_internal.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/xen/xend_internal.c b/src/xen/xend_internal.c
+index fb964a7..fc79ea0 100644
+--- a/src/xen/xend_internal.c
++++ b/src/xen/xend_internal.c
+@@ -1116,7 +1116,7 @@ sexpr_to_xend_topology(const struct sexpr *root,
+     virCapsHostNUMACellCPUPtr cpuInfo = NULL;
+     int cell, cpu, nb_cpus;
+     int n = 0;
+-    int numCpus;
++    int numCpus = 0;
+ 
+     nodeToCpu = sexpr_node(root, "node/node_to_cpu");
+     if (nodeToCpu == NULL)
+-- 
+1.8.2.1
+

@@ -1,0 +1,103 @@
+From efd0b729ab0a9dd717fc9d00849b651019dc97fe Mon Sep 17 00:00:00 2001
+Message-Id: <efd0b729ab0a9dd717fc9d00849b651019dc97fe.1379585484.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 12 Sep 2013 17:00:06 +0100
+Subject: [PATCH] Add support for using 3-arg pkcheck syntax for process
+
+CVE-2013-4311
+
+With the existing pkcheck (pid, start time) tuple for identifying
+the process, there is a race condition, where a process can make
+a libvirt RPC call and in another thread exec a setuid application,
+causing it to change to effective UID 0. This in turn causes polkit
+to do its permission check based on the wrong UID.
+
+To address this, libvirt must get the UID the caller had at time
+of connect() (from SO_PEERCRED) and pass a (pid, start time, uid)
+triple to the pkcheck program.
+
+Signed-off-by: Colin Walters <walters@redhat.com>
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 922b7fda77b094dbf022d625238262ea05335666)
+
+Conflicts:
+	configure.ac
+	src/access/viraccessdriverpolkit.c
+
+Resolution:
+
+ Dropped src/access/viraccessdriverpolkit.c change since that
+ file no longer exists.
+---
+ configure.ac    |  8 ++++++++
+ daemon/remote.c | 21 ++++++++++++++++++---
+ libvirt.spec.in |  7 ++++---
+ 3 files changed, 30 insertions(+), 6 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index a36760e..486e6c3 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1289,6 +1289,14 @@ if test "x$with_polkit" = "xyes" || test "x$with_polkit" = "xcheck"; then
+     AC_DEFINE_UNQUOTED([PKCHECK_PATH],["$PKCHECK_PATH"],[Location of pkcheck program])
+     AC_DEFINE_UNQUOTED([HAVE_POLKIT], 1,
+         [use PolicyKit for UNIX socket access checks])
++    AC_MSG_CHECKING([whether pkcheck supports uid value])
++    pkcheck_supports_uid=`$PKG_CONFIG --variable pkcheck_supports_uid polkit-gobject-1`
++    if test "x$pkcheck_supports_uid" = "xtrue"; then
++      AC_MSG_RESULT([yes])
++      AC_DEFINE_UNQUOTED([PKCHECK_SUPPORTS_UID], 1, [Pass uid to pkcheck])
++    else
++      AC_MSG_RESULT([no])
++    fi
+     AC_DEFINE_UNQUOTED([HAVE_POLKIT1], 1,
+         [use PolicyKit for UNIX socket access checks])
+     with_polkit="yes"
+diff --git a/daemon/remote.c b/daemon/remote.c
+index 47a4eaa..0952ed5 100644
+--- a/daemon/remote.c
++++ b/daemon/remote.c
+@@ -2817,10 +2817,12 @@ remoteDispatchAuthPolkit(virNetServerPtr server ATTRIBUTE_UNUSED,
+     int status = -1;
+     char *ident = NULL;
+     bool authdismissed = 0;
++    bool supportsuid = false;
+     char *pkout = NULL;
+     struct daemonClientPrivate *priv =
+         virNetServerClientGetPrivateData(client);
+     virCommandPtr cmd = NULL;
++    static bool polkitInsecureWarned;
+ 
+     virMutexLock(&priv->lock);
+     action = virNetServerClientGetReadonly(client) ?
+@@ -2842,14 +2844,27 @@ remoteDispatchAuthPolkit(virNetServerPtr server ATTRIBUTE_UNUSED,
+         goto authfail;
+     }
+ 
++    if (timestamp == 0) {
++        VIR_WARN("Failing polkit auth due to missing client (pid=%lld) start time",
++                 (long long)callerPid);
++        goto authfail;
++    }
++
+     VIR_INFO("Checking PID %lld running as %d",
+              (long long) callerPid, callerUid);
+ 
+     virCommandAddArg(cmd, "--process");
+-    if (timestamp != 0) {
+-        virCommandAddArgFormat(cmd, "%lld,%llu", (long long) callerPid, timestamp);
++# ifdef PKCHECK_SUPPORTS_UID
++    supportsuid = true;
++# endif
++    if (supportsuid) {
++        virCommandAddArgFormat(cmd, "%lld,%llu,%lu", (long long) callerPid, timestamp, (unsigned long) callerUid);
+     } else {
+-        virCommandAddArgFormat(cmd, "%lld", (long long) callerPid);
++        if (!polkitInsecureWarned) {
++            VIR_WARN("No support for caller UID with pkcheck. This deployment is known to be insecure.");
++            polkitInsecureWarned = true;
++        }
++        virCommandAddArgFormat(cmd, "%lld,%llu", (long long) callerPid, timestamp);
+     }
+     virCommandAddArg(cmd, "--allow-user-interaction");
+ 

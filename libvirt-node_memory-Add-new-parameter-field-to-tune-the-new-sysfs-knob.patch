@@ -1,0 +1,199 @@
+From 1c72456e105673f38a0306cf5805596d5a6fc832 Mon Sep 17 00:00:00 2001
+Message-Id: <1c72456e105673f38a0306cf5805596d5a6fc832.1350425724.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 15 Oct 2012 16:54:26 +0800
+Subject: [PATCH] node_memory: Add new parameter field to tune the new sysfs
+ knob
+
+https://bugzilla.redhat.com/show_bug.cgi?id=840113
+
+Upstream kernel introduced new sysfs knob "merge_across_nodes" to
+specify if pages from different numa nodes can be merged. When set
+to 0, only pages which physically reside in the memory area of
+same NUMA node can be merged. When set to 1, pages from all nodes
+can be merged.
+
+This patch supports the tuning by adding new param field
+"shm_merge_across_nodes".
+(cherry picked from commit f81f0f2f1d703a84d94018b99f38500ad7b63085)
+---
+ include/libvirt/libvirt.h.in | 12 ++++++++++++
+ src/nodeinfo.c               | 28 +++++++++++++++++++++++++---
+ tools/virsh-host.c           | 20 ++++++++++++++++++++
+ tools/virsh.pod              |  5 ++++-
+ 4 files changed, 61 insertions(+), 4 deletions(-)
+
+diff --git a/include/libvirt/libvirt.h.in b/include/libvirt/libvirt.h.in
+index ed1915b..1bc34f0 100644
+--- a/include/libvirt/libvirt.h.in
++++ b/include/libvirt/libvirt.h.in
+@@ -4519,6 +4519,18 @@ typedef virMemoryParameter *virMemoryParameterPtr;
+  */
+ # define VIR_NODE_MEMORY_SHARED_FULL_SCANS         "shm_full_scans"
+ 
++/* VIR_NODE_MEMORY_SHARED_MERGE_ACROSS_NODES:
++ *
++ * Macro for typed parameter that represents whether pages from
++ * different NUMA nodes can be merged. The parameter has type int,
++ * when its value is 0, only pages which physically reside in the
++ * memory area of same NUMA node are merged; When its value is 1,
++ * pages from all nodes can be merged. Other values are reserved
++ * for future use.
++ */
++# define VIR_NODE_MEMORY_SHARED_MERGE_ACROSS_NODES "shm_merge_across_nodes"
++
++
+ int virNodeGetMemoryParameters(virConnectPtr conn,
+                                virTypedParameterPtr params,
+                                int *nparams,
+diff --git a/src/nodeinfo.c b/src/nodeinfo.c
+index 021eb05..280326a 100644
+--- a/src/nodeinfo.c
++++ b/src/nodeinfo.c
+@@ -984,6 +984,8 @@ nodeSetMemoryParameters(virConnectPtr conn ATTRIBUTE_UNUSED,
+                                        VIR_TYPED_PARAM_UINT,
+                                        VIR_NODE_MEMORY_SHARED_SLEEP_MILLISECS,
+                                        VIR_TYPED_PARAM_UINT,
++                                       VIR_NODE_MEMORY_SHARED_MERGE_ACROSS_NODES,
++                                       VIR_TYPED_PARAM_UINT,
+                                        NULL) < 0)
+         return -1;
+ 
+@@ -1004,6 +1006,13 @@ nodeSetMemoryParameters(virConnectPtr conn ATTRIBUTE_UNUSED,
+             /* Out of memory */
+             if (ret == -2)
+                 return -1;
++        } else if (STREQ(param->field,
++                         VIR_NODE_MEMORY_SHARED_MERGE_ACROSS_NODES)) {
++            ret = nodeSetMemoryParameterValue("merge_across_nodes", param);
++
++            /* Out of memory */
++            if (ret == -2)
++                return -1;
+         }
+     }
+ 
+@@ -1039,8 +1048,9 @@ nodeGetMemoryParameterValue(const char *field,
+     if ((tmp = strchr(buf, '\n')))
+         *tmp = '\0';
+ 
+-    if (STREQ(field, "pages_to_scan") ||
+-        STREQ(field, "sleep_millisecs"))
++    if (STREQ(field, "pages_to_scan")   ||
++        STREQ(field, "sleep_millisecs") ||
++        STREQ(field, "merge_across_nodes"))
+         rc = virStrToLong_ui(buf, NULL, 10, (unsigned int *)value);
+     else if (STREQ(field, "pages_shared")    ||
+              STREQ(field, "pages_sharing")   ||
+@@ -1063,7 +1073,7 @@ cleanup:
+ }
+ #endif
+ 
+-#define NODE_MEMORY_PARAMETERS_NUM 7
++#define NODE_MEMORY_PARAMETERS_NUM 8
+ int
+ nodeGetMemoryParameters(virConnectPtr conn ATTRIBUTE_UNUSED,
+                         virTypedParameterPtr params ATTRIBUTE_UNUSED,
+@@ -1075,6 +1085,7 @@ nodeGetMemoryParameters(virConnectPtr conn ATTRIBUTE_UNUSED,
+ #ifdef __linux__
+     unsigned int pages_to_scan;
+     unsigned int sleep_millisecs;
++    unsigned int merge_across_nodes;
+     unsigned long long pages_shared;
+     unsigned long long pages_sharing;
+     unsigned long long pages_unshared;
+@@ -1168,6 +1179,17 @@ nodeGetMemoryParameters(virConnectPtr conn ATTRIBUTE_UNUSED,
+ 
+             break;
+ 
++        case 7:
++            if (nodeGetMemoryParameterValue("merge_across_nodes",
++                                            &merge_across_nodes) < 0)
++                return -1;
++
++            if (virTypedParameterAssign(param, VIR_NODE_MEMORY_SHARED_MERGE_ACROSS_NODES,
++                                        VIR_TYPED_PARAM_UINT, merge_across_nodes) < 0)
++                return -1;
++
++            break;
++
+         default:
+             break;
+         }
+diff --git a/tools/virsh-host.c b/tools/virsh-host.c
+index 2c46336..62ecafc 100644
+--- a/tools/virsh-host.c
++++ b/tools/virsh-host.c
+@@ -900,6 +900,8 @@ static const vshCmdOptDef opts_node_memory_tune[] = {
+     {"shm-sleep-millisecs", VSH_OT_INT, VSH_OFLAG_NONE,
+       N_("number of millisecs the shared memory service should "
+          "sleep before next scan")},
++    {"shm-merge-across-nodes", VSH_OT_INT, VSH_OFLAG_NONE,
++      N_("Specifies if pages from different numa nodes can be merged")},
+     {NULL, 0, 0, NULL}
+ };
+ 
+@@ -911,6 +913,7 @@ cmdNodeMemoryTune(vshControl *ctl, const vshCmd *cmd)
+     unsigned int flags = 0;
+     unsigned int shm_pages_to_scan = 0;
+     unsigned int shm_sleep_millisecs = 0;
++    unsigned int shm_merge_across_nodes = 0;
+     bool ret = false;
+     int i = 0;
+ 
+@@ -926,12 +929,21 @@ cmdNodeMemoryTune(vshControl *ctl, const vshCmd *cmd)
+         return false;
+     }
+ 
++    if (vshCommandOptUInt(cmd, "shm-merge-across-nodes",
++                          &shm_merge_across_nodes) < 0) {
++        vshError(ctl, "%s", _("invalid shm-merge-across-nodes number"));
++        return false;
++    }
++
+     if (shm_pages_to_scan)
+         nparams++;
+ 
+     if (shm_sleep_millisecs)
+         nparams++;
+ 
++    if (shm_merge_across_nodes)
++        nparams++;
++
+     if (nparams == 0) {
+         /* Get the number of memory parameters */
+         if (virNodeGetMemoryParameters(ctl->conn, NULL, &nparams, flags) != 0) {
+@@ -983,6 +995,14 @@ cmdNodeMemoryTune(vshControl *ctl, const vshCmd *cmd)
+                 goto error;
+         }
+ 
++        if (i < nparams && shm_merge_across_nodes) {
++            if (virTypedParameterAssign(&params[i++],
++                                        VIR_NODE_MEMORY_SHARED_MERGE_ACROSS_NODES,
++                                        VIR_TYPED_PARAM_UINT,
++                                        shm_merge_across_nodes) < 0)
++                goto error;
++        }
++
+         if (virNodeSetMemoryParameters(ctl->conn, params, nparams, flags) != 0)
+             goto error;
+         else
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 43748a3..1b488d1 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -299,7 +299,10 @@ Allows you to display or set the node memory parameters.
+ I<shm-pages-to-scan> can be used to set the number of pages to scan
+ before the shared memory service goes to sleep; I<shm-sleep-millisecs>
+ can be used to set the number of millisecs the shared memory service should
+-sleep before next scan.
++sleep before next scan; I<shm-merge-across-nodes> specifies if pages from
++different numa nodes can be merged. When set to 0, only pages which physically
++reside in the memory area of same NUMA node can be merged. When set to 1,
++pages from all nodes can be merged. Default to 1.
+ 
+ =item B<capabilities>
+ 
+-- 
+1.7.12.3
+

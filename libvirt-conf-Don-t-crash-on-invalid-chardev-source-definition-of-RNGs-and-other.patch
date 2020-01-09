@@ -1,0 +1,96 @@
+From 16654d9842ce68b208fc946c75a1368555ddb11c Mon Sep 17 00:00:00 2001
+Message-Id: <16654d9842ce68b208fc946c75a1368555ddb11c@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:54:05 +0100
+Subject: [PATCH] conf: Don't crash on invalid chardev source definition of
+ RNGs and other
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+Downstream note: Only the test case is backported as the code shouldn't
+be broken downstream.
+
+Since commit 297c99a5 an invalid source definition XML of a character
+device that is used as backend for RNG devices, smartcards and redirdevs
+causes crash of the daemon when parsing such a definition.
+
+The device types mentioned above are not a part of a regular character
+device but are backends for other types. Thus when parsing such device
+NULL is passed as the argument @chr_def. Later when checking the
+validity of the definition @chr_def was dereferenced when parsing a UNIX
+socket backend with missing path of the socket and crashed the daemon.
+
+Sample offending configuration:
+  <devices>
+  ...
+    <rng model='virtio'>
+      <backend model='egd' type='unix'>
+        <source mode='bind' service='1024'/>
+      </backend>
+    </rng>
+  </devices>
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1012196
+(cherry picked from commit 795527548fea79902ea4ce32747e069944cf3e61)
+
+Conflicts:
+	src/conf/domain_conf.c - don't backport any code change
+	tests/qemuxml2argvtest.c - context
+    tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd-crash.xml -
+    pci-root element was not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ .../qemuxml2argv-virtio-rng-egd-crash.xml          | 26 ++++++++++++++++++++++
+ tests/qemuxml2argvtest.c                           |  2 ++
+ 2 files changed, 28 insertions(+)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd-crash.xml
+
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd-crash.xml b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd-crash.xml
+new file mode 100644
+index 0000000..fd547ef
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-virtio-rng-egd-crash.xml
+@@ -0,0 +1,26 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static' cpuset='1-4,8-20,525'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <controller type='usb' index='0'/>
++    <memballoon model='virtio'/>
++    <rng model='virtio'>
++      <backend model='egd' type='unix'>
++        <!-- https://bugzilla.redhat.com/show_bug.cgi?id=1012196 -->
++        <source mode='connect' host='1.2.3.4' service='1234'/>
++      </backend>
++    </rng>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 79b8b69..3e9c685 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -866,6 +866,8 @@ mymain(void)
+             QEMU_CAPS_OBJECT_RNG_RANDOM);
+     DO_TEST("virtio-rng-egd", QEMU_CAPS_DEVICE, QEMU_CAPS_DEVICE_VIRTIO_RNG,
+             QEMU_CAPS_OBJECT_RNG_EGD);
++    DO_TEST_PARSE_ERROR("virtio-rng-egd-crash", QEMU_CAPS_DEVICE,
++            QEMU_CAPS_DEVICE_VIRTIO_RNG, QEMU_CAPS_OBJECT_RNG_EGD);
+ 
+     VIR_FREE(driver.stateDir);
+     virCapabilitiesFree(driver.caps);
+-- 
+1.9.1
+

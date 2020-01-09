@@ -1,0 +1,497 @@
+From a18438bda04fd1ad6f7eab81cc1305fb691c17c3 Mon Sep 17 00:00:00 2001
+Message-Id: <a18438bda04fd1ad6f7eab81cc1305fb691c17c3@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 19 Jul 2013 15:01:38 +0200
+Subject: [PATCH] qemu: Introduce qemuMonitorGetDeviceAliases
+
+Mostly RHEL-only, see downstream changes below.
+
+This API provides a NULL-terminated list of devices which are currently
+attached to a QEMU domain.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit 58b147ad07c9432b53e66ca20aff74d812647c57)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_monitor.c,
+	src/qemu/qemu_monitor.h,
+	src/qemu/qemu_monitor_json.h,
+	tests/qemumonitorjsontest.c -- context
+
+Downstream changes:
+    - qemuMonitorJSONGetDeviceAliases had to be completely rewritten
+      using query-pci instead of qom-list since the latter is not
+      backportable to QEMU. RHEL-6.6 only supports PCI device hotplug so
+      asking for a list of PCI devices (instead of all devices) is fine
+    - the associated test had to be adapted for query-pci
+---
+ src/qemu/qemu_monitor.c      |  21 ++++
+ src/qemu/qemu_monitor.h      |   3 +
+ src/qemu/qemu_monitor_json.c |  96 +++++++++++++++
+ src/qemu/qemu_monitor_json.h |   3 +
+ tests/qemumonitorjsontest.c  | 274 +++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 397 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index adefc27..b4aacfc 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -3387,3 +3387,24 @@ char *qemuMonitorGetTargetArch(qemuMonitorPtr mon)
+ 
+     return qemuMonitorJSONGetTargetArch(mon);
+ }
++
++int
++qemuMonitorGetDeviceAliases(qemuMonitorPtr mon,
++                            char ***aliases)
++{
++    VIR_DEBUG("mon=%p, aliases=%p", mon, aliases);
++
++    if (!mon) {
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("monitor must not be NULL"));
++        return -1;
++    }
++
++    if (!mon->json) {
++        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
++                       _("JSON monitor is required"));
++        return -1;
++    }
++
++    return qemuMonitorJSONGetDeviceAliases(mon, aliases);
++}
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 38bdd46..ac887db 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -645,6 +645,9 @@ int qemuMonitorGetObjectProps(qemuMonitorPtr mon,
+                               char ***props);
+ char *qemuMonitorGetTargetArch(qemuMonitorPtr mon);
+ 
++int qemuMonitorGetDeviceAliases(qemuMonitorPtr mon,
++                                char ***aliases);
++
+ /**
+  * When running two dd process and using <> redirection, we need a
+  * shell that will not truncate files.  These two strings serve that
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 0f6281a..8e23c46 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -4748,3 +4748,99 @@ cleanup:
+     virJSONValueFree(reply);
+     return ret;
+ }
++
++
++int
++qemuMonitorJSONGetDeviceAliases(qemuMonitorPtr mon,
++                                char ***aliases)
++{
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++    virJSONValuePtr data;
++    char **list = NULL;
++    char *alias;
++    int nbuses;
++    int ndevices;
++    int ret = -1;
++    size_t i, j;
++    size_t n = 0;
++    int rv;
++
++    *aliases = NULL;
++
++    if (!(cmd = qemuMonitorJSONMakeCommand("query-pci", NULL)))
++        return -1;
++
++    rv = qemuMonitorJSONCommand(mon, cmd, &reply);
++
++    if (rv == 0)
++        rv = qemuMonitorJSONCheckError(cmd, reply);
++
++    if (rv < 0)
++        goto cleanup;
++
++    if (!(data = virJSONValueObjectGet(reply, "return"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-pci reply was missing return data"));
++        goto cleanup;
++    }
++
++    if ((nbuses = virJSONValueArraySize(data)) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-pci reply data was not an array"));
++        goto cleanup;
++    }
++
++    for (i = 0; i < nbuses; i++) {
++        virJSONValuePtr child = virJSONValueArrayGet(data, i);
++        virJSONValuePtr devices;
++
++        if (!(devices = virJSONValueObjectGet(child, "devices")) ||
++            (ndevices = virJSONValueArraySize(devices)) < 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("query-pci bus is missing array of devices"));
++            goto cleanup;
++        }
++
++        for (j = 0; j < ndevices; j++) {
++            virJSONValuePtr device = virJSONValueArrayGet(devices, j);
++            const char *tmp;
++
++            if (!(tmp = virJSONValueObjectGetString(device, "qdev_id"))) {
++                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                               _("query-pci device is missing qdev_id"));
++                goto cleanup;
++            }
++
++            if (*tmp == '\0')
++                continue;
++
++            if (!(alias = strdup(tmp)) ||
++                VIR_APPEND_ELEMENT(list, n, alias) < 0) {
++                VIR_FREE(alias);
++                virReportOOMError();
++                goto cleanup;
++            }
++        }
++    }
++
++    alias = NULL;
++    if (VIR_APPEND_ELEMENT(list, n, alias) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    *aliases = list;
++    list = NULL;
++    ret = 0;
++
++cleanup:
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    if (list) {
++        for (i = 0; i < n; i++)
++            VIR_FREE(list[i]);
++        VIR_FREE(list);
++    }
++    return ret;
++}
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index 0966a76..ae66b9d 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -340,4 +340,7 @@ int qemuMonitorJSONGetObjectProps(qemuMonitorPtr mon,
+     ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3);
+ char *qemuMonitorJSONGetTargetArch(qemuMonitorPtr mon);
+ 
++int qemuMonitorJSONGetDeviceAliases(qemuMonitorPtr mon,
++                                    char ***aliases);
++
+ #endif /* QEMU_MONITOR_JSON_H */
+diff --git a/tests/qemumonitorjsontest.c b/tests/qemumonitorjsontest.c
+index 264c140..530e46d 100644
+--- a/tests/qemumonitorjsontest.c
++++ b/tests/qemumonitorjsontest.c
+@@ -24,6 +24,7 @@
+ #include "qemumonitortestutils.h"
+ #include "threads.h"
+ #include "virterror_internal.h"
++#include "virstring.h"
+ 
+ 
+ #define VIR_FROM_THIS VIR_FROM_NONE
+@@ -424,6 +425,278 @@ cleanup:
+ 
+ 
+ static int
++testQemuMonitorJSONGetDeviceAliases(const void *data)
++{
++    virCapsPtr caps = (virCapsPtr)data;
++    qemuMonitorTestPtr test = qemuMonitorTestNew(true, caps);
++    int ret = -1;
++    char **aliases = NULL;
++    char **alias;
++    const char *expected[] = {
++        "usb", "video0", "net0", "balloon0", "scsi0",
++        "virtio-disk1", "virtio-disk2", NULL };
++
++    if (!test)
++        return -1;
++
++    if (qemuMonitorTestAddItem(test,
++                               "query-pci",
++                               "{\"return\": ["
++                               " {\"bus\": 0,"
++                               "  \"devices\": ["
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"\","
++                               "    \"slot\": 0,"
++                               "    \"class_info\": {"
++                               "     \"class\": 1536,"
++                               "     \"desc\": \"Host bridge\" },"
++                               "    \"id\": {"
++                               "     \"device\": 4663,"
++                               "     \"vendor\": 32902 },"
++                               "    \"function\": 0,"
++                               "    \"regions\": [ ] },"
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"\","
++                               "    \"slot\": 1,"
++                               "    \"class_info\": {"
++                               "     \"class\": 1537,"
++                               "     \"desc\": \"ISA bridge\" },"
++                               "     \"id\": {"
++                               "      \"device\": 28672,"
++                               "      \"vendor\": 32902 },"
++                               "     \"function\": 0,"
++                               "     \"regions\": [ ] },"
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"\","
++                               "    \"slot\": 1,"
++                               "    \"class_info\": {"
++                               "     \"class\": 257,"
++                               "     \"desc\": \"IDE controller\" },"
++                               "    \"id\": {"
++                               "     \"device\": 28688,"
++                               "     \"vendor\": 32902 },"
++                               "    \"function\": 1,"
++                               "    \"regions\": ["
++                               "     {\"bar\": 4,"
++                               "      \"size\": 16,"
++                               "      \"address\": 49632,"
++                               "      \"type\": \"io\" }"
++                               "    ] },"
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"usb\","
++                               "    \"irq\": 11,"
++                               "    \"slot\": 1,"
++                               "    \"class_info\": {"
++                               "     \"class\": 3075,"
++                               "     \"desc\": \"USB controller\" },"
++                               "    \"id\": {"
++                               "     \"device\": 28704,"
++                               "     \"vendor\": 32902 },"
++                               "    \"function\": 2,"
++                               "    \"regions\": ["
++                               "     {\"bar\": 4,"
++                               "      \"size\": 32,"
++                               "      \"address\": 49536,"
++                               "      \"type\": \"io\" }"
++                               "    ] },"
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"\","
++                               "    \"irq\": 9,"
++                               "    \"slot\": 1,"
++                               "    \"class_info\": {"
++                               "     \"class\": 1664,"
++                               "     \"desc\": \"Bridge\" },"
++                               "    \"id\": {"
++                               "     \"device\": 28947,"
++                               "     \"vendor\": 32902 },"
++                               "    \"function\": 3,"
++                               "    \"regions\": [ ] },"
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"video0\","
++                               "    \"slot\": 2,"
++                               "    \"class_info\": {"
++                               "     \"class\": 768,"
++                               "     \"desc\": \"VGA controller\" },"
++                               "    \"id\": {"
++                               "     \"device\": 184,"
++                               "     \"vendor\": 4115 },"
++                               "    \"function\": 0,"
++                               "    \"regions\": ["
++                               "     {\"prefetch\": true,"
++                               "      \"mem_type_64\": false,"
++                               "      \"bar\": 0,"
++                               "      \"size\": 33554432,"
++                               "      \"address\": 4227858432,"
++                               "      \"type\": \"memory\" },"
++                               "     {\"prefetch\": false,"
++                               "      \"mem_type_64\": false,"
++                               "      \"bar\": 1,"
++                               "      \"size\": 4096,"
++                               "      \"address\": 4273807360,"
++                               "      \"type\": \"memory\" },"
++                               "     {\"prefetch\": false,"
++                               "      \"mem_type_64\": false,"
++                               "      \"bar\": 6,"
++                               "      \"size\": 65536,"
++                               "      \"address\": -1,"
++                               "      \"type\": \"memory\" }"
++                               "    ] },"
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"net0\","
++                               "    \"irq\": 11,"
++                               "    \"slot\": 3,"
++                               "    \"class_info\": {"
++                               "     \"class\": 512,"
++                               "     \"desc\": \"Ethernet controller\" },"
++                               "    \"id\": {"
++                               "     \"device\": 4096,"
++                               "     \"vendor\": 6900 },"
++                               "    \"function\": 0,"
++                               "    \"regions\": ["
++                               "     {\"bar\": 0,"
++                               "      \"size\": 32,"
++                               "      \"address\": 49568,"
++                               "      \"type\": \"io\" },"
++                               "     {\"prefetch\": false,"
++                               "      \"mem_type_64\": false,"
++                               "      \"bar\": 1,"
++                               "      \"size\": 4096,"
++                               "      \"address\": 4273811456,"
++                               "      \"type\": \"memory\" },"
++                               "     {\"prefetch\": false,"
++                               "      \"mem_type_64\": false,"
++                               "      \"bar\": 6,"
++                               "      \"size\": 262144,"
++                               "      \"address\": -1,"
++                               "      \"type\": \"memory\" }"
++                               "    ] },"
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"balloon0\","
++                               "    \"irq\": 10,"
++                               "    \"slot\": 5,"
++                               "    \"class_info\": {"
++                               "     \"class\": 255 },"
++                               "    \"id\": {"
++                               "     \"device\": 4098,"
++                               "     \"vendor\": 6900 },"
++                               "    \"function\": 0,"
++                               "    \"regions\": ["
++                               "     {\"bar\": 0,"
++                               "      \"size\": 32,"
++                               "      \"address\": 49600,"
++                               "      \"type\": \"io\" }"
++                               "    ] },"
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"scsi0\","
++                               "    \"irq\": 10,"
++                               "    \"slot\": 6,"
++                               "    \"class_info\": {"
++                               "     \"class\": 256,"
++                               "     \"desc\": \"SCSI controller\" },"
++                               "    \"id\": {"
++                               "     \"device\": 18,"
++                               "     \"vendor\": 4096 },"
++                               "    \"function\": 0,"
++                               "    \"regions\": ["
++                               "     {\"bar\": 0,"
++                               "      \"size\": 256,"
++                               "      \"address\": 49152,"
++                               "      \"type\": \"io\" },"
++                               "     {\"prefetch\": false,"
++                               "      \"mem_type_64\": false,"
++                               "      \"bar\": 1,"
++                               "      \"size\": 1024,"
++                               "      \"address\": 4273815552,"
++                               "      \"type\": \"memory\" },"
++                               "     {\"prefetch\": false,"
++                               "      \"mem_type_64\": false,"
++                               "      \"bar\": 2,"
++                               "      \"size\": 8192,"
++                               "      \"address\": 4273799168,"
++                               "      \"type\": \"memory\" }"
++                               "    ] },"
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"virtio-disk1\","
++                               "    \"irq\": 11,"
++                               "    \"slot\": 7,"
++                               "    \"class_info\": {"
++                               "     \"class\": 256,"
++                               "     \"desc\": \"SCSI controller\" },"
++                               "    \"id\": {"
++                               "     \"device\": 4097,"
++                               "     \"vendor\": 6900 },"
++                               "    \"function\": 0,"
++                               "    \"regions\": ["
++                               "     {\"bar\": 0,"
++                               "      \"size\": 64,"
++                               "      \"address\": 49408,"
++                               "      \"type\": \"io\" },"
++                               "     {\"prefetch\": false,"
++                               "      \"mem_type_64\": false,"
++                               "      \"bar\": 1,"
++                               "      \"size\": 4096,"
++                               "      \"address\": 4273819648,"
++                               "      \"type\": \"memory\" }"
++                               "    ] },"
++                               "   {\"bus\": 0,"
++                               "    \"qdev_id\": \"virtio-disk2\","
++                               "    \"irq\": 11,"
++                               "    \"slot\": 8,"
++                               "    \"class_info\": {"
++                               "     \"class\": 256,"
++                               "     \"desc\": \"SCSI controller\" },"
++                               "    \"id\": {"
++                               "     \"device\": 4097,"
++                               "     \"vendor\": 6900 },"
++                               "    \"function\": 0,"
++                               "    \"regions\": ["
++                               "     {\"bar\": 0,"
++                               "      \"size\": 64,"
++                               "      \"address\": 49472,"
++                               "      \"type\": \"io\" },"
++                               "     {\"prefetch\": false,"
++                               "      \"mem_type_64\": false,"
++                               "      \"bar\": 1,"
++                               "      \"size\": 4096,"
++                               "      \"address\": 4273823744,"
++                               "      \"type\": \"memory\" }"
++                               "    ] }"
++                               "  ] }"
++                               " ],"
++                               " \"id\": \"libvirt-9\"}") < 0)
++        goto cleanup;
++
++    if (qemuMonitorGetDeviceAliases(qemuMonitorTestGetMonitor(test),
++                                    &aliases) < 0)
++        goto cleanup;
++
++    if (!aliases) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s", "no aliases returned");
++        goto cleanup;
++    }
++
++    ret = 0;
++    for (alias = aliases; *alias; alias++) {
++        if (!virStringArrayHasString((char **) expected, *alias)) {
++            fprintf(stderr, "got unexpected device alias '%s'\n", *alias);
++            ret = -1;
++        }
++    }
++    for (alias = (char **) expected; *alias; alias++) {
++        if (!virStringArrayHasString(aliases, *alias)) {
++            fprintf(stderr, "missing expected alias '%s'\n", *alias);
++            ret = -1;
++        }
++    }
++
++cleanup:
++    virStringFreeList(aliases);
++    qemuMonitorTestFree(test);
++    return ret;
++}
++
++
++static int
+ mymain(void)
+ {
+     int ret = 0;
+@@ -447,6 +720,7 @@ mymain(void)
+     DO_TEST(GetCPUDefinitions);
+     DO_TEST(GetCommands);
+ 
++    DO_TEST(GetDeviceAliases);
+     virCapabilitiesFree(caps);
+ 
+     return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+-- 
+2.0.0
+

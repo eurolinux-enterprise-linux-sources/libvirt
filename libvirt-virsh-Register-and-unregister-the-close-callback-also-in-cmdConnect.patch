@@ -1,0 +1,62 @@
+From 735b9e7113b94133d7a073bb224914689a5937f2 Mon Sep 17 00:00:00 2001
+Message-Id: <735b9e7113b94133d7a073bb224914689a5937f2.1373271641.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 10 Apr 2013 16:26:06 -0600
+Subject: [PATCH] virsh: Register and unregister the close callback also in
+ cmdConnect
+
+https://bugzilla.redhat.com/show_bug.cgi?id=911609
+
+This patch improves the error message after disconnecting from the
+hypervisor and adds the close callback operations required not to leak
+the callback reference.
+(cherry picked from commit 69ab07560a134e82e36b6391be3c806d3dbdb16c)
+---
+ tools/virsh.c | 22 ++++++++++++++++------
+ 1 file changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/tools/virsh.c b/tools/virsh.c
+index 9ab1e10..0cccdf7 100644
+--- a/tools/virsh.c
++++ b/tools/virsh.c
+@@ -380,10 +380,14 @@ cmdConnect(vshControl *ctl, const vshCmd *cmd)
+ 
+     if (ctl->conn) {
+         int ret;
+-        if ((ret = virConnectClose(ctl->conn)) != 0) {
+-            vshError(ctl, _("Failed to disconnect from the hypervisor, %d leaked reference(s)"), ret);
+-            return false;
+-        }
++
++        virConnectUnregisterCloseCallback(ctl->conn, vshCatchDisconnect);
++        ret = virConnectClose(ctl->conn);
++        if (ret < 0)
++            vshError(ctl, "%s", _("Failed to disconnect from the hypervisor"));
++        else if (ret > 0)
++            vshError(ctl, "%s", _("One or more references were leaked after "
++                                  "disconnect from the hypervisor"));
+         ctl->conn = NULL;
+     }
+ 
+@@ -401,10 +405,16 @@ cmdConnect(vshControl *ctl, const vshCmd *cmd)
+     ctl->conn = virConnectOpenAuth(ctl->name, virConnectAuthPtrDefault,
+                                    ctl->readonly ? VIR_CONNECT_RO : 0);
+ 
+-    if (!ctl->conn)
++    if (!ctl->conn) {
+         vshError(ctl, "%s", _("Failed to connect to the hypervisor"));
++        return false;
++    }
++
++    if (virConnectRegisterCloseCallback(ctl->conn, vshCatchDisconnect,
++                                        NULL, NULL) < 0)
++        vshError(ctl, "%s", _("Unable to register disconnect callback"));
+ 
+-    return !!ctl->conn;
++    return true;
+ }
+ 
+ 
+-- 
+1.8.2.1
+

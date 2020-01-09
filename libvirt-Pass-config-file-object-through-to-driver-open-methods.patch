@@ -1,0 +1,463 @@
+From 0d6811001ff7cecb082e95086e9fc1cce2520a6e Mon Sep 17 00:00:00 2001
+Message-Id: <0d6811001ff7cecb082e95086e9fc1cce2520a6e@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Tue, 27 Sep 2016 13:46:00 +0200
+Subject: [PATCH] Pass config file object through to driver open methods
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1333415
+
+The virConnectOpenInternal method opens the libvirt client
+config file and uses it to resolve things like URI aliases.
+
+There may be driver specific things that are useful to
+store in the config file too, so rather than have them
+re-parse the same file, pass the virConfPtr down to the
+drivers.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 5f1837eaca4beba418ea75ce5ee9ec235e277fa2)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+ Conflicts:
+   Not yet present downstream:
+	src/bhyve/bhyve_driver.c
+   Moved from src/driver.h:
+	src/driver-hypervisor.h
+   Dropped as we do not compile these downstream:
+	src/hyperv/hyperv_driver.c
+	src/libxl/libxl_driver.c
+	src/openvz/openvz_driver.c
+	src/phyp/phyp_driver.c
+	src/uml/uml_driver.c
+	src/vmware/vmware_driver.c
+	src/vbox/vbox_common.c
+	src/vbox/vbox_driver.c
+	src/vz/vz_driver.c
+	src/xen/xen_driver.c
+	src/xenapi/xenapi_driver.c
+   Function renamed from Open to ConnectOpen upstream:
+	src/esx/esx_driver.c
+	src/lxc/lxc_driver.c
+	src/qemu/qemu_driver.c
+	src/remote/remote_driver.c
+	src/test/test_driver.c
+   Downstream does not have 'Removing probing of secondary drivers':
+	src/libvirt.c
+   + the addition of virConfPtr to the secondary driver *Open functions
+   + include "conf.h" in "driver.h" since some files including
+        "driver.h" do not include it
+---
+ src/driver.h                            |  2 ++
+ src/esx/esx_device_monitor.c            |  1 +
+ src/esx/esx_driver.c                    |  1 +
+ src/esx/esx_interface_driver.c          |  1 +
+ src/esx/esx_network_driver.c            |  1 +
+ src/esx/esx_nwfilter_driver.c           |  1 +
+ src/esx/esx_secret_driver.c             |  1 +
+ src/esx/esx_storage_driver.c            |  1 +
+ src/interface/interface_backend_netcf.c |  1 +
+ src/libvirt.c                           | 14 +++++++-------
+ src/lxc/lxc_driver.c                    |  1 +
+ src/network/bridge_driver.c             |  1 +
+ src/node_device/node_device_udev.c      |  1 +
+ src/nwfilter/nwfilter_driver.c          |  1 +
+ src/qemu/qemu_driver.c                  |  1 +
+ src/remote/remote_driver.c              |  7 +++++++
+ src/secret/secret_driver.c              |  1 +
+ src/storage/storage_driver.c            |  1 +
+ src/test/test_driver.c                  |  7 +++++++
+ 19 files changed, 38 insertions(+), 7 deletions(-)
+
+diff --git a/src/driver.h b/src/driver.h
+index bdcaa01..03e89a6 100644
+--- a/src/driver.h
++++ b/src/driver.h
+@@ -12,6 +12,7 @@
+ 
+ # include "internal.h"
+ # include "viruri.h"
++# include "conf.h"
+ /*
+  * List of registered drivers numbers
+  */
+@@ -69,6 +70,7 @@ typedef enum {
+ typedef virDrvOpenStatus
+         (*virDrvOpen)           (virConnectPtr conn,
+                                  virConnectAuthPtr auth,
++                                 virConfPtr conf,
+                                  unsigned int flags);
+ typedef int
+         (*virDrvClose)          (virConnectPtr conn);
+diff --git a/src/esx/esx_device_monitor.c b/src/esx/esx_device_monitor.c
+index ced5054..9e53094 100644
+--- a/src/esx/esx_device_monitor.c
++++ b/src/esx/esx_device_monitor.c
+@@ -42,6 +42,7 @@
+ static virDrvOpenStatus
+ esxDeviceOpen(virConnectPtr conn,
+               virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++              virConfPtr conf ATTRIBUTE_UNUSED,
+               unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/esx/esx_driver.c b/src/esx/esx_driver.c
+index 35da1df..f832589 100644
+--- a/src/esx/esx_driver.c
++++ b/src/esx/esx_driver.c
+@@ -912,6 +912,7 @@ esxConnectToVCenter(virConnectPtr conn,
+  */
+ static virDrvOpenStatus
+ esxOpen(virConnectPtr conn, virConnectAuthPtr auth,
++        virConfPtr conf ATTRIBUTE_UNUSED,
+         unsigned int flags)
+ {
+     virDrvOpenStatus result = VIR_DRV_OPEN_ERROR;
+diff --git a/src/esx/esx_interface_driver.c b/src/esx/esx_interface_driver.c
+index c623223..d9531e9 100644
+--- a/src/esx/esx_interface_driver.c
++++ b/src/esx/esx_interface_driver.c
+@@ -44,6 +44,7 @@
+ static virDrvOpenStatus
+ esxInterfaceOpen(virConnectPtr conn,
+                  virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                 virConfPtr conf ATTRIBUTE_UNUSED,
+                  unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/esx/esx_network_driver.c b/src/esx/esx_network_driver.c
+index 625d3fa..8530fd1 100644
+--- a/src/esx/esx_network_driver.c
++++ b/src/esx/esx_network_driver.c
+@@ -50,6 +50,7 @@ verify(MD5_DIGEST_SIZE == VIR_UUID_BUFLEN);
+ static virDrvOpenStatus
+ esxNetworkOpen(virConnectPtr conn,
+                virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++               virConfPtr conf ATTRIBUTE_UNUSED,
+                unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/esx/esx_nwfilter_driver.c b/src/esx/esx_nwfilter_driver.c
+index d896c11..88b55c8 100644
+--- a/src/esx/esx_nwfilter_driver.c
++++ b/src/esx/esx_nwfilter_driver.c
+@@ -42,6 +42,7 @@
+ static virDrvOpenStatus
+ esxNWFilterOpen(virConnectPtr conn,
+                 virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                virConfPtr conf ATTRIBUTE_UNUSED,
+                 unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/esx/esx_secret_driver.c b/src/esx/esx_secret_driver.c
+index 46af8f1..e68b8cd 100644
+--- a/src/esx/esx_secret_driver.c
++++ b/src/esx/esx_secret_driver.c
+@@ -40,6 +40,7 @@
+ 
+ static virDrvOpenStatus
+ esxSecretOpen(virConnectPtr conn, virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++              virConfPtr conf ATTRIBUTE_UNUSED,
+               unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/esx/esx_storage_driver.c b/src/esx/esx_storage_driver.c
+index 51f4177..2efb94a 100644
+--- a/src/esx/esx_storage_driver.c
++++ b/src/esx/esx_storage_driver.c
+@@ -104,6 +104,7 @@ esxStoragePoolLookupType(esxVI_Context *ctx, const char *poolName,
+ static virDrvOpenStatus
+ esxStorageOpen(virConnectPtr conn,
+                virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++               virConfPtr conf ATTRIBUTE_UNUSED,
+                unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/interface/interface_backend_netcf.c b/src/interface/interface_backend_netcf.c
+index 5aa8e15..1a49739 100644
+--- a/src/interface/interface_backend_netcf.c
++++ b/src/interface/interface_backend_netcf.c
+@@ -143,6 +143,7 @@ cleanup:
+ 
+ static virDrvOpenStatus interfaceOpenInterface(virConnectPtr conn,
+                                                virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                               virConfPtr conf ATTRIBUTE_UNUSED,
+                                                unsigned int flags)
+ {
+     struct interface_driver *driverState;
+diff --git a/src/libvirt.c b/src/libvirt.c
+index e89ea98..ababbb5 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -1172,7 +1172,7 @@ do_open (const char *name,
+ 
+         VIR_DEBUG("trying driver %d (%s) ...",
+               i, virDriverTab[i]->name);
+-        res = virDriverTab[i]->open (ret, auth, flags);
++        res = virDriverTab[i]->open (ret, auth, conf, flags);
+         VIR_DEBUG("driver %d %s returned %s",
+               i, virDriverTab[i]->name,
+               res == VIR_DRV_OPEN_SUCCESS ? "SUCCESS" :
+@@ -1194,7 +1194,7 @@ do_open (const char *name,
+     }
+ 
+     for (i = 0; i < virNetworkDriverTabCount; i++) {
+-        res = virNetworkDriverTab[i]->open (ret, auth, flags);
++        res = virNetworkDriverTab[i]->open (ret, auth, conf, flags);
+         VIR_DEBUG("network driver %d %s returned %s",
+               i, virNetworkDriverTab[i]->name,
+               res == VIR_DRV_OPEN_SUCCESS ? "SUCCESS" :
+@@ -1209,7 +1209,7 @@ do_open (const char *name,
+     }
+ 
+     for (i = 0; i < virInterfaceDriverTabCount; i++) {
+-        res = virInterfaceDriverTab[i]->open (ret, auth, flags);
++        res = virInterfaceDriverTab[i]->open (ret, auth, conf, flags);
+         VIR_DEBUG("interface driver %d %s returned %s",
+               i, virInterfaceDriverTab[i]->name,
+               res == VIR_DRV_OPEN_SUCCESS ? "SUCCESS" :
+@@ -1225,7 +1225,7 @@ do_open (const char *name,
+ 
+     /* Secondary driver for storage. Optional */
+     for (i = 0; i < virStorageDriverTabCount; i++) {
+-        res = virStorageDriverTab[i]->open (ret, auth, flags);
++        res = virStorageDriverTab[i]->open (ret, auth, conf, flags);
+         VIR_DEBUG("storage driver %d %s returned %s",
+               i, virStorageDriverTab[i]->name,
+               res == VIR_DRV_OPEN_SUCCESS ? "SUCCESS" :
+@@ -1241,7 +1241,7 @@ do_open (const char *name,
+ 
+     /* Node driver (optional) */
+     for (i = 0; i < virDeviceMonitorTabCount; i++) {
+-        res = virDeviceMonitorTab[i]->open (ret, auth, flags);
++        res = virDeviceMonitorTab[i]->open (ret, auth, conf, flags);
+         VIR_DEBUG("node driver %d %s returned %s",
+               i, virDeviceMonitorTab[i]->name,
+               res == VIR_DRV_OPEN_SUCCESS ? "SUCCESS" :
+@@ -1257,7 +1257,7 @@ do_open (const char *name,
+ 
+     /* Secret manipulation driver. Optional */
+     for (i = 0; i < virSecretDriverTabCount; i++) {
+-        res = virSecretDriverTab[i]->open (ret, auth, flags);
++        res = virSecretDriverTab[i]->open (ret, auth, conf, flags);
+         VIR_DEBUG("secret driver %d %s returned %s",
+               i, virSecretDriverTab[i]->name,
+               res == VIR_DRV_OPEN_SUCCESS ? "SUCCESS" :
+@@ -1273,7 +1273,7 @@ do_open (const char *name,
+ 
+     /* Network filter driver. Optional */
+     for (i = 0; i < virNWFilterDriverTabCount; i++) {
+-        res = virNWFilterDriverTab[i]->open (ret, auth, flags);
++        res = virNWFilterDriverTab[i]->open (ret, auth, conf, flags);
+         VIR_DEBUG("nwfilter driver %d %s returned %s",
+               i, virNWFilterDriverTab[i]->name,
+               res == VIR_DRV_OPEN_SUCCESS ? "SUCCESS" :
+diff --git a/src/lxc/lxc_driver.c b/src/lxc/lxc_driver.c
+index 8bb0a80..ff378e7 100644
+--- a/src/lxc/lxc_driver.c
++++ b/src/lxc/lxc_driver.c
+@@ -106,6 +106,7 @@ static virNWFilterCallbackDriver lxcCallbackDriver = {
+ 
+ static virDrvOpenStatus lxcOpen(virConnectPtr conn,
+                                 virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                virConfPtr conf ATTRIBUTE_UNUSED,
+                                 unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index e74e046..f70bb26 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -2599,6 +2599,7 @@ cleanup:
+ 
+ static virDrvOpenStatus networkOpenNetwork(virConnectPtr conn,
+                                            virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                           virConfPtr conf ATTRIBUTE_UNUSED,
+                                            unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/node_device/node_device_udev.c b/src/node_device/node_device_udev.c
+index aa4ab18..24ea861 100644
+--- a/src/node_device/node_device_udev.c
++++ b/src/node_device/node_device_udev.c
+@@ -1762,6 +1762,7 @@ static int udevDeviceMonitorActive(void)
+ 
+ static virDrvOpenStatus udevNodeDrvOpen(virConnectPtr conn,
+                                         virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                        virConfPtr conf ATTRIBUTE_UNUSED,
+                                         unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/nwfilter/nwfilter_driver.c b/src/nwfilter/nwfilter_driver.c
+index 3b2c9b6..5152b0a 100644
+--- a/src/nwfilter/nwfilter_driver.c
++++ b/src/nwfilter/nwfilter_driver.c
+@@ -442,6 +442,7 @@ cleanup:
+ static virDrvOpenStatus
+ nwfilterOpen(virConnectPtr conn,
+              virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++             virConfPtr conf ATTRIBUTE_UNUSED,
+              unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 93e5dfe..22d760d 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -1083,6 +1083,7 @@ qemudShutdown(void) {
+ 
+ static virDrvOpenStatus qemudOpen(virConnectPtr conn,
+                                   virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                  virConfPtr conf ATTRIBUTE_UNUSED,
+                                   unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 7b65008..2d5a8e9 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -946,6 +946,7 @@ remoteOpenSecondaryDriver(virConnectPtr conn,
+ static virDrvOpenStatus
+ remoteOpen (virConnectPtr conn,
+             virConnectAuthPtr auth,
++            virConfPtr conf ATTRIBUTE_UNUSED,
+             unsigned int flags)
+ {
+     struct private_data *priv;
+@@ -3149,6 +3150,7 @@ remoteGenericClose(virConnectPtr conn, void **genericPrivateData)
+ 
+ static virDrvOpenStatus ATTRIBUTE_NONNULL (1)
+ remoteNetworkOpen(virConnectPtr conn, virConnectAuthPtr auth,
++                  virConfPtr conf ATTRIBUTE_UNUSED,
+                   unsigned int flags)
+ {
+     return remoteGenericOpen(conn, auth, flags, &conn->networkPrivateData);
+@@ -3164,6 +3166,7 @@ remoteNetworkClose(virConnectPtr conn)
+ 
+ static virDrvOpenStatus ATTRIBUTE_NONNULL (1)
+ remoteInterfaceOpen(virConnectPtr conn, virConnectAuthPtr auth,
++                    virConfPtr conf ATTRIBUTE_UNUSED,
+                     unsigned int flags)
+ {
+     return remoteGenericOpen(conn, auth, flags, &conn->interfacePrivateData);
+@@ -3179,6 +3182,7 @@ remoteInterfaceClose(virConnectPtr conn)
+ 
+ static virDrvOpenStatus ATTRIBUTE_NONNULL (1)
+ remoteStorageOpen(virConnectPtr conn, virConnectAuthPtr auth,
++                  virConfPtr conf ATTRIBUTE_UNUSED,
+                   unsigned int flags)
+ {
+     return remoteGenericOpen(conn, auth, flags, &conn->storagePrivateData);
+@@ -3355,6 +3359,7 @@ done:
+ 
+ static virDrvOpenStatus ATTRIBUTE_NONNULL (1)
+ remoteDevMonOpen(virConnectPtr conn, virConnectAuthPtr auth,
++                 virConfPtr conf ATTRIBUTE_UNUSED,
+                  unsigned int flags)
+ {
+     return remoteGenericOpen(conn, auth, flags, &conn->devMonPrivateData);
+@@ -3445,6 +3450,7 @@ done:
+ 
+ static virDrvOpenStatus ATTRIBUTE_NONNULL (1)
+ remoteNWFilterOpen(virConnectPtr conn, virConnectAuthPtr auth,
++                   virConfPtr conf ATTRIBUTE_UNUSED,
+                    unsigned int flags)
+ {
+     return remoteGenericOpen(conn, auth, flags, &conn->nwfilterPrivateData);
+@@ -4680,6 +4686,7 @@ remoteDomainBuildEventDeviceRemoved(virNetClientProgramPtr prog ATTRIBUTE_UNUSED
+ 
+ static virDrvOpenStatus ATTRIBUTE_NONNULL (1)
+ remoteSecretOpen(virConnectPtr conn, virConnectAuthPtr auth,
++                 virConfPtr conf ATTRIBUTE_UNUSED,
+                  unsigned int flags)
+ {
+     return remoteGenericOpen(conn, auth, flags, &conn->secretPrivateData);
+diff --git a/src/secret/secret_driver.c b/src/secret/secret_driver.c
+index e599b33..6207888 100644
+--- a/src/secret/secret_driver.c
++++ b/src/secret/secret_driver.c
+@@ -530,6 +530,7 @@ cleanup:
+ 
+ static virDrvOpenStatus
+ secretOpen(virConnectPtr conn, virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++           virConfPtr conf ATTRIBUTE_UNUSED,
+            unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/storage/storage_driver.c b/src/storage/storage_driver.c
+index 2565903..c33bf96 100644
+--- a/src/storage/storage_driver.c
++++ b/src/storage/storage_driver.c
+@@ -321,6 +321,7 @@ storagePoolLookupByVolume(virStorageVolPtr vol) {
+ static virDrvOpenStatus
+ storageOpen(virConnectPtr conn,
+             virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++            virConfPtr conf ATTRIBUTE_UNUSED,
+             unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+diff --git a/src/test/test_driver.c b/src/test/test_driver.c
+index 73e7524..3fe54f2 100644
+--- a/src/test/test_driver.c
++++ b/src/test/test_driver.c
+@@ -1127,6 +1127,7 @@ static int testOpenFromFile(virConnectPtr conn,
+ 
+ static virDrvOpenStatus testOpen(virConnectPtr conn,
+                                  virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                 virConfPtr conf ATTRIBUTE_UNUSED,
+                                  unsigned int flags)
+ {
+     int ret;
+@@ -2971,6 +2972,7 @@ error:
+ 
+ static virDrvOpenStatus testOpenNetwork(virConnectPtr conn,
+                                         virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                        virConfPtr conf ATTRIBUTE_UNUSED,
+                                         unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+@@ -3491,6 +3493,7 @@ cleanup:
+ 
+ static virDrvOpenStatus testOpenInterface(virConnectPtr conn,
+                                           virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                          virConfPtr conf ATTRIBUTE_UNUSED,
+                                           unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+@@ -3933,6 +3936,7 @@ static int testStoragePoolObjSetDefaults(virStoragePoolObjPtr pool) {
+ 
+ static virDrvOpenStatus testStorageOpen(virConnectPtr conn,
+                                         virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                        virConfPtr conf ATTRIBUTE_UNUSED,
+                                         unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+@@ -5278,6 +5282,7 @@ cleanup:
+ /* Node device implementations */
+ static virDrvOpenStatus testDevMonOpen(virConnectPtr conn,
+                                        virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                       virConfPtr conf ATTRIBUTE_UNUSED,
+                                        unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+@@ -5718,6 +5723,7 @@ static void testDomainEventQueue(testConnPtr driver,
+ 
+ static virDrvOpenStatus testSecretOpen(virConnectPtr conn,
+                                        virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                       virConfPtr conf ATTRIBUTE_UNUSED,
+                                        unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+@@ -5737,6 +5743,7 @@ static int testSecretClose(virConnectPtr conn) {
+ 
+ static virDrvOpenStatus testNWFilterOpen(virConnectPtr conn,
+                                          virConnectAuthPtr auth ATTRIBUTE_UNUSED,
++                                         virConfPtr conf ATTRIBUTE_UNUSED,
+                                          unsigned int flags)
+ {
+     virCheckFlags(VIR_CONNECT_RO, VIR_DRV_OPEN_ERROR);
+-- 
+2.10.1
+

@@ -1,0 +1,246 @@
+From f0c505764171a0229dd609d26167afbaa6123da3 Mon Sep 17 00:00:00 2001
+Message-Id: <f0c505764171a0229dd609d26167afbaa6123da3.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:38 -0600
+Subject: [PATCH] Add a qemuMonitorGetCPUDefinitions method for QMP
+ query-cpu-definitions command
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+Add a new qemuMonitorGetCPUDefinitions() method to support invocation
+of the 'query-cpu-definitions' JSON monitor command. No HMP equivalent
+is required, since this will only be present for QEMU >= 1.2
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 2ecec6e2064c7ae6ec236cd9d392fa9c46390f84)
+---
+ src/qemu/qemu_monitor.c      | 21 +++++++++++++
+ src/qemu/qemu_monitor.h      |  4 +++
+ src/qemu/qemu_monitor_json.c | 74 ++++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_monitor_json.h |  4 +++
+ tests/qemumonitorjsontest.c  | 63 +++++++++++++++++++++++++++++++++++++
+ 5 files changed, 166 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index d65425a..cacb663 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -3116,3 +3116,24 @@ void qemuMonitorMachineInfoFree(qemuMonitorMachineInfoPtr machine)
+     VIR_FREE(machine->alias);
+     VIR_FREE(machine);
+ }
++
++int qemuMonitorGetCPUDefinitions(qemuMonitorPtr mon,
++                                 char ***cpus)
++{
++    VIR_DEBUG("mon=%p cpus=%p",
++              mon, cpus);
++
++    if (!mon) {
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("monitor must not be NULL"));
++        return -1;
++    }
++
++    if (!mon->json) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("JSON monitor is required"));
++        return -1;
++    }
++
++    return qemuMonitorJSONGetCPUDefinitions(mon, cpus);
++}
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index b350cc7..0750cbb 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -599,6 +599,10 @@ int qemuMonitorGetMachines(qemuMonitorPtr mon,
+ 
+ void qemuMonitorMachineInfoFree(qemuMonitorMachineInfoPtr machine);
+ 
++int qemuMonitorGetCPUDefinitions(qemuMonitorPtr mon,
++                                 char ***cpus);
++
++
+ /**
+  * When running two dd process and using <> redirection, we need a
+  * shell that will not truncate files.  These two strings serve that
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index b082186..ab24720 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -4198,3 +4198,77 @@ cleanup:
+     virJSONValueFree(reply);
+     return ret;
+ }
++
++
++int qemuMonitorJSONGetCPUDefinitions(qemuMonitorPtr mon,
++                                     char ***cpus)
++{
++    int ret;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++    virJSONValuePtr data;
++    char **cpulist = NULL;
++    int n = 0;
++    size_t i;
++
++    *cpus = NULL;
++
++    if (!(cmd = qemuMonitorJSONMakeCommand("query-cpu-definitions", NULL)))
++        return -1;
++
++    ret = qemuMonitorJSONCommand(mon, cmd, &reply);
++
++    if (ret == 0)
++        ret = qemuMonitorJSONCheckError(cmd, reply);
++
++    if (ret < 0)
++        goto cleanup;
++
++    ret = -1;
++
++    if (!(data = virJSONValueObjectGet(reply, "return"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-cpu-definitions reply was missing return data"));
++        goto cleanup;
++    }
++
++    if ((n = virJSONValueArraySize(data)) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-cpu-definitions reply data was not an array"));
++        goto cleanup;
++    }
++
++    if (VIR_ALLOC_N(cpulist, n) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    for (i = 0 ; i < n ; i++) {
++        virJSONValuePtr child = virJSONValueArrayGet(data, i);
++        const char *tmp;
++
++        if (!(tmp = virJSONValueObjectGetString(child, "name"))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("query-cpu-definitions reply data was missing 'name'"));
++            goto cleanup;
++        }
++
++        if (!(cpulist[i] = strdup(tmp))) {
++            virReportOOMError();
++            goto cleanup;
++        }
++    }
++
++    ret = n;
++    *cpus = cpulist;
++
++cleanup:
++    if (ret < 0 && cpulist) {
++        for (i = 0 ; i < n ; i++)
++            VIR_FREE(cpulist[i]);
++        VIR_FREE(cpulist);
++    }
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index eb2f1c2..3d8afde 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -303,4 +303,8 @@ int qemuMonitorJSONGetMachines(qemuMonitorPtr mon,
+                                qemuMonitorMachineInfoPtr **machines)
+     ATTRIBUTE_NONNULL(2);
+ 
++int qemuMonitorJSONGetCPUDefinitions(qemuMonitorPtr mon,
++                                     char ***cpus)
++    ATTRIBUTE_NONNULL(2);
++
+ #endif /* QEMU_MONITOR_JSON_H */
+diff --git a/tests/qemumonitorjsontest.c b/tests/qemumonitorjsontest.c
+index f1947c5..c447e69 100644
+--- a/tests/qemumonitorjsontest.c
++++ b/tests/qemumonitorjsontest.c
+@@ -301,6 +301,68 @@ cleanup:
+ 
+ 
+ static int
++testQemuMonitorJSONGetCPUDefinitions(const void *data)
++{
++    virCapsPtr caps = (virCapsPtr)data;
++    qemuMonitorTestPtr test = qemuMonitorTestNew(true, caps);
++    int ret = -1;
++    char **cpus = NULL;
++    int ncpus;
++
++    if (!test)
++        return -1;
++
++    if (qemuMonitorTestAddItem(test, "query-cpu-definitions",
++                               "{ "
++                               "  \"return\": [ "
++                               "   { "
++                               "     \"name\": \"qemu64\" "
++                               "   }, "
++                               "   { "
++                               "     \"name\": \"Opteron_G4\" "
++                               "   }, "
++                               "   { "
++                               "     \"name\": \"Westmere\" "
++                               "   } "
++                               "  ]"
++                               "}") < 0)
++        goto cleanup;
++
++    if ((ncpus = qemuMonitorGetCPUDefinitions(qemuMonitorTestGetMonitor(test),
++                                              &cpus)) < 0)
++        goto cleanup;
++
++    if (ncpus != 3) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "ncpus %d is not 3", ncpus);
++        goto cleanup;
++    }
++
++#define CHECK(i, wantname)                                              \
++    do {                                                                \
++        if (STRNEQ(cpus[i], (wantname))) {                              \
++            virReportError(VIR_ERR_INTERNAL_ERROR,                      \
++                           "name %s is not %s",                         \
++                           cpus[i], (wantname));                        \
++            goto cleanup;                                               \
++        }                                                               \
++    } while (0)
++
++    CHECK(0, "qemu64");
++    CHECK(1, "Opteron_G4");
++    CHECK(2, "Westmere");
++
++#undef CHECK
++
++    ret = 0;
++
++cleanup:
++    qemuMonitorTestFree(test);
++    return ret;
++}
++
++
++static int
+ mymain(void)
+ {
+     int ret = 0;
+@@ -321,6 +383,7 @@ mymain(void)
+     DO_TEST(GetStatus);
+     DO_TEST(GetVersion);
+     DO_TEST(GetMachines);
++    DO_TEST(GetCPUDefinitions);
+ 
+     virCapabilitiesFree(caps);
+ 
+-- 
+1.7.12.3
+

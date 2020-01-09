@@ -1,0 +1,41 @@
+From 31e5f1dc617b3309decd418425e485b6d0468b55 Mon Sep 17 00:00:00 2001
+Message-Id: <31e5f1dc617b3309decd418425e485b6d0468b55.1373271642.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 12 Jun 2013 14:23:59 +0200
+Subject: [PATCH] virsh: don't print --(null) in vol-name and vol-pool
+
+Don't print the pool option name if it's null.
+
+Before:
+virsh # vol-name vol
+error: failed to get vol 'vol', specifying --(null) might help
+error: Storage volume not found: no storage vol with matching path vol
+
+After:
+
+virsh # vol-name vol
+error: failed to get vol 'vol'
+error: Storage volume not found: no storage vol with matching path vol
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=924571
+(cherry picked from commit 7f913c8254beb1d243f80754db3a1498657fba84)
+---
+ tools/virsh-volume.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh-volume.c b/tools/virsh-volume.c
+index 029758c..1102d93 100644
+--- a/tools/virsh-volume.c
++++ b/tools/virsh-volume.c
+@@ -89,7 +89,7 @@ vshCommandOptVolBy(vshControl *ctl, const vshCmd *cmd,
+     }
+ 
+     if (!vol) {
+-        if (pool)
++        if (pool || !pooloptname)
+             vshError(ctl, _("failed to get vol '%s'"), n);
+         else
+             vshError(ctl, _("failed to get vol '%s', specifying --%s "
+-- 
+1.8.2.1
+

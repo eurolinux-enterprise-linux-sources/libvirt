@@ -1,0 +1,93 @@
+From 9bc58fc668e19514c0c5cf7077048d532ec0af99 Mon Sep 17 00:00:00 2001
+Message-Id: <9bc58fc668e19514c0c5cf7077048d532ec0af99.1379450584.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Mon, 9 Sep 2013 15:08:22 -0600
+Subject: [PATCH] qemu: use default machine type if missing it in qemu command
+ line
+
+https://bugzilla.redhat.com/show_bug.cgi?id=995312
+
+BZ:https://bugzilla.redhat.com/show_bug.cgi?id=871273
+when using virsh qemu-attach to attach an existing qemu process,
+if it misses the -M option in qemu command line, libvirtd crashed
+because the NULL value of def->os.machine in later use.
+
+Example:
+/usr/libexec/qemu-kvm -name foo \
+                      -cdrom /var/lib/libvirt/images/boot.img \
+                      -monitor unix:/tmp/demo,server,nowait \
+
+error: End of file while reading data: Input/output error
+error: Failed to reconnect to the hypervisor
+
+This patch tries to set default machine type if the value of
+def->os.machine is still NULL after qemu command line parsing.
+(cherry picked from commit 1851a0c8640f0b42e20a2ccfd5cdb9a9409517ec)
+---
+ src/qemu/qemu_capabilities.c |  4 +++-
+ src/qemu/qemu_command.c      | 11 +++++++++++
+ src/qemu/qemu_driver.c       |  7 +++++--
+ 3 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index f77e481..b30a585 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1880,10 +1880,12 @@ no_memory:
+ 
+ const char *qemuCapsGetCanonicalMachine(qemuCapsPtr caps,
+                                         const char *name)
+-
+ {
+     size_t i;
+ 
++    if (!name)
++        return NULL;
++
+     for (i = 0 ; i < caps->nmachineTypes ; i++) {
+         if (!caps->machineAliases[i])
+             continue;
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 1797005..7cdbac7 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -9174,6 +9174,17 @@ virDomainDefPtr qemuParseCommandLine(virCapsPtr caps,
+         }
+     }
+ 
++    if (!def->os.machine) {
++        const char *defaultMachine =
++                        virCapabilitiesDefaultGuestMachine(caps,
++                                                           def->os.type,
++                                                           def->os.arch,
++                                                           virDomainVirtTypeToString(def->virtType));
++        if (defaultMachine != NULL)
++            if (!(def->os.machine = strdup(defaultMachine)))
++                goto no_memory;
++    }
++
+     if (!nographics && def->ngraphics == 0) {
+         virDomainGraphicsDefPtr sdl;
+         const char *display = qemuFindEnv(progenv, "DISPLAY");
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 3d055ff..79c3ac2 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -1534,9 +1534,12 @@ static int qemudNumDomains(virConnectPtr conn) {
+ static int
+ qemuCanonicalizeMachine(virDomainDefPtr def, qemuCapsPtr caps)
+ {
+-    const char *canon = qemuCapsGetCanonicalMachine(caps, def->os.machine);
++    const char *canon;
+ 
+-    if (canon != def->os.machine) {
++    if (!(canon = qemuCapsGetCanonicalMachine(caps, def->os.machine)))
++        return 0;
++
++    if (STRNEQ(canon, def->os.machine)) {
+         char *tmp;
+         if (!(tmp = strdup(canon))) {
+             virReportOOMError();
+-- 
+1.8.3.2
+

@@ -1,0 +1,193 @@
+From da6b81512321949297bb43a9c65fe4309ade6ef2 Mon Sep 17 00:00:00 2001
+From: Laine Stump <laine@laine.org>
+Date: Wed, 4 Apr 2012 15:14:45 -0400
+Subject: [PATCH] qemu: fix virtio+macvtap migration from 6.3 to older hosts
+To: libvir-list@redhat.com
+
+This resolves: for: https://bugzilla.redhat.com/show_bug.cgi?id=806633
+
+This patch is not a cherry-pick from upstream because this
+functionality is not (and never will be) present upstream. It is a
+RHEL-specific workaround for a bug in older versions of rhel, and thus
+requires a fuller review than most RHEL patches (which have already
+been reviewed upstream).
+
+(This is a *greatly* simplified v2 patch. The original patch allowed
+configuration in libvirt to override the migration compatibility. This
+new patch assumes that anyone who doesn't require the migration
+compatibility, and instead wants better performance, will change the
+guest's machine type from (e.g.) rhel6.2.0 to rhel6.3.0. We can
+require this because the "better performance on macvtap" feature is a
+*new feature*, so not providing it to guests with an older machine
+type is not a regression, it is preserving status quo.)
+
+Description of Problem:
+
+The Linux kernel in RHEL62 and older did not properly
+support merged buffers on virtio network devices that used macvtap to
+connect. This has been fixed inteh RHEL6.3 kernel, but if a guest with
+macvtap interfaces using merged buffers is migrated to an older host
+that doesn't support merged buffers, the migration will fail.
+
+What needs to be done (and why it can't be done by QEMU alone):
+
+To prevent migration failure, qemu must detect when *ALL* of the
+following three items are true, and in that case disabled merged
+buffers in the guest when it is initially started on the RHEL6.3+
+host:
+
+1) it's possible that this guest might be migrated to a host running an
+   older kernel
+
+   QEMU can determined this by examining the machine type (if machine
+   type is "rhel6.3.0", that guest could not possibly be migrated to a
+   RHEL6.2 host; however, if it is "rhel6.2.0" or "rhel6.1.0", it is
+   possible (albeit unlikely) that it could be migrated to a RHEL6.2
+   or older host).
+
+2) The guest network interface is a virtio device
+
+   This is easily determined from the qemu commandline -
+   "virtio-pci-net" is explicitly stated.
+
+3) The network interface is connected to the host's networking with a
+   macvtap device
+
+   This is the difficult item - with pre-existing information
+   available to it, qemu was unable to know if the network device was
+   connected to the host's networking via a macvtap device, or a
+   regular tap device - all qemu was given was an open fd, which could
+   be either.
+
+   Being unable to determine the status of (3), QEMU would have to err
+   on the side of safety, and disable merged buffers for all
+   interfaces that satisfied (1) and (2), meaning a needless reduction
+   in performance for interfaces that used standard tap devices.
+
+The Solution:
+
+The RHEL build of qemu for RHEL6.3 and later has added a new option to
+virtio-net-pci called "__com_redhat_macvtap_compat" with possible
+values "on" and "off" (default is off). This option can be used by
+libvirt to inform qemu that a particular network device is using
+macvtap on the host side (by adding "__com_redhat_macvtap_compat=on"
+to the -device option for the network device).
+
+When qemu sees virtio-net-pci.__com_redhat_macvtap_compat=on, it
+understands that the device is using a macvtap device rather than
+standard tap device and, if the other two items above are also true,
+it disables merged buffers for the device (on the assumption that it
+might be possible the guest could be migrated to a host that doesn't
+have merged buffer support for macvtap).
+
+libvirt's job is to add the option to the qemu commandline in all
+cases when an interface is using macvtap+virtio *and the qemu being
+used also supports the option*. The important details here are 1) this
+means the behavior is in favor of compatibility, rather than
+performance, and 2) the final decision of whether or not to disable
+merged buffers is left up to qemu, thus avoiding the need for libvirt
+to attempt and interpret the machine type (which libvirt otherwise
+treats as an opaque value) and/or have any new configuration exposed
+to the user. In effect, when libvirt adds
+"__com_redhat_macvtap_compat=on" to the commandline, it is just
+telling qemu "This interface uses macvtap, not a traditional tap
+device", nothing more and nothing less.
+
+If a guest that was originally defined on a host that is pre-RHEL6.3
+is using macvtap+virtio, the best possible performance is desired,
+*AND* the admin knows for a certainty that the guest will never be
+migrated to a host that is running RHEL older than 6.3, they should
+change the machine type in the guest's config from (e.g.)  "rhel6.2.0"
+to "rhel6.3.0". If this change in machine type is not possible, they
+will just have to live with the previous performance (just as they
+would need to do with any other new feature whose presence depends on
+machine-type).
+
+Note that there is no documentation accompanying this patch, because
+there are no new user-visible configuration knobs associated with
+it. There should, however, be a technical note included with the
+release that informs users of the need to update machine-type in order
+to gain better network performance on macvtap interfaces.
+
+There also are no test cases - unfortunately, since this option can
+only be added to the commandline for macvtap netdevs, and
+qemuxml2argvtest is unable to test any interface config that uses
+tap/macvtap devices, we are unable to test xml2argv conversion that
+would result in __com_redhat_macvtap_compat on the commandline.
+
+* src/qemu/qemu_capabilities.[ch]
+
+  Check for qemu support of __com_redhat_macvtap_compt option to
+  virtio-net-pci devices.
+
+* src/qemu/qemu_command.c
+
+  add __com_redhat_macvtap_compat=on to netdev "-device" arg at
+  appropriate times.
+
+Conflicts:
+
+	src/qemu/qemu_capabilities.c: some context changes
+
+Signed-off-by: Daniel Veillard <veillard@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 3 +++
+ src/qemu/qemu_capabilities.h | 1 +
+ src/qemu/qemu_command.c      | 8 ++++++++
+ 3 files changed, 12 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 1869fea..c38fcc0 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -184,6 +184,7 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "reboot-timeout", /* 110 */
+               "dump-guest-core",
+               "disable-ksm", /* 112 */
++              "virtio-net-pci.__com_redhat_macvtap_compat", /* RHEL-specific */
+     );
+ 
+ struct _qemuCaps {
+@@ -1601,6 +1602,8 @@ qemuCapsParseDeviceStr(const char *str, qemuCapsPtr caps)
+         qemuCapsSet(caps, QEMU_CAPS_DISABLE_S3);
+     if (strstr(str, "PIIX4_PM.disable_s4="))
+         qemuCapsSet(caps, QEMU_CAPS_DISABLE_S4);
++    if (strstr(str, "virtio-net-pci.__com_redhat_macvtap_compat"))
++        qemuCapsSet(caps, QEMU_CAPS_VIRTIO_NET_MACVTAP_COMPAT);
+ 
+     return 0;
+ }
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index a16a3c4..1f523ac 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -149,6 +149,7 @@ enum qemuCapsFlags {
+     QEMU_CAPS_DUMP_GUEST_CORE    = 111, /* dump-guest-core-parameter */
+ 
+     QEMU_CAPS_DISABLE_KSM           , /* Is '-redhat-disable-KSM' available? */
++    QEMU_CAPS_VIRTIO_NET_MACVTAP_COMPAT, /* virtio-net-pci.__com_redhat_macvtap_compat */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 8431f65..590be08 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -3048,6 +3048,14 @@ qemuBuildNicDevStr(virDomainNetDefPtr net,
+             virBufferAsprintf(&buf, ",event_idx=%s",
+                               virDomainVirtioEventIdxTypeToString(net->driver.virtio.event_idx));
+         }
++        /* Always add this option if it's available and the interface
++         * is macvtap. qemu will decide if it's really necessary for
++         * the current machine-type.
++         */
++        if (virDomainNetGetActualType(net) == VIR_DOMAIN_NET_TYPE_DIRECT &&
++            qemuCapsGet(caps, QEMU_CAPS_VIRTIO_NET_MACVTAP_COMPAT)) {
++            virBufferAddLit(&buf, ",__com_redhat_macvtap_compat=on");
++        }
+     }
+     if (vlan == -1)
+         virBufferAsprintf(&buf, ",netdev=host%s", net->info.alias);
+-- 
+1.7.11.4
+

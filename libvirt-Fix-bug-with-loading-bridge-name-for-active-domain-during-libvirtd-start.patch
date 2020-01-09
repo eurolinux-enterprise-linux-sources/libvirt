@@ -1,0 +1,49 @@
+From 109def26a14dd022e7d7741bf4c22ed5377b7e2d Mon Sep 17 00:00:00 2001
+Message-Id: <109def26a14dd022e7d7741bf4c22ed5377b7e2d@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Wed, 26 Nov 2014 15:48:22 +0100
+Subject: [PATCH] Fix bug with loading bridge name for active domain during
+ libvirtd start
+
+If you have a bridge network in running domain and libvirtd is restarted
+the information about host bridge interface is lost from live xml.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1140085
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit a71f741ec57634957adcac8a59b1ef27641580ad)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1146310
+
+Conflicts:
+	src/conf/domain_conf.c - missing context c2fbb3c6
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 03281b1..b44f99b 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -4928,6 +4928,15 @@ virDomainActualNetDefParseXML(xmlNodePtr node,
+                                               hostdev, flags) < 0) {
+             goto error;
+         }
++    } else if (actual->type == VIR_DOMAIN_NET_TYPE_BRIDGE) {
++        char *brname = virXPathString("string(./source/@bridge)", ctxt);
++        if (!brname) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("Missing <source> element with bridge name in "
++                             "interface's <actual> element"));
++            goto error;
++        }
++        actual->data.bridge.brname = brname;
+     }
+ 
+     bandwidth_node = virXPathNode("./bandwidth", ctxt);
+-- 
+2.2.0
+

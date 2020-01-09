@@ -1,0 +1,66 @@
+From bfe94220ef99252868ce58af6a044b79ada9e26a Mon Sep 17 00:00:00 2001
+Message-Id: <bfe94220ef99252868ce58af6a044b79ada9e26a@dist-git>
+From: Doug Goldstein <cardoe@cardoe.com>
+Date: Tue, 8 Sep 2015 12:05:00 +0200
+Subject: [PATCH] Allow <source> for type=block to have no dev
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1220197
+
+Currently the XML parser already allows the following syntax:
+  <disk type='block' device='cdrom'>
+    <source startupPolicy='optional'/>
+    <target dev='hda' bus='ide'/>
+    <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+  </disk>
+
+But it if the dev value is NULL then it would not have the leading
+"<source ", resulting in invalid XML.
+
+(cherry picked from commit 4b5652d0dcb2d53fd4240f589a63aaa434650fe0)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/schemas/domaincommon.rng | 8 +++++---
+ src/conf/domain_conf.c        | 4 ++--
+ 2 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 5f5309f..3602c58 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -1037,9 +1037,11 @@
+           <interleave>
+             <optional>
+               <element name="source">
+-                <attribute name="dev">
+-                  <ref name="absFilePath"/>
+-                </attribute>
++                <optional>
++                  <attribute name="dev">
++                    <ref name="absFilePath"/>
++                  </attribute>
++                </optional>
+                 <optional>
+                   <ref name="startupPolicy"/>
+                 </optional>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 9e59165..d77f191 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -12636,8 +12636,8 @@ virDomainDiskDefFormat(virBufferPtr buf,
+             }
+             break;
+         case VIR_DOMAIN_DISK_TYPE_BLOCK:
+-            virBufferEscapeString(buf, "      <source dev='%s'",
+-                                  def->src);
++            virBufferAddLit(buf, "      <source");
++            virBufferEscapeString(buf, " dev='%s'", def->src);
+             if (def->startupPolicy)
+                 virBufferEscapeString(buf, " startupPolicy='%s'",
+                                       startupPolicy);
+-- 
+2.6.2
+

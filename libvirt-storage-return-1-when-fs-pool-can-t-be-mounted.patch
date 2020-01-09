@@ -1,0 +1,52 @@
+From 12d35a3596c678b5f9d3be7ad7ff4c09dbe680c0 Mon Sep 17 00:00:00 2001
+Message-Id: <12d35a3596c678b5f9d3be7ad7ff4c09dbe680c0.1373885148.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Thu, 11 Jul 2013 14:02:54 +0200
+Subject: [PATCH] storage: return -1 when fs pool can't be mounted
+
+Don't reuse the return value of virStorageBackendFileSystemIsMounted.
+If it's 0, we'd return it even if the mount command failed.
+
+Also, don't report another error if it's -1, since one has already
+been reported.
+
+Introduced by 258e06c.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=983539
+(cherry picked from commit 13fde7ceab556804dc6cfb3e56938fb948ffe83d)
+---
+ src/storage/storage_backend_fs.c | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index 7578a62..ce57e74 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -352,6 +352,7 @@ virStorageBackendFileSystemMount(virStoragePoolObjPtr pool) {
+                       pool->def->source.format == VIR_STORAGE_POOL_NETFS_GLUSTERFS);
+     virCommandPtr cmd = NULL;
+     int ret = -1;
++    int rc;
+ 
+     if (pool->def->type == VIR_STORAGE_POOL_NETFS) {
+         if (pool->def->source.nhost != 1) {
+@@ -378,10 +379,12 @@ virStorageBackendFileSystemMount(virStoragePoolObjPtr pool) {
+     }
+ 
+     /* Short-circuit if already mounted */
+-    if ((ret = virStorageBackendFileSystemIsMounted(pool)) != 0) {
+-        virReportError(VIR_ERR_OPERATION_INVALID,
+-                       _("Target '%s' is already mounted"),
+-                       pool->def->target.path);
++    if ((rc = virStorageBackendFileSystemIsMounted(pool)) != 0) {
++        if (rc == 1) {
++            virReportError(VIR_ERR_OPERATION_INVALID,
++                           _("Target '%s' is already mounted"),
++                           pool->def->target.path);
++        }
+         return -1;
+     }
+ 
+-- 
+1.8.3.2
+

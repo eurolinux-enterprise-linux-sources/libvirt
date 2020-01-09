@@ -1,0 +1,50 @@
+From e95c864265757507e2d44a69ec9510232f5b7734 Mon Sep 17 00:00:00 2001
+Message-Id: <e95c864265757507e2d44a69ec9510232f5b7734.1373271641.git.jdenemar@redhat.com>
+From: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+Date: Wed, 10 Apr 2013 16:26:03 -0600
+Subject: [PATCH] libvirt: Increase connection reference count for callbacks
+
+https://bugzilla.redhat.com/show_bug.cgi?id=911609
+
+By adjusting the reference count of the connection object we
+prevent races between callback function and virConnectClose.
+
+Signed-off-by: Viktor Mihajlovski <mihajlov@linux.vnet.ibm.com>
+(cherry picked from commit 03a43efa86f5099d3f6df334f73961a535e488b5)
+---
+ src/libvirt.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 04a218b..188abe1 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -19690,6 +19690,8 @@ int virConnectRegisterCloseCallback(virConnectPtr conn,
+         return -1;
+     }
+ 
++    virObjectRef(conn);
++
+     virMutexLock(&conn->lock);
+ 
+     virCheckNonNullArgGoto(cb, error);
+@@ -19710,6 +19712,7 @@ int virConnectRegisterCloseCallback(virConnectPtr conn,
+ 
+ error:
+     virMutexUnlock(&conn->lock);
++    virObjectUnref(conn);
+     virDispatchError(NULL);
+     return -1;
+ }
+@@ -19759,6 +19762,8 @@ int virConnectUnregisterCloseCallback(virConnectPtr conn,
+ 
+     virMutexUnlock(&conn->lock);
+ 
++    virObjectUnref(conn);
++
+     return 0;
+ 
+ error:
+-- 
+1.8.2.1
+

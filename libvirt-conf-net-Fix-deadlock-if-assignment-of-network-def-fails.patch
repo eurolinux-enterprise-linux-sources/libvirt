@@ -1,0 +1,30 @@
+From 7f343b79d1ebcb4e4ebbd020573973fe72e4f441 Mon Sep 17 00:00:00 2001
+Message-Id: <7f343b79d1ebcb4e4ebbd020573973fe72e4f441.1373271642.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 13 Jun 2013 11:12:22 +0200
+Subject: [PATCH] conf: net: Fix deadlock if assignment of network def fails
+
+https://bugzilla.redhat.com/show_bug.cgi?id=921777
+
+When the assignment fails, the network object is not unlocked and next
+call that would use it deadlocks.
+(cherry picked from commit f8230891243f86e920d04a0751512cc31055ff8c)
+---
+ src/conf/network_conf.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index 54d1d35..89d9096 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -295,6 +295,7 @@ virNetworkAssignDef(virNetworkObjListPtr nets,
+ 
+     if ((network = virNetworkFindByName(nets, def->name))) {
+         if (virNetworkObjAssignDef(network, def, live) < 0) {
++            virNetworkObjUnlock(network);
+             return NULL;
+         }
+         return network;
+-- 
+1.8.2.1
+

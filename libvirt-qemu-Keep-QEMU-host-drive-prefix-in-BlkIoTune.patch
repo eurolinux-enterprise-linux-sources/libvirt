@@ -1,0 +1,62 @@
+From 804e4adddbca39e1f0fa8f998398e6c4f3f33cea Mon Sep 17 00:00:00 2001
+Message-Id: <804e4adddbca39e1f0fa8f998398e6c4f3f33cea@dist-git>
+From: Stefan Hajnoczi <stefanha@redhat.com>
+Date: Mon, 23 Mar 2015 10:09:02 +0100
+Subject: [PATCH] qemu: Keep QEMU host drive prefix in BlkIoTune
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1203633
+
+The QEMU -drive id= begins with libvirt's QEMU host drive prefix
+("drive-"), which is stripped off in several places two convert between
+host ("-drive") and guest ("-device") device names.
+
+In the case of BlkIoTune it is unnecessary to strip the QEMU host drive
+prefix because we operate on "info block"/"query-block" output that uses
+host drive names.
+
+Stripping the prefix incorrectly caused string comparisons to fail since
+we were comparing the guest device name against the host device name.
+
+Signed-off-by: Stefan Hajnoczi <stefanha@redhat.com>
+(cherry picked from commit 04ee70bfda21bfdb48b55f074aed25fc75bb9226)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_monitor_json.c | 3 ---
+ src/qemu/qemu_monitor_text.c | 3 ---
+ 2 files changed, 6 deletions(-)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 8e23c46..b6ee631 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -3995,9 +3995,6 @@ qemuMonitorJSONBlockIoThrottleInfo(virJSONValuePtr result,
+             goto cleanup;
+         }
+ 
+-       if(STRPREFIX(current_dev, QEMU_DRIVE_HOST_PREFIX))
+-            current_dev += strlen(QEMU_DRIVE_HOST_PREFIX);
+-
+         if (STREQ(current_dev, device))
+             continue;
+ 
+diff --git a/src/qemu/qemu_monitor_text.c b/src/qemu/qemu_monitor_text.c
+index 1d6a3d1..a54a611 100644
+--- a/src/qemu/qemu_monitor_text.c
++++ b/src/qemu/qemu_monitor_text.c
+@@ -3159,9 +3159,6 @@ qemuMonitorTextParseBlockIoThrottle(const char *result,
+     p = result;
+ 
+     while (*p) {
+-        if (STRPREFIX(p, QEMU_DRIVE_HOST_PREFIX))
+-            p += strlen(QEMU_DRIVE_HOST_PREFIX);
+-
+         if (STREQLEN(p, device, devnamelen) &&
+             p[devnamelen] == ':' && p[devnamelen+1] == ' ') {
+ 
+-- 
+2.3.5
+

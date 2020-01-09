@@ -1,0 +1,46 @@
+From 95e3c4df367b01c4c05a4d76555339527125ea89 Mon Sep 17 00:00:00 2001
+Message-Id: <95e3c4df367b01c4c05a4d76555339527125ea89@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 12 Feb 2016 17:45:42 +0100
+Subject: [PATCH] qemu: Fix formatting flags in qemuDomainSaveImageOpen
+
+Due to incorrect qemuDomainDefCopy flags libvirt would drop any
+passwords from domain XML passed to virDomainRestoreFlags or
+virDomainSaveImageDefineXML.
+
+This is a combined backport of the following upstream commits:
+    f76df311e8896957b92d0e0c5251ee3e6754d9ac
+    cf2d4c603c37a58c7c6cacc87f0e78b45903ae7c
+    c75f42f3318463b0555edac333c8f20d54b4d5dc
+
+The code in RHEL-6 significantly differs from upstream and trying to
+cherry-pick each of the commits results in a giant conflict. Because of
+this and because all but the last commit were just breaking libvirt in a
+different ways, I decided to implement the fix from scratch in a single
+patch.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1307094
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 0c923ff..7432a03 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5555,7 +5555,9 @@ qemuDomainSaveImageOpen(struct qemud_driver *driver,
+                                              VIR_DOMAIN_XML_INACTIVE)))
+             goto error;
+ 
+-        newdef = qemuDomainDefCopy(driver, def2, VIR_DOMAIN_XML_MIGRATABLE);
++        newdef = qemuDomainDefCopy(driver, def2,
++                                   QEMU_DOMAIN_FORMAT_LIVE_FLAGS |
++                                   VIR_DOMAIN_XML_MIGRATABLE);
+         if (!newdef) {
+             virDomainDefFree(def2);
+             goto error;
+-- 
+2.7.1
+

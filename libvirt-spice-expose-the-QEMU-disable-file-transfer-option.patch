@@ -1,0 +1,328 @@
+From 32f26ecb87ebf351f0922299aea923c83b7ce373 Mon Sep 17 00:00:00 2001
+Message-Id: <32f26ecb87ebf351f0922299aea923c83b7ce373@dist-git>
+From: Francesco Romani <fromani@redhat.com>
+Date: Tue, 6 May 2014 11:09:04 +0200
+Subject: [PATCH] spice: expose the QEMU disable file transfer option
+
+https://bugzilla.redhat.com/show_bug.cgi?id=983018
+
+spice-server offers an API to disable file transfer messages
+on the agent channel between the client and the guest.
+This is supported in qemu through the disable-agent-file-xfer option.
+
+This patch exposes this option to libvirt.
+Adds a new element 'filetransfer', with one property,
+'enable', which accepts a boolean.
+Default is enabled, for backward compatibility.
+
+Depends on the capability exported in the first patch of the series.
+(cherry picked from commit 08d07e5fd8a4c072bf040b3949bbd969f98d1081)
+
+This is a manual backport as the code base is too different in upstream.
+
+Signed-off-by: Francesco Romani <fromani@redhat.com>
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in                          |  8 ++++++
+ docs/schemas/domaincommon.rng                      | 11 ++++++++
+ src/conf/domain_conf.c                             | 31 ++++++++++++++++++++-
+ src/conf/domain_conf.h                             | 10 +++++++
+ src/libvirt_private.syms                           |  2 ++
+ src/qemu/qemu_command.c                            |  9 ++++++
+ ...emuxml2argv-graphics-spice-agent-file-xfer.args |  7 +++++
+ ...qemuxml2argv-graphics-spice-agent-file-xfer.xml | 32 ++++++++++++++++++++++
+ .../qemuxml2argv-graphics-spice.args               |  5 ++--
+ .../qemuxml2argv-graphics-spice.xml                |  1 +
+ tests/qemuxml2argvtest.c                           |  9 +++++-
+ 11 files changed, 121 insertions(+), 4 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-agent-file-xfer.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-agent-file-xfer.xml
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 6023d32..d9e0392 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -3365,6 +3365,7 @@ qemu-kvm -net nic,model=? /dev/null
+     &lt;streaming mode='filter'/&gt;
+     &lt;clipboard copypaste='no'/&gt;
+     &lt;mouse mode='client'/&gt;
++    &lt;filetransfer enable='no'/&gt;
+   &lt;/graphics&gt;</pre>
+             <p>
+               Spice supports variable compression settings for audio,
+@@ -3404,6 +3405,13 @@ qemu-kvm -net nic,model=? /dev/null
+               <span class="since">since 0.9.11</span>. If no mode is
+               specified, the qemu default will be used (client mode).
+             </p>
++            <p>
++              File transfer functionality (via Spice agent) is set using the
++              <code>filetransfer</code> element.
++              It is enabled by default, and can be disabled by setting the
++              <code>enable</code> property to <code>no</code> ,
++              since <span class="since">since 1.2.2</span>.
++            </p>
+           </dd>
+           <dt><code>"rdp"</code></dt>
+           <dd>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 44db05b..2eaa2c0 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -2167,6 +2167,17 @@
+                 <empty/>
+               </element>
+             </optional>
++            <optional>
++              <element name="filetransfer">
++                <attribute name="enable">
++                  <choice>
++                    <value>yes</value>
++                    <value>no</value>
++                  </choice>
++                </attribute>
++                <empty/>
++              </element>
++            </optional>
+           </interleave>
+         </group>
+         <group>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index dda140b..ce41f39 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -543,6 +543,12 @@ VIR_ENUM_IMPL(virDomainGraphicsSpiceClipboardCopypaste,
+               "yes",
+               "no");
+ 
++VIR_ENUM_IMPL(virDomainGraphicsSpiceAgentFileTransfer,
++              VIR_DOMAIN_GRAPHICS_SPICE_AGENT_FILE_TRANSFER_LAST,
++              "default",
++              "yes",
++              "no");
++
+ VIR_ENUM_IMPL(virDomainHostdevMode, VIR_DOMAIN_HOSTDEV_MODE_LAST,
+               "subsystem",
+               "capabilities")
+@@ -6993,6 +6999,26 @@ virDomainGraphicsDefParseXML(xmlNodePtr node,
+                     VIR_FREE(copypaste);
+ 
+                     def->data.spice.copypaste = copypasteVal;
++                } else if (xmlStrEqual(cur->name, BAD_CAST "filetransfer")) {
++                    char *enable = virXMLPropString(cur, "enable");
++                    int enableVal;
++
++                    if (!enable) {
++                        virReportError(VIR_ERR_XML_ERROR, "%s",
++                                       _("spice filetransfer missing enable"));
++                        goto error;
++                    }
++
++                    if ((enableVal =
++                         virDomainGraphicsSpiceAgentFileTransferTypeFromString(enable)) <= 0) {
++                        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                                       _("unknown enable value '%s'"), enable);
++                        VIR_FREE(enable);
++                        goto error;
++                    }
++                    VIR_FREE(enable);
++
++                    def->data.spice.filetransfer = enableVal;
+                 } else if (xmlStrEqual(cur->name, BAD_CAST "mouse")) {
+                     const char *mode = virXMLPropString(cur, "mode");
+                     int modeVal;
+@@ -14085,7 +14111,7 @@ virDomainGraphicsDefFormat(virBufferPtr buf,
+         if (!children && (def->data.spice.image || def->data.spice.jpeg ||
+                           def->data.spice.zlib || def->data.spice.playback ||
+                           def->data.spice.streaming || def->data.spice.copypaste ||
+-                          def->data.spice.mousemode)) {
++                          def->data.spice.mousemode || def->data.spice.filetransfer)) {
+             virBufferAddLit(buf, ">\n");
+             children = 1;
+         }
+@@ -14110,6 +14136,9 @@ virDomainGraphicsDefFormat(virBufferPtr buf,
+         if (def->data.spice.copypaste)
+             virBufferAsprintf(buf, "      <clipboard copypaste='%s'/>\n",
+                               virDomainGraphicsSpiceClipboardCopypasteTypeToString(def->data.spice.copypaste));
++        if (def->data.spice.filetransfer)
++            virBufferAsprintf(buf, "      <filetransfer enable='%s'/>\n",
++                              virDomainGraphicsSpiceAgentFileTransferTypeToString(def->data.spice.filetransfer));
+     }
+ 
+     if (children) {
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 5739e55..d46a864 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1272,6 +1272,14 @@ enum virDomainGraphicsSpiceClipboardCopypaste {
+     VIR_DOMAIN_GRAPHICS_SPICE_CLIPBOARD_COPYPASTE_LAST
+ };
+ 
++enum virDomainGraphicsSpiceAgentFileTransfer {
++    VIR_DOMAIN_GRAPHICS_SPICE_AGENT_FILE_TRANSFER_DEFAULT = 0,
++    VIR_DOMAIN_GRAPHICS_SPICE_AGENT_FILE_TRANSFER_YES,
++    VIR_DOMAIN_GRAPHICS_SPICE_AGENT_FILE_TRANSFER_NO,
++
++    VIR_DOMAIN_GRAPHICS_SPICE_AGENT_FILE_TRANSFER_LAST
++};
++
+ enum virDomainGraphicsListenType {
+     VIR_DOMAIN_GRAPHICS_LISTEN_TYPE_NONE = 0,
+     VIR_DOMAIN_GRAPHICS_LISTEN_TYPE_ADDRESS,
+@@ -1341,6 +1349,7 @@ struct _virDomainGraphicsDef {
+             int playback;
+             int streaming;
+             int copypaste;
++            int filetransfer;
+         } spice;
+     } data;
+     /* nListens, listens, and *port are only useful if type is vnc,
+@@ -2340,6 +2349,7 @@ VIR_ENUM_DECL(virDomainInputBus)
+ VIR_ENUM_DECL(virDomainGraphics)
+ VIR_ENUM_DECL(virDomainGraphicsListen)
+ VIR_ENUM_DECL(virDomainGraphicsAuthConnected)
++VIR_ENUM_DECL(virDomainGraphicsSpiceAgentFileTransfer)
+ VIR_ENUM_DECL(virDomainGraphicsSpiceChannelName)
+ VIR_ENUM_DECL(virDomainGraphicsSpiceChannelMode)
+ VIR_ENUM_DECL(virDomainGraphicsSpiceImageCompression)
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 8494c3a..7f5d3d7 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -395,6 +395,8 @@ virDomainGraphicsListenGetType;
+ virDomainGraphicsListenSetAddress;
+ virDomainGraphicsListenSetNetwork;
+ virDomainGraphicsListenSetType;
++virDomainGraphicsSpiceAgentFileTransferTypeFromString;
++virDomainGraphicsSpiceAgentFileTransferTypeToString;
+ virDomainGraphicsSpiceChannelModeTypeFromString;
+ virDomainGraphicsSpiceChannelModeTypeToString;
+ virDomainGraphicsSpiceChannelNameTypeFromString;
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 87f0c1b..643c37b 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4918,6 +4918,15 @@ qemuBuildGraphicsSPICECommandLine(struct qemud_driver *driver,
+                           virDomainGraphicsSpiceStreamingModeTypeToString(graphics->data.spice.streaming));
+     if (graphics->data.spice.copypaste == VIR_DOMAIN_GRAPHICS_SPICE_CLIPBOARD_COPYPASTE_NO)
+         virBufferAddLit(&opt, ",disable-copy-paste");
++    if (graphics->data.spice.filetransfer == VIR_DOMAIN_GRAPHICS_SPICE_AGENT_FILE_TRANSFER_NO) {
++        if (!qemuCapsGet(caps, QEMU_CAPS_SPICE_FILE_XFER_DISABLE)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                           _("This QEMU can't disable file transfers through spice"));
++            goto error;
++        } else {
++            virBufferAddLit(&opt, ",disable-agent-file-xfer");
++        }
++    }
+ 
+     if (qemuCapsGet(caps, QEMU_CAPS_SEAMLESS_MIGRATION)) {
+         /* If qemu supports seamless migration turn it
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-agent-file-xfer.args b/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-agent-file-xfer.args
+new file mode 100644
+index 0000000..e54f8c5
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-agent-file-xfer.args
+@@ -0,0 +1,7 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test QEMU_AUDIO_DRV=spice \
++/usr/bin/qemu -S -M pc -m 214 -smp 1 -nodefaults -monitor \
++unix:/tmp/test-monitor,server,nowait -no-acpi -boot c \
++-usb -hda /dev/HostVG/QEMUGuest1 -spice port=5903,tls-port=5904,\
++addr=127.0.0.1,x509-dir=/etc/pki/libvirt-spice,tls-channel=main,\
++disable-agent-file-xfer -vga cirrus -device virtio-balloon-pci,\
++id=balloon0,bus=pci.0,addr=0x3
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-agent-file-xfer.xml b/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-agent-file-xfer.xml
+new file mode 100644
+index 0000000..afbf544
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice-agent-file-xfer.xml
+@@ -0,0 +1,32 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory>219136</memory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='ide' index='0'/>
++    <graphics type='spice' port='5903' tlsPort='5904' autoport='no' listen='127.0.0.1'>
++      <channel name='main' mode='secure'/>
++      <filetransfer enable='no'/>
++    </graphics>
++    <video>
++      <model type='cirrus' vram='9216' heads='1'/>
++    </video>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice.args b/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice.args
+index d7cfae0..b5a7967 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice.args
++++ b/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice.args
+@@ -4,7 +4,8 @@ unix:/tmp/test-monitor,server,nowait -no-acpi -boot c -usb -hda \
+ /dev/HostVG/QEMUGuest1 -spice port=5903,tls-port=5904,addr=127.0.0.1,\
+ x509-dir=/etc/pki/libvirt-spice,tls-channel=default,tls-channel=main,plaintext-channel=inputs,\
+ image-compression=auto_glz,jpeg-wan-compression=auto,zlib-glz-wan-compression=auto,\
+-playback-compression=on,streaming-video=filter,disable-copy-paste -vga \
+-qxl -global qxl.ram_size=67108864 -global qxl.vram_size=18874368 \
++playback-compression=on,streaming-video=filter,disable-copy-paste,\
++disable-agent-file-xfer -vga qxl -global qxl.ram_size=67108864 \
++-global qxl.vram_size=18874368 \
+ -device qxl,id=video1,ram_size=67108864,vram_size=33554432,bus=pci.0,addr=0x4 \
+ -device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice.xml b/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice.xml
+index 9a36660..0b346ba 100644
+--- a/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice.xml
++++ b/tests/qemuxml2argvdata/qemuxml2argv-graphics-spice.xml
+@@ -32,6 +32,7 @@
+       <playback compression='on'/>
+       <streaming mode='filter'/>
+       <clipboard copypaste='no'/>
++      <filetransfer enable='no'/>
+     </graphics>
+     <video>
+       <model type='qxl' ram='65536' vram='18432' heads='1'/>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 534c893..ef60194 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -565,7 +565,8 @@ mymain(void)
+     DO_TEST("graphics-spice",
+             QEMU_CAPS_VGA, QEMU_CAPS_VGA_QXL,
+             QEMU_CAPS_DEVICE, QEMU_CAPS_SPICE,
+-            QEMU_CAPS_DEVICE_QXL);
++            QEMU_CAPS_DEVICE_QXL,
++            QEMU_CAPS_SPICE_FILE_XFER_DISABLE);
+     DO_TEST("graphics-spice-agentmouse",
+             QEMU_CAPS_VGA, QEMU_CAPS_VGA_QXL,
+             QEMU_CAPS_DEVICE, QEMU_CAPS_SPICE,
+@@ -591,6 +592,12 @@ mymain(void)
+             QEMU_CAPS_PCI_MULTIFUNCTION, QEMU_CAPS_USB_HUB,
+             QEMU_CAPS_ICH9_USB_EHCI1, QEMU_CAPS_USB_REDIR,
+             QEMU_CAPS_CHARDEV_SPICEVMC);
++    DO_TEST("graphics-spice-agent-file-xfer",
++            QEMU_CAPS_VGA, QEMU_CAPS_VGA_QXL,
++            QEMU_CAPS_DEVICE, QEMU_CAPS_SPICE,
++            QEMU_CAPS_DEVICE_QXL_VGA,
++            QEMU_CAPS_DEVICE_QXL,
++            QEMU_CAPS_SPICE_FILE_XFER_DISABLE);
+ 
+     DO_TEST("input-usbmouse", NONE);
+     DO_TEST("input-usbtablet", NONE);
+-- 
+1.9.2
+

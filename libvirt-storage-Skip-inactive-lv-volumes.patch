@@ -1,0 +1,99 @@
+From 9534dec2da84caa34a548af29d7c4035b9cb0410 Mon Sep 17 00:00:00 2001
+Message-Id: <9534dec2da84caa34a548af29d7c4035b9cb0410@dist-git>
+From: Osier Yang <jyang@redhat.com>
+Date: Fri, 11 Apr 2014 07:49:20 -0400
+Subject: [PATCH] storage: Skip inactive lv volumes
+
+https://bugzilla.redhat.com/show_bug.cgi?id=748282
+
+If the volume is of a clustered volume group, and not active, the
+related pool APIs fails on opening /dev/vg/lv. If the volume is
+suspended, it hangs on open(2) the volume.
+
+Though the best solution is to expose the volume status in volume
+XML, and even better to provide API to activate/deactivate the volume,
+but it's not the work I want to touch currently. Volume status in
+other status is just fine to skip.
+
+About the 5th field of lv_attr (from man lvs[8])
+<quote>
+ 5 State: (a)ctive, (s)uspended, (I)nvalid snapshot, invalid
+   (S)uspended snapshot, snapshot (m)erge failed,suspended
+   snapshot (M)erge failed, mapped (d)evice present without
+   tables,  mapped device present with (i)nactive table
+</quote>
+
+(cherry picked from commit 59750ed6ea12c4db5ba042fef1a39b963cbfb559)
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/storage/storage_backend_logical.c | 29 +++++++++++++++++++----------
+ 1 file changed, 19 insertions(+), 10 deletions(-)
+
+diff --git a/src/storage/storage_backend_logical.c b/src/storage/storage_backend_logical.c
+index dac3af1..c0274f2 100644
+--- a/src/storage/storage_backend_logical.c
++++ b/src/storage/storage_backend_logical.c
+@@ -77,6 +77,11 @@ virStorageBackendLogicalMakeVol(virStoragePoolObjPtr pool,
+     regmatch_t *vars = NULL;
+     char *p = NULL;
+     int i, err, nextents, nvars, ret = -1;
++    const char *attrs = groups[9];
++
++    /* Skip inactive volume */
++    if (attrs[4] != 'a')
++        return 0;
+ 
+     /* See if we're only looking for a specific volume */
+     if (data != NULL) {
+@@ -279,14 +284,17 @@ virStorageBackendLogicalFindLVs(virStoragePoolObjPtr pool,
+                                 virStorageVolDefPtr vol)
+ {
+     /*
+-     *  # lvs --separator , --noheadings --units b --unbuffered --nosuffix --options "lv_name,origin,uuid,devices,seg_size,vg_extent_size,size" VGNAME
+-     *  RootLV,,06UgP5-2rhb-w3Bo-3mdR-WeoL-pytO-SAa2ky,/dev/hda2(0),5234491392,33554432,5234491392
+-     *  SwapLV,,oHviCK-8Ik0-paqS-V20c-nkhY-Bm1e-zgzU0M,/dev/hda2(156),1040187392,33554432,1040187392
+-     *  Test2,,3pg3he-mQsA-5Sui-h0i6-HNmc-Cz7W-QSndcR,/dev/hda2(219),1073741824,33554432,1073741824
+-     *  Test3,,UB5hFw-kmlm-LSoX-EI1t-ioVd-h7GL-M0W8Ht,/dev/hda2(251),2181038080,33554432,2181038080
+-     *  Test3,Test2,UB5hFw-kmlm-LSoX-EI1t-ioVd-h7GL-M0W8Ht,/dev/hda2(187),1040187392,33554432,1040187392
++     * # lvs --separator , --noheadings --units b --unbuffered --nosuffix --options \
++     * "lv_name,origin,uuid,devices,seg_size,vg_extent_size,size,lv_attr" VGNAME
++     *
++     * RootLV,,06UgP5-2rhb-w3Bo-3mdR-WeoL-pytO-SAa2ky,/dev/hda2(0),5234491392,33554432,5234491392,-wi-ao
++     * SwapLV,,oHviCK-8Ik0-paqS-V20c-nkhY-Bm1e-zgzU0M,/dev/hda2(156),1040187392,33554432,1040187392,-wi-ao
++     * Test2,,3pg3he-mQsA-5Sui-h0i6-HNmc-Cz7W-QSndcR,/dev/hda2(219),1073741824,33554432,1073741824,owi-a-
++     * Test3,,UB5hFw-kmlm-LSoX-EI1t-ioVd-h7GL-M0W8Ht,/dev/hda2(251),2181038080,33554432,2181038080,-wi-a-
++     * Test3,Test2,UB5hFw-kmlm-LSoX-EI1t-ioVd-h7GL-M0W8Ht,/dev/hda2(187),1040187392,33554432,1040187392,swi-a-
+      *
+-     * Pull out name, origin, & uuid, device, device extent start #, segment size, extent size.
++     * Pull out name, origin, & uuid, device, device extent start #,
++     * segment size, extent size, size, attrs
+      *
+      * NB can be multiple rows per volume if they have many extents
+      *
+@@ -298,10 +306,10 @@ virStorageBackendLogicalFindLVs(virStoragePoolObjPtr pool,
+      *    striped, so "," is not a suitable separator either (rhbz 727474).
+      */
+     const char *regexes[] = {
+-       "^\\s*(\\S+)#(\\S*)#(\\S+)#(\\S+)#(\\S+)#([0-9]+)#(\\S+)#([0-9]+)#([0-9]+)#?\\s*$"
++       "^\\s*(\\S+)#(\\S*)#(\\S+)#(\\S+)#(\\S+)#([0-9]+)#(\\S+)#([0-9]+)#([0-9]+)#(\\S+)#?\\s*$"
+     };
+     int vars[] = {
+-        9
++        10
+     };
+     int ret = -1;
+     virCommandPtr cmd;
+@@ -312,7 +320,8 @@ virStorageBackendLogicalFindLVs(virStoragePoolObjPtr pool,
+                                "--units", "b",
+                                "--unbuffered",
+                                "--nosuffix",
+-                               "--options", "lv_name,origin,uuid,devices,segtype,stripes,seg_size,vg_extent_size,size",
++                               "--options",
++                               "lv_name,origin,uuid,devices,segtype,stripes,seg_size,vg_extent_size,size,lv_attr",
+                                pool->def->source.name,
+                                NULL);
+     if (virStorageBackendRunProgRegex(pool,
+-- 
+1.9.2
+

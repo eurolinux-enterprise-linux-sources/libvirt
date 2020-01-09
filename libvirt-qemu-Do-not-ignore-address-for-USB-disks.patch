@@ -1,0 +1,32 @@
+From c710e7bb41c3f7a05bdf4fb2cd14e46fb20fc0bf Mon Sep 17 00:00:00 2001
+Message-Id: <c710e7bb41c3f7a05bdf4fb2cd14e46fb20fc0bf@dist-git>
+From: Vladislav Bogdanov <bubble@hoster-ok.com>
+Date: Thu, 24 Apr 2014 16:25:47 +0200
+Subject: [PATCH] qemu: Do not ignore address for USB disks
+
+https://bugzilla.redhat.com/show_bug.cgi?id=985166
+
+(cherry picked from commit 8f708761c0d0e4eaf36bcb274d4f49fc3e0c3874)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 7460e02..0d2d01b 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -2818,6 +2818,9 @@ qemuBuildDriveDevStr(virDomainDefPtr def,
+         break;
+     case VIR_DOMAIN_DISK_BUS_USB:
+         virBufferAddLit(&opt, "usb-storage");
++
++        if (qemuBuildDeviceAddressStr(&opt, &disk->info, caps) < 0)
++            goto error;
+         break;
+     default:
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+-- 
+1.9.2
+

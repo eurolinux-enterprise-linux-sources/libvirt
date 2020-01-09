@@ -1,0 +1,38 @@
+From e81f8d175337ec05da67aafb05477026218db45a Mon Sep 17 00:00:00 2001
+Message-Id: <e81f8d175337ec05da67aafb05477026218db45a.1376483447.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 13 Aug 2013 15:13:57 -0600
+Subject: [PATCH] qemu: Take error path if acquiring of job fails in
+ qemuDomainSaveInternal
+
+Due to a goto statement missed when refactoring in 2771f8b74c1bf50d1fa
+when acquiring of a domain job failed the error path was not taken. This
+resulted into a crash afterwards as an extra reference was removed from a
+domain object leading to it being freed. An attempt to list the domains
+leaded to a crash of the daemon afterwards.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=928661
+(cherry picked from commit 29c2208c045e16f55bbfd25db266c30e90fa3535)
+
+Conflicts:
+
+	src/qemu/qemu_driver.c - context: no backport of a9e97e0 lock elision
+---
+ src/qemu/qemu_driver.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index b87750a..3d055ff 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2985,6 +2985,7 @@ qemuDomainSaveInternal(struct qemud_driver *driver, virDomainPtr dom,
+ 
+     if (qemuDomainObjBeginAsyncJobWithDriver(driver, vm,
+                                              QEMU_ASYNC_JOB_SAVE) < 0)
++        goto cleanup;
+ 
+     memset(&priv->job.info, 0, sizeof(priv->job.info));
+     priv->job.info.type = VIR_DOMAIN_JOB_UNBOUNDED;
+-- 
+1.8.3.2
+

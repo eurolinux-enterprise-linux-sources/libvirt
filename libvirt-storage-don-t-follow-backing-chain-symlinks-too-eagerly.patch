@@ -1,0 +1,257 @@
+From adce7bfaddbd374008a87f1fbcc219f80a2363b7 Mon Sep 17 00:00:00 2001
+Message-Id: <adce7bfaddbd374008a87f1fbcc219f80a2363b7.1373271637.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 25 Feb 2013 16:21:52 -0700
+Subject: [PATCH] storage: don't follow backing chain symlinks too eagerly
+
+https://bugzilla.redhat.com/show_bug.cgi?id=903248
+
+If you have a qcow2 file /path1/to/file pointed to by symlink
+/path2/symlink, and pass qemu /path2/symlink, then qemu treats
+a relative backing file in the qcow2 metadata as being relative
+to /path2, not /path1/to.  Yes, this means that it is possible
+to create a qcow2 file where the choice of WHICH directory and
+symlink you access its contents from will then determine WHICH
+backing file (if any) you actually find; the results can be
+rather screwy, but we have to match what qemu does.
+
+Libvirt and qemu default to creating absolute backing file
+names, so most users don't hit this.  But at least VDSM uses
+symlinks and relative backing names alongside the
+--reuse-external flags to libvirt snapshot operations, with the
+result that libvirt was failing to follow the intended chain of
+backing files, and then backing files were not granted the
+necessary sVirt permissions to be opened by qemu.
+
+See https://bugzilla.redhat.com/show_bug.cgi?id=903248 for
+more gory details.  This fixes a regression introduced in
+commit 8250783.
+
+I tested this patch by creating the following chain:
+
+ls /home/eblake/Downloads/Fedora.iso # raw file for base
+cd /var/lib/libvirt/images
+qemu-img create -f qcow2 \
+  -obacking_file=/home/eblake/Downloads/Fedora.iso,backing_fmt=raw one
+mkdir sub
+cd sub
+ln -s ../one onelink
+qemu-img create -f qcow2 \
+  -obacking_file=../sub/onelink,backing_fmt=qcow2 two
+mv two ..
+ln -s ../two twolink
+qemu-img create -f qcow2 \
+  -obacking_file=../sub/twolink,backing_fmt=qcow2 three
+mv three ..
+ln -s ../three threelink
+
+then pointing my domain at /var/lib/libvirt/images/sub/threelink.
+Prior to this patch, I got complaints about missing backing
+files; afterwards, I was able to verify that the backing chain
+(and hence DAC and SELinux relabels) of the entire chain worked.
+
+* src/util/virstoragefile.h (_virStorageFileMetadata): Add
+directory member.
+* src/util/virstoragefile.c (absolutePathFromBaseFile): Drop,
+replaced by...
+(virFindBackingFile): ...better function.
+(virStorageFileGetMetadataInternal): Add an argument.
+(virStorageFileGetMetadataFromFD, virStorageFileChainLookup)
+(virStorageFileGetMetadata): Update callers.
+(cherry picked from commit d1333dd0fbb944a7d5fe56180bcf6b0fd4f85e18)
+---
+ src/util/storage_file.c | 88 +++++++++++++++++++++++++++++++------------------
+ src/util/storage_file.h |  1 +
+ 2 files changed, 57 insertions(+), 32 deletions(-)
+
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index 72b3885..3ff04e1 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -485,44 +485,56 @@ qedGetBackingStore(char **res,
+ }
+ 
+ /**
+- * Return an absolute path corresponding to PATH, which is absolute or relative
+- * to the directory containing BASE_FILE, or NULL on error
++ * Given a starting point START (either an original file name, or the
++ * directory containing the original name, depending on START_IS_DIR)
++ * and a possibly relative backing file NAME, compute the relative
++ * DIRECTORY (optional) and CANONICAL (mandatory) location of the
++ * backing file.  Return 0 on success, negative on error.
+  */
+-static char *
+-absolutePathFromBaseFile(const char *base_file, const char *path)
++static int ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(5)
++virFindBackingFile(const char *start, bool start_is_dir, const char *path,
++                   char **directory, char **canonical)
+ {
+-    char *res = NULL;
+-    char *tmp = NULL;
+-    size_t d_len = dir_len(base_file);
++    char *combined = NULL;
++    int ret = -1;
+ 
+-    /* If path is already absolute, or if dirname(base_file) is ".",
+-       just return a copy of path.  */
+-    if (*path == '/' || d_len == 0) {
+-        if (!(res = canonicalize_file_name(path)))
+-            virReportSystemError(errno,
+-                                 _("Can't canonicalize path '%s'"), path);
++    if (*path == '/') {
++        /* Safe to cast away const */
++        combined = (char *)path;
++    } else {
++        size_t d_len = start_is_dir ? strlen(start) : dir_len(start);
+ 
+-        goto cleanup;
++        if (d_len > INT_MAX) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("name too long: '%s'"), start);
++            goto cleanup;
++        } else if (d_len == 0) {
++            start = ".";
++            d_len = 1;
++        }
++        if (virAsprintf(&combined, "%.*s/%s", (int)d_len, start, path) < 0) {
++            virReportOOMError();
++            goto cleanup;
++        }
+     }
+ 
+-    /* Ensure that the following cast-to-int is valid.  */
+-    if (d_len > INT_MAX) {
+-        virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("Directory name too long: '%s'"), base_file);
++    if (directory && !(*directory = mdir_name(combined))) {
++        virReportOOMError();
+         goto cleanup;
+     }
+ 
+-    if (virAsprintf(&tmp, "%.*s/%s", (int) d_len, base_file, path) < 0) {
+-        virReportOOMError();
++    if (!(*canonical = canonicalize_file_name(combined))) {
++        virReportSystemError(errno,
++                             _("Can't canonicalize path '%s'"), path);
+         goto cleanup;
+     }
+ 
+-    if (!(res = canonicalize_file_name(tmp)))
+-        virReportSystemError(errno, _("Can't canonicalize path '%s'"), path);
++    ret = 0;
+ 
+ cleanup:
+-    VIR_FREE(tmp);
+-    return res;
++    if (combined != path)
++        VIR_FREE(combined);
++    return ret;
+ }
+ 
+ 
+@@ -643,9 +655,13 @@ cleanup:
+ }
+ 
+ 
++/* Given a file descriptor FD open on PATH, and optionally opened from
++ * a given DIRECTORY, return metadata about that file, assuming it has
++ * the given FORMAT. */
+ static virStorageFileMetadataPtr
+ virStorageFileGetMetadataInternal(const char *path,
+                                   int fd,
++                                  const char *directory,
+                                   int format)
+ {
+     virStorageFileMetadata *meta = NULL;
+@@ -752,8 +768,11 @@ virStorageFileGetMetadataInternal(const char *path,
+             if (virBackingStoreIsFile(backing)) {
+                 meta->backingStoreIsFile = true;
+                 meta->backingStoreRaw = meta->backingStore;
+-                meta->backingStore = absolutePathFromBaseFile(path, backing);
+-                if (meta->backingStore == NULL) {
++                meta->backingStore = NULL;
++                if (virFindBackingFile(directory ? directory : path,
++                                       !!directory, backing,
++                                       &meta->directory,
++                                       &meta->backingStore) < 0) {
+                     /* the backing file is (currently) unavailable, treat this
+                      * file as standalone:
+                      * backingStoreRaw is kept to mark broken image chains */
+@@ -892,13 +911,13 @@ virStorageFileGetMetadataFromFD(const char *path,
+                                 int fd,
+                                 int format)
+ {
+-    return virStorageFileGetMetadataInternal(path, fd, format);
++    return virStorageFileGetMetadataInternal(path, fd, NULL, format);
+ }
+ 
+ /* Recursive workhorse for virStorageFileGetMetadata.  */
+ static virStorageFileMetadataPtr
+-virStorageFileGetMetadataRecurse(const char *path, int format,
+-                                 uid_t uid, gid_t gid,
++virStorageFileGetMetadataRecurse(const char *path, const char *directory,
++                                 int format, uid_t uid, gid_t gid,
+                                  bool allow_probe, virHashTablePtr cycle)
+ {
+     int fd;
+@@ -921,7 +940,7 @@ virStorageFileGetMetadataRecurse(const char *path, int format,
+         return NULL;
+     }
+ 
+-    ret = virStorageFileGetMetadataInternal(path, fd, format);
++    ret = virStorageFileGetMetadataInternal(path, fd, directory, format);
+ 
+     if (VIR_CLOSE(fd) < 0)
+         VIR_WARN("could not close file %s", path);
+@@ -933,6 +952,7 @@ virStorageFileGetMetadataRecurse(const char *path, int format,
+             ret->backingStoreFormat = VIR_STORAGE_FILE_AUTO;
+         format = ret->backingStoreFormat;
+         ret->backingMeta = virStorageFileGetMetadataRecurse(ret->backingStore,
++                                                            ret->directory,
+                                                             format,
+                                                             uid, gid,
+                                                             allow_probe,
+@@ -980,7 +1000,7 @@ virStorageFileGetMetadata(const char *path, int format,
+ 
+     if (format <= VIR_STORAGE_FILE_NONE)
+         format = allow_probe ? VIR_STORAGE_FILE_AUTO : VIR_STORAGE_FILE_RAW;
+-    ret = virStorageFileGetMetadataRecurse(path, format, uid, gid,
++    ret = virStorageFileGetMetadataRecurse(path, NULL, format, uid, gid,
+                                            allow_probe, cycle);
+     virHashFree(cycle);
+     return ret;
+@@ -1000,6 +1020,7 @@ virStorageFileFreeMetadata(virStorageFileMetadata *meta)
+     virStorageFileFreeMetadata(meta->backingMeta);
+     VIR_FREE(meta->backingStore);
+     VIR_FREE(meta->backingStoreRaw);
++    VIR_FREE(meta->directory);
+     VIR_FREE(meta);
+ }
+ 
+@@ -1278,7 +1299,10 @@ virStorageFileChainLookup(virStorageFileMetadataPtr chain, const char *start,
+                    STREQ(name, owner->backingStore)) {
+             break;
+         } else if (owner->backingStoreIsFile) {
+-            char *absName = absolutePathFromBaseFile(*parent, name);
++            char *absName = NULL;
++            if (virFindBackingFile(owner->directory, true, name,
++                                   NULL, &absName) < 0)
++                goto error;
+             if (absName && STREQ(absName, owner->backingStore)) {
+                 VIR_FREE(absName);
+                 break;
+diff --git a/src/util/storage_file.h b/src/util/storage_file.h
+index abfaca9..c3209e5 100644
+--- a/src/util/storage_file.h
++++ b/src/util/storage_file.h
+@@ -55,6 +55,7 @@ typedef virStorageFileMetadata *virStorageFileMetadataPtr;
+ struct _virStorageFileMetadata {
+     char *backingStore; /* Canonical name (absolute file, or protocol) */
+     char *backingStoreRaw; /* If file, original name, possibly relative */
++    char *directory; /* The directory containing basename(backingStoreRaw) */
+     int backingStoreFormat; /* enum virStorageFileFormat */
+     bool backingStoreIsFile;
+     virStorageFileMetadataPtr backingMeta;
+-- 
+1.8.2.1
+

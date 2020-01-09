@@ -1,0 +1,67 @@
+From 6fc8015376069f01867f92c1cb0688705929049c Mon Sep 17 00:00:00 2001
+Message-Id: <6fc8015376069f01867f92c1cb0688705929049c.1350297261.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 10 Oct 2012 15:38:48 +0100
+Subject: [PATCH] Simplify some redundant locking while unref'ing objects
+
+https://bugzilla.redhat.com/show_bug.cgi?id=859712
+
+There is no need to hold the mutex when unref'ing
+virObject instances
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 7307c3c00c8e6814a4d413d7dace684e55dea5f8)
+---
+ src/conf/domain_conf.c | 4 +---
+ src/qemu/qemu_driver.c | 4 ++--
+ src/rpc/virnetserver.c | 3 ---
+ 3 files changed, 3 insertions(+), 8 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 25ba0ba..f427bb4 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -748,9 +748,7 @@ static void
+ virDomainObjListDataFree(void *payload, const void *name ATTRIBUTE_UNUSED)
+ {
+     virDomainObjPtr obj = payload;
+-    virDomainObjLock(obj);
+-    if (virObjectUnref(obj))
+-        virDomainObjUnlock(obj);
++    virObjectUnref(obj);
+ }
+ 
+ int virDomainObjListInit(virDomainObjListPtr doms)
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index ef980d4..bd5b6d7 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3537,8 +3537,8 @@ endjob:
+     ignore_value(qemuDomainObjEndAsyncJob(driver, wdEvent->vm));
+ 
+ unlock:
+-    if (virObjectUnref(wdEvent->vm))
+-        virDomainObjUnlock(wdEvent->vm);
++    virDomainObjUnlock(wdEvent->vm);
++    virObjectUnref(wdEvent->vm);
+     qemuDriverUnlock(driver);
+     VIR_FREE(wdEvent);
+ }
+diff --git a/src/rpc/virnetserver.c b/src/rpc/virnetserver.c
+index 23493bd..ae4ed46 100644
+--- a/src/rpc/virnetserver.c
++++ b/src/rpc/virnetserver.c
+@@ -191,10 +191,7 @@ static void virNetServerHandleJob(void *jobOpaque, void *opaque)
+     if (virNetServerProcessMsg(srv, job->client, job->prog, job->msg) < 0)
+         goto error;
+ 
+-    virNetServerLock(srv);
+     virObjectUnref(job->prog);
+-    virNetServerUnlock(srv);
+-
+     virObjectUnref(job->client);
+     VIR_FREE(job);
+     return;
+-- 
+1.7.12.3
+

@@ -1,0 +1,43 @@
+From 9113743d861077c6ecd9ae426ffabf7d32376176 Mon Sep 17 00:00:00 2001
+Message-Id: <9113743d861077c6ecd9ae426ffabf7d32376176.1353944811.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 19 Nov 2012 15:22:27 -0700
+Subject: [PATCH] snapshot: require user to supply external memory file name
+
+https://bugzilla.redhat.com/show_bug.cgi?id=876816
+
+For disk snapshots, the user could request an external snapshot
+but not supply a filename; later on, we would check this condition
+and generate a suitable name if possible, or gracefully error out
+when not possible (such as when the original file was a block
+device).  But unless we come up with a suitable way to generate
+external memory file names, we have no later code point that was
+checking for NULL, so we should forbid this up front.
+
+* src/conf/snapshot_conf.c (virDomainSnapshotDefParseString):
+Avoid NULL deref, since we don't generate names yet.
+(cherry picked from commit 516c12237b489a3660663f9957289a245cdf16a7)
+---
+ src/conf/snapshot_conf.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index 41d5542..c581d14 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -297,6 +297,12 @@ virDomainSnapshotDefParseString(const char *xmlStr,
+                            memoryFile);
+             goto cleanup;
+         }
++        if (!memoryFile &&
++            def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL) {
++            virReportError(VIR_ERR_XML_ERROR, "%s",
++                           _("external memory snapshots require a filename"));
++            goto cleanup;
++        }
+     } else if (memoryFile) {
+         def->memory = VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL;
+     } else if (flags & VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE) {
+-- 
+1.8.0
+

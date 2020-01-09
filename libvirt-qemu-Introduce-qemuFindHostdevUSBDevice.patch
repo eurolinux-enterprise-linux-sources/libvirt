@@ -1,0 +1,174 @@
+From 16a8018f7a9202401acf58d31ca2aa3761f9ba49 Mon Sep 17 00:00:00 2001
+Message-Id: <16a8018f7a9202401acf58d31ca2aa3761f9ba49.1350297258.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 3 Oct 2012 13:55:35 +0200
+Subject: [PATCH] qemu: Introduce qemuFindHostdevUSBDevice
+
+https://bugzilla.redhat.com/show_bug.cgi?id=843560
+
+The code which looks up a USB device specified by hostdev is duplicated
+in two places. This patch creates a dedicated function that can be
+called in both places.
+(cherry picked from commit 7bcc7278bf145e2628831823f77192307f09bfa1)
+---
+ src/qemu/qemu_hostdev.c | 73 +++++++++++++++++++++++++++----------------------
+ src/qemu/qemu_hostdev.h |  1 +
+ src/qemu/qemu_hotplug.c | 33 +---------------------
+ 3 files changed, 42 insertions(+), 65 deletions(-)
+
+diff --git a/src/qemu/qemu_hostdev.c b/src/qemu/qemu_hostdev.c
+index 7375d26..017f0ec 100644
+--- a/src/qemu/qemu_hostdev.c
++++ b/src/qemu/qemu_hostdev.c
+@@ -641,6 +641,44 @@ error:
+     return -1;
+ }
+ 
++usbDevice *
++qemuFindHostdevUSBDevice(virDomainHostdevDefPtr hostdev)
++{
++    usbDevice *usb = NULL;
++    unsigned vendor = hostdev->source.subsys.u.usb.vendor;
++    unsigned product = hostdev->source.subsys.u.usb.product;
++    unsigned bus = hostdev->source.subsys.u.usb.bus;
++    unsigned device = hostdev->source.subsys.u.usb.device;
++
++    if (vendor && bus) {
++        usb = usbFindDevice(vendor, product, bus, device);
++
++    } else if (vendor && !bus) {
++        usbDeviceList *devs = usbFindDeviceByVendor(vendor, product);
++        if (!devs)
++            return NULL;
++
++        if (usbDeviceListCount(devs) > 1) {
++            virReportError(VIR_ERR_OPERATION_FAILED,
++                           _("multiple USB devices for %x:%x, "
++                             "use <address> to specify one"), vendor, product);
++            usbDeviceListFree(devs);
++            return NULL;
++        }
++        usb = usbDeviceListGet(devs, 0);
++        usbDeviceListSteal(devs, usb);
++        usbDeviceListFree(devs);
++
++        hostdev->source.subsys.u.usb.bus = usbDeviceGetBus(usb);
++        hostdev->source.subsys.u.usb.device = usbDeviceGetDevno(usb);
++
++    } else if (!vendor && bus) {
++        usb = usbFindDeviceByBus(bus, device);
++    }
++
++    return usb;
++}
++
+ static int
+ qemuPrepareHostUSBDevices(struct qemud_driver *driver,
+                           virDomainDefPtr def)
+@@ -663,45 +701,14 @@ qemuPrepareHostUSBDevices(struct qemud_driver *driver,
+      */
+     for (i = 0 ; i < nhostdevs ; i++) {
+         virDomainHostdevDefPtr hostdev = hostdevs[i];
+-        usbDevice *usb = NULL;
++        usbDevice *usb;
+ 
+         if (hostdev->mode != VIR_DOMAIN_HOSTDEV_MODE_SUBSYS)
+             continue;
+         if (hostdev->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB)
+             continue;
+ 
+-        unsigned vendor = hostdev->source.subsys.u.usb.vendor;
+-        unsigned product = hostdev->source.subsys.u.usb.product;
+-        unsigned bus = hostdev->source.subsys.u.usb.bus;
+-        unsigned device = hostdev->source.subsys.u.usb.device;
+-
+-        if (vendor && bus) {
+-            usb = usbFindDevice(vendor, product, bus, device);
+-
+-        } else if (vendor && !bus) {
+-            usbDeviceList *devs = usbFindDeviceByVendor(vendor, product);
+-            if (!devs)
+-                goto cleanup;
+-
+-            if (usbDeviceListCount(devs) > 1) {
+-                virReportError(VIR_ERR_OPERATION_FAILED,
+-                               _("multiple USB devices for %x:%x, "
+-                                 "use <address> to specify one"), vendor, product);
+-                usbDeviceListFree(devs);
+-                goto cleanup;
+-            }
+-            usb = usbDeviceListGet(devs, 0);
+-            usbDeviceListSteal(devs, usb);
+-            usbDeviceListFree(devs);
+-
+-            hostdev->source.subsys.u.usb.bus = usbDeviceGetBus(usb);
+-            hostdev->source.subsys.u.usb.device = usbDeviceGetDevno(usb);
+-
+-        } else if (!vendor && bus) {
+-            usb = usbFindDeviceByBus(bus, device);
+-        }
+-
+-        if (!usb)
++        if (!(usb = qemuFindHostdevUSBDevice(hostdev)))
+             goto cleanup;
+ 
+         if (usbDeviceListAdd(list, usb) < 0) {
+diff --git a/src/qemu/qemu_hostdev.h b/src/qemu/qemu_hostdev.h
+index 14f1fca..204b2d4 100644
+--- a/src/qemu/qemu_hostdev.h
++++ b/src/qemu/qemu_hostdev.h
+@@ -36,6 +36,7 @@ int qemuPrepareHostdevPCIDevices(struct qemud_driver *driver,
+                                  const unsigned char *uuid,
+                                  virDomainHostdevDefPtr *hostdevs,
+                                  int nhostdevs);
++usbDevice *qemuFindHostdevUSBDevice(virDomainHostdevDefPtr hostdev);
+ int qemuPrepareHostdevUSBDevices(struct qemud_driver *driver,
+                                  const char *name,
+                                  usbDeviceList *list);
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index f66e1d0..2671764 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -1153,38 +1153,7 @@ int qemuDomainAttachHostDevice(struct qemud_driver *driver,
+         goto cleanup;
+ 
+     if (hostdev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB) {
+-        unsigned vendor = hostdev->source.subsys.u.usb.vendor;
+-        unsigned product = hostdev->source.subsys.u.usb.product;
+-        unsigned bus = hostdev->source.subsys.u.usb.bus;
+-        unsigned device = hostdev->source.subsys.u.usb.device;
+-
+-        if (vendor && bus) {
+-            usb = usbFindDevice(vendor, product, bus, device);
+-
+-        } else if (vendor && !bus) {
+-            usbDeviceList *devs = usbFindDeviceByVendor(vendor, product);
+-            if (!devs)
+-                goto cleanup;
+-
+-            if (usbDeviceListCount(devs) > 1) {
+-                virReportError(VIR_ERR_OPERATION_FAILED,
+-                               _("multiple USB devices for %x:%x, "
+-                                 "use <address> to specify one"), vendor, product);
+-                usbDeviceListFree(devs);
+-                goto cleanup;
+-            }
+-            usb = usbDeviceListGet(devs, 0);
+-            usbDeviceListSteal(devs, usb);
+-            usbDeviceListFree(devs);
+-
+-            hostdev->source.subsys.u.usb.bus = usbDeviceGetBus(usb);
+-            hostdev->source.subsys.u.usb.device = usbDeviceGetDevno(usb);
+-
+-        } else if (!vendor && bus) {
+-            usb = usbFindDeviceByBus(bus, device);
+-        }
+-
+-        if (!usb)
++        if (!(usb = qemuFindHostdevUSBDevice(hostdev)))
+             goto cleanup;
+ 
+         if (usbDeviceListAdd(list, usb) < 0) {
+-- 
+1.7.12.3
+

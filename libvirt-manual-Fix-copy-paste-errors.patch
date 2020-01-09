@@ -1,0 +1,46 @@
+From c8eb89de32f7d8513151cc92356e796a395ae8a0 Mon Sep 17 00:00:00 2001
+Message-Id: <c8eb89de32f7d8513151cc92356e796a395ae8a0.1373271643.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Mon, 24 Jun 2013 12:32:01 +0200
+Subject: [PATCH] manual: Fix copy-paste errors
+
+Descriptions for vol-download and vol-upload didn't make much sense.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=923613
+(cherry picked from commit 11e295705a4c19aee71ab6bb9334b31174adbcd1)
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+---
+ tools/virsh.pod | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 4c561e7..28b5d90 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -2407,7 +2407,8 @@ I<vol-name-or-key-or-path> is the name or key or path of the volume to delete.
+ Upload the contents of I<local-file> to a storage volume.
+ I<--pool> I<pool-or-uuid> is the name or UUID of the storage pool the volume
+ is in.
+-I<vol-name-or-key-or-path> is the name or key or path of the volume to wipe.
++I<vol-name-or-key-or-path> is the name or key or path of the volume where the
++file will be uploaded.
+ I<--offset> is the position in the storage volume at which to start writing
+ the data. I<--length> is an upper bound of the amount of data to be uploaded.
+ An error will occurr if the I<local-file> is greater than the specified length.
+@@ -2415,10 +2416,10 @@ An error will occurr if the I<local-file> is greater than the specified length.
+ =item B<vol-download> [I<--pool> I<pool-or-uuid>] [I<--offset> I<bytes>]
+ [I<--length> I<bytes>] I<vol-name-or-key-or-path> I<local-file>
+ 
+-Download the contents of I<local-file> from a storage volume.
++Download the contents of a storage volume to I<local-file>.
+ I<--pool> I<pool-or-uuid> is the name or UUID of the storage pool the volume
+ is in.
+-I<vol-name-or-key-or-path> is the name or key or path of the volume to wipe.
++I<vol-name-or-key-or-path> is the name or key or path of the volume to download.
+ I<--offset> is the position in the storage volume at which to start reading
+ the data. I<--length> is an upper bound of the amount of data to be downloaded.
+ 
+-- 
+1.8.2.1
+

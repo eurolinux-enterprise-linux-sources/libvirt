@@ -1,0 +1,453 @@
+From 0b177f04f7d4e7904f882bafcce0671dac0313c4 Mon Sep 17 00:00:00 2001
+Message-Id: <0b177f04f7d4e7904f882bafcce0671dac0313c4.1351526126.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Fri, 26 Oct 2012 20:59:36 -0400
+Subject: [PATCH] qemu: fix attach/detach of netdevs with matching mac addrs
+
+This resolves:
+
+   https://bugzilla.redhat.com/show_bug.cgi?id=862515
+
+which describes inconsistencies in dealing with duplicate mac
+addresses on network devices in a domain.
+
+(at any rate, it resolves *almost* everything, and prints out an
+informative error message for the one problem that isn't solved, but
+has a workaround.)
+
+A synopsis of the problems:
+
+1) you can't do a persistent attach-interface of a device with a mac
+address that matches an existing device.
+
+2) you *can* do a live attach-interface of such a device.
+
+3) you *can* directly edit a domain and put in two devices with
+matching mac addresses.
+
+4) When running virsh detach-device (live or config), only MAC address
+is checked when matching the device to remove, so the first device
+with the desired mac address will be removed. This isn't always the
+one that's wanted.
+
+5) when running virsh detach-interface (live or config), the only two
+items that can be specified to match against are mac address and model
+type (virtio, etc) - if multiple netdevs match both of those
+attributes, it again just finds the first one added and assumes that
+is the only match.
+
+Since it is completely valid to have multiple network devices with the
+same MAC address (although it can cause problems in many cases, there
+*are* valid use cases), what is needed is:
+
+1) remove the restriction that prohibits doing a persistent add of a
+netdev with a duplicate mac address.
+
+2) enhance the backend of virDomainDetachDeviceFlags to check for
+something that *is* guaranteed unique (but still work with just mac
+address, as long as it yields only a single results.
+
+This patch does three things:
+
+1) removes the check for duplicate mac address during a persistent
+netdev attach.
+
+2) unifies the searching for both live and config detach of netdevices
+in the subordinate functions of qemuDomainModifyDeviceFlags() to use the
+new function virDomainNetFindIdx (which matches mac address and PCI
+address if available, checking for duplicates if only mac address was
+specified). This function returns -2 if multiple matches are found,
+allowing the callers to print out an appropriate message.
+
+Steps 1 & 2 are enough to fully fix the problem when using virsh
+attach-device and detach-device (which require an XML description of
+the device rather than a bunch of commandline args)
+
+3) modifies the virsh detach-interface command to check for multiple
+matches of mac address and show an error message suggesting use of the
+detach-device command in cases where there are multiple matching mac
+addresses.
+
+Later we should decide how we want to input a PCI address on the virsh
+commandline, and enhance detach-interface to take a --address option,
+eliminating the need to use detach-device
+
+* src/conf/domain_conf.c
+* src/conf/domain_conf.h
+* src/libvirt_private.syms
+  * added new virDomainNetFindIdx function
+  * removed now unused virDomainNetIndexByMac and
+    virDomainNetRemoveByMac
+
+* src/qemu/qemu_driver.c
+  * remove check for duplicate max from qemuDomainAttachDeviceConfig
+  * use virDomainNetFindIdx/virDomainNetRemove instead
+    of virDomainNetRemoveByMac in qemuDomainDetachDeviceConfig
+  * use virDomainNetFindIdx instead of virDomainIndexByMac
+    in qemuDomainUpdateDeviceConfig
+
+* src/qemu/qemu_hotplug.c
+  * use virDomainNetFindIdx instead of a homespun loop in
+    qemuDomainDetachNetDevice.
+
+* tools/virsh-domain.c: modified detach-interface command as described
+    above
+(cherry picked from commit def31e4c5812aff869ebe00be6c4896920223012)
+---
+ src/conf/domain_conf.c   | 58 ++++++++++++++++++++++++++++++++++--------------
+ src/conf/domain_conf.h   | 11 +++------
+ src/libvirt_private.syms |  3 +--
+ src/qemu/qemu_driver.c   | 49 ++++++++++++++++++++++------------------
+ src/qemu/qemu_hotplug.c  | 28 +++++++++++------------
+ tools/virsh-domain.c     | 26 ++++++++++++++++------
+ 6 files changed, 104 insertions(+), 71 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 4bad367..4c34f42 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8005,14 +8005,49 @@ int virDomainNetInsert(virDomainDefPtr def, virDomainNetDefPtr net)
+     return 0;
+ }
+ 
+-int virDomainNetIndexByMac(virDomainDefPtr def, const virMacAddrPtr mac)
++/* virDomainNetFindIdx: search according to mac address and guest side
++ *                      PCI address (if specified)
++ *
++ * Return: index of match if unique match found
++ *         -1 if not found
++ *         -2 if multiple matches
++ */
++int
++virDomainNetFindIdx(virDomainDefPtr def, virDomainNetDefPtr net)
+ {
+-    int i;
++    int ii, matchidx = -1;
++    bool PCIAddrSpecified = virDomainDeviceAddressIsValid(&net->info,
++                                                          VIR_DOMAIN_DEVICE_ADDRESS_TYPE_PCI);
+ 
+-    for (i = 0; i < def->nnets; i++)
+-        if (!virMacAddrCmp(&def->nets[i]->mac, mac))
+-            return i;
+-    return -1;
++    for (ii = 0 ; ii < def->nnets ; ii++) {
++        if (virMacAddrCmp(&def->nets[ii]->mac, &net->mac))
++            continue;
++
++        if ((matchidx >= 0) && !PCIAddrSpecified) {
++            /* there were multiple matches on mac address, and no
++             * qualifying guest-side PCI address was given, so we must
++             * fail (NB: a USB address isn't adequate, since it may
++             * specify only vendor and product ID, and there may be
++             * multiples of those.
++             */
++            matchidx = -2; /* indicates "multiple matches" to caller */
++            break;
++        }
++        if (PCIAddrSpecified) {
++            if (virDevicePCIAddressEqual(&def->nets[ii]->info.addr.pci,
++                                         &net->info.addr.pci)) {
++                /* exit early if the pci address was specified and
++                 * it matches, as this guarantees no duplicates.
++                 */
++                matchidx = ii;
++                break;
++            }
++        } else {
++            /* no PCI address given, so there may be multiple matches */
++            matchidx = ii;
++        }
++    }
++    return matchidx;
+ }
+ 
+ virDomainNetDefPtr
+@@ -8050,17 +8085,6 @@ virDomainNetRemove(virDomainDefPtr def, size_t i)
+     return net;
+ }
+ 
+-virDomainNetDefPtr
+-virDomainNetRemoveByMac(virDomainDefPtr def, const virMacAddrPtr mac)
+-{
+-    int i = virDomainNetIndexByMac(def, mac);
+-
+-    if (i < 0)
+-        return NULL;
+-    return virDomainNetRemove(def, i);
+-}
+-
+-
+ int virDomainControllerInsert(virDomainDefPtr def,
+                               virDomainControllerDefPtr controller)
+ {
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 2fbbfc6..50a63c3 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2011,12 +2011,10 @@ virDomainDiskDefPtr
+ virDomainDiskRemoveByName(virDomainDefPtr def, const char *name);
+ bool virDomainHasDiskMirror(virDomainObjPtr vm);
+ 
+-int virDomainNetIndexByMac(virDomainDefPtr def, const virMacAddrPtr mac);
++int virDomainNetFindIdx(virDomainDefPtr def, virDomainNetDefPtr net);
++virDomainNetDefPtr virDomainNetFind(virDomainDefPtr def, const char *device);
+ int virDomainNetInsert(virDomainDefPtr def, virDomainNetDefPtr net);
+-virDomainNetDefPtr
+-virDomainNetRemove(virDomainDefPtr def, size_t i);
+-virDomainNetDefPtr
+-virDomainNetRemoveByMac(virDomainDefPtr def, const virMacAddrPtr mac);
++virDomainNetDefPtr virDomainNetRemove(virDomainDefPtr def, size_t i);
+ 
+ int virDomainHostdevInsert(virDomainDefPtr def, virDomainHostdevDefPtr hostdev);
+ virDomainHostdevDefPtr
+@@ -2276,9 +2274,6 @@ VIR_ENUM_DECL(virDomainCpuPlacementMode)
+ 
+ VIR_ENUM_DECL(virDomainStartupPolicy)
+ 
+-virDomainNetDefPtr virDomainNetFind(virDomainDefPtr def,
+-                                    const char *device);
+-
+ # define VIR_CONNECT_LIST_DOMAINS_FILTERS_ACTIVE   \
+                 (VIR_CONNECT_LIST_DOMAINS_ACTIVE | \
+                  VIR_CONNECT_LIST_DOMAINS_INACTIVE)
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 8f62bf9..a26d0e5 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -437,6 +437,7 @@ virDomainMemDumpTypeFromString;
+ virDomainMemDumpTypeToString;
+ virDomainNetDefFree;
+ virDomainNetFind;
++virDomainNetFindIdx;
+ virDomainNetGetActualBandwidth;
+ virDomainNetGetActualBridgeName;
+ virDomainNetGetActualDirectDev;
+@@ -445,10 +446,8 @@ virDomainNetGetActualHostdev;
+ virDomainNetGetActualType;
+ virDomainNetGetActualVirtPortProfile;
+ virDomainNetGetActualVlan;
+-virDomainNetIndexByMac;
+ virDomainNetInsert;
+ virDomainNetRemove;
+-virDomainNetRemoveByMac;
+ virDomainNetTypeToString;
+ virDomainNostateReasonTypeFromString;
+ virDomainNostateReasonTypeToString;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 586104c..1a2bb4f 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -6165,14 +6165,6 @@ qemuDomainAttachDeviceConfig(qemuCapsPtr caps,
+ 
+     case VIR_DOMAIN_DEVICE_NET:
+         net = dev->data.net;
+-        if (virDomainNetIndexByMac(vmdef, &net->mac) >= 0) {
+-            char macbuf[VIR_MAC_STRING_BUFLEN];
+-
+-            virMacAddrFormat(&net->mac, macbuf);
+-            virReportError(VIR_ERR_INVALID_ARG,
+-                           _("mac %s already exists"), macbuf);
+-            return -1;
+-        }
+         if (virDomainNetInsert(vmdef, net)) {
+             virReportOOMError();
+             return -1;
+@@ -6244,11 +6236,12 @@ qemuDomainDetachDeviceConfig(virDomainDefPtr vmdef,
+                              virDomainDeviceDefPtr dev)
+ {
+     virDomainDiskDefPtr disk, det_disk;
+-    virDomainNetDefPtr net, det_net;
++    virDomainNetDefPtr net;
+     virDomainHostdevDefPtr hostdev, det_hostdev;
+     virDomainLeaseDefPtr lease, det_lease;
+     virDomainControllerDefPtr cont, det_cont;
+     int idx;
++    char mac[VIR_MAC_STRING_BUFLEN];
+ 
+     switch (dev->type) {
+     case VIR_DOMAIN_DEVICE_DISK:
+@@ -6263,15 +6256,19 @@ qemuDomainDetachDeviceConfig(virDomainDefPtr vmdef,
+ 
+     case VIR_DOMAIN_DEVICE_NET:
+         net = dev->data.net;
+-        if (!(det_net = virDomainNetRemoveByMac(vmdef, &net->mac))) {
+-            char macbuf[VIR_MAC_STRING_BUFLEN];
+-
+-            virMacAddrFormat(&net->mac, macbuf);
+-            virReportError(VIR_ERR_INVALID_ARG,
+-                           _("no nic of mac %s"), macbuf);
++        idx = virDomainNetFindIdx(vmdef, net);
++        if (idx == -2) {
++            virReportError(VIR_ERR_OPERATION_FAILED,
++                           _("multiple devices matching mac address %s found"),
++                           virMacAddrFormat(&net->mac, mac));
++            return -1;
++        } else if (idx < 0) {
++            virReportError(VIR_ERR_OPERATION_FAILED, "%s",
++                           _("no matching network device was found"));
+             return -1;
+         }
+-        virDomainNetDefFree(det_net);
++        /* this is guaranteed to succeed */
++        virDomainNetDefFree(virDomainNetRemove(vmdef, idx));
+         break;
+ 
+     case VIR_DOMAIN_DEVICE_HOSTDEV: {
+@@ -6326,6 +6323,8 @@ qemuDomainUpdateDeviceConfig(qemuCapsPtr caps,
+     virDomainDiskDefPtr orig, disk;
+     virDomainNetDefPtr net;
+     int pos;
++    char mac[VIR_MAC_STRING_BUFLEN];
++
+ 
+     switch (dev->type) {
+     case VIR_DOMAIN_DEVICE_DISK:
+@@ -6363,12 +6362,18 @@ qemuDomainUpdateDeviceConfig(qemuCapsPtr caps,
+ 
+     case VIR_DOMAIN_DEVICE_NET:
+         net = dev->data.net;
+-        if ((pos = virDomainNetIndexByMac(vmdef, &net->mac)) < 0) {
+-            char macbuf[VIR_MAC_STRING_BUFLEN];
+-
+-            virMacAddrFormat(&net->mac, macbuf);
+-            virReportError(VIR_ERR_INVALID_ARG,
+-                           _("mac %s doesn't exist"), macbuf);
++        pos = virDomainNetFindIdx(vmdef, net);
++        if (pos == -2) {
++            virMacAddrFormat(&net->mac, mac);
++            virReportError(VIR_ERR_OPERATION_FAILED,
++                           _("couldn't find matching device "
++                             "with mac address %s"), mac);
++            return -1;
++        } else if (pos < 0) {
++            virMacAddrFormat(&net->mac, mac);
++            virReportError(VIR_ERR_OPERATION_FAILED,
++                           _("couldn't find matching device "
++                             "with mac address %s"), mac);
+             return -1;
+         }
+ 
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 91b392e..ab1a6e2 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -2455,30 +2455,28 @@ qemuDomainDetachNetDevice(struct qemud_driver *driver,
+                           virDomainObjPtr vm,
+                           virDomainDeviceDefPtr dev)
+ {
+-    int i, ret = -1;
++    int detachidx, ret = -1;
+     virDomainNetDefPtr detach = NULL;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     int vlan;
+     char *hostnet_name = NULL;
++    char mac[VIR_MAC_STRING_BUFLEN];
+     virNetDevVPortProfilePtr vport = NULL;
+ 
+-    for (i = 0 ; i < vm->def->nnets ; i++) {
+-        virDomainNetDefPtr net = vm->def->nets[i];
+-
+-        if (!virMacAddrCmp(&net->mac, &dev->data.net->mac)) {
+-            detach = net;
+-            break;
++    detachidx = virDomainNetFindIdx(vm->def, dev->data.net);
++    if (detachidx == -2) {
++        virReportError(VIR_ERR_OPERATION_FAILED,
++                       _("multiple devices matching mac address %s found"),
++                       virMacAddrFormat(&dev->data.net->mac, mac));
++        goto cleanup;
+         }
+-    }
+-
+-    if (!detach) {
++    else if (detachidx < 0) {
+         virReportError(VIR_ERR_OPERATION_FAILED,
+-                       _("network device %02x:%02x:%02x:%02x:%02x:%02x not found"),
+-                       dev->data.net->mac.addr[0], dev->data.net->mac.addr[1],
+-                       dev->data.net->mac.addr[2], dev->data.net->mac.addr[3],
+-                       dev->data.net->mac.addr[4], dev->data.net->mac.addr[5]);
++                       _("network device %s not found"),
++                       virMacAddrFormat(&dev->data.net->mac, mac));
+         goto cleanup;
+     }
++    detach = vm->def->nets[detachidx];
+ 
+     if (virDomainNetGetActualType(detach) == VIR_DOMAIN_NET_TYPE_HOSTDEV) {
+         ret = qemuDomainDetachThisHostDevice(driver, vm,
+@@ -2582,7 +2580,7 @@ qemuDomainDetachNetDevice(struct qemud_driver *driver,
+ cleanup:
+     if (!ret) {
+         networkReleaseActualDevice(detach);
+-        virDomainNetRemove(vm->def, i);
++        virDomainNetRemove(vm->def, detachidx);
+         virDomainNetDefFree(detach);
+     }
+     VIR_FREE(hostnet_name);
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 9032420..a2b76ab 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -7692,7 +7692,7 @@ cmdDetachInterface(vshControl *ctl, const vshCmd *cmd)
+     xmlDocPtr xml = NULL;
+     xmlXPathObjectPtr obj=NULL;
+     xmlXPathContextPtr ctxt = NULL;
+-    xmlNodePtr cur = NULL;
++    xmlNodePtr cur = NULL, matchNode = NULL;
+     xmlBufferPtr xml_buf = NULL;
+     const char *mac =NULL, *type = NULL;
+     char *doc;
+@@ -7738,10 +7738,12 @@ cmdDetachInterface(vshControl *ctl, const vshCmd *cmd)
+         goto cleanup;
+     }
+ 
+-    if (!mac)
++    if (!mac) {
++        matchNode = obj->nodesetval->nodeTab[0];
+         goto hit;
++    }
+ 
+-    /* search mac */
++    /* multiple possibilities, so search for matching mac */
+     for (; i < obj->nodesetval->nodeNr; i++) {
+         cur = obj->nodesetval->nodeTab[i]->children;
+         while (cur != NULL) {
+@@ -7751,14 +7753,24 @@ cmdDetachInterface(vshControl *ctl, const vshCmd *cmd)
+                 diff_mac = virMacAddrCompare(tmp_mac, mac);
+                 VIR_FREE(tmp_mac);
+                 if (!diff_mac) {
+-                    goto hit;
++                    if (matchNode) {
++                        /* this is the 2nd match, so it's ambiguous */
++                        vshError(ctl, _("Domain has multiple interfaces matching "
++                                        "MAC address %s. You must use detach-device and "
++                                        "specify the device pci address to remove it."),
++                                 mac);
++                        goto cleanup;
++                    }
++                    matchNode = obj->nodesetval->nodeTab[i];
+                 }
+             }
+             cur = cur->next;
+         }
+     }
+-    vshError(ctl, _("No found interface whose MAC address is %s"), mac);
+-    goto cleanup;
++    if (!matchNode) {
++        vshError(ctl, _("No interface with MAC address %s was found"), mac);
++        goto cleanup;
++    }
+ 
+  hit:
+     xml_buf = xmlBufferCreate();
+@@ -7767,7 +7779,7 @@ cmdDetachInterface(vshControl *ctl, const vshCmd *cmd)
+         goto cleanup;
+     }
+ 
+-    if (xmlNodeDump(xml_buf, xml, obj->nodesetval->nodeTab[i], 0, 0) < 0) {
++    if (xmlNodeDump(xml_buf, xml, matchNode, 0, 0) < 0) {
+         vshError(ctl, "%s", _("Failed to create XML"));
+         goto cleanup;
+     }
+-- 
+1.7.12.4
+

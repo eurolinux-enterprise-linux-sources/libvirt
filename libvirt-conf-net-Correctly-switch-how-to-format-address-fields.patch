@@ -1,0 +1,101 @@
+From 466d1679694b5c6f851194d92a0d0c8aafa32db3 Mon Sep 17 00:00:00 2001
+Message-Id: <466d1679694b5c6f851194d92a0d0c8aafa32db3@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 20 Jan 2016 08:56:12 +0100
+Subject: [PATCH] conf: net: Correctly switch how to format address fields
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+6.8: https://bugzilla.redhat.com/show_bug.cgi?id=1299700
+
+When formatting the forward mode addresses or interfaces the switch was
+done based on the type of the network rather than of the type of the
+individual <interface>/<address> element. In case a user would specify
+an incorrect network type ("passhtrough") with <address> elements,
+libvirtd would crash as it would attempt to format an <interface>.
+
+Use the type of the individual element to format the XML.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1132347
+(cherry picked from commit 4cf1c3fab138462fc9c014aee853fa17f278c5df)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+Conflicts:
+  downstream is missing commit 47c94b6:
+    conf: put data for network <forward> element into its own struct
+  and the ii -> i rename
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/network_conf.c                               | 5 ++---
+ tests/networkxml2xmlin/passthrough-address-crash.xml  | 7 +++++++
+ tests/networkxml2xmlout/passthrough-address-crash.xml | 7 +++++++
+ tests/networkxml2xmltest.c                            | 1 +
+ 4 files changed, 17 insertions(+), 3 deletions(-)
+ create mode 100644 tests/networkxml2xmlin/passthrough-address-crash.xml
+ create mode 100644 tests/networkxml2xmlout/passthrough-address-crash.xml
+
+diff --git a/src/conf/network_conf.c b/src/conf/network_conf.c
+index 359912e..2eb4b1a 100644
+--- a/src/conf/network_conf.c
++++ b/src/conf/network_conf.c
+@@ -2128,7 +2128,7 @@ virNetworkDefFormatBuf(virBufferPtr buf,
+         if (def->nForwardIfs &&
+             (!def->nForwardPfs || !(flags & VIR_NETWORK_XML_INACTIVE))) {
+             for (ii = 0; ii < def->nForwardIfs; ii++) {
+-                if (def->forwardType != VIR_NETWORK_FORWARD_HOSTDEV) {
++                if (def->forwardIfs[ii].type == VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_NETDEV) {
+                     virBufferEscapeString(buf, "<interface dev='%s'",
+                                           def->forwardIfs[ii].device.dev);
+                     if (!(flags & VIR_NETWORK_XML_INACTIVE) &&
+@@ -2137,8 +2137,7 @@ virNetworkDefFormatBuf(virBufferPtr buf,
+                                           def->forwardIfs[ii].connections);
+                     }
+                     virBufferAddLit(buf, "/>\n");
+-                }
+-                else {
++                } else {
+                     if (def->forwardIfs[ii].type ==  VIR_NETWORK_FORWARD_HOSTDEV_DEVICE_PCI) {
+                         if (virDevicePCIAddressFormat(buf,
+                                                       def->forwardIfs[ii].device.pci,
+diff --git a/tests/networkxml2xmlin/passthrough-address-crash.xml b/tests/networkxml2xmlin/passthrough-address-crash.xml
+new file mode 100644
+index 0000000..a05dbbf
+--- /dev/null
++++ b/tests/networkxml2xmlin/passthrough-address-crash.xml
+@@ -0,0 +1,7 @@
++<network>
++  <name>passthrough_001</name>
++  <uuid>50e92386-8dd1-4a95-8a4b-9a888274eb66</uuid>
++  <forward mode='passthrough'>
++    <address type='pci' domain='0x0000' bus='0x11' slot='0x10' function='0x1'/>
++  </forward>
++</network>
+diff --git a/tests/networkxml2xmlout/passthrough-address-crash.xml b/tests/networkxml2xmlout/passthrough-address-crash.xml
+new file mode 100644
+index 0000000..a05dbbf
+--- /dev/null
++++ b/tests/networkxml2xmlout/passthrough-address-crash.xml
+@@ -0,0 +1,7 @@
++<network>
++  <name>passthrough_001</name>
++  <uuid>50e92386-8dd1-4a95-8a4b-9a888274eb66</uuid>
++  <forward mode='passthrough'>
++    <address type='pci' domain='0x0000' bus='0x11' slot='0x10' function='0x1'/>
++  </forward>
++</network>
+diff --git a/tests/networkxml2xmltest.c b/tests/networkxml2xmltest.c
+index 15e0e43..1e28d9c 100644
+--- a/tests/networkxml2xmltest.c
++++ b/tests/networkxml2xmltest.c
+@@ -110,6 +110,7 @@ mymain(void)
+     DO_TEST_FULL("passthrough-pf", VIR_NETWORK_XML_INACTIVE);
+     DO_TEST("hostdev");
+     DO_TEST_FULL("hostdev-pf", VIR_NETWORK_XML_INACTIVE);
++    DO_TEST("passthrough-address-crash");
+ 
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+-- 
+2.7.0
+

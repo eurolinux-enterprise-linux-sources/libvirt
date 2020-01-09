@@ -1,0 +1,99 @@
+From cb78f1e4afad0848d9ff7ad6286aad92f3f9cdd0 Mon Sep 17 00:00:00 2001
+Message-Id: <cb78f1e4afad0848d9ff7ad6286aad92f3f9cdd0@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 11 Jul 2013 16:54:16 +0200
+Subject: [PATCH] Add virDomainDefFindDevice for looking up a device by its
+ alias
+
+https://bugzilla.redhat.com/show_bug.cgi?id=807023
+
+(cherry picked from commit ae951e724c3371ee9b118a369c3be683f2325547)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+
+Conflicts:
+	src/libvirt_private.syms -- context
+
+Downstream changes:
+    - no virDomainDeviceInfoIterateInternal in RHEL-6
+---
+ src/conf/domain_conf.c   | 40 ++++++++++++++++++++++++++++++++++++++++
+ src/conf/domain_conf.h   |  4 ++++
+ src/libvirt_private.syms |  1 +
+ 3 files changed, 45 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 0690377..fe09b56 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -16531,3 +16531,43 @@ virDomainDiskDefGenSecurityLabelDef(const char *model)
+ 
+     return seclabel;
+ }
++
++
++typedef struct {
++    const char *devAlias;
++    virDomainDeviceDefPtr dev;
++} virDomainDefFindDeviceCallbackData;
++
++static int
++virDomainDefFindDeviceCallback(virDomainDefPtr def ATTRIBUTE_UNUSED,
++                               virDomainDeviceDefPtr dev,
++                               virDomainDeviceInfoPtr info,
++                               void *opaque)
++{
++    virDomainDefFindDeviceCallbackData *data = opaque;
++
++    if (STREQ_NULLABLE(info->alias, data->devAlias)) {
++        *data->dev = *dev;
++        return -1;
++    }
++    return 0;
++}
++
++int
++virDomainDefFindDevice(virDomainDefPtr def,
++                       const char *devAlias,
++                       virDomainDeviceDefPtr dev)
++{
++    virDomainDefFindDeviceCallbackData data = { devAlias, dev };
++
++    dev->type = VIR_DOMAIN_DEVICE_NONE;
++    virDomainDeviceInfoIterate(def, virDomainDefFindDeviceCallback, &data);
++
++    if (dev->type == VIR_DOMAIN_DEVICE_NONE) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("no device found with alias %s"), devAlias);
++        return -1;
++    }
++
++    return 0;
++}
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 25a8c44..0c5dd09 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2432,4 +2432,8 @@ VIR_ENUM_DECL(virDomainStartupPolicy)
+ int virDomainList(virConnectPtr conn, virHashTablePtr domobjs,
+                   virDomainPtr **domains, unsigned int flags);
+ 
++int virDomainDefFindDevice(virDomainDefPtr def,
++                           const char *devAlias,
++                           virDomainDeviceDefPtr dev);
++
+ #endif /* __DOMAIN_CONF_H */
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index b62ffba..a0260a3 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -324,6 +324,7 @@ virDomainDefCheckABIStability;
+ virDomainDefClearDeviceAliases;
+ virDomainDefClearPCIAddresses;
+ virDomainDefCompatibleDevice;
++virDomainDefFindDevice;
+ virDomainDefFormat;
+ virDomainDefFormatInternal;
+ virDomainDefFree;
+-- 
+2.0.0
+

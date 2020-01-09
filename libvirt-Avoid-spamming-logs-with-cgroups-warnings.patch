@@ -1,0 +1,63 @@
+From a9cc4ad81f86206268fcfd27c4b388f8ee169c51 Mon Sep 17 00:00:00 2001
+Message-Id: <a9cc4ad81f86206268fcfd27c4b388f8ee169c51.1373271641.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 2 May 2013 09:36:45 -0600
+Subject: [PATCH] Avoid spamming logs with cgroups warnings
+
+6.5: https://bugzilla.redhat.com/show_bug.cgi?id=922153
+6.4.z: https://bugzilla.redhat.com/show_bug.cgi?id=958837
+
+The code for putting the emulator threads in a separate cgroup
+would spam the logs with warnings
+
+2013-02-27 16:08:26.731+0000: 29624: warning : virCgroupMoveTask:887 : no vm cgroup in controller 3
+2013-02-27 16:08:26.731+0000: 29624: warning : virCgroupMoveTask:887 : no vm cgroup in controller 4
+2013-02-27 16:08:26.732+0000: 29624: warning : virCgroupMoveTask:887 : no vm cgroup in controller 6
+
+This is because it has only created child cgroups for 3 of the
+controllers, but was trying to move the processes from all the
+controllers. The fix is to only try to move threads in the
+controllers we actually created. Also remove the warning and
+make it return a hard error to avoid such lazy callers in the
+future.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 279336c5d8c44f28956b3427ab2bf207d06878e2)
+---
+ src/qemu/qemu_cgroup.c | 5 +++++
+ src/util/cgroup.c      | 3 +--
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index ea2c1c0..c336934 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -685,6 +685,11 @@ int qemuSetupCgroupForEmulator(struct qemud_driver *driver,
+     }
+ 
+     for (i = 0; i < VIR_CGROUP_CONTROLLER_LAST; i++) {
++        if (i != VIR_CGROUP_CONTROLLER_CPU &&
++            i != VIR_CGROUP_CONTROLLER_CPUACCT &&
++            i != VIR_CGROUP_CONTROLLER_CPUSET)
++            continue;
++
+         if (!qemuCgroupControllerActive(driver, i))
+             continue;
+         rc = virCgroupMoveTask(cgroup, cgroup_emulator, i);
+diff --git a/src/util/cgroup.c b/src/util/cgroup.c
+index 0825801..baf4048 100644
+--- a/src/util/cgroup.c
++++ b/src/util/cgroup.c
+@@ -882,8 +882,7 @@ int virCgroupMoveTask(virCgroupPtr src_group, virCgroupPtr dest_group,
+ 
+     if (!src_group->controllers[controller].mountPoint ||
+         !dest_group->controllers[controller].mountPoint) {
+-        VIR_WARN("no vm cgroup in controller %d", controller);
+-        return 0;
++        return -EINVAL;
+     }
+ 
+     rc = virCgroupGetValueStr(src_group, controller, "tasks", &content);
+-- 
+1.8.2.1
+

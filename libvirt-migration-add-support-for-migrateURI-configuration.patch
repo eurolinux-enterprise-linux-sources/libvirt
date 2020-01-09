@@ -1,0 +1,181 @@
+From 0830c537620227ca965cd4f88ad43f0f981327d6 Mon Sep 17 00:00:00 2001
+Message-Id: <0830c537620227ca965cd4f88ad43f0f981327d6@dist-git>
+From: Chen Fan <chen.fan.fnst@cn.fujitsu.com>
+Date: Thu, 20 Oct 2016 10:57:10 +0200
+Subject: [PATCH] migration: add support for migrateURI configuration
+
+For now, we set the migration URI via command line '--migrate_uri' or
+construct the URI by looking up the dest host's hostname which could be
+solved by DNS automatically.
+
+But in cases the dest host have two or more NICs to reach, we may need to
+send the migration data over a specific NIC which is different from the
+automatically resolved one for some reason like performance, security, etc.
+Thus we must explicitly specify the migrateuri in command line everytime,
+but it is too troublesome if there are many such hosts (and don't forget
+virt-manager).
+
+This patch adds a configuration file option on dest host to save the
+default value set which can be specified to a migration hostname or
+one of this host's addresses used for transferring data, thus user doesn't
+have to specify it in command line everytime.
+
+Signed-off-by: Chen Fan <chen.fan.fnst@cn.fujitsu.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit b0312d9fbd66cec1ef0b0a13794404d179f3b20c)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1347389
+
+Conflicts and downstream changes:
+	src/qemu/qemu.conf:
+            - context
+
+	src/qemu/qemu_conf.c:
+            - context
+            - GET_VALUE_STR had to be open-coded
+
+	src/qemu/qemu_conf.h:
+            - context
+
+	src/qemu/qemu_migration.c:
+            - context
+            - config parameters are still directly in struct qemud_driver
+            - virSocketAddrIsNumeric does not exist downstream, but the
+              condition could never be true anyway so I just removed it
+              (which is what upstream did later on too)
+            - VIR_STRDUP had to be open-coded
+
+	src/qemu/test_libvirtd_qemu.aug.in:
+            - context
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/libvirtd_qemu.aug         |  1 +
+ src/qemu/qemu.conf                 |  8 ++++++++
+ src/qemu/qemu_conf.c               | 10 ++++++++++
+ src/qemu/qemu_conf.h               |  1 +
+ src/qemu/qemu_migration.c          | 17 +++++++++++++----
+ src/qemu/test_libvirtd_qemu.aug.in |  1 +
+ 6 files changed, 34 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/libvirtd_qemu.aug b/src/qemu/libvirtd_qemu.aug
+index 36e5a33..a14a04c 100644
+--- a/src/qemu/libvirtd_qemu.aug
++++ b/src/qemu/libvirtd_qemu.aug
+@@ -75,6 +75,7 @@ module Libvirtd_qemu =
+ 
+    let network_entry = int_entry "migration_port_min"
+                  | int_entry "migration_port_max"
++                 | str_entry "migration_host"
+ 
+    let log_entry = bool_entry "log_timestamp"
+ 
+diff --git a/src/qemu/qemu.conf b/src/qemu/qemu.conf
+index 4175e58..f68a36f 100644
+--- a/src/qemu/qemu.conf
++++ b/src/qemu/qemu.conf
+@@ -403,6 +403,14 @@
+ #seccomp_sandbox = 1
+ 
+ 
++# The default hostname or IP address which will be used by a migration
++# source for transferring migration data to this host.  The migration
++# source has to be able to resolve this hostname and connect to it so
++# setting "localhost" will not work.  By default, the host's configured
++# hostname is used.
++#migration_host = "host.example.com"
++
++
+ # Override the port range used for incoming migrations.
+ #
+ # Minimum must be greater than 0, however when QEMU is not running as root,
+diff --git a/src/qemu/qemu_conf.c b/src/qemu/qemu_conf.c
+index 6d17f56..9d1e79c 100644
+--- a/src/qemu/qemu_conf.c
++++ b/src/qemu/qemu_conf.c
+@@ -607,6 +607,16 @@ int qemudLoadDriverConfig(struct qemud_driver *driver,
+     CHECK_TYPE("seccomp_sandbox", VIR_CONF_LONG);
+     if (p) driver->seccompSandbox = p->l;
+ 
++    p = virConfGetValue(conf, "migration_host");
++    CHECK_TYPE("migration_host", VIR_CONF_STRING);
++    if (p && p->str) {
++        if (!(driver->migrateHost = strdup(p->str))) {
++            virReportOOMError();
++            virConfFree(conf);
++            return -1;
++        }
++    }
++
+     p = virConfGetValue(conf, "log_timestamp");
+     CHECK_TYPE("log_timestamp", VIR_CONF_LONG);
+     if (p) driver->logTimestamp = p->l != 0;
+diff --git a/src/qemu/qemu_conf.h b/src/qemu/qemu_conf.h
+index a1dc506..ab8c4ce 100644
+--- a/src/qemu/qemu_conf.h
++++ b/src/qemu/qemu_conf.h
+@@ -164,6 +164,7 @@ struct qemud_driver {
+     int seccompSandbox;
+ 
+     bool logTimestamp;
++    char *migrateHost;
+     int migrationPortMin;
+     int migrationPortMax;
+ };
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index c4f0fcb..d4b1aa7 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1636,6 +1636,7 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+     char *uri_str = NULL;
+     int ret = -1;
+     virURIPtr uri = NULL;
++    const char *migrateHost = driver->migrateHost;
+ 
+     VIR_DEBUG("driver=%p, dconn=%p, cookiein=%s, cookieinlen=%d, "
+               "cookieout=%p, cookieoutlen=%p, uri_in=%s, uri_out=%p, "
+@@ -1647,8 +1648,9 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+     /* The URI passed in may be NULL or a string "tcp://somehostname:port".
+      *
+      * If the URI passed in is NULL then we allocate a port number
+-     * from our pool of port numbers and return a URI of
+-     * "tcp://ourhostname:port".
++     * from our pool of port numbers, and if the migrateHost is configured,
++     * we return a URI of "tcp://migrateHost:port", otherwise return a URI
++     * of "tcp://ourhostname:port".
+      *
+      * If the URI passed in is not NULL then we try to parse out the
+      * port number and use that (note that the hostname is assumed
+@@ -1664,8 +1666,15 @@ qemuMigrationPrepareDirect(struct qemud_driver *driver,
+             goto cleanup;
+         }
+ 
+-        if ((hostname = virGetHostname(NULL)) == NULL)
+-            goto cleanup;
++        if (migrateHost != NULL) {
++            if (!(hostname = strdup(migrateHost))) {
++                virReportOOMError();
++                goto cleanup;
++            }
++        } else {
++            if ((hostname = virGetHostname(NULL)) == NULL)
++                goto cleanup;
++        }
+ 
+         if (STRPREFIX(hostname, "localhost")) {
+             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+diff --git a/src/qemu/test_libvirtd_qemu.aug.in b/src/qemu/test_libvirtd_qemu.aug.in
+index 57f6f62..772e5f9 100644
+--- a/src/qemu/test_libvirtd_qemu.aug.in
++++ b/src/qemu/test_libvirtd_qemu.aug.in
+@@ -61,6 +61,7 @@ module Test_libvirtd_qemu =
+ { "keepalive_interval" = "5" }
+ { "keepalive_count" = "5" }
+ { "seccomp_sandbox" = "1" }
++{ "migration_host" = "host.example.com" }
+ { "migration_port_min" = "49152" }
+ { "migration_port_max" = "49215" }
+ { "log_timestamp" = "0" }
+-- 
+2.10.2
+

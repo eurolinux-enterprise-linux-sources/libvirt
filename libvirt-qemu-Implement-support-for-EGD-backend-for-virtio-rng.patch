@@ -1,0 +1,110 @@
+From cd0e5113ec79a467c2d07ca58621bac795e51aa8 Mon Sep 17 00:00:00 2001
+Message-Id: <cd0e5113ec79a467c2d07ca58621bac795e51aa8@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:53:52 +0100
+Subject: [PATCH] qemu: Implement support for EGD backend for virtio-rng
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+This patch adds a new capability bit QEMU_CAPS_OBJECT_RNG_EGD and code
+to support the egd backend for the VirtIO RNG device.
+
+The device is added by 3 qemu command line options:
+-chardev socket,id=charrng0,host=1.2.3.4,port=1234 (communication
+                                                    backend)
+-object rng-egd,chardev=charrng0,id=rng0 (RNG protocol client)
+-device virtio-rng-pci,rng=rng0,bus=pci.0,addr=0x4 (the RNG device)
+(cherry picked from commit 820019fcdff27264bc5ae8fd01095840d3456aa6)
+
+Conflicts:
+	src/qemu/qemu_capabilities.c - context
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c |  2 ++
+ src/qemu/qemu_capabilities.h |  1 +
+ src/qemu/qemu_command.c      | 22 +++++++++++++++++++---
+ 3 files changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index f4e8513..636fa60 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -202,6 +202,7 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "mlock",
+               "virtio-rng",
+               "rng-random",
++              "rng-egd",
+     );
+ 
+ struct _qemuCaps {
+@@ -1317,6 +1318,7 @@ struct qemuCapsStringFlags qemuCapsObjectTypes[] = {
+     { "vmware-svga", QEMU_CAPS_DEVICE_VMWARE_SVGA },
+     { "virtio-rng-pci", QEMU_CAPS_DEVICE_VIRTIO_RNG },
+     { "rng-random", QEMU_CAPS_OBJECT_RNG_RANDOM },
++    { "rng-egd", QEMU_CAPS_OBJECT_RNG_EGD },
+ };
+ 
+ 
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index d2fca60..18c4f8b 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -170,6 +170,7 @@ enum qemuCapsFlags {
+     QEMU_CAPS_DEVICE_VIRTIO_RNG,        /* virtio-rng device */
+     QEMU_CAPS_OBJECT_RNG_RANDOM,        /* the rng-random backend for
+                                            virtio rng */
++    QEMU_CAPS_OBJECT_RNG_EGD,           /* EGD protocol daemon for rng */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index c66dc25..4346123 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4135,6 +4135,7 @@ qemuBuildRNGBackendArgs(virCommandPtr cmd,
+                         qemuCapsPtr caps)
+ {
+     virBuffer buf = VIR_BUFFER_INITIALIZER;
++    char *backend = NULL;
+     int ret = -1;
+ 
+     switch ((enum virDomainRNGBackend) dev->backend) {
+@@ -4155,9 +4156,23 @@ qemuBuildRNGBackendArgs(virCommandPtr cmd,
+         break;
+ 
+     case VIR_DOMAIN_RNG_BACKEND_EGD:
+-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-                       _("egd RNG backend not yet implemented"));
+-        goto cleanup;
++
++        if (!qemuCapsGet(caps, QEMU_CAPS_OBJECT_RNG_EGD)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                           _("this qemu doesn't support the rng-egd "
++                             "backend"));
++            goto cleanup;
++        }
++
++        if (!(backend = qemuBuildChrChardevStr(dev->source.chardev,
++                                               dev->info.alias, caps)))
++            goto cleanup;
++
++        virCommandAddArgList(cmd, "-chardev", backend, NULL);
++
++        virCommandAddArg(cmd, "-object");
++        virCommandAddArgFormat(cmd, "rng-egd,chardev=char%s,id=%s",
++                               dev->info.alias, dev->info.alias);
+         break;
+ 
+     case VIR_DOMAIN_RNG_BACKEND_LAST:
+@@ -4168,6 +4183,7 @@ qemuBuildRNGBackendArgs(virCommandPtr cmd,
+ 
+ cleanup:
+     virBufferFreeAndReset(&buf);
++    VIR_FREE(backend);
+     return ret;
+ }
+ 
+-- 
+1.9.1
+

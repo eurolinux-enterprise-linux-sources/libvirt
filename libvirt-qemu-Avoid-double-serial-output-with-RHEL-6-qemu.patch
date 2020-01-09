@@ -1,0 +1,41 @@
+From 99dfda7b969badff107f135ec4b2047d91d957ac Mon Sep 17 00:00:00 2001
+Message-Id: <99dfda7b969badff107f135ec4b2047d91d957ac@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Thu, 29 Jan 2015 13:49:30 +0100
+Subject: [PATCH] qemu: Avoid double serial output with RHEL 6 qemu
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1162759
+
+QEMU in RHEL 6 has a bug that automatically adds "-device sga" if it
+sees "-nographic" on the command-line.  Since reverting a patch that
+introduced the bug would make more problems than working around it in
+libvirt, this patch just fixes it with a few-liner.
+
+RHEL-only
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 4735de7..9cedb3a 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -5510,7 +5510,11 @@ qemuBuildCommandLine(virConnectPtr conn,
+                            _("need at least one serial port to use SGA"));
+             goto error;
+         }
+-        virCommandAddArgList(cmd, "-device", "sga", NULL);
++        /* QEMU in RHEL 6 has a bug that automatically adds "-device sga" if it
++         * sees "-nographic" on the command-line (rhbz#1162759)
++         */
++        if (def->graphics)
++            virCommandAddArgList(cmd, "-device", "sga", NULL);
+     }
+ 
+     if (monitor_chr) {
+-- 
+2.2.2
+

@@ -1,0 +1,44 @@
+From 8f21ecf5abe3343edd46e7b94349e39b4257ed4d Mon Sep 17 00:00:00 2001
+Message-Id: <8f21ecf5abe3343edd46e7b94349e39b4257ed4d.1373885147.git.jdenemar@redhat.com>
+From: John Ferlan <jferlan@redhat.com>
+Date: Mon, 8 Jul 2013 23:05:41 +0800
+Subject: [PATCH] virsh: Resolve Coverity 'MISSING_BREAK'
+
+https://bugzilla.redhat.com/show_bug.cgi?id=924596
+
+Recent commit '53531e16' resulted in a new Coverity warning regarding
+a missing break in the ':' options processing. Adjust the commit to
+avoid the issue.
+(cherry picked from commit 55b46920bbcceaad6c71a74eb5877c0d2bebf673)
+---
+ tools/virsh.c | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/tools/virsh.c b/tools/virsh.c
+index 6889b0d..be24f41 100644
+--- a/tools/virsh.c
++++ b/tools/virsh.c
+@@ -2970,12 +2970,15 @@ vshParseArgv(vshControl *ctl, int argc, char **argv)
+             break;
+         case ':':
+             for (i = 0; opt[i].name != NULL; i++) {
+-                if (opt[i].val == optopt) {
+-                    vshError(ctl, _("option '-%c'/'--%s' requires an argument"),
+-                             optopt, opt[i].name);
+-                    exit(EXIT_FAILURE);
+-                }
++                if (opt[i].val == optopt)
++                    break;
+             }
++            if (opt[i].name)
++                vshError(ctl, _("option '-%c'/'--%s' requires an argument"),
++                         optopt, opt[i].name);
++            else
++                vshError(ctl, _("option '-%c' requires an argument"), optopt);
++            exit(EXIT_FAILURE);
+         case '?':
+             if (optopt)
+                 vshError(ctl, _("unsupported option '-%c'. See --help."), optopt);
+-- 
+1.8.3.2
+

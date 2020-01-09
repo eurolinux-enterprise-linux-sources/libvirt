@@ -1,0 +1,190 @@
+From adbaabf5e263fa5765bbf1280c0f8211ac58acf9 Mon Sep 17 00:00:00 2001
+Message-Id: <adbaabf5e263fa5765bbf1280c0f8211ac58acf9.1350297261.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 15 Oct 2012 12:36:13 +0800
+Subject: [PATCH] qemu: Initialize cpuset for hotplugged vcpu as def->cpuset
+
+https://bugzilla.redhat.com/show_bug.cgi?id=855218
+
+The onlined vcpu pinning policy should inherit def->cpuset if
+it's not specified explicitly, and the affinity should be set
+in this case. Oppositely, the offlined vcpu pinning policy should
+be free()'ed.
+(cherry picked from commit 0df1a790891b4d829b564d2afc2584a63dc7ade0)
+---
+ src/conf/domain_conf.c   | 21 ++++++++++++++
+ src/conf/domain_conf.h   |  3 ++
+ src/libvirt_private.syms |  1 +
+ src/qemu/qemu_driver.c   | 75 ++++++++++++++++++++++++++++++++++++++++++------
+ 4 files changed, 91 insertions(+), 9 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index cfc3b2d..e638c2d 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8398,6 +8398,27 @@ error:
+     goto cleanup;
+ }
+ 
++/*
++ * Return the vcpupin related with the vcpu id on SUCCESS, or
++ * NULL on failure.
++ */
++virDomainVcpuPinDefPtr
++virDomainLookupVcpuPin(virDomainDefPtr def,
++                       int vcpuid)
++{
++    int i;
++
++    if (!def->cputune.vcpupin)
++        return NULL;
++
++    for (i = 0; i < def->cputune.nvcpupin; i++) {
++        if (def->cputune.vcpupin[i]->vcpuid == vcpuid)
++            return def->cputune.vcpupin[i];
++    }
++
++    return NULL;
++}
++
+ static int virDomainDefMaybeAddController(virDomainDefPtr def,
+                                           int type,
+                                           int idx)
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 880f253..a112b14 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2303,4 +2303,7 @@ virDomainNetDefPtr virDomainNetFind(virDomainDefPtr def,
+ int virDomainList(virConnectPtr conn, virHashTablePtr domobjs,
+                   virDomainPtr **domains, unsigned int flags);
+ 
++virDomainVcpuPinDefPtr virDomainLookupVcpuPin(virDomainDefPtr def,
++                                              int vcpuid);
++
+ #endif /* __DOMAIN_CONF_H */
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 22e8b90..7ea52c9 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -426,6 +426,7 @@ virDomainLiveConfigHelperMethod;
+ virDomainLoadAllConfigs;
+ virDomainLockFailureTypeFromString;
+ virDomainLockFailureTypeToString;
++virDomainLookupVcpuPin;
+ virDomainMemballoonModelTypeFromString;
+ virDomainMemballoonModelTypeToString;
+ virDomainMemDumpTypeFromString;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 0a17bed..65e01de 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3542,6 +3542,7 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+     int ncpupids;
+     virCgroupPtr cgroup = NULL;
+     virCgroupPtr cgroup_vcpu = NULL;
++    bool cgroup_available = false;
+ 
+     qemuDomainObjEnterMonitor(driver, vm);
+ 
+@@ -3595,11 +3596,13 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+         goto cleanup;
+     }
+ 
+-    if (virCgroupForDomain(driver->cgroup, vm->def->name, &cgroup, 0) == 0) {
+-        int rv = -1;
++    cgroup_available = (virCgroupForDomain(driver->cgroup, vm->def->name,
++                                           &cgroup, 0) == 0);
+ 
+-        if (nvcpus > oldvcpus) {
+-            for (i = oldvcpus; i < nvcpus; i++) {
++    if (nvcpus > oldvcpus) {
++        for (i = oldvcpus; i < nvcpus; i++) {
++            if (cgroup_available) {
++                int rv = -1;
+                 /* Create cgroup for the onlined vcpu */
+                 rv = virCgroupForVcpu(cgroup, i, &cgroup_vcpu, 1);
+                 if (rv < 0) {
+@@ -3619,11 +3622,62 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+                     virCgroupRemove(cgroup_vcpu);
+                     goto cleanup;
+                 }
++            }
+ 
+-                virCgroupFree(&cgroup_vcpu);
++            /* Inherit def->cpuset */
++            if (vm->def->cpumask) {
++                /* vm->def->cputune.vcpupin can't be NULL if
++                 * vm->def->cpumask is not NULL.
++                 */
++                virDomainVcpuPinDefPtr vcpupin = NULL;
++
++                if (VIR_REALLOC_N(vm->def->cputune.vcpupin,
++                                  vm->def->cputune.nvcpupin + 1) < 0) {
++                    virReportOOMError();
++                    goto cleanup;
++                }
++
++                if (VIR_ALLOC(vcpupin) < 0) {
++                    virReportOOMError();
++                    goto cleanup;
++                }
++
++                vcpupin->cpumask = virBitmapNew(VIR_DOMAIN_CPUMASK_LEN);
++                virBitmapCopy(vcpupin->cpumask, vm->def->cpumask);
++                vcpupin->vcpuid = i;
++                vm->def->cputune.vcpupin[vm->def->cputune.nvcpupin++] = vcpupin;
++
++                if (cgroup_available) {
++                    if (qemuSetupCgroupVcpuPin(cgroup_vcpu,
++                                               vm->def->cputune.vcpupin,
++                                               vm->def->cputune.nvcpupin, i) < 0) {
++                        virReportError(VIR_ERR_OPERATION_INVALID,
++                                       _("failed to set cpuset.cpus in cgroup"
++                                         " for vcpu %d"), i);
++                        ret = -1;
++                        goto cleanup;
++                    }
++                } else {
++                    if (virProcessInfoSetAffinity(cpupids[i],
++                                                  vcpupin->cpumask) < 0) {
++                        virReportError(VIR_ERR_SYSTEM_ERROR,
++                                       _("failed to set cpu affinity for vcpu %d"),
++                                       i);
++                        ret = -1;
++                        goto cleanup;
++                    }
++                }
+             }
+-        } else {
+-            for (i = oldvcpus - 1; i >= nvcpus; i--) {
++
++            virCgroupFree(&cgroup_vcpu);
++	}
++    } else {
++        for (i = oldvcpus - 1; i >= nvcpus; i--) {
++            virDomainVcpuPinDefPtr vcpupin = NULL;
++
++            if (cgroup_available) {
++                int rv = -1;
++
+                 rv = virCgroupForVcpu(cgroup, i, &cgroup_vcpu, 0);
+                 if (rv < 0) {
+                     virReportSystemError(-rv,
+@@ -3637,9 +3691,12 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+                 virCgroupRemove(cgroup_vcpu);
+                 virCgroupFree(&cgroup_vcpu);
+             }
+-        }
+ 
+-        virCgroupFree(&cgroup);
++            /* Free vcpupin setting */
++            if ((vcpupin = virDomainLookupVcpuPin(vm->def, i))) {
++                VIR_FREE(vcpupin);
++            }
++        }
+     }
+ 
+     priv->nvcpupids = ncpupids;
+-- 
+1.7.12.3
+

@@ -1,0 +1,45 @@
+From 65e2bce882075544b5d43dee16c3656c28661cd4 Mon Sep 17 00:00:00 2001
+Message-Id: <65e2bce882075544b5d43dee16c3656c28661cd4.1350297260.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:49 -0600
+Subject: [PATCH] Ignore error from query-cpu-definitions
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+Some architectures provide the query-cpu-definitions command,
+but are set to always return a "GenericError" from it :-(
+Catch this & treat it as if there was an empty list of CPUs
+returned
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 295bda40da400bea10d997e84780659169bee778)
+---
+ src/qemu/qemu_monitor_json.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index b77a2fe..f1badff 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -4113,6 +4113,18 @@ int qemuMonitorJSONGetCPUDefinitions(qemuMonitorPtr mon,
+ 
+     ret = qemuMonitorJSONCommand(mon, cmd, &reply);
+ 
++    if (ret == 0) {
++        /* Urgh, some QEMU architectures have the query-cpu-definitions
++         * command, but return 'GenericError' with string "Not supported",
++         * instead of simply omitting the command entirely :-(
++         */
++        if (qemuMonitorJSONHasError(reply, "GenericError")) {
++            ret = 0;
++            goto cleanup;
++        }
++        ret = qemuMonitorJSONCheckError(cmd, reply);
++    }
++
+     if (ret == 0)
+         ret = qemuMonitorJSONCheckError(cmd, reply);
+ 
+-- 
+1.7.12.3
+

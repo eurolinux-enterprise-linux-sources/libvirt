@@ -1,0 +1,45 @@
+From 02ab991de94aee430cb04089b974b3105fa2cf24 Mon Sep 17 00:00:00 2001
+Message-Id: <02ab991de94aee430cb04089b974b3105fa2cf24.1373271644.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 26 Jun 2013 15:30:56 +0200
+Subject: [PATCH] Plug leak in virCgroupMoveTask
+
+RHEL-only.
+
+We only break out of the while loop if *content is an empty string.
+However the buffer has been allocated to BUFSIZ + 1 (8193 in my case),
+and needs to be freed.
+
+Remove 'return 0' since we can only reach it via the break where rc is 0
+and free the string.
+
+Detected by valgrind:
+==4945== 16,386 bytes in 2 blocks are definitely lost in loss record 715
+of 722
+==4945==    by 0x4E787CB: virReallocN (memory.c:160)
+==4945==    by 0x4E87A89: virFileReadLimFD (util.c:400)
+==4945==    by 0x4E87BF7: virFileReadAll (util.c:461)
+==4945==    by 0x4E6D140: virCgroupGetValueStr (cgroup.c:363)
+==4945==    by 0x4E6DD7D: virCgroupMoveTask (cgroup.c:897)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=978352
+---
+ src/util/cgroup.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/src/util/cgroup.c b/src/util/cgroup.c
+index 778a52e..e057b79 100644
+--- a/src/util/cgroup.c
++++ b/src/util/cgroup.c
+@@ -907,8 +907,6 @@ int virCgroupMoveTask(virCgroupPtr src_group, virCgroupPtr dest_group,
+         VIR_FREE(content);
+     }
+ 
+-    return 0;
+-
+ cleanup:
+     VIR_FREE(content);
+ 
+-- 
+1.8.2.1
+

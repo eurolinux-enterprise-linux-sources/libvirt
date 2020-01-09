@@ -1,0 +1,30 @@
+From 392897d00daba0663bf4f96cd8d1b28a643e2f9a Mon Sep 17 00:00:00 2001
+Message-Id: <392897d00daba0663bf4f96cd8d1b28a643e2f9a.1350990679.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Mon, 22 Oct 2012 23:24:30 +0800
+Subject: [PATCH] virsh: Fix segfault of snapshot-list
+
+https://bugzilla.redhat.com/show_bug.cgi?id=837544
+
+'snaps' is used after free()'ed.
+(cherry picked from commit e0ad4669834d44763f7201ae97b997e9c64e8940)
+---
+ tools/virsh-snapshot.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh-snapshot.c b/tools/virsh-snapshot.c
+index b828371..53de2b3 100644
+--- a/tools/virsh-snapshot.c
++++ b/tools/virsh-snapshot.c
+@@ -866,7 +866,7 @@ vshSnapshotListCollect(vshControl *ctl, virDomainPtr dom,
+                     goto cleanup;
+             }
+             if (from) {
+-                snaps[snaplist->nsnaps++] = from;
++                snaplist->snaps[snaplist->nsnaps++].snap = from;
+                 virDomainSnapshotRef(from);
+             }
+         }
+-- 
+1.7.12.4
+

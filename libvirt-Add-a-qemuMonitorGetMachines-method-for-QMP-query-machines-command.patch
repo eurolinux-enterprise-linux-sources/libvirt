@@ -1,0 +1,308 @@
+From 4d728206bc2537819dc5a88799411c6c2f864821 Mon Sep 17 00:00:00 2001
+Message-Id: <4d728206bc2537819dc5a88799411c6c2f864821.1350297259.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 11 Oct 2012 19:56:37 -0600
+Subject: [PATCH] Add a qemuMonitorGetMachines() method for QMP query-machines
+ command
+
+https://bugzilla.redhat.com/show_bug.cgi?id=863115
+
+Add a new qemuMonitorGetMachines() method to support invocation
+of the 'query-machines' JSON monitor command. No HMP equivalent
+is required, since this will only be present for QEMU >= 1.2
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 399937218207efcf1167b75986e22104b8b75fae)
+---
+ src/qemu/qemu_monitor.c      |  30 +++++++++++++
+ src/qemu/qemu_monitor.h      |  15 +++++++
+ src/qemu/qemu_monitor_json.c | 101 +++++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_monitor_json.h |   4 ++
+ tests/qemumonitorjsontest.c  |  78 +++++++++++++++++++++++++++++++++
+ 5 files changed, 228 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index bcd16b1..d65425a 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -3086,3 +3086,33 @@ int qemuMonitorGetVersion(qemuMonitorPtr mon,
+ 
+     return qemuMonitorJSONGetVersion(mon, major, minor, micro, package);
+ }
++
++int qemuMonitorGetMachines(qemuMonitorPtr mon,
++                           qemuMonitorMachineInfoPtr **machines)
++{
++    VIR_DEBUG("mon=%p machines=%p",
++              mon, machines);
++
++    if (!mon) {
++        virReportError(VIR_ERR_INVALID_ARG, "%s",
++                       _("monitor must not be NULL"));
++        return -1;
++    }
++
++    if (!mon->json) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("JSON monitor is required"));
++        return -1;
++    }
++
++    return qemuMonitorJSONGetMachines(mon, machines);
++}
++
++void qemuMonitorMachineInfoFree(qemuMonitorMachineInfoPtr machine)
++{
++    if (!machine)
++        return;
++    VIR_FREE(machine->name);
++    VIR_FREE(machine->alias);
++    VIR_FREE(machine);
++}
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 0b5e339..b350cc7 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -584,6 +584,21 @@ int qemuMonitorGetVersion(qemuMonitorPtr mon,
+                           char **package)
+     ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4);
+ 
++
++typedef struct _qemuMonitorMachineInfo qemuMonitorMachineInfo;
++typedef qemuMonitorMachineInfo *qemuMonitorMachineInfoPtr;
++
++struct _qemuMonitorMachineInfo {
++    char *name;
++    bool isDefault;
++    char *alias;
++};
++
++int qemuMonitorGetMachines(qemuMonitorPtr mon,
++                           qemuMonitorMachineInfoPtr **machines);
++
++void qemuMonitorMachineInfoFree(qemuMonitorMachineInfoPtr machine);
++
+ /**
+  * When running two dd process and using <> redirection, we need a
+  * shell that will not truncate files.  These two strings serve that
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index aa5c4b7..b082186 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -4097,3 +4097,104 @@ cleanup:
+     virJSONValueFree(reply);
+     return ret;
+ }
++
++
++int qemuMonitorJSONGetMachines(qemuMonitorPtr mon,
++                               qemuMonitorMachineInfoPtr **machines)
++{
++    int ret;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++    virJSONValuePtr data;
++    qemuMonitorMachineInfoPtr *infolist = NULL;
++    int n = 0;
++    size_t i;
++
++    *machines = NULL;
++
++    if (!(cmd = qemuMonitorJSONMakeCommand("query-machines", NULL)))
++        return -1;
++
++    ret = qemuMonitorJSONCommand(mon, cmd, &reply);
++
++    if (ret == 0)
++        ret = qemuMonitorJSONCheckError(cmd, reply);
++
++    if (ret < 0)
++        goto cleanup;
++
++    ret = -1;
++
++    if (!(data = virJSONValueObjectGet(reply, "return"))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-machines reply was missing return data"));
++        goto cleanup;
++    }
++
++    if ((n = virJSONValueArraySize(data)) < 0) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("query-machines reply data was not an array"));
++        goto cleanup;
++    }
++
++    if (VIR_ALLOC_N(infolist, n) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    for (i = 0 ; i < n ; i++) {
++        virJSONValuePtr child = virJSONValueArrayGet(data, i);
++        const char *tmp;
++        qemuMonitorMachineInfoPtr info;
++
++        if (VIR_ALLOC(info) < 0) {
++            virReportOOMError();
++            goto cleanup;
++        }
++
++        infolist[i] = info;
++
++        if (!(tmp = virJSONValueObjectGetString(child, "name"))) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("query-machines reply data was missing 'name'"));
++            goto cleanup;
++        }
++
++        if (!(info->name = strdup(tmp))) {
++            virReportOOMError();
++            goto cleanup;
++        }
++
++        if (virJSONValueObjectHasKey(child, "is-default") &&
++            virJSONValueObjectGetBoolean(child, "is-default", &info->isDefault) < 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("query-machines reply has malformed 'is-default' data"));
++            goto cleanup;
++        }
++
++        if (virJSONValueObjectHasKey(child, "alias")) {
++            if (!(tmp = virJSONValueObjectGetString(child, "alias"))) {
++                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                               _("query-machines reply has malformed 'alias' data"));
++                goto cleanup;
++            }
++            if (!(info->alias = strdup(tmp))) {
++                virReportOOMError();
++                goto cleanup;
++            }
++        }
++    }
++
++    ret = n;
++    *machines = infolist;
++
++cleanup:
++    if (ret < 0 && infolist) {
++        for (i = 0 ; i < n ; i++)
++            qemuMonitorMachineInfoFree(infolist[i]);
++        VIR_FREE(infolist);
++    }
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++}
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index d527d07..eb2f1c2 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -299,4 +299,8 @@ int qemuMonitorJSONGetVersion(qemuMonitorPtr mon,
+                               char **package)
+     ATTRIBUTE_NONNULL(2) ATTRIBUTE_NONNULL(3) ATTRIBUTE_NONNULL(4);
+ 
++int qemuMonitorJSONGetMachines(qemuMonitorPtr mon,
++                               qemuMonitorMachineInfoPtr **machines)
++    ATTRIBUTE_NONNULL(2);
++
+ #endif /* QEMU_MONITOR_JSON_H */
+diff --git a/tests/qemumonitorjsontest.c b/tests/qemumonitorjsontest.c
+index c3a0c45..f1947c5 100644
+--- a/tests/qemumonitorjsontest.c
++++ b/tests/qemumonitorjsontest.c
+@@ -224,6 +224,83 @@ cleanup:
+ }
+ 
+ static int
++testQemuMonitorJSONGetMachines(const void *data)
++{
++    virCapsPtr caps = (virCapsPtr)data;
++    qemuMonitorTestPtr test = qemuMonitorTestNew(true, caps);
++    int ret = -1;
++    qemuMonitorMachineInfoPtr *info;
++    int ninfo;
++    const char *null = NULL;
++
++    if (!test)
++        return -1;
++
++    if (qemuMonitorTestAddItem(test, "query-machines",
++                               "{ "
++                               "  \"return\": [ "
++                               "   { "
++                               "     \"name\": \"pc-1.0\" "
++                               "   }, "
++                               "   { "
++                               "     \"name\": \"pc-1.1\" "
++                               "   }, "
++                               "   { "
++                               "     \"name\": \"pc-1.2\", "
++                               "     \"is-default\": true, "
++                               "     \"alias\": \"pc\" "
++                               "   } "
++                               "  ]"
++                               "}") < 0)
++        goto cleanup;
++
++    if ((ninfo = qemuMonitorGetMachines(qemuMonitorTestGetMonitor(test),
++                                        &info)) < 0)
++        goto cleanup;
++
++    if (ninfo != 3) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       "ninfo %d is not 3", ninfo);
++        goto cleanup;
++    }
++
++#define CHECK(i, wantname, wantisDefault, wantalias)                    \
++    do {                                                                \
++        if (STRNEQ(info[i]->name, (wantname))) {                        \
++            virReportError(VIR_ERR_INTERNAL_ERROR,                      \
++                           "name %s is not %s",                         \
++                           info[i]->name, (wantname));                  \
++            goto cleanup;                                               \
++        }                                                               \
++        if (info[i]->isDefault != (wantisDefault)) {                    \
++            virReportError(VIR_ERR_INTERNAL_ERROR,                      \
++                           "isDefault %d is not %d",                    \
++                           info[i]->isDefault, (wantisDefault));        \
++            goto cleanup;                                               \
++        }                                                               \
++        if (STRNEQ_NULLABLE(info[i]->alias, (wantalias))) {             \
++            virReportError(VIR_ERR_INTERNAL_ERROR,                      \
++                           "alias %s is not %s",                        \
++                           info[i]->alias, NULLSTR(wantalias));         \
++            goto cleanup;                                               \
++        }                                                               \
++    } while (0)
++
++    CHECK(0, "pc-1.0", false, null);
++    CHECK(1, "pc-1.1", false, null);
++    CHECK(2, "pc-1.2", true, "pc");
++
++#undef CHECK
++
++    ret = 0;
++
++cleanup:
++    qemuMonitorTestFree(test);
++    return ret;
++}
++
++
++static int
+ mymain(void)
+ {
+     int ret = 0;
+@@ -243,6 +320,7 @@ mymain(void)
+ 
+     DO_TEST(GetStatus);
+     DO_TEST(GetVersion);
++    DO_TEST(GetMachines);
+ 
+     virCapabilitiesFree(caps);
+ 
+-- 
+1.7.12.3
+

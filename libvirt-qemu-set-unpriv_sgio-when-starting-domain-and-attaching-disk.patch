@@ -1,0 +1,153 @@
+From 1f64573f8fb95079df3d94434a697a9e21a9ea09 Mon Sep 17 00:00:00 2001
+Message-Id: <1f64573f8fb95079df3d94434a697a9e21a9ea09.1357740563.git.jdenemar@redhat.com>
+From: Osier Yang <jyang@redhat.com>
+Date: Tue, 8 Jan 2013 23:49:55 +0800
+Subject: [PATCH] qemu: set unpriv_sgio when starting domain and attaching disk
+
+https://bugzilla.redhat.com/show_bug.cgi?id=878578
+
+This ignores the default "filtered" if unpriv_sgio is not supported
+by kernel, but for explicit request "filtered", it error out for
+domain starting.
+(cherry picked from commit 278f87c4b526dcf97d1824ce08722925428e17b4)
+
+Conflicts:
+
+	src/libvirt_private.syms: virGetUserCacheDirectory and
+                                  virGetUserConfigDirectory are
+                                  not in RHEL.
+---
+ src/libvirt_private.syms |  1 +
+ src/qemu/qemu_driver.c   | 15 +++++++++------
+ src/qemu/qemu_process.c  | 31 +++++++++++++++++++++++++++++++
+ src/qemu/qemu_process.h  |  1 +
+ src/util/util.c          |  2 +-
+ src/util/util.h          |  2 ++
+ 6 files changed, 45 insertions(+), 7 deletions(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 64d7196..58438bd 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1269,6 +1269,7 @@ virGetDeviceUnprivSGIO;
+ virGetGroupID;
+ virGetGroupName;
+ virGetHostname;
++virGetUnprivSGIOSysfsPath;
+ virGetUserDirectory;
+ virGetUserID;
+ virGetUserName;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 2a4f62f..41e23fa 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -5958,12 +5958,15 @@ qemuDomainAttachDeviceDiskLive(virConnectPtr conn,
+                      NULLSTR(disk->src));
+     }
+ 
+-    if (ret == 0 &&
+-        disk->type == VIR_DOMAIN_DISK_TYPE_BLOCK &&
+-        disk->shared) {
+-        if (qemuAddSharedDisk(driver->sharedDisks, disk->src) < 0)
+-            VIR_WARN("Failed to add disk '%s' to shared disk table",
+-                     disk->src);
++    if (ret == 0) {
++        if (disk->type == VIR_DOMAIN_DISK_TYPE_BLOCK && disk->shared) {
++            if (qemuAddSharedDisk(driver->sharedDisks, disk->src) < 0)
++                VIR_WARN("Failed to add disk '%s' to shared disk table",
++                         disk->src);
++        }
++
++        if (qemuSetUnprivSGIO(disk) < 0)
++            VIR_WARN("Failed to set unpriv_sgio of disk '%s'", disk->src);
+     }
+ 
+ end:
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 7ae7137..525d309 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -3390,6 +3390,34 @@ qemuProcessReconnectAll(virConnectPtr conn, struct qemud_driver *driver)
+     virHashForEach(driver->domains.objs, qemuProcessReconnectHelper, &data);
+ }
+ 
++int
++qemuSetUnprivSGIO(virDomainDiskDefPtr disk)
++{
++    int val = -1;
++
++    if (disk->sgio)
++        val = (disk->sgio == VIR_DOMAIN_DISK_SGIO_UNFILTERED);
++
++    /* Ignore the setting if unpriv_sgio is not supported by the
++     * kernel, otherwise defaults to filter the SG_IO commands,
++     * I.E. Set unpriv_sgio to 0.
++     */
++    if (disk->sgio == VIR_DOMAIN_DISK_SGIO_DEFAULT &&
++        disk->device == VIR_DOMAIN_DISK_DEVICE_LUN) {
++        char *sysfs_path = NULL;
++
++        if ((sysfs_path = virGetUnprivSGIOSysfsPath(disk->src, NULL)) &&
++            virFileExists(sysfs_path))
++            val = 0;
++        VIR_FREE(sysfs_path);
++    }
++
++    if (val >= 0 && virSetDeviceUnprivSGIO(disk->src, NULL, val) < 0)
++        return -1;
++
++    return 0;
++}
++
+ int qemuProcessStart(virConnectPtr conn,
+                      struct qemud_driver *driver,
+                      virDomainObjPtr vm,
+@@ -3721,6 +3749,9 @@ int qemuProcessStart(virConnectPtr conn,
+             if (qemuAddSharedDisk(driver->sharedDisks, disk->src) < 0)
+                 goto cleanup;
+         }
++
++        if (qemuSetUnprivSGIO(disk) < 0)
++            goto cleanup;
+     }
+ 
+     virCommandSetPreExecHook(cmd, qemuProcessHook, &hookData);
+diff --git a/src/qemu/qemu_process.h b/src/qemu/qemu_process.h
+index 543c9ee..396b899 100644
+--- a/src/qemu/qemu_process.h
++++ b/src/qemu/qemu_process.h
+@@ -98,5 +98,6 @@ bool qemuProcessAutoDestroyActive(struct qemud_driver *driver,
+                                   virDomainObjPtr vm);
+ virBitmapPtr qemuPrepareCpumap(struct qemud_driver *driver,
+                                virBitmapPtr nodemask);
++int qemuSetUnprivSGIO(virDomainDiskDefPtr disk);
+ 
+ #endif /* __QEMU_PROCESS_H__ */
+diff --git a/src/util/util.c b/src/util/util.c
+index c27462a..c49ea8c 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -3180,7 +3180,7 @@ virGetDeviceID(const char *path ATRRIBUTE_UNUSED,
+ 
+ #define SYSFS_DEV_BLOCK_PATH "/sys/dev/block"
+ 
+-static char *
++char *
+ virGetUnprivSGIOSysfsPath(const char *path,
+                           const char *sysfs_dir)
+ {
+diff --git a/src/util/util.h b/src/util/util.h
+index 781163e..1a427fc 100644
+--- a/src/util/util.h
++++ b/src/util/util.h
+@@ -288,5 +288,7 @@ int virSetDeviceUnprivSGIO(const char *path,
+ int virGetDeviceUnprivSGIO(const char *path,
+                            const char *sysfs_dir,
+                            int *unpriv_sgio);
++char * virGetUnprivSGIOSysfsPath(const char *path,
++                                 const char *sysfs_dir);
+ 
+ #endif /* __VIR_UTIL_H__ */
+-- 
+1.8.1
+

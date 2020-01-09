@@ -1,0 +1,88 @@
+From f7ce2eb11f618eecfbab35237117fdee592f43bd Mon Sep 17 00:00:00 2001
+Message-Id: <f7ce2eb11f618eecfbab35237117fdee592f43bd.1350990680.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Mon, 22 Oct 2012 21:48:42 -0600
+Subject: [PATCH] storage: let format probing work on root-squash NFS
+
+https://bugzilla.redhat.com/show_bug.cgi?id=856247
+
+Yet another instance of where using plain open() mishandles files
+that live on root-squash NFS, and where improving the API can
+improve the chance of a successful probe.
+
+* src/util/storage_file.h (virStorageFileProbeFormat): Alter
+signature.
+* src/util/storage_file.c (virStorageFileProbeFormat): Use better
+method for opening file.
+* src/qemu/qemu_driver.c (qemuDomainGetBlockInfo): Update caller.
+* src/storage/storage_backend_fs.c (virStorageBackendProbeTarget):
+Likewise.
+(cherry picked from commit d9d77bfa8085f37eb0bff3d795c3d12f5d36de3d)
+---
+ src/qemu/qemu_driver.c           | 3 ++-
+ src/storage/storage_backend_fs.c | 2 +-
+ src/util/storage_file.c          | 4 ++--
+ src/util/storage_file.h          | 2 +-
+ 4 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 4ef67cb..4db92e8 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -9306,7 +9306,8 @@ static int qemuDomainGetBlockInfo(virDomainPtr dom,
+         format = disk->format;
+     } else {
+         if (driver->allowDiskFormatProbing) {
+-            if ((format = virStorageFileProbeFormat(disk->src)) < 0)
++            if ((format = virStorageFileProbeFormat(disk->src, driver->user,
++                                                    driver->group)) < 0)
+                 goto cleanup;
+         } else {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index cecc2d2..30e203c 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -104,7 +104,7 @@ virStorageBackendProbeTarget(virStorageVolTargetPtr target,
+         meta->backingStore = NULL;
+         if (meta->backingStoreFormat == VIR_STORAGE_FILE_AUTO &&
+             meta->backingStoreIsFile) {
+-            if ((ret = virStorageFileProbeFormat(*backingStore)) < 0) {
++            if ((ret = virStorageFileProbeFormat(*backingStore, -1, -1)) < 0) {
+                 /* If the backing file is currently unavailable, only log an error,
+                  * but continue. Returning -1 here would disable the whole storage
+                  * pool, making it unavailable for even maintenance. */
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index 882df6e..e0b4178 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -830,11 +830,11 @@ cleanup:
+  * Best option: Don't use this function
+  */
+ int
+-virStorageFileProbeFormat(const char *path)
++virStorageFileProbeFormat(const char *path, uid_t uid, gid_t gid)
+ {
+     int fd, ret;
+ 
+-    if ((fd = open(path, O_RDONLY)) < 0) {
++    if ((fd = virFileOpenAs(path, O_RDONLY, 0, uid, gid, 0)) < 0) {
+         virReportSystemError(errno, _("cannot open file '%s'"), path);
+         return -1;
+     }
+diff --git a/src/util/storage_file.h b/src/util/storage_file.h
+index 9b00dba..abfaca9 100644
+--- a/src/util/storage_file.h
++++ b/src/util/storage_file.h
+@@ -66,7 +66,7 @@ struct _virStorageFileMetadata {
+ #  define DEV_BSIZE 512
+ # endif
+ 
+-int virStorageFileProbeFormat(const char *path);
++int virStorageFileProbeFormat(const char *path, uid_t uid, gid_t gid);
+ int virStorageFileProbeFormatFromFD(const char *path,
+                                     int fd);
+ 
+-- 
+1.7.12.4
+

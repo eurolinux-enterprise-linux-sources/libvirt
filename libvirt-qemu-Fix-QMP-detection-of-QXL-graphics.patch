@@ -1,0 +1,47 @@
+From 883abd9b6856acea5e1da69a1b8648caed035bf3 Mon Sep 17 00:00:00 2001
+Message-Id: <883abd9b6856acea5e1da69a1b8648caed035bf3.1373271639.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 6 Mar 2013 15:03:51 -0700
+Subject: [PATCH] qemu: Fix QMP detection of QXL graphics
+
+https://bugzilla.redhat.com/show_bug.cgi?id=896604
+
+With the recent introduction of QMP capabilities probing, libvirt failed
+to detect support for QXL graphics in QEMU 1.2 and newer. In addition to
+fixing that, this patch also causes libvirt to detect QXL support for
+qemu-kvm-0.13.0, which doesn't advertise it in -help output but mentions
+it in device list. Since qemu-kvm-0.13.0 supported -spice, it looks like
+not having qxl in -help was a bug.
+(cherry picked from commit 844cdf22e6fa314b08523b19cae672efaabbef42)
+---
+ src/qemu/qemu_capabilities.c | 1 +
+ tests/qemuhelptest.c         | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index b223adf..7cd5bf2 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1280,6 +1280,7 @@ struct qemuCapsStringFlags qemuCapsObjectTypes[] = {
+     { "virtio-scsi-pci", QEMU_CAPS_VIRTIO_SCSI_PCI },
+     { "spicevmc", QEMU_CAPS_DEVICE_SPICEVMC },
+     { "qxl-vga", QEMU_CAPS_DEVICE_QXL_VGA },
++    { "qxl", QEMU_CAPS_VGA_QXL },
+     { "sga", QEMU_CAPS_SGA },
+     { "scsi-block", QEMU_CAPS_SCSI_BLOCK },
+     { "scsi-cd", QEMU_CAPS_SCSI_CD },
+diff --git a/tests/qemuhelptest.c b/tests/qemuhelptest.c
+index ff86855..94828cc 100644
+--- a/tests/qemuhelptest.c
++++ b/tests/qemuhelptest.c
+@@ -467,6 +467,7 @@ mymain(void)
+             QEMU_CAPS_NESTING,
+             QEMU_CAPS_NAME_PROCESS,
+             QEMU_CAPS_SMBIOS_TYPE,
++            QEMU_CAPS_VGA_QXL,
+             QEMU_CAPS_SPICE,
+             QEMU_CAPS_VGA_NONE,
+             QEMU_CAPS_MIGRATE_QEMU_FD,
+-- 
+1.8.2.1
+

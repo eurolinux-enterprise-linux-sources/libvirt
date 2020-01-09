@@ -1,0 +1,180 @@
+From a3ca24d0127df0c224588ecda221dc4f8ffeb5d1 Mon Sep 17 00:00:00 2001
+Message-Id: <a3ca24d0127df0c224588ecda221dc4f8ffeb5d1@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Tue, 29 Apr 2014 11:40:17 +0200
+Subject: [PATCH] conf: restrict external snapshots to backing store formats
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1019926
+
+Domain snapshots should only permit an external snapshot into
+a storage format that permits a backing chain, since the new
+snapshot file necessarily must be backed by the existing file.
+The C code for the qemu driver is a little bit stricter in
+currently enforcing only qcow2 or qed, but at the XML parser
+level, including virt-xml-validate, it is fairly easy to
+enforce that a user can't request a 'raw' external snapshot.
+
+* docs/schemas/storagecommon.rng (storageFormat): Split out...
+(storageFormatBacking): ...new sublist.
+* docs/schemas/domainsnapshot.rng (disksnapshotdriver): Use new
+type.
+* src/util/virstoragefile.h (virStorageFileFormat): Rearrange for
+easier code management.
+* src/util/virstoragefile.c (virStorageFileFormat, fileTypeInfo):
+Likewise.
+* src/conf/snapshot_conf.c (virDomainSnapshotDiskDefParseXML): Use
+new marker to limit selection of formats.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit db7d7c0ee8a1a6db2d81a71e10794bc5c597b301)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+Conflicts:
+	docs/schemas/domainsnapshot.rng
+	docs/schemas/storagecommon.rng
+	src/conf/snapshot_conf.c
+	src/util/virstoragefile.c
+	src/util/virstoragefile.h
+
+All of the files conflicted due to missing VDI file format,
+storage_file is not yet renamed to virstoragefile and file format
+features are not yet added.
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/snapshot_conf.c |  9 ++++++---
+ src/util/storage_file.c  | 42 ++++++++++++++++++++++++------------------
+ src/util/storage_file.h  | 15 +++++++++++----
+ 3 files changed, 41 insertions(+), 25 deletions(-)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index 280f5a4..cc254fa 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -138,9 +138,12 @@ virDomainSnapshotDiskDefParseXML(xmlNodePtr node,
+                        xmlStrEqual(cur->name, BAD_CAST "driver")) {
+                 char *driver = virXMLPropString(cur, "type");
+                 def->format = virStorageFileFormatTypeFromString(driver);
+-                if (def->format <= 0) {
+-                    virReportError(VIR_ERR_INTERNAL_ERROR,
+-                                   _("unknown disk snapshot driver '%s'"),
++                if (def->format < VIR_STORAGE_FILE_BACKING) {
++                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                                   def->format <= 0
++                                   ? _("unknown disk snapshot driver '%s'")
++                                   : _("disk format '%s' lacks backing file "
++                                       "support"),
+                                    driver);
+                     VIR_FREE(driver);
+                     goto cleanup;
+diff --git a/src/util/storage_file.c b/src/util/storage_file.c
+index cda62de..6b279f1 100644
+--- a/src/util/storage_file.c
++++ b/src/util/storage_file.c
+@@ -50,9 +50,12 @@ VIR_ENUM_IMPL(virStorageFileFormat,
+               VIR_STORAGE_FILE_LAST,
+               "none",
+               "raw", "dir", "bochs",
+-              "cloop", "cow", "dmg", "iso",
+-              "qcow", "qcow2", "qed", "vmdk", "vpc",
+-              "fat", "vhd")
++              "cloop", "dmg", "iso",
++              "vpc",
++              /* Not direct file formats, but used for various drivers */
++              "fat", "vhd",
++              /* Formats with backing file below here */
++              "cow", "qcow", "qcow2", "qed", "vmdk")
+ 
+ enum lv_endian {
+     LV_LITTLE_ENDIAN = 1, /* 1234 */
+@@ -146,11 +149,6 @@ static struct FileTypeInfo const fileTypeInfo[] = {
+         LV_LITTLE_ENDIAN, -1, 0,
+         -1, 0, 0, -1, NULL
+     },
+-    [VIR_STORAGE_FILE_COW] = {
+-        "OOOM", NULL,
+-        LV_BIG_ENDIAN, 4, 2,
+-        4+4+1024+4, 8, 1, -1, cowGetBackingStore
+-    },
+     [VIR_STORAGE_FILE_DMG] = {
+         NULL, /* XXX QEMU says there's no magic for dmg, but we should check... */
+         ".dmg",
+@@ -163,6 +161,24 @@ static struct FileTypeInfo const fileTypeInfo[] = {
+         0, -1, 0,
+         -1, 0, 0, -1, NULL
+     },
++    [VIR_STORAGE_FILE_VPC] = {
++        "conectix", NULL,
++        LV_BIG_ENDIAN, 12, 0x10000,
++        8 + 4 + 4 + 8 + 4 + 4 + 2 + 2 + 4, 8, 1, -1, NULL
++    },
++
++    /* Not direct file formats, but used for various drivers */
++    [VIR_STORAGE_FILE_FAT] = { NULL, NULL, LV_LITTLE_ENDIAN,
++                               -1, 0, 0, 0, 0, 0, NULL },
++    [VIR_STORAGE_FILE_VHD] = { NULL, NULL, LV_LITTLE_ENDIAN,
++                               -1, 0, 0, 0, 0, 0, NULL },
++
++    /* All formats with a backing store probe below here */
++    [VIR_STORAGE_FILE_COW] = {
++        "OOOM", NULL,
++        LV_BIG_ENDIAN, 4, 2,
++        4+4+1024+4, 8, 1, -1, cowGetBackingStore
++    },
+     [VIR_STORAGE_FILE_QCOW] = {
+         "QFI", NULL,
+         LV_BIG_ENDIAN, 4, 1,
+@@ -184,16 +200,6 @@ static struct FileTypeInfo const fileTypeInfo[] = {
+         LV_LITTLE_ENDIAN, 4, 1,
+         4+4+4, 8, 512, -1, vmdk4GetBackingStore
+     },
+-    [VIR_STORAGE_FILE_VPC] = {
+-        "conectix", NULL,
+-        LV_BIG_ENDIAN, 12, 0x10000,
+-        8 + 4 + 4 + 8 + 4 + 4 + 2 + 2 + 4, 8, 1, -1, NULL
+-    },
+-    /* Not direct file formats, but used for various drivers */
+-    [VIR_STORAGE_FILE_FAT] = { NULL, NULL, LV_LITTLE_ENDIAN,
+-                               -1, 0, 0, 0, 0, 0, NULL },
+-    [VIR_STORAGE_FILE_VHD] = { NULL, NULL, LV_LITTLE_ENDIAN,
+-                               -1, 0, 0, 0, 0, 0, NULL },
+ };
+ verify(ARRAY_CARDINALITY(fileTypeInfo) == VIR_STORAGE_FILE_LAST);
+ 
+diff --git a/src/util/storage_file.h b/src/util/storage_file.h
+index 8d77e3d..c1f1966 100644
+--- a/src/util/storage_file.h
++++ b/src/util/storage_file.h
+@@ -34,16 +34,23 @@ enum virStorageFileFormat {
+     VIR_STORAGE_FILE_DIR,
+     VIR_STORAGE_FILE_BOCHS,
+     VIR_STORAGE_FILE_CLOOP,
+-    VIR_STORAGE_FILE_COW,
+     VIR_STORAGE_FILE_DMG,
+     VIR_STORAGE_FILE_ISO,
++    VIR_STORAGE_FILE_VPC,
++
++    /* Not direct file formats, but used for various drivers */
++    VIR_STORAGE_FILE_FAT,
++    VIR_STORAGE_FILE_VHD,
++
++    /* Not a format, but a marker: all formats below this point have
++     * libvirt support for following a backing chain */
++    VIR_STORAGE_FILE_BACKING,
++
++    VIR_STORAGE_FILE_COW = VIR_STORAGE_FILE_BACKING,
+     VIR_STORAGE_FILE_QCOW,
+     VIR_STORAGE_FILE_QCOW2,
+     VIR_STORAGE_FILE_QED,
+     VIR_STORAGE_FILE_VMDK,
+-    VIR_STORAGE_FILE_VPC,
+-    VIR_STORAGE_FILE_FAT,
+-    VIR_STORAGE_FILE_VHD,
+ 
+     VIR_STORAGE_FILE_LAST,
+ };
+-- 
+1.9.2
+

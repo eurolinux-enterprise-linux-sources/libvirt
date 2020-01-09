@@ -1,0 +1,63 @@
+From 10ce8b4eb5baeebed826ddabaa9e23e04fa5080a Mon Sep 17 00:00:00 2001
+Message-Id: <10ce8b4eb5baeebed826ddabaa9e23e04fa5080a@dist-git>
+From: Christophe Fergeau <cfergeau@redhat.com>
+Date: Wed, 21 Jan 2015 15:44:25 +0100
+Subject: [PATCH] sasl: Fix authentication when using PLAIN mechanism
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+With some authentication mechanism (PLAIN for example), sasl_client_start()
+can return SASL_OK, which translates to virNetSASLSessionClientStart()
+returning VIR_NET_SASL_COMPLETE.
+cyrus-sasl documentation is a bit vague as to what to do in such situation,
+but upstream clarified this a bit in
+http://asg.andrew.cmu.edu/archive/message.php?mailbox=archive.cyrus-sasl&msg=10104
+
+When we got VIR_NET_SASL_COMPLETE after virNetSASLSessionClientStart() and
+if the remote also tells us that authentication is complete, then we should
+end the authentication procedure rather than forcing a call to
+virNetSASLSessionClientStep(). Without this patch, when trying to use SASL
+PLAIN, I get:
+error :authentication failed : Failed to step SASL negotiation: -1
+(SASL(-1): generic failure: Unable to find a callback: 32775)
+
+This patch is based on a spice-gtk patch by Dietmar Maurer.
+
+(cherry picked from commit 0955025b9cdb734293adfae09be1fdae231d7a73)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1171521
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/remote/remote_driver.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index 709aca1..ed3b39e 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -4001,6 +4001,11 @@ remoteAuthSASL (virConnectPtr conn, struct private_data *priv,
+     VIR_DEBUG("Client step result complete: %d. Data %zu bytes %p",
+               complete, serverinlen, serverin);
+ 
++    /* Previous server call showed completion & sasl_client_start() told us
++     * we are locally complete too */
++    if (complete && err == VIR_NET_SASL_COMPLETE)
++        goto done;
++
+     /* Loop-the-loop...
+      * Even if the server has completed, the client must *always* do at least one step
+      * in this loop to verify the server isn't lying about something. Mutual auth */
+@@ -4075,6 +4080,7 @@ remoteAuthSASL (virConnectPtr conn, struct private_data *priv,
+         priv->is_secure = 1;
+     }
+ 
++done:
+     VIR_DEBUG("SASL authentication complete");
+     virNetClientSetSASLSession(priv->client, sasl);
+     ret = 0;
+-- 
+2.2.2
+

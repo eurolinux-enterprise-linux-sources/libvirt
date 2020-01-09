@@ -1,0 +1,117 @@
+From 5cd16717fe628204d44306065c9111640ba99bff Mon Sep 17 00:00:00 2001
+Message-Id: <5cd16717fe628204d44306065c9111640ba99bff.1354720507.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Fri, 30 Nov 2012 11:08:52 -0500
+Subject: [PATCH] util: new virSocketAddrIsPrivate function
+
+This patch is part of the fix for
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=882265
+
+The original CVE (CVE-201-3411) report is here:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=833033
+
+The new function virSocketAddrIsPrivate returns true if the given
+address is in the range of any "private" or "local" networks as
+defined in RFC1918 (IPv4) or RFC3484/RFC4193 (IPv6), otherwise they
+return false.
+
+These ranges are:
+
+   192.168.0.0/16
+   172.16.0.0/16
+   10.0.0.0/24
+   FC00::/7
+   FEC0::/10
+(cherry picked from commit bf402e77b6d53a4e569b3aa76aef9c7d589c0cf2)
+---
+ src/libvirt_private.syms |  1 +
+ src/util/virsocketaddr.c | 35 ++++++++++++++++++++++++++++++++++-
+ src/util/virsocketaddr.h |  3 ++-
+ 3 files changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 8a8e6a7..00d13a7 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1743,6 +1743,7 @@ virSocketAddrFormatFull;
+ virSocketAddrGetPort;
+ virSocketAddrGetRange;
+ virSocketAddrIsNetmask;
++virSocketAddrIsPrivate;
+ virSocketAddrMask;
+ virSocketAddrMaskByPrefix;
+ virSocketAddrParse;
+diff --git a/src/util/virsocketaddr.c b/src/util/virsocketaddr.c
+index 7f49b40..66ddb61 100644
+--- a/src/util/virsocketaddr.c
++++ b/src/util/virsocketaddr.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2009-2011 Red Hat, Inc.
++ * Copyright (C) 2009-2012 Red Hat, Inc.
+  *
+  * This library is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU Lesser General Public
+@@ -194,6 +194,39 @@ virSocketAddrEqual(const virSocketAddrPtr s1, const virSocketAddrPtr s2)
+ }
+ 
+ /*
++ * virSocketAddrIsPrivate:
++ * @s: the location of the IP address
++ *
++ * Return true if this address is in its family's defined
++ * "private/local" address space. For IPv4, private addresses are in
++ * the range of 192.168.0.0/16, 172.16.0.0/16, or 10.0.0.0/8.  For
++ * IPv6, local addresses are in the range of FC00::/7 or FEC0::/10
++ * (that last one is deprecated, but still in use).
++ *
++ * See RFC1918, RFC3484, and RFC4193 for details.
++ */
++bool
++virSocketAddrIsPrivate(const virSocketAddrPtr addr)
++{
++    unsigned long val;
++
++    switch (addr->data.stor.ss_family) {
++    case AF_INET:
++       val = ntohl(addr->data.inet4.sin_addr.s_addr);
++
++       return ((val & 0xFFFF0000) == ((192L << 24) + (168 << 16)) ||
++               (val & 0xFFFF0000) == ((172L << 24) + (16  << 16)) ||
++               (val & 0xFF000000) == ((10L  << 24)));
++
++    case AF_INET6:
++        return ((addr->data.inet6.sin6_addr.s6_addr[0] & 0xFE) == 0xFC ||
++                ((addr->data.inet6.sin6_addr.s6_addr[0] & 0xFF) == 0xFE &&
++                 (addr->data.inet6.sin6_addr.s6_addr[1] & 0xC0) == 0xC0));
++    }
++    return false;
++}
++
++/*
+  * virSocketAddrFormat:
+  * @addr: an initialized virSocketAddrPtr
+  *
+diff --git a/src/util/virsocketaddr.h b/src/util/virsocketaddr.h
+index 51ddd2d..66d4265 100644
+--- a/src/util/virsocketaddr.h
++++ b/src/util/virsocketaddr.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2009-2011 Red Hat, Inc.
++ * Copyright (C) 2009-2012 Red Hat, Inc.
+  *
+  * This library is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU Lesser General Public
+@@ -104,5 +104,6 @@ int virSocketAddrPrefixToNetmask(unsigned int prefix,
+                                  int family);
+ bool virSocketAddrEqual(const virSocketAddrPtr s1,
+                         const virSocketAddrPtr s2);
++bool virSocketAddrIsPrivate(const virSocketAddrPtr addr);
+ 
+ #endif /* __VIR_SOCKETADDR_H__ */
+-- 
+1.8.0
+

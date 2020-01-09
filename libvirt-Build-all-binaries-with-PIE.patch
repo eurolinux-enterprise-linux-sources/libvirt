@@ -1,0 +1,261 @@
+From 0f9e73dda237cc26e7ac173e33df149cdf651cf7 Mon Sep 17 00:00:00 2001
+Message-Id: <0f9e73dda237cc26e7ac173e33df149cdf651cf7@dist-git>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 3 Apr 2013 11:32:15 +0100
+Subject: [PATCH] Build all binaries with PIE
+
+PIE (position independent executable) adds security to executables
+by composing them entirely of position-independent code (PIC. The
+.so libraries already build with -fPIC. This adds -fPIE which is
+the equivalent to -fPIC, but for executables. This for allows Exec
+Shield to use address space layout randomization to prevent attackers
+from knowing where existing executable code is during a security
+attack using exploits that rely on knowing the offset of the
+executable code in the binary, such as return-to-libc attacks.
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 1150999ca444d8cb1d906a4948b808125fa209b7)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1242156
+
+Conflicts:
+	src/Makefile.am -- context and no virtlockd
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ configure.ac           |  1 +
+ daemon/Makefile.am     |  5 +++--
+ m4/virt-compile-pie.m4 | 30 +++++++++++++++++++++++++++++
+ src/Makefile.am        | 52 +++++++++++++++++++++++++++++++++++++++++---------
+ tools/Makefile.am      |  6 +++++-
+ 5 files changed, 82 insertions(+), 12 deletions(-)
+ create mode 100644 m4/virt-compile-pie.m4
+
+diff --git a/configure.ac b/configure.ac
+index 9caa88e..0df2cca 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -147,6 +147,7 @@ VERSION_SCRIPT_FLAGS=-Wl,--version-script=
+ AC_MSG_RESULT([$VERSION_SCRIPT_FLAGS])
+ 
+ LIBVIRT_COMPILE_WARNINGS
++LIBVIRT_COMPILE_PIE
+ 
+ AC_MSG_CHECKING([for CPUID instruction])
+ AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
+diff --git a/daemon/Makefile.am b/daemon/Makefile.am
+index 3405c67..aa22cb3 100644
+--- a/daemon/Makefile.am
++++ b/daemon/Makefile.am
+@@ -96,12 +96,13 @@ libvirtd_SOURCES = $(DAEMON_SOURCES)
+ libvirtd_CFLAGS = \
+ 	$(LIBXML_CFLAGS) $(GNUTLS_CFLAGS) $(SASL_CFLAGS) \
+ 	$(XDR_CFLAGS) $(POLKIT_CFLAGS) $(DBUS_CFLAGS) $(LIBNL_CFLAGS) \
+-	$(WARN_CFLAGS) \
++	$(WARN_CFLAGS) $(PIE_CFLAGS) \
+ 	$(COVERAGE_CFLAGS) \
+ 	-DQEMUD_PID_FILE="\"$(QEMUD_PID_FILE)\""
+ 
+ libvirtd_LDFLAGS =					\
+-	$(WARN_CFLAGS)					\
++	$(WARN_LDFLAGS)					\
++	$(PIE_LDFLAGS)					\
+ 	$(COVERAGE_LDFLAGS)
+ 
+ libvirtd_LDADD =					\
+diff --git a/m4/virt-compile-pie.m4 b/m4/virt-compile-pie.m4
+new file mode 100644
+index 0000000..1b62041
+--- /dev/null
++++ b/m4/virt-compile-pie.m4
+@@ -0,0 +1,30 @@
++dnl
++dnl Check for support for position independent executables
++dnl
++dnl Copyright (C) 2013 Red Hat, Inc.
++dnl
++dnl This library is free software; you can redistribute it and/or
++dnl modify it under the terms of the GNU Lesser General Public
++dnl License as published by the Free Software Foundation; either
++dnl version 2.1 of the License, or (at your option) any later version.
++dnl
++dnl This library is distributed in the hope that it will be useful,
++dnl but WITHOUT ANY WARRANTY; without even the implied warranty of
++dnl MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++dnl Lesser General Public License for more details.
++dnl
++dnl You should have received a copy of the GNU Lesser General Public
++dnl License along with this library.  If not, see
++dnl <http://www.gnu.org/licenses/>.
++dnl
++
++AC_DEFUN([LIBVIRT_COMPILE_PIE],[
++    PIE_CFLAGS=
++    PIE_LDFLAGS=
++    gl_COMPILER_OPTION_IF([-fPIE -DPIE], [
++        PIE_CFLAGS="-fPIE -DPIE"
++        PIE_LDFLAGS="-pie"
++    ])
++    AC_SUBST([PIE_CFLAGS])
++    AC_SUBST([PIE_LDFLAGS])
++])
+diff --git a/src/Makefile.am b/src/Makefile.am
+index d3bd8f1..b88d59a 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -1619,7 +1619,11 @@ libexec_PROGRAMS =
+ if WITH_LIBVIRTD
+ libexec_PROGRAMS += libvirt_iohelper
+ libvirt_iohelper_SOURCES = $(UTIL_IO_HELPER_SOURCES)
+-libvirt_iohelper_LDFLAGS = $(WARN_LDFLAGS) $(AM_LDFLAGS)
++libvirt_iohelper_LDFLAGS = \
++		$(WARN_LDFLAGS) \
++		$(AM_LDFLAGS) \
++		$(PIE_LDFLAGS) \
++		$(NULL)
+ libvirt_iohelper_LDADD =		\
+ 		libvirt_util.la		\
+ 		../gnulib/lib/libgnu.la
+@@ -1627,7 +1631,10 @@ if WITH_DTRACE_PROBES
+ libvirt_iohelper_LDADD += libvirt_probes.lo
+ endif
+ 
+-libvirt_iohelper_CFLAGS = $(AM_CFLAGS)
++libvirt_iohelper_CFLAGS = \
++		$(AM_CFLAGS) \
++		$(PIE_CFLAGS) \
++		$(NULL)
+ endif
+ 
+ if WITH_STORAGE_DISK
+@@ -1635,7 +1642,11 @@ if WITH_LIBVIRTD
+ libexec_PROGRAMS += libvirt_parthelper
+ 
+ libvirt_parthelper_SOURCES = $(STORAGE_HELPER_DISK_SOURCES)
+-libvirt_parthelper_LDFLAGS = $(WARN_LDFLAGS) $(AM_LDFLAGS)
++libvirt_parthelper_LDFLAGS = \
++		$(WARN_LDFLAGS) \
++		$(AM_LDFLAGS) \
++		$(PIE_LDFLAGS) \
++		$(NULL)
+ libvirt_parthelper_LDADD =		\
+ 		$(LIBPARTED_LIBS)	\
+ 		libvirt_util.la		\
+@@ -1644,7 +1655,11 @@ if WITH_DTRACE_PROBES
+ libvirt_parthelper_LDADD += libvirt_probes.lo
+ endif
+ 
+-libvirt_parthelper_CFLAGS = $(LIBPARTED_CFLAGS) $(AM_CFLAGS)
++libvirt_parthelper_CFLAGS = \
++		$(LIBPARTED_CFLAGS) \
++		$(AM_CFLAGS) \
++		$(PIE_CFLAGS) \
++		$(NULL)
+ endif
+ endif
+ EXTRA_DIST += $(STORAGE_HELPER_DISK_SOURCES)
+@@ -1654,8 +1669,16 @@ if HAVE_SANLOCK
+ libexec_PROGRAMS += libvirt_sanlock_helper
+ 
+ libvirt_sanlock_helper_SOURCES = $(LOCK_DRIVER_SANLOCK_HELPER_SOURCES)
+-libvirt_sanlock_helper_CFLAGS = -I$(top_srcdir)/src/conf $(AM_CFLAGS)
+-libvirt_sanlock_helper_LDFLAGS = $(WARN_LDFLAGS) $(AM_LDFLAGS)
++libvirt_sanlock_helper_CFLAGS = \
++		-I$(top_srcdir)/src/conf \
++		$(AM_CFLAGS) \
++		$(PIE_CFLAGS) \
++		$(NULL)
++libvirt_sanlock_helper_LDFLAGS = \
++		$(WARN_LDFLAGS) \
++		$(AM_LDFLAGS) \
++		$(PIE_LDFLAGS) \
++		$(NULL)
+ libvirt_sanlock_helper_LDADD = libvirt.la
+ endif
+ 
+@@ -1667,7 +1690,11 @@ libvirt_lxc_SOURCES =						\
+ 		$(LXC_CONTROLLER_SOURCES)			\
+ 		$(NODE_INFO_SOURCES)				\
+ 		$(DATATYPES_SOURCES)
+-libvirt_lxc_LDFLAGS = $(WARN_CFLAGS) $(AM_LDFLAGS)
++libvirt_lxc_LDFLAGS = \
++		$(WARN_LDFLAGS) \
++		$(AM_LDFLAGS) \
++		$(PIE_LDFLAGS) \
++		$(NULL)
+ libvirt_lxc_LDADD =			\
+ 		$(NUMACTL_LIBS) \
+ 		libvirt-net-rpc-server.la \
+@@ -1688,6 +1715,7 @@ endif
+ libvirt_lxc_CFLAGS =				\
+ 		-I$(top_srcdir)/src/conf	\
+ 		$(AM_CFLAGS)                    \
++		$(PIE_CFLAGS)                   \
+ 		$(LIBNL_CFLAGS)
+ if HAVE_LIBBLKID
+ libvirt_lxc_CFLAGS += $(BLKID_CFLAGS)
+@@ -1709,7 +1737,11 @@ libexec_PROGRAMS += virt-aa-helper
+ 
+ virt_aa_helper_SOURCES = $(SECURITY_DRIVER_APPARMOR_HELPER_SOURCES)
+ 
+-virt_aa_helper_LDFLAGS = $(WARN_LDFLAGS) $(AM_LDFLAGS)
++virt_aa_helper_LDFLAGS = \
++		$(WARN_LDFLAGS) \
++		$(AM_LDFLAGS) \
++		$(PIE_LDFLAGS) \
++		$(NULL)
+ virt_aa_helper_LDADD =						\
+ 		libvirt_conf.la					\
+ 		libvirt_util.la					\
+@@ -1720,7 +1752,9 @@ endif
+ virt_aa_helper_CFLAGS =						\
+ 		-I$(top_srcdir)/src/conf			\
+ 		-I$(top_srcdir)/src/security			\
+-		$(AM_CFLAGS)
++		$(AM_CFLAGS) \
++		$(PIE_CFLAGS) \
++		$(NULL)
+ endif
+ endif
+ EXTRA_DIST += $(SECURITY_DRIVER_APPARMOR_HELPER_SOURCES)
+diff --git a/tools/Makefile.am b/tools/Makefile.am
+index 0d7822d..0ce865e 100644
+--- a/tools/Makefile.am
++++ b/tools/Makefile.am
+@@ -90,6 +90,7 @@ virt_host_validate_SOURCES = \
+ 
+ virt_host_validate_LDFLAGS = \
+ 		$(WARN_LDFLAGS) \
++		$(PIE_LDFLAGS) \
+ 		$(COVERAGE_LDFLAGS) \
+ 		$(NULL)
+ 
+@@ -100,6 +101,7 @@ virt_host_validate_LDADD = \
+ 
+ virt_host_validate_CFLAGS = \
+ 		$(WARN_CFLAGS)					\
++		$(PIE_CFLAGS)					\
+ 		$(COVERAGE_CFLAGS)				\
+ 		$(NULL)
+ 
+@@ -122,7 +124,8 @@ virsh_SOURCES =							\
+ virsh_LDFLAGS = $(WARN_LDFLAGS) $(COVERAGE_LDFLAGS)
+ virsh_LDADD =							\
+ 		$(STATIC_BINARIES)				\
+-		$(WARN_CFLAGS)					\
++		$(WARN_LDFLAGS)					\
++		$(PIE_LDFLAGS)					\
+ 		../src/libvirt.la				\
+ 		../src/libvirt-qemu.la				\
+ 		../gnulib/lib/libgnu.la				\
+@@ -130,6 +133,7 @@ virsh_LDADD =							\
+ 		$(VIRSH_LIBS)
+ virsh_CFLAGS =							\
+ 		$(WARN_CFLAGS)					\
++		$(PIE_CFLAGS)					\
+ 		$(COVERAGE_CFLAGS)				\
+ 		$(LIBXML_CFLAGS)				\
+ 		$(READLINE_CFLAGS)
+-- 
+2.7.0
+

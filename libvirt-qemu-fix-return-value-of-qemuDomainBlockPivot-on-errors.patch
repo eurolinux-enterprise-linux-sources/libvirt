@@ -1,0 +1,59 @@
+From 5329b42c8c59ab83ff6a345e115f212b5fb5ca12 Mon Sep 17 00:00:00 2001
+Message-Id: <5329b42c8c59ab83ff6a345e115f212b5fb5ca12@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 19 Oct 2016 13:38:57 +0200
+Subject: [PATCH] qemu: fix return value of qemuDomainBlockPivot on errors
+
+If qemuMonitorBlockJob returned 0, qemuDomainBlockPivot
+might return 0 even if an error occured.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1300159
+(cherry picked from commit c34107dfd3a25232255e6d6f559b1306ef99bb3b)
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+
+ Conflicts:
+	src/qemu/qemu_driver.c - conflicts caused by slightly different naming
+	of methods in libvirt 0.10.2 (RHEL-6) and 1.1.1 (old upstream) which
+	this patch is cherry-picked from
+---
+ src/qemu/qemu_driver.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 22d760d..6ab6beb 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -13783,7 +13783,7 @@ qemuDomainBlockPivot(virConnectPtr conn,
+                      struct qemud_driver *driver, virDomainObjPtr vm,
+                      const char *device, virDomainDiskDefPtr disk)
+ {
+-    int ret = -1;
++    int ret = -1, rc;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     virDomainBlockJobInfo info;
+     const char *format = virStorageFileFormatTypeToString(disk->mirrorFormat);
+@@ -13796,17 +13796,17 @@ qemuDomainBlockPivot(virConnectPtr conn,
+     /* Probe the status, if needed.  */
+     if (!disk->mirroring) {
+         qemuDomainObjEnterMonitorWithDriver(driver, vm);
+-        ret = qemuMonitorBlockJob(priv->mon, device, NULL, 0, &info,
+-                                  BLOCK_JOB_INFO, true);
++        rc = qemuMonitorBlockJob(priv->mon, device, NULL, 0, &info,
++                                 BLOCK_JOB_INFO, true);
+         qemuDomainObjExitMonitorWithDriver(driver, vm);
+-        if (ret < 0)
++        if (rc < 0)
+             goto cleanup;
+         if (!virDomainObjIsActive(vm)) {
+             virReportError(VIR_ERR_OPERATION_INVALID, "%s",
+                            _("domain is not running"));
+             goto cleanup;
+         }
+-        if (ret == 1 && info.cur == info.end &&
++        if (rc == 1 && info.cur == info.end &&
+             info.type == VIR_DOMAIN_BLOCK_JOB_TYPE_COPY)
+             disk->mirroring = true;
+     }
+-- 
+2.10.2
+

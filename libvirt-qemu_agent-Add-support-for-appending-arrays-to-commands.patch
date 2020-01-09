@@ -1,0 +1,34 @@
+From 197fe72e07d1e622ece018f9e32247b6eed084c8 Mon Sep 17 00:00:00 2001
+Message-Id: <197fe72e07d1e622ece018f9e32247b6eed084c8.1374158623.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 16 Jul 2013 17:28:18 +0200
+Subject: [PATCH] qemu_agent: Add support for appending arrays to commands
+
+https://bugzilla.redhat.com/show_bug.cgi?id=924400
+
+Add support for array elements for agent commands just like 64d5e815 did
+for monitor commands.
+
+(cherry picked from commit cbf8ebaad47fd82d80b5b58011868e0fd3425a96)
+---
+ src/qemu/qemu_agent.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/qemu/qemu_agent.c b/src/qemu/qemu_agent.c
+index 4288d14..a24ea20 100644
+--- a/src/qemu/qemu_agent.c
++++ b/src/qemu/qemu_agent.c
+@@ -1231,6 +1231,10 @@ qemuAgentMakeCommand(const char *cmdname,
+         case 'n': {
+             ret = virJSONValueObjectAppendNull(jargs, key);
+         }   break;
++        case 'a': {
++            virJSONValuePtr val = va_arg(args, virJSONValuePtr);
++            ret = virJSONValueObjectAppend(jargs, key, val);
++        }   break;
+         default:
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+                            _("unsupported data type '%c' for arg '%s'"), type, key - 2);
+-- 
+1.8.3.2
+

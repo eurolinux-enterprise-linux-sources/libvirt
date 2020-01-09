@@ -1,0 +1,38 @@
+From 55abc05e998c8efce35c5e8601d6c19df50ff29b Mon Sep 17 00:00:00 2001
+Message-Id: <55abc05e998c8efce35c5e8601d6c19df50ff29b@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 28 Mar 2014 22:54:01 +0100
+Subject: [PATCH] qemu_caps: Enable virtio-rng for RHEL-6.6 qemu-kvm downstream
+
+https://bugzilla.redhat.com/show_bug.cgi?id=786408
+
+RHEL-only
+
+Enable the capabilities according to help text match.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 636fa60..9ae9f9c 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1060,6 +1060,13 @@ qemuCapsComputeCmdFlags(const char *help,
+     if (strstr(help, "mlock=on|off"))
+         qemuCapsSet(caps, QEMU_CAPS_MLOCK);
+ 
++    /* The -object interface was backported for virtio-rng stuff */
++    if (strstr(help, "-object")) {
++        qemuCapsSet(caps, QEMU_CAPS_DEVICE_VIRTIO_RNG);
++        qemuCapsSet(caps, QEMU_CAPS_OBJECT_RNG_RANDOM);
++        qemuCapsSet(caps, QEMU_CAPS_OBJECT_RNG_EGD);
++    }
++
+     /*
+      * Handling of -incoming arg with varying features
+      *  -incoming tcp    (kvm >= 79, qemu >= 0.10.0)
+-- 
+1.9.1
+

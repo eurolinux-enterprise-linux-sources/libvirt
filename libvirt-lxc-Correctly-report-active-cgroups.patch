@@ -1,0 +1,33 @@
+From e6258c897c754066b12f17b899ba83644e92187a Mon Sep 17 00:00:00 2001
+Message-Id: <e6258c897c754066b12f17b899ba83644e92187a.1349722366.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 2 Oct 2012 10:38:34 +0200
+Subject: [PATCH] lxc: Correctly report active cgroups
+
+https://bugzilla.redhat.com/show_bug.cgi?id=860907
+
+There was an inverted return value in lxcCgroupControllerActive().
+The function assumes cgroups are active and do couple of checks
+to prove that. If any of them fails, false is returned. Therefore,
+at the end, after all checks are done we must return true, not false.
+(cherry picked from commit 0dddd680c267eecfb0eeaa7b3a52f563089c6301)
+---
+ src/lxc/lxc_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/lxc/lxc_driver.c b/src/lxc/lxc_driver.c
+index ae5163e..87305db 100644
+--- a/src/lxc/lxc_driver.c
++++ b/src/lxc/lxc_driver.c
+@@ -1645,7 +1645,7 @@ static bool lxcCgroupControllerActive(virLXCDriverPtr driver,
+     if (driver->cgroupControllers & (1 << controller))
+         return true;
+ #endif
+-    return false;
++    return true;
+ }
+ 
+ 
+-- 
+1.7.12
+

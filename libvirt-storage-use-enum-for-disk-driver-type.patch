@@ -1,0 +1,742 @@
+From 9ce622817672389e28769ded040ed33afaeb2280 Mon Sep 17 00:00:00 2001
+Message-Id: <9ce622817672389e28769ded040ed33afaeb2280.1350990678.git.jdenemar@redhat.com>
+From: Eric Blake <eblake@redhat.com>
+Date: Fri, 19 Oct 2012 21:54:31 -0600
+Subject: [PATCH] storage: use enum for disk driver type
+
+https://bugzilla.redhat.com/show_bug.cgi?id=772088
+
+Actually use the enum in the domain conf structure.
+
+* src/conf/domain_conf.h (_virDomainDiskDef): Store enum rather
+than string for disk type.
+* src/conf/domain_conf.c (virDomainDiskDefFree)
+(virDomainDiskDefParseXML, virDomainDiskDefFormat)
+(virDomainDiskDefForeachPath): Adjust users.
+* src/xenxs/xen_sxpr.c (xenParseSxprDisks, xenFormatSxprDisk):
+Likewise.
+* src/xenxs/xen_xm.c (xenParseXM, xenFormatXMDisk): Likewise.
+* src/vbox/vbox_tmpl.c (vboxAttachDrives): Likewise.
+* src/libxl/libxl_conf.c (libxlMakeDisk): Likewise.
+(cherry picked from commit e5e8d5d0820276751829bc34b8611d2cd9aa5b1b)
+---
+ src/conf/domain_conf.c   | 61 +++++++++++++++++----------------
+ src/conf/domain_conf.h   |  4 +--
+ src/libxl/libxl_conf.c   | 42 +++++++++++++----------
+ src/libxl/libxl_driver.c |  6 +---
+ src/qemu/qemu_command.c  | 18 +++++-----
+ src/qemu/qemu_domain.c   |  7 ++--
+ src/qemu/qemu_driver.c   | 89 ++++++++++++++++--------------------------------
+ src/qemu/qemu_hotplug.c  |  9 ++---
+ src/vbox/vbox_tmpl.c     |  6 ++--
+ src/xenxs/xen_sxpr.c     | 30 +++++++++-------
+ src/xenxs/xen_xm.c       | 33 ++++++++++--------
+ 11 files changed, 146 insertions(+), 159 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 6824972..cbfd5d9 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -975,9 +975,7 @@ void virDomainDiskDefFree(virDomainDiskDefPtr def)
+     VIR_FREE(def->src);
+     VIR_FREE(def->dst);
+     VIR_FREE(def->driverName);
+-    VIR_FREE(def->driverType);
+     VIR_FREE(def->mirror);
+-    VIR_FREE(def->mirrorFormat);
+     VIR_FREE(def->auth.username);
+     VIR_FREE(def->wwn);
+     if (def->auth.secretType == VIR_DOMAIN_DISK_SECRET_TYPE_USAGE)
+@@ -4176,12 +4174,8 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+     authUsername = NULL;
+     def->driverName = driverName;
+     driverName = NULL;
+-    def->driverType = driverType;
+-    driverType = NULL;
+     def->mirror = mirror;
+     mirror = NULL;
+-    def->mirrorFormat = mirrorFormat;
+-    mirrorFormat = NULL;
+     def->mirroring = mirroring;
+     def->encryption = encryption;
+     encryption = NULL;
+@@ -4190,23 +4184,35 @@ virDomainDiskDefParseXML(virCapsPtr caps,
+     def->wwn = wwn;
+     wwn = NULL;
+ 
+-    if (!def->driverType &&
+-        caps->defaultDiskDriverType &&
+-        !(def->driverType = strdup(virStorageFileFormatTypeToString(
+-                                       caps->defaultDiskDriverType))))
+-        goto no_memory;
++    if (driverType) {
++        def->format = virStorageFileFormatTypeFromString(driverType);
++        if (def->format <= 0) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("unknown driver format value '%s'"),
++                           driverType);
++            goto error;
++        }
++    } else if (def->type == VIR_DOMAIN_DISK_TYPE_FILE ||
++               def->type == VIR_DOMAIN_DISK_TYPE_BLOCK) {
++        def->format = caps->defaultDiskDriverType;
++    }
+ 
+     if (!def->driverName &&
+         caps->defaultDiskDriverName &&
+         !(def->driverName = strdup(caps->defaultDiskDriverName)))
+         goto no_memory;
+ 
+-
+-    if (def->mirror && !def->mirrorFormat &&
+-        caps->defaultDiskDriverType &&
+-        !(def->mirrorFormat = strdup(virStorageFileFormatTypeToString(
+-                                         caps->defaultDiskDriverType))))
+-        goto no_memory;
++    if (mirrorFormat) {
++        def->mirrorFormat = virStorageFileFormatTypeFromString(mirrorFormat);
++        if (def->mirrorFormat <= 0) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("unknown mirror format value '%s'"),
++                           driverType);
++            goto error;
++        }
++    } else if (def->mirror) {
++        def->mirrorFormat = caps->defaultDiskDriverType;
++    }
+ 
+     if (def->info.type == VIR_DOMAIN_DEVICE_ADDRESS_TYPE_NONE
+         && virDomainDiskDefAssignAddress(caps, def) < 0)
+@@ -11869,13 +11875,14 @@ virDomainDiskDefFormat(virBufferPtr buf,
+                           virDomainSnapshotLocationTypeToString(def->snapshot));
+     virBufferAddLit(buf, ">\n");
+ 
+-    if (def->driverName || def->driverType || def->cachemode ||
++    if (def->driverName || def->format > 0 || def->cachemode ||
+         def->ioeventfd || def->event_idx || def->copy_on_read) {
+         virBufferAddLit(buf, "      <driver");
+         if (def->driverName)
+             virBufferAsprintf(buf, " name='%s'", def->driverName);
+-        if (def->driverType)
+-            virBufferAsprintf(buf, " type='%s'", def->driverType);
++        if (def->format > 0)
++            virBufferAsprintf(buf, " type='%s'",
++                              virStorageFileFormatTypeToString(def->format));
+         if (def->cachemode)
+             virBufferAsprintf(buf, " cache='%s'", cachemode);
+         if (def->error_policy)
+@@ -11987,7 +11994,8 @@ virDomainDiskDefFormat(virBufferPtr buf,
+     if (def->mirror && !(flags & VIR_DOMAIN_XML_INACTIVE)) {
+         virBufferEscapeString(buf, "      <mirror file='%s'", def->mirror);
+         if (def->mirrorFormat)
+-            virBufferAsprintf(buf, " format='%s'", def->mirrorFormat);
++            virBufferAsprintf(buf, " format='%s'",
++                              virStorageFileFormatTypeToString(def->mirrorFormat));
+         if (def->mirroring)
+             virBufferAddLit(buf, " ready='yes'");
+         virBufferAddLit(buf, "/>\n");
+@@ -14859,15 +14867,8 @@ int virDomainDiskDefForeachPath(virDomainDiskDefPtr disk,
+         return ret;
+     }
+ 
+-    if (disk->driverType) {
+-        const char *formatStr = disk->driverType;
+-
+-        if ((format = virStorageFileFormatTypeFromString(formatStr)) <= 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("unknown disk format '%s' for %s"),
+-                           disk->driverType, disk->src);
+-            goto cleanup;
+-        }
++    if (disk->format > 0) {
++        format = disk->format;
+     } else {
+         if (allowProbing) {
+             format = VIR_STORAGE_FILE_AUTO;
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index d1a7b95..99b8a83 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -567,10 +567,10 @@ struct _virDomainDiskDef {
+         } secret;
+     } auth;
+     char *driverName;
+-    char *driverType;
++    int format; /* enum virStorageFileFormat */
+ 
+     char *mirror;
+-    char *mirrorFormat;
++    int mirrorFormat; /* enum virStorageFileFormat */
+     bool mirroring;
+ 
+     struct {
+diff --git a/src/libxl/libxl_conf.c b/src/libxl/libxl_conf.c
+index b988fa7..fa931c3 100644
+--- a/src/libxl/libxl_conf.c
++++ b/src/libxl/libxl_conf.c
+@@ -41,6 +41,7 @@
+ #include "capabilities.h"
+ #include "libxl_driver.h"
+ #include "libxl_conf.h"
++#include "storage_file.h"
+ 
+ 
+ #define VIR_FROM_THIS VIR_FROM_LIBXL
+@@ -505,25 +506,30 @@ libxlMakeDisk(virDomainDefPtr def, virDomainDiskDefPtr l_disk,
+     if (l_disk->driverName) {
+         if (STREQ(l_disk->driverName, "tap") ||
+             STREQ(l_disk->driverName, "tap2")) {
+-            if (l_disk->driverType) {
+-                if (STREQ(l_disk->driverType, "qcow")) {
+-                    x_disk->format = DISK_FORMAT_QCOW;
+-                    x_disk->backend = DISK_BACKEND_QDISK;
+-                } else if (STREQ(l_disk->driverType, "qcow2")) {
+-                    x_disk->format = DISK_FORMAT_QCOW2;
+-                    x_disk->backend = DISK_BACKEND_QDISK;
+-                } else if (STREQ(l_disk->driverType, "vhd")) {
+-                    x_disk->format = DISK_FORMAT_VHD;
+-                    x_disk->backend = DISK_BACKEND_TAP;
+-                } else if (STREQ(l_disk->driverType, "aio") ||
+-                            STREQ(l_disk->driverType, "raw")) {
+-                    x_disk->format = DISK_FORMAT_RAW;
+-                    x_disk->backend = DISK_BACKEND_TAP;
+-                }
+-            } else {
++            switch (l_disk->format) {
++            case VIR_STORAGE_FILE_QCOW:
++                x_disk->format = DISK_FORMAT_QCOW;
++                x_disk->backend = DISK_BACKEND_QDISK;
++                break;
++            case VIR_STORAGE_FILE_QCOW2:
++                x_disk->format = DISK_FORMAT_QCOW2;
++                x_disk->backend = DISK_BACKEND_QDISK;
++                break;
++            case VIR_STORAGE_FILE_VHD:
++                x_disk->format = DISK_FORMAT_VHD;
++                x_disk->backend = DISK_BACKEND_TAP;
++                break;
++            case VIR_STORAGE_FILE_NONE:
+                 /* No subtype specified, default to raw/tap */
+-                    x_disk->format = DISK_FORMAT_RAW;
+-                    x_disk->backend = DISK_BACKEND_TAP;
++            case VIR_STORAGE_FILE_RAW:
++                x_disk->format = DISK_FORMAT_RAW;
++                x_disk->backend = DISK_BACKEND_TAP;
++                break;
++            default:
++                virReportError(VIR_ERR_INTERNAL_ERROR,
++                               _("libxenlight does not support disk driver %s"),
++                               virStorageFileFormatTypeToString(l_disk->format));
++                return -1;
+             }
+         } else if (STREQ(l_disk->driverName, "file")) {
+             x_disk->format = DISK_FORMAT_RAW;
+diff --git a/src/libxl/libxl_driver.c b/src/libxl/libxl_driver.c
+index 6fe284f..f4e9aa6 100644
+--- a/src/libxl/libxl_driver.c
++++ b/src/libxl/libxl_driver.c
+@@ -3202,11 +3202,7 @@ libxlDomainUpdateDeviceConfig(virDomainDefPtr vmdef, virDomainDeviceDefPtr dev)
+                 orig->driverName = disk->driverName;
+                 disk->driverName = NULL;
+             }
+-            if (disk->driverType) {
+-                VIR_FREE(orig->driverType);
+-                orig->driverType = disk->driverType;
+-                disk->driverType = NULL;
+-            }
++            orig->format = disk->format;
+             disk->src = NULL;
+             break;
+         default:
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index f64047b..e1df1fc 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -43,6 +43,7 @@
+ #include "virnetdevtap.h"
+ #include "base64.h"
+ #include "device_conf.h"
++#include "storage_file.h"
+ 
+ #include <sys/utsname.h>
+ #include <sys/stat.h>
+@@ -2128,11 +2129,10 @@ qemuBuildDriveStr(virConnectPtr conn ATTRIBUTE_UNUSED,
+           disk->tray_status == VIR_DOMAIN_DISK_TRAY_OPEN)) {
+         if (disk->type == VIR_DOMAIN_DISK_TYPE_DIR) {
+             /* QEMU only supports magic FAT format for now */
+-            if (disk->driverType &&
+-                STRNEQ(disk->driverType, "fat")) {
++            if (disk->format > 0 && disk->format != VIR_STORAGE_FILE_FAT) {
+                 virReportError(VIR_ERR_INTERNAL_ERROR,
+                                _("unsupported disk driver type for '%s'"),
+-                               disk->driverType);
++                               virStorageFileFormatTypeToString(disk->format));
+                 goto error;
+             }
+             if (!disk->readonly) {
+@@ -2229,10 +2229,11 @@ qemuBuildDriveStr(virConnectPtr conn ATTRIBUTE_UNUSED,
+                        _("transient disks not supported yet"));
+         goto error;
+     }
+-    if (disk->driverType && *disk->driverType != '\0' &&
++    if (disk->format > 0 &&
+         disk->type != VIR_DOMAIN_DISK_TYPE_DIR &&
+         qemuCapsGet(caps, QEMU_CAPS_DRIVE_FORMAT))
+-        virBufferAsprintf(&opt, ",format=%s", disk->driverType);
++        virBufferAsprintf(&opt, ",format=%s",
++                          virStorageFileFormatTypeToString(disk->format));
+ 
+     /* generate geometry command string */
+     if (disk->geometry.cylinders > 0 &&
+@@ -5249,11 +5250,10 @@ qemuBuildCommandLine(virConnectPtr conn,
+ 
+             if (disk->type == VIR_DOMAIN_DISK_TYPE_DIR) {
+                 /* QEMU only supports magic FAT format for now */
+-                if (disk->driverType &&
+-                    STRNEQ(disk->driverType, "fat")) {
++                if (disk->format > 0 && disk->format != VIR_STORAGE_FILE_FAT) {
+                     virReportError(VIR_ERR_INTERNAL_ERROR,
+                                    _("unsupported disk driver type for '%s'"),
+-                                   disk->driverType);
++                                   virStorageFileFormatTypeToString(disk->format));
+                     goto error;
+                 }
+                 if (!disk->readonly) {
+@@ -7060,7 +7060,7 @@ qemuParseCommandLineDisk(virCapsPtr caps,
+                 virReportOOMError();
+                 goto cleanup;
+             }
+-            def->driverType = values[i];
++            def->format = virStorageFileFormatTypeFromString(values[i]);
+             values[i] = NULL;
+         } else if (STREQ(keywords[i], "cache")) {
+             if (STREQ(values[i], "off") ||
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 65a85cd..fe4e67d 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -36,6 +36,7 @@
+ #include "virfile.h"
+ #include "domain_event.h"
+ #include "virtime.h"
++#include "storage_file.h"
+ 
+ #include <sys/time.h>
+ #include <fcntl.h>
+@@ -1411,7 +1412,7 @@ void qemuDomainObjCheckDiskTaint(struct qemud_driver *driver,
+                                  virDomainDiskDefPtr disk,
+                                  int logFD)
+ {
+-    if (!disk->driverType &&
++    if ((!disk->format || disk->format == VIR_STORAGE_FILE_AUTO) &&
+         driver->allowDiskFormatProbing)
+         qemuDomainObjTaint(driver, obj, VIR_DOMAIN_TAINT_DISK_PROBING, logFD);
+ 
+@@ -1646,8 +1647,8 @@ qemuDomainSnapshotForEachQcow2Raw(struct qemud_driver *driver,
+     for (i = 0; i < ndisks; i++) {
+         /* FIXME: we also need to handle LVM here */
+         if (def->disks[i]->device == VIR_DOMAIN_DISK_DEVICE_DISK) {
+-            if (!def->disks[i]->driverType ||
+-                STRNEQ(def->disks[i]->driverType, "qcow2")) {
++            if (def->disks[i]->format > 0 &&
++                def->disks[i]->format != VIR_STORAGE_FILE_QCOW2) {
+                 if (try_all) {
+                     /* Continue on even in the face of error, since other
+                      * disks in this VM may have the same snapshot name.
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index e301b66..329ff06 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -6332,11 +6332,8 @@ qemuDomainUpdateDeviceConfig(qemuCapsPtr caps,
+             orig->driverName = disk->driverName;
+             disk->driverName = NULL;
+         }
+-        if (disk->driverType) {
+-            VIR_FREE(orig->driverType);
+-            orig->driverType = disk->driverType;
+-            disk->driverType = NULL;
+-        }
++        if (disk->format)
++            orig->format = disk->format;
+         disk->src = NULL;
+         break;
+ 
+@@ -9299,13 +9296,8 @@ static int qemuDomainGetBlockInfo(virDomainPtr dom,
+     }
+ 
+     /* Probe for magic formats */
+-    if (disk->driverType) {
+-        if ((format = virStorageFileFormatTypeFromString(disk->driverType)) <= 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("unknown disk format %s for %s"),
+-                           disk->driverType, disk->src);
+-            goto cleanup;
+-        }
++    if (disk->format) {
++        format = disk->format;
+     } else {
+         if (driver->allowDiskFormatProbing) {
+             if ((format = virStorageFileProbeFormat(disk->src)) < 0)
+@@ -10478,7 +10470,7 @@ qemuDomainSnapshotIsAllowed(virDomainObjPtr vm)
+ 
+         if ((disk->device == VIR_DOMAIN_DISK_DEVICE_LUN) ||
+             (disk->device == VIR_DOMAIN_DISK_DEVICE_DISK &&
+-             STRNEQ_NULLABLE(disk->driverType, "qcow2"))) {
++             disk->format > 0 && disk->format != VIR_STORAGE_FILE_QCOW2)) {
+             virReportError(VIR_ERR_OPERATION_INVALID,
+                            _("Disk '%s' does not support snapshotting"),
+                            disk->src);
+@@ -10671,13 +10663,14 @@ qemuDomainSnapshotDiskPrepare(virDomainObjPtr vm, virDomainSnapshotDefPtr def,
+                                disk->name);
+                 goto cleanup;
+             }
+-            if (!vm->def->disks[i]->driverType ||
+-                STRNEQ(vm->def->disks[i]->driverType, "qcow2")) {
++            if (vm->def->disks[i]->format > 0 &&
++                vm->def->disks[i]->format != VIR_STORAGE_FILE_QCOW2) {
+                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                                _("internal snapshot for disk %s unsupported "
+                                  "for storage type %s"),
+                                disk->name,
+-                               NULLSTR(vm->def->disks[i]->driverType));
++                               virStorageFileFormatTypeToString(
++                                   vm->def->disks[i]->format));
+                 goto cleanup;
+             }
+             found = true;
+@@ -10764,13 +10757,12 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     char *device = NULL;
+     char *source = NULL;
+-    char *driverType = NULL;
++    int format = VIR_STORAGE_FILE_NONE;
+     char *persistSource = NULL;
+-    char *persistDriverType = NULL;
+     int ret = -1;
+     int fd = -1;
+     char *origsrc = NULL;
+-    char *origdriver = NULL;
++    int origdriver;
+     bool need_unlink = false;
+ 
+     if (snap->snapshot != VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL) {
+@@ -10779,14 +10771,19 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+         return -1;
+     }
+ 
++    if (snap->driverType) {
++        format = virStorageFileFormatTypeFromString(snap->driverType);
++        if (format <= 0) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("unknown driver type %s"), snap->driverType);
++            goto cleanup;
++        }
++    }
++
+     if (virAsprintf(&device, "drive-%s", disk->info.alias) < 0 ||
+         !(source = strdup(snap->file)) ||
+-        (STRNEQ_NULLABLE(disk->driverType, snap->driverType) &&
+-         !(driverType = strdup(snap->driverType))) ||
+         (persistDisk &&
+-         (!(persistSource = strdup(source)) ||
+-          (STRNEQ_NULLABLE(persistDisk->driverType, snap->driverType) &&
+-           !(persistDriverType = strdup(snap->driverType)))))) {
++         !(persistSource = strdup(source)))) {
+         virReportOOMError();
+         goto cleanup;
+     }
+@@ -10803,8 +10800,8 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+ 
+     origsrc = disk->src;
+     disk->src = source;
+-    origdriver = disk->driverType;
+-    disk->driverType = (char *) "raw"; /* Don't want to probe backing files */
++    origdriver = disk->format;
++    disk->format = VIR_STORAGE_FILE_RAW; /* Don't want to probe backing files */
+ 
+     if (virDomainLockDiskAttach(driver->lockManager, driver->uri,
+                                 vm, disk) < 0)
+@@ -10825,8 +10822,7 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+ 
+     disk->src = origsrc;
+     origsrc = NULL;
+-    disk->driverType = origdriver;
+-    origdriver = NULL;
++    disk->format = origdriver;
+ 
+     /* create the actual snapshot */
+     ret = qemuMonitorDiskSnapshot(priv->mon, actions, device, source,
+@@ -10840,34 +10836,24 @@ qemuDomainSnapshotCreateSingleDiskActive(struct qemud_driver *driver,
+     VIR_FREE(disk->src);
+     disk->src = source;
+     source = NULL;
+-    if (driverType) {
+-        VIR_FREE(disk->driverType);
+-        disk->driverType = driverType;
+-        driverType = NULL;
+-    }
++    disk->format = format;
+     if (persistDisk) {
+         VIR_FREE(persistDisk->src);
+         persistDisk->src = persistSource;
+         persistSource = NULL;
+-        if (persistDriverType) {
+-            VIR_FREE(persistDisk->driverType);
+-            persistDisk->driverType = persistDriverType;
+-            persistDriverType = NULL;
+-        }
++        persistDisk->format = format;
+     }
+ 
+ cleanup:
+     if (origsrc) {
+         disk->src = origsrc;
+-        disk->driverType = origdriver;
++        disk->format = origdriver;
+     }
+     if (need_unlink && unlink(source))
+         VIR_WARN("unable to unlink just-created %s", source);
+     VIR_FREE(device);
+     VIR_FREE(source);
+-    VIR_FREE(driverType);
+     VIR_FREE(persistSource);
+-    VIR_FREE(persistDriverType);
+     return ret;
+ }
+ 
+@@ -10884,17 +10870,12 @@ qemuDomainSnapshotUndoSingleDiskActive(struct qemud_driver *driver,
+                                        bool need_unlink)
+ {
+     char *source = NULL;
+-    char *driverType = NULL;
+     char *persistSource = NULL;
+-    char *persistDriverType = NULL;
+     struct stat st;
+ 
+     if (!(source = strdup(origdisk->src)) ||
+-        (origdisk->driverType &&
+-         !(driverType = strdup(origdisk->driverType))) ||
+         (persistDisk &&
+-         (!(persistSource = strdup(source)) ||
+-          (driverType && !(persistDriverType = strdup(driverType)))))) {
++         !(persistSource = strdup(source)))) {
+         virReportOOMError();
+         goto cleanup;
+     }
+@@ -10914,27 +10895,17 @@ qemuDomainSnapshotUndoSingleDiskActive(struct qemud_driver *driver,
+     VIR_FREE(disk->src);
+     disk->src = source;
+     source = NULL;
+-    VIR_FREE(disk->driverType);
+-    if (driverType) {
+-        disk->driverType = driverType;
+-        driverType = NULL;
+-    }
++    disk->format = origdisk->format;
+     if (persistDisk) {
+         VIR_FREE(persistDisk->src);
+         persistDisk->src = persistSource;
+         persistSource = NULL;
+-        VIR_FREE(persistDisk->driverType);
+-        if (persistDriverType) {
+-            persistDisk->driverType = persistDriverType;
+-            persistDriverType = NULL;
+-        }
++        persistDisk->format = origdisk->format;
+     }
+ 
+ cleanup:
+     VIR_FREE(source);
+-    VIR_FREE(driverType);
+     VIR_FREE(persistSource);
+-    VIR_FREE(persistDriverType);
+ }
+ 
+ /* The domain is expected to be locked and active. */
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index f8520ab..4fd93bf 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -45,6 +45,7 @@
+ #include "virnetdevbridge.h"
+ #include "virnetdevtap.h"
+ #include "device_conf.h"
++#include "storage_file.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_QEMU
+ 
+@@ -107,10 +108,10 @@ int qemuDomainChangeEjectableMedia(struct qemud_driver *driver,
+     if (disk->src) {
+         const char *format = NULL;
+         if (disk->type != VIR_DOMAIN_DISK_TYPE_DIR) {
+-            if (disk->driverType)
+-                format = disk->driverType;
+-            else if (origdisk->driverType)
+-                format = origdisk->driverType;
++            if (disk->format > 0)
++                format = virStorageFileFormatTypeToString(disk->format);
++            else if (origdisk->format > 0)
++                format = virStorageFileFormatTypeToString(origdisk->format);
+         }
+         ret = qemuMonitorChangeMedia(priv->mon,
+                                      driveAlias,
+diff --git a/src/vbox/vbox_tmpl.c b/src/vbox/vbox_tmpl.c
+index 4f2d025..6979e29 100644
+--- a/src/vbox/vbox_tmpl.c
++++ b/src/vbox/vbox_tmpl.c
+@@ -3846,7 +3846,8 @@ vboxAttachDrives(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine)
+         VIR_DEBUG("disk(%d) src:        %s", i, def->disks[i]->src);
+         VIR_DEBUG("disk(%d) dst:        %s", i, def->disks[i]->dst);
+         VIR_DEBUG("disk(%d) driverName: %s", i, def->disks[i]->driverName);
+-        VIR_DEBUG("disk(%d) driverType: %s", i, def->disks[i]->driverType);
++        VIR_DEBUG("disk(%d) driverType: %s", i,
++                  virStorageFileFormatTypeToString(def->disks[i]->format));
+         VIR_DEBUG("disk(%d) cachemode:  %d", i, def->disks[i]->cachemode);
+         VIR_DEBUG("disk(%d) readonly:   %s", i, (def->disks[i]->readonly
+                                              ? "True" : "False"));
+@@ -4125,7 +4126,8 @@ vboxAttachDrives(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine)
+         VIR_DEBUG("disk(%d) src:        %s", i, def->disks[i]->src);
+         VIR_DEBUG("disk(%d) dst:        %s", i, def->disks[i]->dst);
+         VIR_DEBUG("disk(%d) driverName: %s", i, def->disks[i]->driverName);
+-        VIR_DEBUG("disk(%d) driverType: %s", i, def->disks[i]->driverType);
++        VIR_DEBUG("disk(%d) driverType: %s", i,
++                  virStorageFileFormatTypeToString(def->disks[i]->format));
+         VIR_DEBUG("disk(%d) cachemode:  %d", i, def->disks[i]->cachemode);
+         VIR_DEBUG("disk(%d) readonly:   %s", i, (def->disks[i]->readonly
+                                              ? "True" : "False"));
+diff --git a/src/xenxs/xen_sxpr.c b/src/xenxs/xen_sxpr.c
+index 8f8a59b..efc5d51 100644
+--- a/src/xenxs/xen_sxpr.c
++++ b/src/xenxs/xen_sxpr.c
+@@ -36,6 +36,7 @@
+ #include "count-one-bits.h"
+ #include "xenxs_private.h"
+ #include "xen_sxpr.h"
++#include "storage_file.h"
+ 
+ /* Get a domain id from a S-expression string */
+ int xenGetDomIdFromSxprString(const char *sexpr, int xendConfigVersion)
+@@ -427,6 +428,8 @@ xenParseSxprDisks(virDomainDefPtr def,
+ 
+                 if (STREQ (disk->driverName, "tap") ||
+                     STREQ (disk->driverName, "tap2")) {
++                    char *driverType = NULL;
++
+                     offset = strchr(src, ':');
+                     if (!offset) {
+                         virReportError(VIR_ERR_INTERNAL_ERROR,
+@@ -434,21 +437,19 @@ xenParseSxprDisks(virDomainDefPtr def,
+                         goto error;
+                     }
+ 
+-                    if (VIR_ALLOC_N(disk->driverType, (offset-src)+1)< 0)
++                    if (!(driverType = strndup(src, offset - src)))
+                         goto no_memory;
+-                    if (virStrncpy(disk->driverType, src, offset-src,
+-                                   (offset-src)+1) == NULL) {
++                    if (STREQ(driverType, "aio"))
++                        disk->format = VIR_STORAGE_FILE_RAW;
++                    else
++                        disk->format =
++                            virStorageFileFormatTypeFromString(driverType);
++                    VIR_FREE(driverType);
++                    if (disk->format <= 0) {
+                         virReportError(VIR_ERR_INTERNAL_ERROR,
+-                                       _("Driver type %s too big for destination"),
+-                                       src);
++                                       _("Unknown driver type %s"), src);
+                         goto error;
+                     }
+-                    if (STREQ(disk->driverType, "aio")) {
+-                        /* In-place conversion to "raw" */
+-                        disk->driverType[0] = 'r';
+-                        disk->driverType[1] = 'a';
+-                        disk->driverType[2] = 'w';
+-                    }
+ 
+                     src = offset + 1;
+                     /* Its possible to use blktap driver for block devs
+@@ -1837,9 +1838,12 @@ xenFormatSxprDisk(virDomainDiskDefPtr def,
+         if (def->driverName) {
+             if (STREQ(def->driverName, "tap") ||
+                 STREQ(def->driverName, "tap2")) {
+-                const char *type = def->driverType ? def->driverType : "aio";
+-                if (STREQ(type, "raw"))
++                const char *type;
++
++                if (!def->format || def->format == VIR_STORAGE_FILE_RAW)
+                     type = "aio";
++                else
++                    type = virStorageFileFormatTypeToString(def->format);
+                 virBufferEscapeSexpr(buf, "(uname '%s:", def->driverName);
+                 virBufferEscapeSexpr(buf, "%s:", type);
+                 virBufferEscapeSexpr(buf, "%s')", def->src);
+diff --git a/src/xenxs/xen_xm.c b/src/xenxs/xen_xm.c
+index c564d35..2e560a6 100644
+--- a/src/xenxs/xen_xm.c
++++ b/src/xenxs/xen_xm.c
+@@ -37,6 +37,7 @@
+ #include "xen_xm.h"
+ #include "xen_sxpr.h"
+ #include "domain_conf.h"
++#include "storage_file.h"
+ 
+ /* Convenience method to grab a long int from the config file object */
+ static int xenXMConfigGetBool(virConfPtr conf,
+@@ -554,24 +555,25 @@ xenParseXM(virConfPtr conf, int xendConfigVersion,
+                 /* And the sub-type for tap:XXX: type */
+                 if (disk->driverName &&
+                     STREQ(disk->driverName, "tap")) {
++                    char *driverType;
++
+                     if (!(tmp = strchr(disk->src, ':')))
+                         goto skipdisk;
+-                    if (VIR_ALLOC_N(disk->driverType, (tmp - disk->src) + 1) < 0)
++
++                    if (!(driverType = strndup(disk->src, tmp - disk->src)))
+                         goto no_memory;
+-                    if (virStrncpy(disk->driverType, disk->src,
+-                                   (tmp - disk->src),
+-                                   (tmp - disk->src) + 1) == NULL) {
++                    if (STREQ(driverType, "aio"))
++                        disk->format = VIR_STORAGE_FILE_RAW;
++                    else
++                        disk->format =
++                            virStorageFileFormatTypeFromString(driverType);
++                    VIR_FREE(driverType);
++                    if (disk->format <= 0) {
+                         virReportError(VIR_ERR_INTERNAL_ERROR,
+-                                       _("Driver type %s too big for destination"),
++                                       _("Unknown driver type %s"),
+                                        disk->src);
+                         goto cleanup;
+                     }
+-                    if (STREQ(disk->driverType, "aio")) {
+-                        /* In-place conversion to "raw" */
+-                        disk->driverType[0] = 'r';
+-                        disk->driverType[1] = 'a';
+-                        disk->driverType[2] = 'w';
+-                    }
+ 
+                     /* Strip the prefix we found off the source file name */
+                     memmove(disk->src, disk->src+(tmp-disk->src)+1,
+@@ -1208,10 +1210,13 @@ static int xenFormatXMDisk(virConfValuePtr list,
+     virConfValuePtr val, tmp;
+ 
+     if(disk->src) {
+-        if (disk->driverName) {
+-            const char *type = disk->driverType ? disk->driverType : "aio";
+-            if (STREQ(type, "raw"))
++        if (disk->format) {
++            const char *type;
++
++            if (disk->format == VIR_STORAGE_FILE_RAW)
+                 type = "aio";
++            else
++                type = virStorageFileFormatTypeToString(disk->format);
+             virBufferAsprintf(&buf, "%s:", disk->driverName);
+             if (STREQ(disk->driverName, "tap"))
+                 virBufferAsprintf(&buf, "%s:", type);
+-- 
+1.7.12.4
+

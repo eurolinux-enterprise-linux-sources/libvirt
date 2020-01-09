@@ -1,0 +1,180 @@
+From c5f46fd1cbda85dfbecb6427d2e530be71e2161d Mon Sep 17 00:00:00 2001
+Message-Id: <c5f46fd1cbda85dfbecb6427d2e530be71e2161d@dist-git>
+From: =?UTF-8?q?Guido=20G=C3=BCnther?= <agx@sigxcpu.org>
+Date: Tue, 20 Aug 2013 11:20:46 +0200
+Subject: [PATCH] Simplify RELRO_LDFLAGS
+
+by adding it to AM_LDFLAGS instead of every linking rule and
+by avoiding a forked grep.
+
+(cherry picked from commit d9527b6d565f0561c7920db65b841b0e13041827)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1242156
+
+Conflicts:
+	src/Makefile.am -- no DRIVER_MODULE_LDFLAGS, virtlockd, and
+        libvirt-lxc.la
+	tools/Makefile.am -- no virt-login-shell
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ daemon/Makefile.am      |  5 +++--
+ m4/virt-linker-relro.m4 | 11 +++++++----
+ src/Makefile.am         | 11 +++--------
+ tools/Makefile.am       | 12 +++++++++---
+ 4 files changed, 22 insertions(+), 17 deletions(-)
+
+diff --git a/daemon/Makefile.am b/daemon/Makefile.am
+index 29a4e3f..8a9d2e9 100644
+--- a/daemon/Makefile.am
++++ b/daemon/Makefile.am
+@@ -101,9 +101,10 @@ libvirtd_CFLAGS = \
+ 	-DQEMUD_PID_FILE="\"$(QEMUD_PID_FILE)\""
+ 
+ libvirtd_LDFLAGS =					\
+-	$(PIE_LDFLAGS)					\
+ 	$(RELRO_LDFLAGS)				\
+-	$(COVERAGE_LDFLAGS)
++	$(PIE_LDFLAGS)					\
++	$(COVERAGE_LDFLAGS)				\
++	$(NULL)
+ 
+ libvirtd_LDADD =					\
+ 	$(LIBXML_LIBS)					\
+diff --git a/m4/virt-linker-relro.m4 b/m4/virt-linker-relro.m4
+index 9bca90e..079a095 100644
+--- a/m4/virt-linker-relro.m4
++++ b/m4/virt-linker-relro.m4
+@@ -22,10 +22,13 @@ AC_DEFUN([LIBVIRT_LINKER_RELRO],[
+     AC_MSG_CHECKING([for how to force completely read-only GOT table])
+ 
+     RELRO_LDFLAGS=
+-    `$LD --help 2>&1 | grep -- "-z relro" >/dev/null` && \
+-        RELRO_LDFLAGS="-Wl,-z -Wl,relro"
+-    `$LD --help 2>&1 | grep -- "-z now" >/dev/null` && \
+-        RELRO_LDFLAGS="$RELRO_LDFLAGS -Wl,-z -Wl,now"
++    ld_help=`$LD --help 2>&1`
++    case $ld_help in
++        *"-z relro"*) RELRO_LDFLAGS="-Wl,-z -Wl,relro" ;;
++    esac
++    case $ld_help in
++        *"-z now"*) RELRO_LDFLAGS="$RELRO_LDFLAGS -Wl,-z -Wl,now" ;;
++    esac
+     AC_SUBST([RELRO_LDFLAGS])
+ 
+     AC_MSG_RESULT([$RELRO_LDFLAGS])
+diff --git a/src/Makefile.am b/src/Makefile.am
+index 13c2b52..a6a5600 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -20,7 +20,9 @@ AM_CFLAGS =	$(DRIVER_MODULE_CFLAGS)				\
+ 		$(LOCK_CHECKING_CFLAGS)				\
+ 		$(WIN32_EXTRA_CFLAGS)				\
+ 		$(COVERAGE_CFLAGS)
+-AM_LDFLAGS = $(COVERAGE_LDFLAGS)
++AM_LDFLAGS =	$(COVERAGE_LDFLAGS)                             \
++		$(RELRO_LDFLAGS)                                \
++		$(NULL)
+ 
+ EXTRA_DIST = $(conf_DATA) util/keymaps.csv
+ 
+@@ -1413,7 +1415,6 @@ libvirt_la_LDFLAGS = \
+ 		-version-info $(LIBVIRT_VERSION_INFO) \
+ 		$(LIBVIRT_NODELETE) \
+ 		$(AM_LDFLAGS) \
+-		$(RELRO_LDFLAGS) \
+ 		$(CYGWIN_EXTRA_LDFLAGS) \
+ 		$(MINGW_EXTRA_LDFLAGS) \
+ 		$(NULL)
+@@ -1493,7 +1494,6 @@ libvirt_qemu_la_LDFLAGS = \
+ 		$(VERSION_SCRIPT_FLAGS)$(LIBVIRT_QEMU_SYMBOL_FILE) \
+ 		-version-info $(LIBVIRT_VERSION_INFO) \
+ 		$(AM_LDFLAGS) \
+-		$(RELRO_LDFLAGS) \
+ 		$(CYGWIN_EXTRA_LDFLAGS) \
+ 		$(MINGW_EXTRA_LDFLAGS) \
+ 		$(NULL)
+@@ -1631,7 +1631,6 @@ libvirt_iohelper_SOURCES = $(UTIL_IO_HELPER_SOURCES)
+ libvirt_iohelper_LDFLAGS = \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+-		$(RELRO_LDFLAGS) \
+ 		$(NULL)
+ libvirt_iohelper_LDADD =		\
+ 		libvirt_util.la		\
+@@ -1654,7 +1653,6 @@ libvirt_parthelper_SOURCES = $(STORAGE_HELPER_DISK_SOURCES)
+ libvirt_parthelper_LDFLAGS = \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+-		$(RELRO_LDFLAGS) \
+ 		$(NULL)
+ libvirt_parthelper_LDADD =		\
+ 		$(LIBPARTED_LIBS)	\
+@@ -1686,7 +1684,6 @@ libvirt_sanlock_helper_CFLAGS = \
+ libvirt_sanlock_helper_LDFLAGS = \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+-		$(RELRO_LDFLAGS) \
+ 		$(NULL)
+ libvirt_sanlock_helper_LDADD = libvirt.la
+ endif
+@@ -1702,7 +1699,6 @@ libvirt_lxc_SOURCES =						\
+ libvirt_lxc_LDFLAGS = \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+-		$(RELRO_LDFLAGS) \
+ 		$(NULL)
+ libvirt_lxc_LDADD =			\
+ 		$(NUMACTL_LIBS) \
+@@ -1749,7 +1745,6 @@ virt_aa_helper_SOURCES = $(SECURITY_DRIVER_APPARMOR_HELPER_SOURCES)
+ virt_aa_helper_LDFLAGS = \
+ 		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+-		$(RELRO_LDFLAGS) \
+ 		$(NULL)
+ virt_aa_helper_LDADD =						\
+ 		libvirt_conf.la					\
+diff --git a/tools/Makefile.am b/tools/Makefile.am
+index b6e7880..9391696 100644
+--- a/tools/Makefile.am
++++ b/tools/Makefile.am
+@@ -9,6 +9,10 @@ INCLUDES = \
+ 	-I$(top_srcdir)						\
+ 	$(GETTEXT_CPPFLAGS)
+ 
++AM_LDFLAGS = \
++	$(RELRO_LDFLAGS)					\
++	$(NULL)
++
+ POD2MAN = pod2man -c "Virtualization Support" -r "$(PACKAGE)-$(VERSION)"
+ 
+ ICON_FILES = \
+@@ -89,8 +93,8 @@ virt_host_validate_SOURCES = \
+ 		$(NULL)
+ 
+ virt_host_validate_LDFLAGS = \
++		$(AM_LDFLAGS) \
+ 		$(PIE_LDFLAGS) \
+-		$(RELRO_LDFLAGS) \
+ 		$(COVERAGE_LDFLAGS) \
+ 		$(NULL)
+ 
+@@ -121,11 +125,13 @@ virsh_SOURCES =							\
+ 		virsh-volume.c virsh-volume.h			\
+ 		$(NULL)
+ 
+-virsh_LDFLAGS = $(COVERAGE_LDFLAGS)
++virsh_LDFLAGS = \
++		$(AM_LDFLAGS) 					\
++		$(COVERAGE_LDFLAGS)				\
++		$(NULL)
+ virsh_LDADD =							\
+ 		$(STATIC_BINARIES)				\
+ 		$(PIE_LDFLAGS)					\
+-		$(RELRO_LDFLAGS) \
+ 		../src/libvirt.la				\
+ 		../src/libvirt-qemu.la				\
+ 		../gnulib/lib/libgnu.la				\
+-- 
+2.7.0
+

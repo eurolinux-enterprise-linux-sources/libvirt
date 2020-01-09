@@ -1,0 +1,38 @@
+From 94ab947ed44d85b1ad84f6c87a918201ab27ee25 Mon Sep 17 00:00:00 2001
+Message-Id: <94ab947ed44d85b1ad84f6c87a918201ab27ee25@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 2 Jul 2014 15:49:29 +0200
+Subject: [PATCH] lib: Don't force the key argument when deleting metadata
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1115039
+
+virDomainSetMetadata when operating on the metadata element was
+requesting the @key argument to be passed even if @metadata was NULL
+used to delete the corresponding metadata element. This is not needed as
+the key is only used when adding the element and matching is done via
+the XML namespace.
+
+(cherry picked from commit 3b6784d119074e3be8861cc4c30630f299bde121)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index ded463b..6952164 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -9532,7 +9532,8 @@ virDomainSetMetadata(virDomainPtr domain,
+         break;
+     case VIR_DOMAIN_METADATA_ELEMENT:
+         virCheckNonNullArgGoto(uri, error);
+-        virCheckNonNullArgGoto(key, error);
++        if (metadata)
++            virCheckNonNullArgGoto(key, error);
+         break;
+     default:
+         /* For future expansion */
+-- 
+2.0.0
+

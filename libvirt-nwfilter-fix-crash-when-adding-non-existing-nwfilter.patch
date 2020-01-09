@@ -1,0 +1,38 @@
+From a6081efef680b81b7436447c413b61597dd4a90e Mon Sep 17 00:00:00 2001
+Message-Id: <a6081efef680b81b7436447c413b61597dd4a90e@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Tue, 17 Mar 2015 10:41:01 +0100
+Subject: [PATCH] nwfilter: fix crash when adding non-existing nwfilter
+
+Adding non-existing nwfilter to a network interface device without any
+nwfilter specified will crash libvirt daemon with segfault. The reason is
+that the nwfilter is not found an libvirt will try to restore old
+nwfilter configuration but there is no nwfilter specified.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit d98ad8dd0c5a1d9f6a804e23f0568c784469c3fd)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1202703
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/nwfilter_conf.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/conf/nwfilter_conf.c b/src/conf/nwfilter_conf.c
+index a80ca56..192b9f7 100644
+--- a/src/conf/nwfilter_conf.c
++++ b/src/conf/nwfilter_conf.c
+@@ -2704,7 +2704,7 @@ virNWFilterObjFindByName(virNWFilterObjListPtr nwfilters, const char *name)
+ 
+     for (i = 0 ; i < nwfilters->count ; i++) {
+         virNWFilterObjLock(nwfilters->objs[i]);
+-        if (STREQ(nwfilters->objs[i]->def->name, name))
++        if (STREQ_NULLABLE(nwfilters->objs[i]->def->name, name))
+             return nwfilters->objs[i];
+         virNWFilterObjUnlock(nwfilters->objs[i]);
+     }
+-- 
+2.3.3
+

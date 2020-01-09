@@ -1,0 +1,370 @@
+From 2e23ca19e8cacf79c8e0b56b6c305d8f8b47a422 Mon Sep 17 00:00:00 2001
+Message-Id: <2e23ca19e8cacf79c8e0b56b6c305d8f8b47a422.1373271638.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Wed, 6 Mar 2013 15:03:49 -0700
+Subject: [PATCH] Use size_t instead of int for virDomainDefPtr struct
+
+https://bugzilla.redhat.com/show_bug.cgi?id=896604
+
+Many parts of virDomainDefPtr were using 'int' variables as
+array length counts. Replace all these with size_t and update
+various format strings & API signatures to adapt
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 5cbb0d37d435c47c90e2d06e0f6efa5b8526f3e9)
+---
+ src/conf/domain_conf.c           | 28 ++++++++++++++--------------
+ src/conf/domain_conf.h           | 40 ++++++++++++++++++++--------------------
+ src/lxc/lxc_controller.c         |  4 ++--
+ src/parallels/parallels_driver.c |  2 +-
+ src/qemu/qemu_hotplug.c          |  2 +-
+ src/vbox/vbox_tmpl.c             |  8 ++++----
+ src/vmx/vmx.c                    |  2 +-
+ 7 files changed, 43 insertions(+), 43 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 5d05fae..547cd60 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -11236,7 +11236,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->ndisks != dst->ndisks) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain disk count %d does not match source %d"),
++                       _("Target domain disk count %zu does not match source %zu"),
+                        dst->ndisks, src->ndisks);
+         goto cleanup;
+     }
+@@ -11247,7 +11247,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->ncontrollers != dst->ncontrollers) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain disk controller count %d does not match source %d"),
++                       _("Target domain disk controller count %zu does not match source %zu"),
+                        dst->ncontrollers, src->ncontrollers);
+         goto cleanup;
+     }
+@@ -11258,7 +11258,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nfss != dst->nfss) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain filesystem count %d does not match source %d"),
++                       _("Target domain filesystem count %zu does not match source %zu"),
+                        dst->nfss, src->nfss);
+         goto cleanup;
+     }
+@@ -11269,7 +11269,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nnets != dst->nnets) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain net card count %d does not match source %d"),
++                       _("Target domain net card count %zu does not match source %zu"),
+                        dst->nnets, src->nnets);
+         goto cleanup;
+     }
+@@ -11280,7 +11280,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->ninputs != dst->ninputs) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain input device count %d does not match source %d"),
++                       _("Target domain input device count %zu does not match source %zu"),
+                        dst->ninputs, src->ninputs);
+         goto cleanup;
+     }
+@@ -11291,7 +11291,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nsounds != dst->nsounds) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain sound card count %d does not match source %d"),
++                       _("Target domain sound card count %zu does not match source %zu"),
+                        dst->nsounds, src->nsounds);
+         goto cleanup;
+     }
+@@ -11302,7 +11302,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nvideos != dst->nvideos) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain video card count %d does not match source %d"),
++                       _("Target domain video card count %zu does not match source %zu"),
+                        dst->nvideos, src->nvideos);
+         goto cleanup;
+     }
+@@ -11313,7 +11313,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nhostdevs != dst->nhostdevs) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain host device count %d does not match source %d"),
++                       _("Target domain host device count %zu does not match source %zu"),
+                        dst->nhostdevs, src->nhostdevs);
+         goto cleanup;
+     }
+@@ -11324,7 +11324,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nsmartcards != dst->nsmartcards) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain smartcard count %d does not match source %d"),
++                       _("Target domain smartcard count %zu does not match source %zu"),
+                        dst->nsmartcards, src->nsmartcards);
+         goto cleanup;
+     }
+@@ -11335,7 +11335,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nserials != dst->nserials) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain serial port count %d does not match source %d"),
++                       _("Target domain serial port count %zu does not match source %zu"),
+                        dst->nserials, src->nserials);
+         goto cleanup;
+     }
+@@ -11346,7 +11346,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nparallels != dst->nparallels) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain parallel port count %d does not match source %d"),
++                       _("Target domain parallel port count %zu does not match source %zu"),
+                        dst->nparallels, src->nparallels);
+         goto cleanup;
+     }
+@@ -11357,7 +11357,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nchannels != dst->nchannels) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain channel count %d does not match source %d"),
++                       _("Target domain channel count %zu does not match source %zu"),
+                        dst->nchannels, src->nchannels);
+         goto cleanup;
+     }
+@@ -11368,7 +11368,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nconsoles != dst->nconsoles) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain console count %d does not match source %d"),
++                       _("Target domain console count %zu does not match source %zu"),
+                        dst->nconsoles, src->nconsoles);
+         goto cleanup;
+     }
+@@ -11379,7 +11379,7 @@ bool virDomainDefCheckABIStability(virDomainDefPtr src,
+ 
+     if (src->nhubs != dst->nhubs) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+-                       _("Target domain hub device count %d does not match source %d"),
++                       _("Target domain hub device count %zu does not match source %zu"),
+                        dst->nhubs, src->nhubs);
+         goto cleanup;
+     }
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 977da9e..8595df5 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -565,7 +565,7 @@ struct _virDomainDiskDef {
+     char *dst;
+     int tray_status;
+     int protocol;
+-    int nhosts;
++    size_t nhosts;
+     virDomainDiskHostDefPtr hosts;
+     struct {
+         char *username;
+@@ -1063,7 +1063,7 @@ struct _virDomainSoundDef {
+     int model;
+     virDomainDeviceInfo info;
+ 
+-    int ncodecs;
++    size_t ncodecs;
+     virDomainSoundCodecDefPtr *codecs;
+ };
+ 
+@@ -1477,7 +1477,7 @@ struct _virDomainOSDef {
+     char *type;
+     char *arch;
+     char *machine;
+-    int nBootDevs;
++    size_t nBootDevs;
+     int bootDevs[VIR_DOMAIN_BOOT_LAST];
+     /* enum virDomainBootMenu */
+     int bootmenu;
+@@ -1609,7 +1609,7 @@ struct _virDomainClockDef {
+         char *timezone;
+     } data;
+ 
+-    int ntimers;
++    size_t ntimers;
+     virDomainTimerDefPtr *timers;
+ };
+ 
+@@ -1734,55 +1734,55 @@ struct _virDomainDef {
+ 
+     virDomainClockDef clock;
+ 
+-    int ngraphics;
++    size_t ngraphics;
+     virDomainGraphicsDefPtr *graphics;
+ 
+-    int ndisks;
++    size_t ndisks;
+     virDomainDiskDefPtr *disks;
+ 
+-    int ncontrollers;
++    size_t ncontrollers;
+     virDomainControllerDefPtr *controllers;
+ 
+-    int nfss;
++    size_t nfss;
+     virDomainFSDefPtr *fss;
+ 
+-    int nnets;
++    size_t nnets;
+     virDomainNetDefPtr *nets;
+ 
+-    int ninputs;
++    size_t ninputs;
+     virDomainInputDefPtr *inputs;
+ 
+-    int nsounds;
++    size_t nsounds;
+     virDomainSoundDefPtr *sounds;
+ 
+-    int nvideos;
++    size_t nvideos;
+     virDomainVideoDefPtr *videos;
+ 
+-    int nhostdevs;
++    size_t nhostdevs;
+     virDomainHostdevDefPtr *hostdevs;
+ 
+-    int nredirdevs;
++    size_t nredirdevs;
+     virDomainRedirdevDefPtr *redirdevs;
+ 
+-    int nsmartcards;
++    size_t nsmartcards;
+     virDomainSmartcardDefPtr *smartcards;
+ 
+-    int nserials;
++    size_t nserials;
+     virDomainChrDefPtr *serials;
+ 
+-    int nparallels;
++    size_t nparallels;
+     virDomainChrDefPtr *parallels;
+ 
+-    int nchannels;
++    size_t nchannels;
+     virDomainChrDefPtr *channels;
+ 
+-    int nconsoles;
++    size_t nconsoles;
+     virDomainChrDefPtr *consoles;
+ 
+     size_t nleases;
+     virDomainLeaseDefPtr *leases;
+ 
+-    int nhubs;
++    size_t nhubs;
+     virDomainHubDefPtr *hubs;
+ 
+     size_t nseclabels;
+diff --git a/src/lxc/lxc_controller.c b/src/lxc/lxc_controller.c
+index f3d87e8..03f055b 100644
+--- a/src/lxc/lxc_controller.c
++++ b/src/lxc/lxc_controller.c
+@@ -321,7 +321,7 @@ static int virLXCControllerValidateNICs(virLXCControllerPtr ctrl)
+ {
+     if (ctrl->def->nnets != ctrl->nveths) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("expecting %d veths, but got %zu"),
++                       _("expecting %zu veths, but got %zu"),
+                        ctrl->def->nnets, ctrl->nveths);
+         return -1;
+     }
+@@ -334,7 +334,7 @@ static int virLXCControllerValidateConsoles(virLXCControllerPtr ctrl)
+ {
+     if (ctrl->def->nconsoles != ctrl->nconsoles) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+-                       _("expecting %d consoles, but got %zu tty file handlers"),
++                       _("expecting %zu consoles, but got %zu tty file handlers"),
+                        ctrl->def->nconsoles, ctrl->nconsoles);
+         return -1;
+     }
+diff --git a/src/parallels/parallels_driver.c b/src/parallels/parallels_driver.c
+index 20ee361..a938199 100644
+--- a/src/parallels/parallels_driver.c
++++ b/src/parallels/parallels_driver.c
+@@ -222,7 +222,7 @@ parallelsGetSerialInfo(virDomainChrDefPtr chr,
+ }
+ 
+ static int
+-parallelsAddSerialInfo(virDomainChrDefPtr **serials, int *nserials,
++parallelsAddSerialInfo(virDomainChrDefPtr **serials, size_t *nserials,
+                        const char *key, virJSONValuePtr value)
+ {
+     virDomainChrDefPtr chr = NULL;
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index d4d5a9d..7d72d09 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -2351,7 +2351,7 @@ int qemuDomainDetachThisHostDevice(struct qemud_driver *driver,
+         }
+         if (idx >= vm->def->nhostdevs) {
+             virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("device not found in hostdevs list (%d entries)"),
++                           _("device not found in hostdevs list (%zu entries)"),
+                            vm->def->nhostdevs);
+             return ret;
+         }
+diff --git a/src/vbox/vbox_tmpl.c b/src/vbox/vbox_tmpl.c
+index 6979e29..1030146 100644
+--- a/src/vbox/vbox_tmpl.c
++++ b/src/vbox/vbox_tmpl.c
+@@ -3786,7 +3786,7 @@ vboxSetBootDeviceOrder(virDomainDefPtr def, vboxGlobalData *data,
+     VIR_DEBUG("def->os.type             %s", def->os.type);
+     VIR_DEBUG("def->os.arch             %s", def->os.arch);
+     VIR_DEBUG("def->os.machine          %s", def->os.machine);
+-    VIR_DEBUG("def->os.nBootDevs        %d", def->os.nBootDevs);
++    VIR_DEBUG("def->os.nBootDevs        %zu", def->os.nBootDevs);
+     VIR_DEBUG("def->os.bootDevs[0]      %d", def->os.bootDevs[0]);
+     VIR_DEBUG("def->os.bootDevs[1]      %d", def->os.bootDevs[1]);
+     VIR_DEBUG("def->os.bootDevs[2]      %d", def->os.bootDevs[2]);
+@@ -4378,7 +4378,7 @@ vboxAttachNetwork(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine)
+         systemProperties = NULL;
+     }
+ 
+-    VIR_DEBUG("Number of Network Cards to be connected: %d", def->nnets);
++    VIR_DEBUG("Number of Network Cards to be connected: %zu", def->nnets);
+     VIR_DEBUG("Number of Network Cards available: %d", networkAdapterCount);
+ 
+     for (i = 0; (i < def->nnets) && (i < networkAdapterCount); i++) {
+@@ -4540,7 +4540,7 @@ vboxAttachSerial(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine)
+         systemProperties = NULL;
+     }
+ 
+-    VIR_DEBUG("Number of Serial Ports to be connected: %d", def->nserials);
++    VIR_DEBUG("Number of Serial Ports to be connected: %zu", def->nserials);
+     VIR_DEBUG("Number of Serial Ports available: %d", serialPortCount);
+     for (i = 0; (i < def->nserials) && (i < serialPortCount); i++) {
+         ISerialPort *serialPort = NULL;
+@@ -4619,7 +4619,7 @@ vboxAttachParallel(virDomainDefPtr def, vboxGlobalData *data, IMachine *machine)
+         systemProperties = NULL;
+     }
+ 
+-    VIR_DEBUG("Number of Parallel Ports to be connected: %d", def->nparallels);
++    VIR_DEBUG("Number of Parallel Ports to be connected: %zu", def->nparallels);
+     VIR_DEBUG("Number of Parallel Ports available: %d", parallelPortCount);
+     for (i = 0; (i < def->nparallels) && (i < parallelPortCount); i++) {
+         IParallelPort *parallelPort = NULL;
+diff --git a/src/vmx/vmx.c b/src/vmx/vmx.c
+index 1ccd931..e051de5 100644
+--- a/src/vmx/vmx.c
++++ b/src/vmx/vmx.c
+@@ -3299,7 +3299,7 @@ virVMXFormatConfig(virVMXContext *ctx, virCapsPtr caps, virDomainDefPtr def,
+     /* def:fss */
+     if (def->nfss > 0) {
+         virBufferAddLit(&buffer, "isolation.tools.hgfs.disable = \"false\"\n");
+-        virBufferAsprintf(&buffer, "sharedFolder.maxNum = \"%d\"\n", def->nfss);
++        virBufferAsprintf(&buffer, "sharedFolder.maxNum = \"%zu\"\n", def->nfss);
+     }
+ 
+     for (i = 0; i < def->nfss; ++i) {
+-- 
+1.8.2.1
+

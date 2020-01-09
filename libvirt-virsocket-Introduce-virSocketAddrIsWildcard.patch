@@ -1,0 +1,136 @@
+From 1f5d89b0fe667e6dfd8406c7e09ec7a1f6699723 Mon Sep 17 00:00:00 2001
+Message-Id: <1f5d89b0fe667e6dfd8406c7e09ec7a1f6699723.1373271642.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 7 Jun 2013 15:47:35 +0200
+Subject: [PATCH] virsocket: Introduce virSocketAddrIsWildcard
+
+https://bugzilla.redhat.com/show_bug.cgi?id=920441
+
+This internal API checks, if passed address is a wildcard address.
+(cherry picked from commit 688994364fd06036b41cad0c0eec59ff436cdcdb)
+---
+ src/libvirt_private.syms |  1 +
+ src/util/virsocketaddr.c | 20 ++++++++++++++++++++
+ src/util/virsocketaddr.h |  1 +
+ tests/sockettest.c       | 38 ++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 60 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 9171745..5a4039d 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1759,6 +1759,7 @@ virSocketAddrGetPort;
+ virSocketAddrGetRange;
+ virSocketAddrIsNetmask;
+ virSocketAddrIsPrivate;
++virSocketAddrIsWildcard;
+ virSocketAddrMask;
+ virSocketAddrMaskByPrefix;
+ virSocketAddrParse;
+diff --git a/src/util/virsocketaddr.c b/src/util/virsocketaddr.c
+index 66ddb61..45260bf 100644
+--- a/src/util/virsocketaddr.c
++++ b/src/util/virsocketaddr.c
+@@ -227,6 +227,26 @@ virSocketAddrIsPrivate(const virSocketAddrPtr addr)
+ }
+ 
+ /*
++ * virSocketAddrIsWildcard:
++ * @addr: address to check
++ *
++ * Check if passed address is a variant of ANYCAST address.
++ */
++bool
++virSocketAddrIsWildcard(const virSocketAddrPtr addr)
++{
++    in_addr_t tmp = INADDR_ANY;
++    switch (addr->data.stor.ss_family) {
++    case AF_INET:
++        return memcmp(&addr->data.inet4.sin_addr.s_addr, &tmp,
++                      sizeof(addr->data.inet4.sin_addr.s_addr)) == 0;
++    case AF_INET6:
++        return IN6_IS_ADDR_UNSPECIFIED(&addr->data.inet6.sin6_addr.s6_addr);
++    }
++    return false;
++}
++
++/*
+  * virSocketAddrFormat:
+  * @addr: an initialized virSocketAddrPtr
+  *
+diff --git a/src/util/virsocketaddr.h b/src/util/virsocketaddr.h
+index 66d4265..5c57471 100644
+--- a/src/util/virsocketaddr.h
++++ b/src/util/virsocketaddr.h
+@@ -106,4 +106,5 @@ bool virSocketAddrEqual(const virSocketAddrPtr s1,
+                         const virSocketAddrPtr s2);
+ bool virSocketAddrIsPrivate(const virSocketAddrPtr addr);
+ 
++bool virSocketAddrIsWildcard(const virSocketAddrPtr addr);
+ #endif /* __VIR_SOCKETADDR_H__ */
+diff --git a/tests/sockettest.c b/tests/sockettest.c
+index 2f85307..d710a78 100644
+--- a/tests/sockettest.c
++++ b/tests/sockettest.c
+@@ -157,6 +157,28 @@ static int testNetmaskHelper(const void *opaque)
+     return testNetmask(data->addr1, data->addr2, data->netmask, data->pass);
+ }
+ 
++static int testWildcard(const char *addrstr,
++                        bool pass)
++{
++    virSocketAddr addr;
++
++    if (virSocketAddrParse(&addr, addrstr, AF_UNSPEC) < 0)
++        return -1;
++
++    if (virSocketAddrIsWildcard(&addr))
++        return pass ? 0 : -1;
++    return pass ? -1 : 0;
++}
++
++struct testWildcardData {
++    const char *addr;
++    bool pass;
++};
++static int testWildcardHelper(const void *opaque)
++{
++    const struct testWildcardData *data = opaque;
++    return testWildcard(data->addr, data->pass);
++}
+ 
+ static int
+ mymain(void)
+@@ -209,6 +231,14 @@ mymain(void)
+             ret = -1;                                                   \
+     } while (0)
+ 
++#define DO_TEST_WILDCARD(addr, pass)                                    \
++    do {                                                                \
++        struct testWildcardData data = { addr, pass};                   \
++        if (virtTestRun("Test wildcard " addr, 1,                       \
++                        testWildcardHelper, &data) < 0)                 \
++            ret = -1;                                                   \
++    } while (0)
++
+ 
+     DO_TEST_PARSE_AND_FORMAT("127.0.0.1", AF_UNSPEC, true);
+     DO_TEST_PARSE_AND_FORMAT("127.0.0.1", AF_INET, true);
+@@ -252,6 +282,14 @@ mymain(void)
+     DO_TEST_NETMASK("2000::1:1", "9000::1:1",
+                     "ffff:ffff:ffff:ffff:ffff:ffff:ffff:0", false);
+ 
++    DO_TEST_WILDCARD("0.0.0.0", true);
++    DO_TEST_WILDCARD("::", true);
++    DO_TEST_WILDCARD("0", true);
++    DO_TEST_WILDCARD("0.0", true);
++    DO_TEST_WILDCARD("0.0.0", true);
++    DO_TEST_WILDCARD("1", false);
++    DO_TEST_WILDCARD("0.1", false);
++
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+ 
+-- 
+1.8.2.1
+

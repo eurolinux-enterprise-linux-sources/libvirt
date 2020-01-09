@@ -1,0 +1,45 @@
+From 57708d8a3157d8e20045e9a86d78fb6f79ce7385 Mon Sep 17 00:00:00 2001
+Message-Id: <57708d8a3157d8e20045e9a86d78fb6f79ce7385.1354720508.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 3 Dec 2012 15:20:20 +0100
+Subject: [PATCH] rpc: don't destroy xdr before creating it in
+ virNetMessageEncodeHeader
+
+Bug: https://bugzilla.redhat.com/show_bug.cgi?id=878376
+
+On OOM, xdr_destroy got called even though it wasn't created yet.
+
+Found by coverity:
+Error: UNINIT (CWE-457):
+    libvirt-0.10.2/src/rpc/virnetmessage.c:214: var_decl: Declaring
+    variable "xdr" without initializer.
+    libvirt-0.10.2/src/rpc/virnetmessage.c:219: cond_true: Condition
+    "virReallocN(&msg->buffer, 1UL /* sizeof (*msg->buffer) */,
+    msg->bufferLength) < 0", taking true branch
+    libvirt-0.10.2/src/rpc/virnetmessage.c:221: goto: Jumping to label
+    "cleanup"
+    libvirt-0.10.2/src/rpc/virnetmessage.c:257: label: Reached label
+    "cleanup"
+    libvirt-0.10.2/src/rpc/virnetmessage.c:258: uninit_use: Using
+    uninitialized value "xdr.x_ops".
+(cherry picked from commit 6e1fc35546bda31a27e9adb8a23c761cffc1aae6)
+---
+ src/rpc/virnetmessage.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/rpc/virnetmessage.c b/src/rpc/virnetmessage.c
+index ce5f9d8..2fbd603 100644
+--- a/src/rpc/virnetmessage.c
++++ b/src/rpc/virnetmessage.c
+@@ -218,7 +218,7 @@ int virNetMessageEncodeHeader(virNetMessagePtr msg)
+     msg->bufferLength = VIR_NET_MESSAGE_MAX + VIR_NET_MESSAGE_LEN_MAX;
+     if (VIR_REALLOC_N(msg->buffer, msg->bufferLength) < 0) {
+         virReportOOMError();
+-        goto cleanup;
++        return ret;
+     }
+     msg->bufferOffset = 0;
+ 
+-- 
+1.8.0
+

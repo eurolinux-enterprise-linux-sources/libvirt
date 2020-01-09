@@ -1,0 +1,197 @@
+From 6680451bd6fddc859e651e8d74f79fd357594e4e Mon Sep 17 00:00:00 2001
+Message-Id: <6680451bd6fddc859e651e8d74f79fd357594e4e.1374158623.git.jdenemar@redhat.com>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 16 May 2013 22:01:05 +0200
+Subject: [PATCH] qemu: Implement support for locking domain's memory pages
+
+https://bugzilla.redhat.com/show_bug.cgi?id=947118
+
+(cherry picked from commit fd74f74fe609f3e3eb33ef70fb6a2d402c4cd519)
+
+Conflicts:
+	src/qemu/qemu_capabilities.c - no QMP probing in RHEL-6
+	src/qemu/qemu_capabilities.h - context
+        src/qemu/qemu_command.c - s/virQEMUCapsGet/qemuCapsGet/ and
+	    s/qemuCaps/caps/
+	tests/qemuxml2argvtest.c - context
+        tests/qemuxml2argvdata/qemuxml2argv-*.args - reorder -usb
+---
+ src/qemu/qemu_capabilities.c                           |  1 +
+ src/qemu/qemu_capabilities.h                           |  1 +
+ src/qemu/qemu_command.c                                | 11 +++++++++++
+ tests/qemuxml2argvdata/qemuxml2argv-mlock-off.args     |  4 ++++
+ tests/qemuxml2argvdata/qemuxml2argv-mlock-off.xml      | 15 +++++++++++++++
+ tests/qemuxml2argvdata/qemuxml2argv-mlock-on.args      |  4 ++++
+ tests/qemuxml2argvdata/qemuxml2argv-mlock-on.xml       | 18 ++++++++++++++++++
+ .../qemuxml2argv-mlock-unsupported.args                |  4 ++++
+ .../qemuxml2argv-mlock-unsupported.xml                 | 15 +++++++++++++++
+ tests/qemuxml2argvtest.c                               |  5 +++++
+ 10 files changed, 78 insertions(+)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-mlock-off.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-mlock-off.xml
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-mlock-on.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-mlock-on.xml
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-mlock-unsupported.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-mlock-unsupported.xml
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index d66665b..345198d 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -199,6 +199,7 @@ VIR_ENUM_IMPL(qemuCaps, QEMU_CAPS_LAST,
+               "device-video-primary",
+               "ipv6-migration",
+               "vnc-share-policy",
++              "mlock",
+     );
+ 
+ struct _qemuCaps {
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 2809a8e..41c72fe 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -166,6 +166,7 @@ enum qemuCapsFlags {
+                                            for primary video device */
+     QEMU_CAPS_IPV6_MIGRATION,           /* -incoming [::] */
+     QEMU_CAPS_VNC_SHARE_POLICY,         /* set display sharing policy */
++    QEMU_CAPS_MLOCK,                    /* -realtime mlock=on|off */
+ 
+     QEMU_CAPS_LAST,                   /* this must always be the last item */
+ };
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 0754f8c..1869e2d 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -5018,6 +5018,17 @@ qemuBuildCommandLine(virConnectPtr conn,
+         virCommandAddArg(cmd, "-redhat-disable-KSM");
+     }
+ 
++    if (def->mem.locked && !qemuCapsGet(caps, QEMU_CAPS_MLOCK)) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("memory locking not supported by QEMU binary"));
++        goto error;
++    }
++    if (qemuCapsGet(caps, QEMU_CAPS_MLOCK)) {
++        virCommandAddArg(cmd, "-realtime");
++        virCommandAddArgFormat(cmd, "mlock=%s",
++                               def->mem.locked ? "on" : "off");
++    }
++
+     virCommandAddArg(cmd, "-smp");
+     if (!(smp = qemuBuildSmpArgStr(def, caps)))
+         goto error;
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-mlock-off.args b/tests/qemuxml2argvdata/qemuxml2argv-mlock-off.args
+new file mode 100644
+index 0000000..2ea4a70
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-mlock-off.args
+@@ -0,0 +1,4 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test \
++/usr/bin/qemu -S -M pc -m 214 -realtime mlock=off \
++-smp 1 -nographic -monitor unix:/tmp/test-monitor,server,nowait \
++-no-acpi -boot c -net none -serial none -parallel none -usb
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-mlock-off.xml b/tests/qemuxml2argvdata/qemuxml2argv-mlock-off.xml
+new file mode 100644
+index 0000000..4125ca5
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-mlock-off.xml
+@@ -0,0 +1,15 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-mlock-on.args b/tests/qemuxml2argvdata/qemuxml2argv-mlock-on.args
+new file mode 100644
+index 0000000..cf9f7a9
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-mlock-on.args
+@@ -0,0 +1,4 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test \
++/usr/bin/qemu -S -M pc -m 214 -realtime mlock=on \
++-smp 1 -nographic -monitor unix:/tmp/test-monitor,server,nowait \
++-no-acpi -boot c -net none -serial none -parallel none -usb
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-mlock-on.xml b/tests/qemuxml2argvdata/qemuxml2argv-mlock-on.xml
+new file mode 100644
+index 0000000..20a5eaa
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-mlock-on.xml
+@@ -0,0 +1,18 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <memoryBacking>
++    <locked/>
++  </memoryBacking>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-mlock-unsupported.args b/tests/qemuxml2argvdata/qemuxml2argv-mlock-unsupported.args
+new file mode 100644
+index 0000000..61ad8c6
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-mlock-unsupported.args
+@@ -0,0 +1,4 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test \
++/usr/bin/qemu -S -M pc -m 214 \
++-smp 1 -nographic -monitor unix:/tmp/test-monitor,server,nowait \
++-no-acpi -boot c -net none -serial none -parallel none -usb
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-mlock-unsupported.xml b/tests/qemuxml2argvdata/qemuxml2argv-mlock-unsupported.xml
+new file mode 100644
+index 0000000..4125ca5
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-mlock-unsupported.xml
+@@ -0,0 +1,15 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 437c5a0..ca2af4b 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -853,6 +853,11 @@ mymain(void)
+             QEMU_CAPS_DEVICE, QEMU_CAPS_DEVICE_VIDEO_PRIMARY,
+             QEMU_CAPS_DEVICE_QXL, QEMU_CAPS_DEVICE_QXL_VGA);
+ 
++    DO_TEST("mlock-on", QEMU_CAPS_MLOCK);
++    DO_TEST_FAILURE("mlock-on", NONE);
++    DO_TEST("mlock-off", QEMU_CAPS_MLOCK);
++    DO_TEST("mlock-unsupported", NONE);
++
+     VIR_FREE(driver.stateDir);
+     virCapabilitiesFree(driver.caps);
+     VIR_FREE(map);
+-- 
+1.8.3.2
+

@@ -1,0 +1,73 @@
+From 958b3b4403259b8298ebe357b208323c3aec6a6c Mon Sep 17 00:00:00 2001
+Message-Id: <958b3b4403259b8298ebe357b208323c3aec6a6c@dist-git>
+From: Giuseppe Scrivano <gscrivan@redhat.com>
+Date: Tue, 13 May 2014 14:30:38 +0200
+Subject: [PATCH] udev: consider the device a CDROM when ID_CDROM=1
+
+Some CDROM devices are reported by udev to have an ID_TYPE="generic"
+thus it is necessary to check if ID_CDROM is present.
+
+As a side effect, treating ID_TYPE="generic" as a missing ID_TYPE will
+enable checks for ID_DRIVE_FLOPPY and the udevKludgeStorageType
+heuristic.
+
+Closes: https://bugzilla.redhat.com/show_bug.cgi?id=1016878
+
+Signed-off-by: Giuseppe Scrivano <gscrivan@redhat.com>
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 2c054ca176c5f53f5acb31f4a48bcf3091110eb8)
+
+Conflicts:
+	src/node_device/node_device_udev.c
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/node_device/node_device_udev.c | 18 +++++++++++++-----
+ 1 file changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/src/node_device/node_device_udev.c b/src/node_device/node_device_udev.c
+index 818bd08..aa4ab18 100644
+--- a/src/node_device/node_device_udev.c
++++ b/src/node_device/node_device_udev.c
+@@ -1,7 +1,7 @@
+ /*
+  * node_device_udev.c: node device enumeration - libudev implementation
+  *
+- * Copyright (C) 2009-2012 Red Hat, Inc.
++ * Copyright (C) 2009-2014 Red Hat, Inc.
+  *
+  * This library is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU Lesser General Public
+@@ -1061,18 +1061,26 @@ static int udevProcessStorage(struct udev_device *device,
+ 
+     if (udevGetStringProperty(device,
+                               "ID_TYPE",
+-                              &data->storage.drive_type) != PROPERTY_FOUND) {
++                              &data->storage.drive_type) != PROPERTY_FOUND ||
++        STREQ(def->caps->data.storage.drive_type, "generic")) {
+         int tmp_int = 0;
+ 
+         /* All floppy drives have the ID_DRIVE_FLOPPY prop. This is
+          * needed since legacy floppies don't have a drive_type */
+-        if ((udevGetIntProperty(device, "ID_DRIVE_FLOPPY",
+-                                &tmp_int, 0) == PROPERTY_FOUND) &&
+-            (tmp_int == 1)) {
++        if (udevGetIntProperty(device, "ID_DRIVE_FLOPPY",
++                               &tmp_int, 0) == PROPERTY_FOUND &&
++            tmp_int == 1) {
+ 
+             data->storage.drive_type = strdup("floppy");
+             if (!data->storage.drive_type)
+                 goto out;
++        } else if (udevGetIntProperty(device, "ID_CDROM",
++                                      &tmp_int, 0) == PROPERTY_FOUND &&
++                   tmp_int == 1) {
++
++            data->storage.drive_type = strdup("cd");
++            if (!data->storage.drive_type)
++                goto out;
+         } else {
+ 
+             /* If udev doesn't have it, perhaps we can guess it. */
+-- 
+1.9.3
+

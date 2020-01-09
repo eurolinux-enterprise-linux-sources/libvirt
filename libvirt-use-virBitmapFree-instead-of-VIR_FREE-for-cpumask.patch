@@ -1,0 +1,47 @@
+From a405f271b69c13e9399c1862d2a40077a3d1bbdf Mon Sep 17 00:00:00 2001
+Message-Id: <a405f271b69c13e9399c1862d2a40077a3d1bbdf@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Tue, 22 Apr 2014 16:50:09 +0200
+Subject: [PATCH] use virBitmapFree instead of VIR_FREE for cpumask
+
+Found by 'git grep FREE.*cpumask' after looking at 31f1f6b.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1088165
+
+(cherry picked from commit de6889590254806456da5e8a7790e2704e6810ed)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c   | 2 +-
+ src/libxl/libxl_driver.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index a80255c..d8737e2 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -12222,7 +12222,7 @@ virDomainVcpuPinDel(virDomainDefPtr def, int vcpu)
+ 
+     for (n = 0; n < def->cputune.nvcpupin; n++) {
+         if (vcpupin_list[n]->vcpuid == vcpu) {
+-            VIR_FREE(vcpupin_list[n]->cpumask);
++            virBitmapFree(vcpupin_list[n]->cpumask);
+             VIR_FREE(vcpupin_list[n]);
+             memmove(&vcpupin_list[n],
+                     &vcpupin_list[n+1],
+diff --git a/src/libxl/libxl_driver.c b/src/libxl/libxl_driver.c
+index f4e9aa6..912cc22 100644
+--- a/src/libxl/libxl_driver.c
++++ b/src/libxl/libxl_driver.c
+@@ -326,7 +326,7 @@ libxlVmCleanup(libxlDriverPrivatePtr driver,
+     /* Remove any cputune settings */
+     if (vm->def->cputune.nvcpupin) {
+         for (i = 0; i < vm->def->cputune.nvcpupin; ++i) {
+-            VIR_FREE(vm->def->cputune.vcpupin[i]->cpumask);
++            virBitmapFree(vm->def->cputune.vcpupin[i]->cpumask);
+             VIR_FREE(vm->def->cputune.vcpupin[i]);
+         }
+         VIR_FREE(vm->def->cputune.vcpupin);
+-- 
+1.9.2
+

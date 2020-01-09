@@ -1,0 +1,333 @@
+From bba33ae149a13aaa0813d3a2ab041e0d0845535b Mon Sep 17 00:00:00 2001
+Message-Id: <bba33ae149a13aaa0813d3a2ab041e0d0845535b@dist-git>
+From: Eric Blake <eblake@redhat.com>
+Date: Wed, 9 Apr 2014 10:56:28 +0200
+Subject: [PATCH] storage: reduce number of stat calls
+
+6.6: https://bugzilla.redhat.com/show_bug.cgi?id=977706
+
+We are calling fstat() at least twice per storage volume in
+a directory storage pool; this is rather wasteful.  Refactoring
+this is also a step towards making code reusable for gluster,
+where gluster can provide struct stat but cannot use fstat().
+
+* src/storage/storage_backend.h
+(virStorageBackendVolOpenCheckMode)
+(virStorageBackendUpdateVolTargetInfoFD): Update signature.
+* src/storage/storage_backend.c
+(virStorageBackendVolOpenCheckMode): Pass stat results back.
+(virStorageBackendUpdateVolTargetInfoFD): Use existing stats.
+(virStorageBackendVolOpen, virStorageBackendUpdateVolTargetInfo):
+Update callers.
+* src/storage/storage_backend_fs.c (virStorageBackendProbeTarget):
+Likewise.
+* src/storage/storage_backend_scsi.c
+(virStorageBackendSCSIUpdateVolTargetInfo): Likewise.
+* src/storage/storage_backend_mpath.c
+(virStorageBackendMpathUpdateVolTargetInfo): Likewise.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 9cac863965aa318667619727c387ec8ee3965557)
+
+Conflicts:
+	src/storage/storage_backend.c - context:
+    HAVE_SELINUX vs WITH_SELINUX and VIR_ALLOC doesn't report errors
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/storage/storage_backend.c       | 62 +++++++++++++++++--------------------
+ src/storage/storage_backend.h       | 10 ++++--
+ src/storage/storage_backend_fs.c    |  5 +--
+ src/storage/storage_backend_mpath.c |  7 +++--
+ src/storage/storage_backend_scsi.c  |  7 +++--
+ 5 files changed, 49 insertions(+), 42 deletions(-)
+
+diff --git a/src/storage/storage_backend.c b/src/storage/storage_backend.c
+index 244a99d..6a2c51d 100644
+--- a/src/storage/storage_backend.c
++++ b/src/storage/storage_backend.c
+@@ -1028,30 +1028,30 @@ virStorageBackendForType(int type) {
+  * volume is a dangling symbolic link.
+  */
+ int
+-virStorageBackendVolOpenCheckMode(const char *path, unsigned int flags)
++virStorageBackendVolOpenCheckMode(const char *path, struct stat *sb,
++                                  unsigned int flags)
+ {
+     int fd, mode = 0;
+-    struct stat sb;
+     char *base = last_component(path);
+ 
+-    if (lstat(path, &sb) < 0) {
++    if (lstat(path, sb) < 0) {
+         virReportSystemError(errno,
+                              _("cannot stat file '%s'"),
+                              path);
+         return -1;
+     }
+ 
+-    if (S_ISFIFO(sb.st_mode)) {
++    if (S_ISFIFO(sb->st_mode)) {
+         VIR_WARN("ignoring FIFO '%s'", path);
+         return -2;
+-    } else if (S_ISSOCK(sb.st_mode)) {
++    } else if (S_ISSOCK(sb->st_mode)) {
+         VIR_WARN("ignoring socket '%s'", path);
+         return -2;
+     }
+ 
+     if ((fd = open(path, O_RDONLY|O_NONBLOCK|O_NOCTTY)) < 0) {
+         if ((errno == ENOENT || errno == ELOOP) &&
+-            S_ISLNK(sb.st_mode)) {
++            S_ISLNK(sb->st_mode)) {
+             VIR_WARN("ignoring dangling symlink '%s'", path);
+             return -2;
+         }
+@@ -1062,7 +1062,7 @@ virStorageBackendVolOpenCheckMode(const char *path, unsigned int flags)
+         return -1;
+     }
+ 
+-    if (fstat(fd, &sb) < 0) {
++    if (fstat(fd, sb) < 0) {
+         virReportSystemError(errno,
+                              _("cannot stat file '%s'"),
+                              path);
+@@ -1070,13 +1070,13 @@ virStorageBackendVolOpenCheckMode(const char *path, unsigned int flags)
+         return -1;
+     }
+ 
+-    if (S_ISREG(sb.st_mode))
++    if (S_ISREG(sb->st_mode))
+         mode = VIR_STORAGE_VOL_OPEN_REG;
+-    else if (S_ISCHR(sb.st_mode))
++    else if (S_ISCHR(sb->st_mode))
+         mode = VIR_STORAGE_VOL_OPEN_CHAR;
+-    else if (S_ISBLK(sb.st_mode))
++    else if (S_ISBLK(sb->st_mode))
+         mode = VIR_STORAGE_VOL_OPEN_BLOCK;
+-    else if (S_ISDIR(sb.st_mode)) {
++    else if (S_ISDIR(sb->st_mode)) {
+         mode = VIR_STORAGE_VOL_OPEN_DIR;
+ 
+         if (STREQ(base, ".") ||
+@@ -1105,7 +1105,8 @@ virStorageBackendVolOpenCheckMode(const char *path, unsigned int flags)
+ 
+ int virStorageBackendVolOpen(const char *path)
+ {
+-    return virStorageBackendVolOpenCheckMode(path,
++    struct stat sb;
++    return virStorageBackendVolOpenCheckMode(path, &sb,
+                                              VIR_STORAGE_VOL_OPEN_DEFAULT);
+ }
+ 
+@@ -1116,14 +1117,16 @@ virStorageBackendUpdateVolTargetInfo(virStorageVolTargetPtr target,
+                                      unsigned int openflags)
+ {
+     int ret, fd;
++    struct stat sb;
+ 
+-    if ((ret = virStorageBackendVolOpenCheckMode(target->path,
++    if ((ret = virStorageBackendVolOpenCheckMode(target->path, &sb,
+                                                  openflags)) < 0)
+         return ret;
+ 
+     fd = ret;
+     ret = virStorageBackendUpdateVolTargetInfoFD(target,
+                                                  fd,
++                                                 &sb,
+                                                  allocation,
+                                                  capacity);
+ 
+@@ -1174,35 +1177,28 @@ int virStorageBackendUpdateVolInfo(virStorageVolDefPtr vol,
+ int
+ virStorageBackendUpdateVolTargetInfoFD(virStorageVolTargetPtr target,
+                                        int fd,
++                                       struct stat *sb,
+                                        unsigned long long *allocation,
+                                        unsigned long long *capacity)
+ {
+-    struct stat sb;
+ #if HAVE_SELINUX
+     security_context_t filecon = NULL;
+ #endif
+ 
+-    if (fstat(fd, &sb) < 0) {
+-        virReportSystemError(errno,
+-                             _("cannot stat file '%s'"),
+-                             target->path);
+-        return -1;
+-    }
+-
+     if (allocation) {
+-        if (S_ISREG(sb.st_mode)) {
++        if (S_ISREG(sb->st_mode)) {
+ #ifndef WIN32
+-            *allocation = (unsigned long long)sb.st_blocks *
++            *allocation = (unsigned long long)sb->st_blocks *
+                           (unsigned long long)DEV_BSIZE;
+ #else
+-            *allocation = sb.st_size;
++            *allocation = sb->st_size;
+ #endif
+             /* Regular files may be sparse, so logical size (capacity) is not same
+              * as actual allocation above
+              */
+             if (capacity)
+-                *capacity = sb.st_size;
+-        } else if (S_ISDIR(sb.st_mode)) {
++                *capacity = sb->st_size;
++        } else if (S_ISDIR(sb->st_mode)) {
+             *allocation = 0;
+             if (capacity)
+                 *capacity = 0;
+@@ -1227,18 +1223,18 @@ virStorageBackendUpdateVolTargetInfoFD(virStorageVolTargetPtr target,
+         }
+     }
+ 
+-    target->perms.mode = sb.st_mode & S_IRWXUGO;
+-    target->perms.uid = sb.st_uid;
+-    target->perms.gid = sb.st_gid;
++    target->perms.mode = sb->st_mode & S_IRWXUGO;
++    target->perms.uid = sb->st_uid;
++    target->perms.gid = sb->st_gid;
+ 
+     if (!target->timestamps && VIR_ALLOC(target->timestamps) < 0) {
+         virReportOOMError();
+         return -1;
+     }
+-    target->timestamps->atime = get_stat_atime(&sb);
+-    target->timestamps->btime = get_stat_birthtime(&sb);
+-    target->timestamps->ctime = get_stat_ctime(&sb);
+-    target->timestamps->mtime = get_stat_mtime(&sb);
++    target->timestamps->atime = get_stat_atime(sb);
++    target->timestamps->btime = get_stat_birthtime(sb);
++    target->timestamps->ctime = get_stat_ctime(sb);
++    target->timestamps->mtime = get_stat_mtime(sb);
+ 
+     VIR_FREE(target->perms.label);
+ 
+diff --git a/src/storage/storage_backend.h b/src/storage/storage_backend.h
+index a67eeb7..f524020 100644
+--- a/src/storage/storage_backend.h
++++ b/src/storage/storage_backend.h
+@@ -24,6 +24,8 @@
+ #ifndef __VIR_STORAGE_BACKEND_H__
+ # define __VIR_STORAGE_BACKEND_H__
+ 
++# include <sys/stat.h>
++
+ # include "internal.h"
+ # include "storage_conf.h"
+ # include "command.h"
+@@ -107,9 +109,10 @@ enum {
+                                        VIR_STORAGE_VOL_OPEN_CHAR     |\
+                                        VIR_STORAGE_VOL_OPEN_BLOCK)
+ 
+-int virStorageBackendVolOpenCheckMode(const char *path, unsigned int flags)
+-ATTRIBUTE_RETURN_CHECK
+-ATTRIBUTE_NONNULL(1);
++int virStorageBackendVolOpenCheckMode(const char *path, struct stat *sb,
++                                      unsigned int flags)
++    ATTRIBUTE_RETURN_CHECK
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+ 
+ int virStorageBackendUpdateVolInfo(virStorageVolDefPtr vol,
+                                    int withCapacity);
+@@ -123,6 +126,7 @@ int virStorageBackendUpdateVolTargetInfo(virStorageVolTargetPtr target,
+                                          unsigned int openflags);
+ int virStorageBackendUpdateVolTargetInfoFD(virStorageVolTargetPtr target,
+                                            int fd,
++                                           struct stat *sb,
+                                            unsigned long long *allocation,
+                                            unsigned long long *capacity);
+ int
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index ce57e74..63f7452 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -69,18 +69,19 @@ virStorageBackendProbeTarget(virStorageVolTargetPtr target,
+     int fd = -1;
+     int ret = -1;
+     virStorageFileMetadata *meta = NULL;
++    struct stat sb;
+ 
+     *backingStore = NULL;
+     *backingStoreFormat = VIR_STORAGE_FILE_AUTO;
+     if (encryption)
+         *encryption = NULL;
+ 
+-    if ((ret = virStorageBackendVolOpenCheckMode(target->path,
++    if ((ret = virStorageBackendVolOpenCheckMode(target->path, &sb,
+                                         VIR_STORAGE_VOL_FS_REFRESH_FLAGS)) < 0)
+         goto error; /* Take care to propagate ret, it is not always -1 */
+     fd = ret;
+ 
+-    if ((ret = virStorageBackendUpdateVolTargetInfoFD(target, fd,
++    if ((ret = virStorageBackendUpdateVolTargetInfoFD(target, fd, &sb,
+                                                       allocation,
+                                                       capacity)) < 0) {
+         goto error;
+diff --git a/src/storage/storage_backend_mpath.c b/src/storage/storage_backend_mpath.c
+index 4c74e8c..8961619 100644
+--- a/src/storage/storage_backend_mpath.c
++++ b/src/storage/storage_backend_mpath.c
+@@ -1,7 +1,7 @@
+ /*
+  * storage_backend_mpath.c: storage backend for multipath handling
+  *
+- * Copyright (C) 2009-2011 Red Hat, Inc.
++ * Copyright (C) 2009-2011, 2013 Red Hat, Inc.
+  * Copyright (C) 2009-2008 Dave Allan
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -45,13 +45,16 @@ virStorageBackendMpathUpdateVolTargetInfo(virStorageVolTargetPtr target,
+ {
+     int ret = -1;
+     int fdret, fd = -1;
++    struct stat sb;
+ 
+-    if ((fdret = virStorageBackendVolOpen(target->path)) < 0)
++    if ((fdret = virStorageBackendVolOpenCheckMode(target->path, &sb,
++                                                   VIR_STORAGE_VOL_OPEN_DEFAULT)) < 0)
+         goto out;
+     fd = fdret;
+ 
+     if (virStorageBackendUpdateVolTargetInfoFD(target,
+                                                fd,
++                                               &sb,
+                                                allocation,
+                                                capacity) < 0)
+         goto out;
+diff --git a/src/storage/storage_backend_scsi.c b/src/storage/storage_backend_scsi.c
+index 27dcbb6..cdd126f 100644
+--- a/src/storage/storage_backend_scsi.c
++++ b/src/storage/storage_backend_scsi.c
+@@ -1,7 +1,7 @@
+ /*
+  * storage_backend_scsi.c: storage backend for SCSI handling
+  *
+- * Copyright (C) 2007-2008 Red Hat, Inc.
++ * Copyright (C) 2007-2008, 2013 Red Hat, Inc.
+  * Copyright (C) 2007-2008 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -139,13 +139,16 @@ virStorageBackendSCSIUpdateVolTargetInfo(virStorageVolTargetPtr target,
+ {
+     int fdret, fd = -1;
+     int ret = -1;
++    struct stat sb;
+ 
+-    if ((fdret = virStorageBackendVolOpen(target->path)) < 0)
++    if ((fdret = virStorageBackendVolOpenCheckMode(target->path, &sb,
++                                                   VIR_STORAGE_VOL_OPEN_DEFAULT)) < 0)
+         goto cleanup;
+     fd = fdret;
+ 
+     if (virStorageBackendUpdateVolTargetInfoFD(target,
+                                                fd,
++                                               &sb,
+                                                allocation,
+                                                capacity) < 0)
+         goto cleanup;
+-- 
+1.9.2
+

@@ -1,0 +1,41 @@
+From f144598072b847442a6134c4489c69115191253d Mon Sep 17 00:00:00 2001
+Message-Id: <f144598072b847442a6134c4489c69115191253d.1358948742.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 21 Jan 2013 12:14:54 +0100
+Subject: [PATCH] qemu: Reject attempts to create snapshots with names
+ containig '/'
+
+https://bugzilla.redhat.com/show_bug.cgi?id=896403
+
+The snapshot name is used to create path to the definition save file.
+When the name contains slashes the creation of the file fails. Reject
+such names.
+(cherry picked from commit 790f912b468657859466215312dbfb0b1a9a1f69)
+---
+ src/qemu/qemu_driver.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 5a115df..72a4e20 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11535,6 +11535,16 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+                                                 parse_flags)))
+         goto cleanup;
+ 
++    /* reject snapshot names containing slashes as snapshot definitions are
++     * saved in files containing the name */
++    if (!(flags & VIR_DOMAIN_SNAPSHOT_CREATE_NO_METADATA) &&
++        strchr(def->name, '/')) {
++        virReportError(VIR_ERR_XML_DETAIL,
++                       _("invalid snapshot name '%s': name can't contain '/'"),
++                       def->name);
++        goto cleanup;
++    }
++
+     /* reject the VIR_DOMAIN_SNAPSHOT_CREATE_LIVE flag where not supported */
+     if (flags & VIR_DOMAIN_SNAPSHOT_CREATE_LIVE &&
+         (!virDomainObjIsActive(vm) ||
+-- 
+1.8.1.1
+

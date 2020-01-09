@@ -1,0 +1,177 @@
+From 01e203844afd232a047b4bea2e0b7fb1f22ba319 Mon Sep 17 00:00:00 2001
+Message-Id: <01e203844afd232a047b4bea2e0b7fb1f22ba319.1373885147.git.jdenemar@redhat.com>
+From: Guannan Ren <gren@redhat.com>
+Date: Thu, 4 Jul 2013 22:53:06 +0800
+Subject: [PATCH] qemu: add ', share=<policy>' to qemu commandline
+
+Resolves:https://bugzilla.redhat.com/show_bug.cgi?id=803602
+(cherry picked from commit 3c53984412702b736c1a96413b2cb9936c2ed7cd)
+example: qemu ${otherargs} \
+             -vnc 127.0.0.1:0,share=allow-exclusive
+
+Conflicts:
+	src/qemu/qemu_command.c
+	tests/qemuargv2xmltest.c
+	tests/qemuxml2argvtest.c
+---
+ src/qemu/qemu_command.c                            | 58 ++++++++++++++++++++++
+ tests/qemuargv2xmltest.c                           |  1 +
+ .../qemuxml2argv-graphics-vnc-policy.args          |  4 ++
+ .../qemuxml2argv-graphics-vnc-policy.xml           | 33 ++++++++++++
+ tests/qemuxml2argvtest.c                           |  1 +
+ 5 files changed, 97 insertions(+)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-graphics-vnc-policy.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-graphics-vnc-policy.xml
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index b345ab0..0754f8c 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4554,6 +4554,19 @@ qemuBuildGraphicsCommandLine(struct qemud_driver *driver,
+         }
+ 
+         if (qemuCapsGet(caps, QEMU_CAPS_VNC_COLON)) {
++            if (def->graphics[0]->data.vnc.sharePolicy) {
++                if (!qemuCapsGet(caps, QEMU_CAPS_VNC_SHARE_POLICY)) {
++                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                                   _("vnc display sharing policy is not "
++                                     "supported with this QEMU"));
++                    goto error;
++                }
++
++                virBufferAsprintf(&opt, ",share=%s",
++                                  virDomainGraphicsVNCSharePolicyTypeToString(
++                                  def->graphics[0]->data.vnc.sharePolicy));
++            }
++
+             if (def->graphics[0]->data.vnc.auth.passwd ||
+                 driver->vncPassword)
+                 virBufferAddLit(&opt, ",password");
+@@ -8326,6 +8339,51 @@ virDomainDefPtr qemuParseCommandLine(virCapsPtr caps,
+                     virDomainGraphicsDefFree(vnc);
+                     goto no_memory;
+                 }
++
++                if (*opts == ',') {
++                    char *orig_opts;
++
++                    if (!(orig_opts = strdup(opts + 1))) {
++                        virDomainGraphicsDefFree(vnc);
++                        goto no_memory;
++                    }
++                    opts = orig_opts;
++
++                    while (opts && *opts) {
++                        char *nextopt = strchr(opts, ',');
++                        if (nextopt)
++                            *(nextopt++) = '\0';
++
++                        if (STRPREFIX(opts, "share=")) {
++                            char *sharePolicy = opts + strlen("share=");
++                            if (sharePolicy && *sharePolicy) {
++                                int policy =
++                                    virDomainGraphicsVNCSharePolicyTypeFromString(sharePolicy);
++
++                                if (policy < 0) {
++                                    virReportError(VIR_ERR_INTERNAL_ERROR,
++                                                   _("unknown vnc display sharing policy '%s'"),
++                                                     sharePolicy);
++                                    virDomainGraphicsDefFree(vnc);
++                                    VIR_FREE(orig_opts);
++                                    goto error;
++                                } else {
++                                    vnc->data.vnc.sharePolicy = policy;
++                                }
++                            } else {
++                                virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                                               _("missing vnc sharing policy"));
++                                virDomainGraphicsDefFree(vnc);
++                                VIR_FREE(orig_opts);
++                                goto error;
++                            }
++                        }
++
++                        opts = nextopt;
++                    }
++                    VIR_FREE(orig_opts);
++                }
++
+                 vnc->data.vnc.port += 5900;
+                 vnc->data.vnc.autoport = 0;
+             }
+diff --git a/tests/qemuargv2xmltest.c b/tests/qemuargv2xmltest.c
+index 70de8c3..998cfde 100644
+--- a/tests/qemuargv2xmltest.c
++++ b/tests/qemuargv2xmltest.c
+@@ -190,6 +190,7 @@ mymain(void)
+     DO_TEST("disk-usb");
+     DO_TEST("graphics-vnc");
+     DO_TEST("graphics-vnc-socket");
++    DO_TEST("graphics-vnc-policy");
+ 
+     driver.vncSASL = 1;
+     driver.vncSASLdir = strdup("/root/.sasl2");
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-graphics-vnc-policy.args b/tests/qemuxml2argvdata/qemuxml2argv-graphics-vnc-policy.args
+new file mode 100644
+index 0000000..275146475
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-graphics-vnc-policy.args
+@@ -0,0 +1,4 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test QEMU_AUDIO_DRV=none \
++/usr/bin/qemu -S -M pc -m 214 -smp 1 -monitor unix:/tmp/test-monitor,server,nowait \
++-no-acpi -boot c -hda /dev/HostVG/QEMUGuest1 \
++-net none -serial none -parallel none -usb -vnc 127.0.0.1:0,share=allow-exclusive
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-graphics-vnc-policy.xml b/tests/qemuxml2argvdata/qemuxml2argv-graphics-vnc-policy.xml
+new file mode 100644
+index 0000000..b9d431d
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-graphics-vnc-policy.xml
+@@ -0,0 +1,33 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='ide' index='0'/>
++    <input type='mouse' bus='ps2'/>
++    <graphics type='vnc' port='5900' autoport='no' listen='127.0.0.1' sharePolicy='allow-exclusive'>
++      <listen type='address' address='127.0.0.1'/>
++    </graphics>
++    <video>
++      <model type='cirrus' vram='9216' heads='1'/>
++    </video>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 22a2211..437c5a0 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -541,6 +541,7 @@ mymain(void)
+ 
+     DO_TEST("graphics-vnc", NONE);
+     DO_TEST("graphics-vnc-socket", NONE);
++    DO_TEST("graphics-vnc-policy", QEMU_CAPS_VNC_SHARE_POLICY);
+ 
+     driver.vncSASL = 1;
+     driver.vncSASLdir = strdup("/root/.sasl2");
+-- 
+1.8.3.2
+

@@ -1,0 +1,757 @@
+From eabf8a9da25400f37d1715013f71f2ff3d558758 Mon Sep 17 00:00:00 2001
+Message-Id: <eabf8a9da25400f37d1715013f71f2ff3d558758.1354720507.git.jdenemar@redhat.com>
+From: Laine Stump <laine@laine.org>
+Date: Fri, 30 Nov 2012 11:08:51 -0500
+Subject: [PATCH] util: capabilities detection for dnsmasq
+
+This patch is part of the fix for
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=882265
+
+The original CVE (CVE-201-3411) report is here:
+
+  https://bugzilla.redhat.com/show_bug.cgi?id=833033
+
+In order to optionally take advantage of new features in dnsmasq when
+the host's version of dnsmasq supports them, but still be able to run
+on hosts that don't support the new features, we need to be able to
+detect the version of dnsmasq running on the host, and possibly
+determine from the help output what options are in this dnsmasq.
+
+This patch implements a greatly simplified version of the capabilities
+code we already have for qemu. A dnsmasqCaps device can be created and
+populated either from running a program on disk, reading a file with
+the concatenated output of "dnsmasq --version; dnsmasq --help", or
+examining a buffer in memory that contains the concatenated output of
+those two commands. Simple functions to retrieve capabilities flags,
+the version number, and the path of the binary are also included.
+
+bridge_driver.c creates a single dnsmasqCaps object at driver startup,
+and disposes of it at driver shutdown. Any time it must be used, the
+dnsmasqCapsRefresh method is called - it checks the mtime of the
+binary, and re-runs the checks if the binary has changed.
+
+networkxml2argvtest.c creates 2 "artificial" dnsmasqCaps objects at
+startup - one "restricted" (doesn't support --bind-dynamic) and one
+"full" (does support --bind-dynamic). Some of the test cases use one
+and some the other, to make sure both code pathes are tested.
+(cherry picked from commit 719c2c7665e5826a8cf05531080fe20354b39de1)
+---
+ src/libvirt_private.syms    |   7 ++
+ src/network/bridge_driver.c |  59 ++++++----
+ src/network/bridge_driver.h |   7 +-
+ src/util/dnsmasq.c          | 276 ++++++++++++++++++++++++++++++++++++++++++++
+ src/util/dnsmasq.h          |  22 +++-
+ tests/networkxml2argvtest.c |  57 ++++++---
+ 6 files changed, 384 insertions(+), 44 deletions(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index c48a6a4..8a8e6a7 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -246,6 +246,13 @@ virDevicePCIAddressParseXML;
+ # dnsmasq.h
+ dnsmasqAddDhcpHost;
+ dnsmasqAddHost;
++dnsmasqCapsGet;
++dnsmasqCapsGetBinaryPath;
++dnsmasqCapsGetVersion;
++dnsmasqCapsNewFromBuffer;
++dnsmasqCapsNewFromFile;
++dnsmasqCapsNewFromBinary;
++dnsmasqCapsRefresh;
+ dnsmasqContextFree;
+ dnsmasqContextNew;
+ dnsmasqDelete;
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index adbee9f..60cbc75 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -84,6 +84,7 @@ struct network_driver {
+     char *networkConfigDir;
+     char *networkAutostartDir;
+     char *logDir;
++    dnsmasqCapsPtr dnsmasqCaps;
+ };
+ 
+ 
+@@ -219,7 +220,8 @@ networkFindActiveConfigs(struct network_driver *driver) {
+                 char *radvdpidbase;
+ 
+                 ignore_value(virPidFileReadIfAlive(NETWORK_PID_DIR, obj->def->name,
+-                                                   &obj->dnsmasqPid, DNSMASQ));
++                                                   &obj->dnsmasqPid,
++                                                   dnsmasqCapsGetBinaryPath(driver->dnsmasqCaps)));
+ 
+                 if (!(radvdpidbase = networkRadvdPidfileBasename(obj->def->name))) {
+                     virReportOOMError();
+@@ -335,6 +337,8 @@ networkStartup(int privileged) {
+         goto out_of_memory;
+     }
+ 
++    /* if this fails now, it will be retried later with dnsmasqCapsRefresh() */
++    driverState->dnsmasqCaps = dnsmasqCapsNewFromBinary(DNSMASQ);
+ 
+     if (virNetworkLoadAllConfigs(&driverState->networks,
+                                  driverState->networkConfigDir,
+@@ -460,6 +464,8 @@ networkShutdown(void) {
+     if (driverState->iptables)
+         iptablesContextFree(driverState->iptables);
+ 
++    virObjectUnref(driverState->dnsmasqCaps);
++
+     networkDriverUnlock(driverState);
+     virMutexDestroy(&driverState->lock);
+ 
+@@ -562,7 +568,8 @@ networkBuildDnsmasqArgv(virNetworkObjPtr network,
+                         virNetworkIpDefPtr ipdef,
+                         const char *pidfile,
+                         virCommandPtr cmd,
+-                        dnsmasqContext *dctx)
++                        dnsmasqContext *dctx,
++                        dnsmasqCapsPtr caps ATTRIBUTE_UNUSED)
+ {
+     int r, ret = -1;
+     int nbleases = 0;
+@@ -794,7 +801,8 @@ cleanup:
+ 
+ int
+ networkBuildDhcpDaemonCommandLine(virNetworkObjPtr network, virCommandPtr *cmdout,
+-                                  char *pidfile, dnsmasqContext *dctx)
++                                  char *pidfile, dnsmasqContext *dctx,
++                                  dnsmasqCapsPtr caps)
+ {
+     virCommandPtr cmd = NULL;
+     int ret = -1, ii;
+@@ -822,8 +830,8 @@ networkBuildDhcpDaemonCommandLine(virNetworkObjPtr network, virCommandPtr *cmdou
+     if (!virNetworkDefGetIpByIndex(network->def, AF_UNSPEC, 0))
+         return 0;
+ 
+-    cmd = virCommandNew(DNSMASQ);
+-    if (networkBuildDnsmasqArgv(network, ipdef, pidfile, cmd, dctx) < 0) {
++    cmd = virCommandNew(dnsmasqCapsGetBinaryPath(caps));
++    if (networkBuildDnsmasqArgv(network, ipdef, pidfile, cmd, dctx, caps) < 0) {
+         goto cleanup;
+     }
+ 
+@@ -837,7 +845,8 @@ cleanup:
+ }
+ 
+ static int
+-networkStartDhcpDaemon(virNetworkObjPtr network)
++networkStartDhcpDaemon(struct network_driver *driver,
++                       virNetworkObjPtr network)
+ {
+     virCommandPtr cmd = NULL;
+     char *pidfile = NULL;
+@@ -879,7 +888,10 @@ networkStartDhcpDaemon(virNetworkObjPtr network)
+     if (dctx == NULL)
+         goto cleanup;
+ 
+-    ret = networkBuildDhcpDaemonCommandLine(network, &cmd, pidfile, dctx);
++    dnsmasqCapsRefresh(&driver->dnsmasqCaps, false);
++
++    ret = networkBuildDhcpDaemonCommandLine(network, &cmd, pidfile,
++                                            dctx, driver->dnsmasqCaps);
+     if (ret < 0)
+         goto cleanup;
+ 
+@@ -920,7 +932,8 @@ cleanup:
+  *  Returns 0 on success, -1 on failure.
+  */
+ static int
+-networkRefreshDhcpDaemon(virNetworkObjPtr network)
++networkRefreshDhcpDaemon(struct network_driver *driver,
++                         virNetworkObjPtr network)
+ {
+     int ret = -1, ii;
+     virNetworkIpDefPtr ipdef;
+@@ -928,7 +941,7 @@ networkRefreshDhcpDaemon(virNetworkObjPtr network)
+ 
+     /* if there's no running dnsmasq, just start it */
+     if (network->dnsmasqPid <= 0 || (kill(network->dnsmasqPid, 0) < 0))
+-        return networkStartDhcpDaemon(network);
++        return networkStartDhcpDaemon(driver, network);
+ 
+     /* Look for first IPv4 address that has dhcp defined. */
+     /* We support dhcp config on 1 IPv4 interface only. */
+@@ -970,7 +983,8 @@ cleanup:
+  *  Returns 0 on success, -1 on failure.
+  */
+ static int
+-networkRestartDhcpDaemon(virNetworkObjPtr network)
++networkRestartDhcpDaemon(struct network_driver *driver,
++                         virNetworkObjPtr network)
+ {
+     /* if there is a running dnsmasq, kill it */
+     if (network->dnsmasqPid > 0) {
+@@ -979,7 +993,7 @@ networkRestartDhcpDaemon(virNetworkObjPtr network)
+         network->dnsmasqPid = -1;
+     }
+     /* now start dnsmasq if it should be started */
+-    return networkStartDhcpDaemon(network);
++    return networkStartDhcpDaemon(driver, network);
+ }
+ 
+ static int
+@@ -1174,7 +1188,8 @@ cleanup:
+ }
+ 
+ static int
+-networkRefreshRadvd(virNetworkObjPtr network)
++networkRefreshRadvd(struct network_driver *driver ATTRIBUTE_UNUSED,
++                    virNetworkObjPtr network)
+ {
+     /* if there's no running radvd, just start it */
+     if (network->radvdPid <= 0 || (kill(network->radvdPid, 0) < 0))
+@@ -1194,7 +1209,8 @@ networkRefreshRadvd(virNetworkObjPtr network)
+ #if 0
+ /* currently unused, so it causes a build error unless we #if it out */
+ static int
+-networkRestartRadvd(virNetworkObjPtr network)
++networkRestartRadvd(struct network_driver *driver,
++                    virNetworkObjPtr network)
+ {
+     char *radvdpidbase;
+ 
+@@ -1242,8 +1258,8 @@ networkRefreshDaemons(struct network_driver *driver)
+              * dnsmasq and/or radvd, or restart them if they've
+              * disappeared.
+              */
+-            networkRefreshDhcpDaemon(network);
+-            networkRefreshRadvd(network);
++            networkRefreshDhcpDaemon(driver, network);
++            networkRefreshRadvd(driver, network);
+         }
+         virNetworkObjUnlock(network);
+     }
+@@ -2147,7 +2163,8 @@ networkStartNetworkVirtual(struct network_driver *driver,
+ 
+ 
+     /* start dnsmasq if there are any IP addresses (v4 or v6) */
+-    if ((v4present || v6present) && networkStartDhcpDaemon(network) < 0)
++    if ((v4present || v6present) &&
++        networkStartDhcpDaemon(driver, network) < 0)
+         goto err3;
+ 
+     /* start radvd if there are any ipv6 addresses */
+@@ -2963,7 +2980,7 @@ networkUpdate(virNetworkPtr net,
+             /* these sections all change things on the dnsmasq commandline,
+              * so we need to kill and restart dnsmasq.
+              */
+-            if (networkRestartDhcpDaemon(network) < 0)
++            if (networkRestartDhcpDaemon(driver, network) < 0)
+                 goto cleanup;
+ 
+         } else if (section == VIR_NETWORK_SECTION_IP_DHCP_HOST) {
+@@ -2984,8 +3001,8 @@ networkUpdate(virNetworkPtr net,
+             }
+ 
+             if ((newDhcpActive != oldDhcpActive &&
+-                networkRestartDhcpDaemon(network) < 0) ||
+-                networkRefreshDhcpDaemon(network) < 0) {
++                 networkRestartDhcpDaemon(driver, network) < 0) ||
++                networkRefreshDhcpDaemon(driver, network) < 0) {
+                 goto cleanup;
+             }
+ 
+@@ -2996,7 +3013,7 @@ networkUpdate(virNetworkPtr net,
+              * can just update the config files and send SIGHUP to
+              * dnsmasq.
+              */
+-            if (networkRefreshDhcpDaemon(network) < 0)
++            if (networkRefreshDhcpDaemon(driver, network) < 0)
+                 goto cleanup;
+ 
+         }
+@@ -3005,7 +3022,7 @@ networkUpdate(virNetworkPtr net,
+             /* only a change in IP addresses will affect radvd, and all of radvd's
+              * config is stored in the conf file which will be re-read with a SIGHUP.
+              */
+-            if (networkRefreshRadvd(network) < 0)
++            if (networkRefreshRadvd(driver, network) < 0)
+                 goto cleanup;
+         }
+ 
+diff --git a/src/network/bridge_driver.h b/src/network/bridge_driver.h
+index 0fae275..3af74a1 100644
+--- a/src/network/bridge_driver.h
++++ b/src/network/bridge_driver.h
+@@ -1,7 +1,7 @@
+ /*
+  * network_driver.h: core driver methods for managing networks
+  *
+- * Copyright (C) 2006, 2007, 2011 Red Hat, Inc.
++ * Copyright (C) 2006-2012 Red Hat, Inc.
+  * Copyright (C) 2006 Daniel P. Berrange
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -48,7 +48,8 @@ int networkGetNetworkAddress(const char *netname, char **netaddr)
+ 
+ int networkBuildDhcpDaemonCommandLine(virNetworkObjPtr network,
+                                       virCommandPtr *cmdout, char *pidfile,
+-                                      dnsmasqContext *dctx)
++                                      dnsmasqContext *dctx,
++                                      dnsmasqCapsPtr caps)
+     ;
+ # else
+ /* Define no-op replacements that don't drag in any link dependencies.  */
+@@ -56,7 +57,7 @@ int networkBuildDhcpDaemonCommandLine(virNetworkObjPtr network,
+ #  define networkNotifyActualDevice(iface) 0
+ #  define networkReleaseActualDevice(iface) 0
+ #  define networkGetNetworkAddress(netname, netaddr) (-2)
+-#  define networkBuildDhcpDaemonCommandLine(network, cmdout, pidfile, dctx) 0
++#  define networkBuildDhcpDaemonCommandLine(network, cmdout, pidfile, dctx, caps) 0
+ # endif
+ 
+ typedef char *(*networkDnsmasqLeaseFileNameFunc)(const char *netname);
+diff --git a/src/util/dnsmasq.c b/src/util/dnsmasq.c
+index 9d1c07b..4f210d2 100644
+--- a/src/util/dnsmasq.c
++++ b/src/util/dnsmasq.c
+@@ -39,8 +39,10 @@
+ 
+ #include "internal.h"
+ #include "datatypes.h"
++#include "bitmap.h"
+ #include "dnsmasq.h"
+ #include "util.h"
++#include "command.h"
+ #include "memory.h"
+ #include "virterror_internal.h"
+ #include "logging.h"
+@@ -583,3 +585,277 @@ dnsmasqReload(pid_t pid ATTRIBUTE_UNUSED)
+ 
+     return 0;
+ }
++
++/*
++ * dnsmasqCapabilities functions - provide useful information about the
++ * version of dnsmasq on this machine.
++ *
++ */
++struct _dnsmasqCaps {
++    virObject object;
++    char *binaryPath;
++    bool noRefresh;
++    time_t mtime;
++    virBitmapPtr flags;
++    unsigned long version;
++};
++
++static virClassPtr dnsmasqCapsClass;
++
++static void
++dnsmasqCapsDispose(void *obj)
++{
++    dnsmasqCapsPtr caps = obj;
++
++    virBitmapFree(caps->flags);
++    VIR_FREE(caps->binaryPath);
++}
++
++static int dnsmasqCapsOnceInit(void)
++{
++    if (!(dnsmasqCapsClass = virClassNew("dnsmasqCaps",
++                                         sizeof(dnsmasqCaps),
++                                         dnsmasqCapsDispose))) {
++        return -1;
++    }
++
++    return 0;
++}
++
++VIR_ONCE_GLOBAL_INIT(dnsmasqCaps)
++
++static void
++dnsmasqCapsSet(dnsmasqCapsPtr caps,
++               dnsmasqCapsFlags flag)
++{
++    ignore_value(virBitmapSetBit(caps->flags, flag));
++}
++
++
++#define DNSMASQ_VERSION_STR "Dnsmasq version "
++
++static int
++dnsmasqCapsSetFromBuffer(dnsmasqCapsPtr caps, const char *buf)
++{
++    const char *p;
++
++    caps->noRefresh = true;
++
++    p = STRSKIP(buf, DNSMASQ_VERSION_STR);
++    if (!p)
++       goto fail;
++    virSkipSpaces(&p);
++    if (virParseVersionString(p, &caps->version, true) < 0)
++        goto fail;
++
++    if (strstr(buf, "--bind-dynamic"))
++        dnsmasqCapsSet(caps, DNSMASQ_CAPS_BIND_DYNAMIC);
++
++    VIR_INFO("dnsmasq version is %d.%d, --bind-dynamic is %s",
++             (int)caps->version / 1000000, (int)(caps->version % 1000000) / 1000,
++             dnsmasqCapsGet(caps, DNSMASQ_CAPS_BIND_DYNAMIC)
++             ? "present" : "NOT present");
++    return 0;
++
++fail:
++    p = strchrnul(buf, '\n');
++    virReportError(VIR_ERR_INTERNAL_ERROR,
++                   _("cannot parse %s version number in '%.*s'"),
++                   caps->binaryPath, (int) (p - buf), buf);
++    return -1;
++
++}
++
++static int
++dnsmasqCapsSetFromFile(dnsmasqCapsPtr caps, const char *path)
++{
++    int ret = -1;
++    char *buf = NULL;
++
++    if (virFileReadAll(path, 1024 * 1024, &buf) < 0)
++        goto cleanup;
++
++    ret = dnsmasqCapsSetFromBuffer(caps, buf);
++
++cleanup:
++    VIR_FREE(buf);
++    return ret;
++}
++
++static int
++dnsmasqCapsRefreshInternal(dnsmasqCapsPtr caps, bool force)
++{
++    int ret = -1;
++    struct stat sb;
++    virCommandPtr cmd = NULL;
++    char *help = NULL, *version = NULL, *complete = NULL;
++
++    if (!caps || caps->noRefresh)
++        return 0;
++
++    if (stat(caps->binaryPath, &sb) < 0) {
++        virReportSystemError(errno, _("Cannot check dnsmasq binary %s"),
++                             caps->binaryPath);
++        return -1;
++    }
++    if (!force && caps->mtime == sb.st_mtime) {
++        return 0;
++    }
++    caps->mtime = sb.st_mtime;
++
++    /* Make sure the binary we are about to try exec'ing exists.
++     * Technically we could catch the exec() failure, but that's
++     * in a sub-process so it's hard to feed back a useful error.
++     */
++    if (!virFileIsExecutable(caps->binaryPath)) {
++        virReportSystemError(errno, _("dnsmasq binary %s is not executable"),
++                             caps->binaryPath);
++        goto cleanup;
++    }
++
++    cmd = virCommandNewArgList(caps->binaryPath, "--version", NULL);
++    virCommandSetOutputBuffer(cmd, &version);
++    virCommandSetErrorBuffer(cmd, &version);
++    virCommandAddEnvPassCommon(cmd);
++    virCommandClearCaps(cmd);
++    if (virCommandRun(cmd, NULL) < 0) {
++        virReportSystemError(errno, _("failed to run '%s --version': %s"),
++                             caps->binaryPath, version);
++        goto cleanup;
++    }
++    virCommandFree(cmd);
++
++    cmd = virCommandNewArgList(caps->binaryPath, "--help", NULL);
++    virCommandSetOutputBuffer(cmd, &help);
++    virCommandSetErrorBuffer(cmd, &help);
++    virCommandAddEnvPassCommon(cmd);
++    virCommandClearCaps(cmd);
++    if (virCommandRun(cmd, NULL) < 0) {
++        virReportSystemError(errno, _("failed to run '%s --help': %s"),
++                             caps->binaryPath, help);
++        goto cleanup;
++    }
++
++    if (virAsprintf(&complete, "%s\n%s", version, help) < 0) {
++        virReportOOMError();
++        goto cleanup;
++    }
++
++    ret = dnsmasqCapsSetFromBuffer(caps, complete);
++
++cleanup:
++    virCommandFree(cmd);
++    VIR_FREE(help);
++    VIR_FREE(version);
++    VIR_FREE(complete);
++    return ret;
++}
++
++static dnsmasqCapsPtr
++dnsmasqCapsNewEmpty(const char *binaryPath)
++{
++    dnsmasqCapsPtr caps;
++
++    if (dnsmasqCapsInitialize() < 0)
++        return NULL;
++    if (!(caps = virObjectNew(dnsmasqCapsClass)))
++        return NULL;
++    if (!(caps->flags = virBitmapNew(DNSMASQ_CAPS_LAST)))
++        goto error;
++    if (!(caps->binaryPath = strdup(binaryPath ? binaryPath : DNSMASQ)))
++        goto error;
++    return caps;
++
++error:
++    virReportOOMError();
++    virObjectUnref(caps);
++    return NULL;
++}
++
++dnsmasqCapsPtr
++dnsmasqCapsNewFromBuffer(const char *buf, const char *binaryPath)
++{
++    dnsmasqCapsPtr caps = dnsmasqCapsNewEmpty(binaryPath);
++
++    if (!caps)
++        return NULL;
++
++    if (dnsmasqCapsSetFromBuffer(caps, buf) < 0) {
++        virObjectUnref(caps);
++        return NULL;
++    }
++    return caps;
++}
++
++dnsmasqCapsPtr
++dnsmasqCapsNewFromFile(const char *dataPath, const char *binaryPath)
++{
++    dnsmasqCapsPtr caps = dnsmasqCapsNewEmpty(binaryPath);
++
++    if (!caps)
++        return NULL;
++
++    if (dnsmasqCapsSetFromFile(caps, dataPath) < 0) {
++        virObjectUnref(caps);
++        return NULL;
++    }
++    return caps;
++}
++
++dnsmasqCapsPtr
++dnsmasqCapsNewFromBinary(const char *binaryPath)
++{
++    dnsmasqCapsPtr caps = dnsmasqCapsNewEmpty(binaryPath);
++
++    if (!caps)
++        return NULL;
++
++    if (dnsmasqCapsRefreshInternal(caps, true) < 0) {
++        virObjectUnref(caps);
++        return NULL;
++    }
++    return caps;
++}
++
++/** dnsmasqCapsRefresh:
++ *
++ *   Refresh an existing caps object if the binary has changed. If
++ *   there isn't yet a caps object (if it's NULL), create a new one.
++ *
++ *   Returns 0 on success, -1 on failure
++ */
++int
++dnsmasqCapsRefresh(dnsmasqCapsPtr *caps, const char *binaryPath)
++{
++    if (!*caps) {
++        *caps = dnsmasqCapsNewFromBinary(binaryPath);
++        return *caps ? 0 : -1;
++    }
++    return dnsmasqCapsRefreshInternal(*caps, false);
++}
++
++const char *
++dnsmasqCapsGetBinaryPath(dnsmasqCapsPtr caps)
++{
++    return caps ? caps->binaryPath : DNSMASQ;
++}
++
++unsigned long
++dnsmasqCapsGetVersion(dnsmasqCapsPtr caps)
++{
++    if (caps)
++        return caps->version;
++    else
++        return 0;
++}
++
++bool
++dnsmasqCapsGet(dnsmasqCapsPtr caps, dnsmasqCapsFlags flag)
++{
++    bool b;
++
++    if (!caps || virBitmapGetBit(caps->flags, flag, &b) < 0)
++        return false;
++    else
++        return b;
++}
+diff --git a/src/util/dnsmasq.h b/src/util/dnsmasq.h
+index ad612be..e8881a0 100644
+--- a/src/util/dnsmasq.h
++++ b/src/util/dnsmasq.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2007-2010 Red Hat, Inc.
++ * Copyright (C) 2007-2012 Red Hat, Inc.
+  * Copyright (C) 2010 Satoru SATOH <satoru.satoh@gmail.com>
+  *
+  * This library is free software; you can redistribute it and/or
+@@ -22,6 +22,7 @@
+ #ifndef __DNSMASQ_H__
+ # define __DNSMASQ_H__
+ 
++# include "virobject.h"
+ # include "virsocketaddr.h"
+ 
+ typedef struct
+@@ -65,6 +66,16 @@ typedef struct
+     dnsmasqAddnHostsfile *addnhostsfile;
+ } dnsmasqContext;
+ 
++typedef enum {
++   DNSMASQ_CAPS_BIND_DYNAMIC = 0, /* support for --bind-dynamic */
++
++   DNSMASQ_CAPS_LAST,             /* this must always be the last item */
++} dnsmasqCapsFlags;
++
++typedef struct _dnsmasqCaps dnsmasqCaps;
++typedef dnsmasqCaps *dnsmasqCapsPtr;
++
++
+ dnsmasqContext * dnsmasqContextNew(const char *network_name,
+                                    const char *config_dir);
+ void             dnsmasqContextFree(dnsmasqContext *ctx);
+@@ -79,4 +90,13 @@ int              dnsmasqSave(const dnsmasqContext *ctx);
+ int              dnsmasqDelete(const dnsmasqContext *ctx);
+ int              dnsmasqReload(pid_t pid);
+ 
++dnsmasqCapsPtr dnsmasqCapsNewFromBuffer(const char *buf,
++                                        const char *binaryPath);
++dnsmasqCapsPtr dnsmasqCapsNewFromFile(const char *dataPath,
++                                      const char *binaryPath);
++dnsmasqCapsPtr dnsmasqCapsNewFromBinary(const char *binaryPath);
++int dnsmasqCapsRefresh(dnsmasqCapsPtr *caps, const char *binaryPath);
++bool dnsmasqCapsGet(dnsmasqCapsPtr caps, dnsmasqCapsFlags flag);
++const char *dnsmasqCapsGetBinaryPath(dnsmasqCapsPtr caps);
++unsigned long dnsmasqCapsGetVersion(dnsmasqCapsPtr caps);
+ #endif /* __DNSMASQ_H__ */
+diff --git a/tests/networkxml2argvtest.c b/tests/networkxml2argvtest.c
+index 87519e4..69cbd1c 100644
+--- a/tests/networkxml2argvtest.c
++++ b/tests/networkxml2argvtest.c
+@@ -46,7 +46,9 @@ static int replaceTokens(char **buf, const char *token, const char *replacement)
+     return 0;
+ }
+ 
+-static int testCompareXMLToArgvFiles(const char *inxml, const char *outargv) {
++static int
++testCompareXMLToArgvFiles(const char *inxml, const char *outargv, dnsmasqCapsPtr caps)
++{
+     char *inXmlData = NULL;
+     char *outArgvData = NULL;
+     char *actual = NULL;
+@@ -78,7 +80,7 @@ static int testCompareXMLToArgvFiles(const char *inxml, const char *outargv) {
+     if (dctx == NULL)
+         goto fail;
+ 
+-    if (networkBuildDhcpDaemonCommandLine(obj, &cmd, pidfile, dctx) < 0)
++    if (networkBuildDhcpDaemonCommandLine(obj, &cmd, pidfile, dctx, caps) < 0)
+         goto fail;
+ 
+     if (!(actual = virCommandToString(cmd)))
+@@ -102,21 +104,27 @@ static int testCompareXMLToArgvFiles(const char *inxml, const char *outargv) {
+     return ret;
+ }
+ 
++typedef struct {
++    const char *name;
++    dnsmasqCapsPtr caps;
++} testInfo;
++
+ static int
+ testCompareXMLToArgvHelper(const void *data)
+ {
+     int result = -1;
++    const testInfo *info = data;
+     char *inxml = NULL;
+     char *outxml = NULL;
+ 
+     if (virAsprintf(&inxml, "%s/networkxml2argvdata/%s.xml",
+-                    abs_srcdir, (const char*)data) < 0 ||
++                    abs_srcdir, info->name) < 0 ||
+         virAsprintf(&outxml, "%s/networkxml2argvdata/%s.argv",
+-                    abs_srcdir, (const char*)data) < 0) {
++                    abs_srcdir, info->name) < 0) {
+         goto cleanup;
+     }
+ 
+-    result = testCompareXMLToArgvFiles(inxml, outxml);
++    result = testCompareXMLToArgvFiles(inxml, outxml, info->caps);
+ 
+ cleanup:
+     VIR_FREE(inxml);
+@@ -140,23 +148,34 @@ static int
+ mymain(void)
+ {
+     int ret = 0;
++    dnsmasqCapsPtr restricted
++        = dnsmasqCapsNewFromBuffer("Dnsmasq version 2.48", DNSMASQ);
++    dnsmasqCapsPtr full
++        = dnsmasqCapsNewFromBuffer("Dnsmasq version 2.63\n--bind-dynamic", DNSMASQ);
+ 
+     networkDnsmasqLeaseFileName = testDnsmasqLeaseFileName;
+ 
+-#define DO_TEST(name) \
+-    if (virtTestRun("Network XML-2-Argv " name, \
+-                    1, testCompareXMLToArgvHelper, (name)) < 0) \
+-        ret = -1
+-
+-    DO_TEST("isolated-network");
+-    DO_TEST("routed-network");
+-    DO_TEST("nat-network");
+-    DO_TEST("netboot-network");
+-    DO_TEST("netboot-proxy-network");
+-    DO_TEST("nat-network-dns-txt-record");
+-    DO_TEST("nat-network-dns-srv-record");
+-    DO_TEST("nat-network-dns-srv-record-minimal");
+-    DO_TEST("nat-network-dns-hosts");
++#define DO_TEST(xname, xcaps)                                        \
++    do {                                                             \
++        static testInfo info;                                        \
++                                                                     \
++        info.name = xname;                                           \
++        info.caps = xcaps;                                           \
++        if (virtTestRun("Network XML-2-Argv " xname,                 \
++                        1, testCompareXMLToArgvHelper, &info) < 0) { \
++            ret = -1;                                                \
++        }                                                            \
++    } while (0)
++
++    DO_TEST("isolated-network", restricted);
++    DO_TEST("netboot-network", restricted);
++    DO_TEST("netboot-proxy-network", restricted);
++    DO_TEST("nat-network-dns-srv-record-minimal", restricted);
++    DO_TEST("routed-network", full);
++    DO_TEST("nat-network", full);
++    DO_TEST("nat-network-dns-txt-record", full);
++    DO_TEST("nat-network-dns-srv-record", full);
++    DO_TEST("nat-network-dns-hosts", full);
+ 
+     return ret==0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+-- 
+1.8.0
+

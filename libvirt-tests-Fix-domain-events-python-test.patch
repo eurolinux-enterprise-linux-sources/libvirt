@@ -1,0 +1,32 @@
+From e048bcab4314691cb1634a993f8b5a6d963c746e Mon Sep 17 00:00:00 2001
+Message-Id: <e048bcab4314691cb1634a993f8b5a6d963c746e.1350425724.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Tue, 16 Oct 2012 16:58:00 +0200
+Subject: [PATCH] tests: Fix domain-events python test
+
+https://bugzilla.redhat.com/show_bug.cgi?id=839661
+
+There was a missing method in python implementation of domain-events
+test and this patch adds that.
+(cherry picked from commit 60f96bfc88d7819029ffd63cbade74d50ae43d63)
+---
+ examples/domain-events/events-python/event-test.py | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/examples/domain-events/events-python/event-test.py b/examples/domain-events/events-python/event-test.py
+index 1adabe3..445e017 100644
+--- a/examples/domain-events/events-python/event-test.py
++++ b/examples/domain-events/events-python/event-test.py
+@@ -492,6 +492,9 @@ def myDomainEventPMSuspendCallback(conn, dom, reason, opaque):
+             dom.name(), dom.ID())
+ def myDomainEventBalloonChangeCallback(conn, dom, utcoffset, actual):
+     print "myDomainEventBalloonChangeCallback: Domain %s(%s) %d" % (dom.name(), dom.ID(), actual)
++def myDomainEventPMSuspendDiskCallback(conn, dom, reason, opaque):
++    print "myDomainEventPMSuspendDiskCallback: Domain %s(%s) system pmsuspend_disk" % (
++            dom.name(), dom.ID())
+ def usage(out=sys.stderr):
+     print >>out, "usage: "+os.path.basename(sys.argv[0])+" [-hdl] [uri]"
+     print >>out, "   uri will default to qemu:///system"
+-- 
+1.7.12.3
+

@@ -1,0 +1,76 @@
+From de53f083d1a8b10f2b03b02d5451f4a07bc48cb5 Mon Sep 17 00:00:00 2001
+Message-Id: <de53f083d1a8b10f2b03b02d5451f4a07bc48cb5.1377097597.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 16 Aug 2013 15:34:12 +0200
+Subject: [PATCH] virbitmaptest: Add test for out of bounds condition
+
+https://bugzilla.redhat.com/show_bug.cgi?id=997367
+
+Previous patch fixed an issue where, when parsing a bitmap from the
+string, the bounds of the bitmap weren't checked. That flaw resulted into
+crashes. This test tests that case to avoid it in the future.
+
+(cherry picked from commit 7efd5fd1b0225436cbbae1181ab41c2d3eca43f9)
+
+Conflicts:
+	tests/virbitmaptest.c - bitmap test 8 not backported
+---
+ tests/virbitmaptest.c | 35 ++++++++++++++++++++++++++++++++++-
+ 1 file changed, 34 insertions(+), 1 deletion(-)
+
+diff --git a/tests/virbitmaptest.c b/tests/virbitmaptest.c
+index af94dab..2380f1c 100644
+--- a/tests/virbitmaptest.c
++++ b/tests/virbitmaptest.c
+@@ -382,6 +382,38 @@ error:
+     return -1;
+ }
+ 
++
++/* test out of bounds conditions on virBitmapParse */
++static int
++test9(const void *opaque ATTRIBUTE_UNUSED)
++{
++    int ret = -1;
++    virBitmapPtr bitmap;
++
++    if (virBitmapParse("100000000", 0, &bitmap, 20) != -1)
++        goto cleanup;
++
++    if (bitmap)
++        goto cleanup;
++
++    if (virBitmapParse("1-1000000000", 0, &bitmap, 20) != -1)
++        goto cleanup;
++
++    if (bitmap)
++        goto cleanup;
++
++    if (virBitmapParse("1-10^10000000000", 0, &bitmap, 20) != -1)
++        goto cleanup;
++
++    if (bitmap)
++        goto cleanup;
++
++    ret = 0;
++cleanup:
++    return ret;
++
++}
++
+ static int
+ mymain(void)
+ {
+@@ -401,7 +433,8 @@ mymain(void)
+         ret = -1;
+     if (virtTestRun("test7", 1, test7, NULL) < 0)
+         ret = -1;
+-
++    if (virtTestRun("test9", 1, test9, NULL) < 0)
++        ret = -1;
+ 
+     return ret;
+ }
+-- 
+1.8.3.2
+

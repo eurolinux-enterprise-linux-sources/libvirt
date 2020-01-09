@@ -1,0 +1,44 @@
+From 2b7f4139b8cd2c5275e41f97692bf487c27be4f7 Mon Sep 17 00:00:00 2001
+Message-Id: <2b7f4139b8cd2c5275e41f97692bf487c27be4f7@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 7 May 2014 10:50:27 -0400
+Subject: [PATCH] storage: Resolve issues in failure path
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1092882
+
+Refactoring in commit id '0c2305b3' resulted in the wrong storage
+volume object being passed to the new storageVolDeleteInternal().
+It should have passed 'voldef' which is the address found in the
+pool->volumes.objs[i] array.  By passing 'voldef', the DeleteInternal
+code will find and remove the voldef from the volumes.objs[] list.
+
+(cherry picked from commit e1e4483c90442a2125cbf94dc28bf61eab0b1485)
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/storage/storage_driver.c | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/src/storage/storage_driver.c b/src/storage/storage_driver.c
+index 1b3c9f5..2565903 100644
+--- a/src/storage/storage_driver.c
++++ b/src/storage/storage_driver.c
+@@ -1571,12 +1571,11 @@ storageVolumeCreateXML(virStoragePoolPtr obj,
+         voldef->building = 0;
+         pool->asyncjobs--;
+ 
+-        voldef = NULL;
+-
+         if (buildret < 0) {
+-            storageVolDeleteInternal(volobj, backend, pool, buildvoldef,
++            VIR_FREE(buildvoldef);
++            storageVolDeleteInternal(volobj, backend, pool, voldef,
+                                      0, false);
+-            buildvoldef = NULL;
++            voldef = NULL;
+             goto cleanup;
+         }
+ 
+-- 
+1.9.3
+

@@ -1,0 +1,650 @@
+From 4d085efe1d768cfffc8c017a18da3478dca158c4 Mon Sep 17 00:00:00 2001
+Message-Id: <4d085efe1d768cfffc8c017a18da3478dca158c4.1350297261.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Fri, 12 Oct 2012 14:28:19 +0200
+Subject: [PATCH] Revert "Use XDG Base Directories instead of storing in home
+ directory"
+
+https://bugzilla.redhat.com/show_bug.cgi?id=859331
+
+This reverts commit 32a9aac2e04c991340b66c855a1095e4e6445e54.
+
+The reason for this are selinux policies that can't be modified in
+RHEL6 to suit these needs, thus this commit is causing problems on
+RHEL6 systems.
+
+Many commits between this and 32a9aa were fixing some minor
+documentation issues, some of them are needed to be kept and so on.
+Due to these commits, there is a lot of conflicts, so sorry for not
+explaining them all.
+
+RHEL-only.
+
+Conflicts:
+    AUTHORS -- I've kept the person in the file
+    daemon/libvirtd-config.c
+    daemon/libvirtd.c
+    src/libvirt.c
+    src/network/bridge_driver.c
+    src/nwfilter/nwfilter_driver.c
+    src/qemu/qemu_driver.c
+    src/remote/remote_driver.c
+    src/secret/secret_driver.c
+    src/storage/storage_driver.c
+    src/uml/uml_driver.c
+    src/util/util.c
+    src/util/util.h
+    src/util/virauth.c
+    tools/virsh.c -- conflict with virsh-splitting series
+---
+ daemon/libvirtd-config.c       |   4 +-
+ daemon/libvirtd.c              | 140 +++++------------------------------------
+ daemon/libvirtd.pod.in         |  10 +--
+ docs/auth.html.in              |   2 +-
+ docs/uri.html.in               |   2 +-
+ src/libvirt.c                  |   4 +-
+ src/libvirt_private.syms       |   4 --
+ src/network/bridge_driver.c    |   8 +--
+ src/nwfilter/nwfilter_driver.c |  10 ++-
+ src/qemu/qemu_driver.c         |  34 +++-------
+ src/remote/remote_driver.c     |   4 +-
+ src/remote/remote_driver.h     |   2 +-
+ src/secret/secret_driver.c     |  10 ++-
+ src/storage/storage_driver.c   |  11 +++-
+ src/uml/uml_driver.c           |   8 +--
+ src/util/virauth.c             |   4 +-
+ tools/virsh.c                  |   6 +-
+ 17 files changed, 74 insertions(+), 189 deletions(-)
+
+diff --git a/daemon/libvirtd-config.c b/daemon/libvirtd-config.c
+index d9dfea1..f835b15 100644
+--- a/daemon/libvirtd-config.c
++++ b/daemon/libvirtd-config.c
+@@ -203,10 +203,10 @@ daemonConfigFilePath(bool privileged, char **configfile)
+     } else {
+         char *configdir = NULL;
+ 
+-        if (!(configdir = virGetUserConfigDirectory()))
++        if (!(configdir = virGetUserDirectory()))
+             goto error;
+ 
+-        if (virAsprintf(configfile, "%s/libvirtd.conf", configdir) < 0) {
++        if (virAsprintf(configfile, "%s/.libvirt/libvirtd.conf", configdir) < 0) {
+             VIR_FREE(configdir);
+             goto no_memory;
+         }
+diff --git a/daemon/libvirtd.c b/daemon/libvirtd.c
+index 349ffd6..b3e4a24 100644
+--- a/daemon/libvirtd.c
++++ b/daemon/libvirtd.c
+@@ -244,23 +244,14 @@ daemonPidFilePath(bool privileged,
+             goto no_memory;
+     } else {
+         char *rundir = NULL;
+-        mode_t old_umask;
+ 
+-        if (!(rundir = virGetUserRuntimeDirectory()))
++        if (!(rundir = virGetUserDirectory()))
+             goto error;
+ 
+-        old_umask = umask(077);
+-        if (virFileMakePath(rundir) < 0) {
+-            umask(old_umask);
+-            goto error;
+-        }
+-        umask(old_umask);
+-
+-        if (virAsprintf(pidfile, "%s/libvirtd.pid", rundir) < 0) {
++        if (virAsprintf(pidfile, "%s/.libvirt/libvirtd.pid", rundir) < 0) {
+             VIR_FREE(rundir);
+             goto no_memory;
+         }
+-
+         VIR_FREE(rundir);
+     }
+ 
+@@ -291,24 +282,15 @@ daemonUnixSocketPaths(struct daemonConfig *config,
+             if (!(*rosockfile = strdup(LOCALSTATEDIR "/run/libvirt/libvirt-sock-ro")))
+                 goto no_memory;
+         } else {
+-            char *rundir = NULL;
+-            mode_t old_umask;
++            char *rundir = virGetUserDirectory();
+ 
+-            if (!(rundir = virGetUserRuntimeDirectory()))
++            if (!rundir)
+                 goto error;
+ 
+-            old_umask = umask(077);
+-            if (virFileMakePath(rundir) < 0) {
+-                umask(old_umask);
+-                goto error;
+-            }
+-            umask(old_umask);
+-
+-            if (virAsprintf(sockfile, "%s/libvirt-sock", rundir) < 0) {
++            if (virAsprintf(sockfile, "@%s/.libvirt/libvirt-sock", rundir) < 0) {
+                 VIR_FREE(rundir);
+                 goto no_memory;
+             }
+-
+             VIR_FREE(rundir);
+         }
+     }
+@@ -648,20 +630,11 @@ daemonSetupLogging(struct daemonConfig *config,
+                                 LOCALSTATEDIR) == -1)
+                     goto no_memory;
+             } else {
+-                char *logdir = virGetUserCacheDirectory();
+-                mode_t old_umask;
+-
++                char *logdir = virGetUserDirectory();
+                 if (!logdir)
+                     goto error;
+ 
+-                old_umask = umask(077);
+-                if (virFileMakePath(logdir) < 0) {
+-                    umask(old_umask);
+-                    goto error;
+-                }
+-                umask(old_umask);
+-
+-                if (virAsprintf(&tmp, "%d:file:%s/libvirtd.log",
++                if (virAsprintf(&tmp, "%d:file:%s/.libvirt/libvirtd.log",
+                                 virLogGetDefaultPriority(), logdir) == -1) {
+                     VIR_FREE(logdir);
+                     goto no_memory;
+@@ -786,82 +759,6 @@ static int daemonStateInit(virNetServerPtr srv)
+     return 0;
+ }
+ 
+-static int migrateProfile(void)
+-{
+-    char *old_base = NULL;
+-    char *updated = NULL;
+-    char *home = NULL;
+-    char *xdg_dir = NULL;
+-    char *config_dir = NULL;
+-    const char *config_home;
+-    int ret = -1;
+-    mode_t old_umask;
+-
+-    VIR_DEBUG("Checking if user profile needs migrating");
+-
+-    if (!(home = virGetUserDirectory()))
+-        goto cleanup;
+-
+-    if (virAsprintf(&old_base, "%s/.libvirt", home) < 0) {
+-        goto cleanup;
+-    }
+-
+-    /* if the new directory is there or the old one is not: do nothing */
+-    if (!(config_dir = virGetUserConfigDirectory()))
+-        goto cleanup;
+-
+-    if (!virFileIsDir(old_base) || virFileExists(config_dir)) {
+-        VIR_DEBUG("No old profile in '%s' / "
+-                  "new profile directory already present '%s'",
+-                  old_base, config_dir);
+-        ret = 0;
+-        goto cleanup;
+-    }
+-
+-    /* test if we already attempted to migrate first */
+-    if (virAsprintf(&updated, "%s/DEPRECATED-DIRECTORY", old_base) < 0) {
+-        goto cleanup;
+-    }
+-    if (virFileExists(updated)) {
+-        goto cleanup;
+-    }
+-
+-    config_home = getenv("XDG_CONFIG_HOME");
+-    if (config_home && config_home[0] != '\0') {
+-        xdg_dir = strdup(config_home);
+-    } else {
+-        if (virAsprintf(&xdg_dir, "%s/.config", home) < 0) {
+-            goto cleanup;
+-        }
+-    }
+-
+-    old_umask = umask(077);
+-    if (virFileMakePath(xdg_dir) < 0) {
+-        umask(old_umask);
+-        goto cleanup;
+-    }
+-    umask(old_umask);
+-
+-    if (rename(old_base, config_dir) < 0) {
+-        int fd = creat(updated, 0600);
+-        VIR_FORCE_CLOSE(fd);
+-        VIR_ERROR(_("Unable to migrate %s to %s"), old_base, config_dir);
+-        goto cleanup;
+-    }
+-
+-    VIR_DEBUG("Profile migrated from %s to %s", old_base, config_dir);
+-    ret = 0;
+-
+- cleanup:
+-    VIR_FREE(home);
+-    VIR_FREE(old_base);
+-    VIR_FREE(xdg_dir);
+-    VIR_FREE(config_dir);
+-    VIR_FREE(updated);
+-
+-    return ret;
+-}
+-
+ /* Print command-line usage. */
+ static void
+ daemonUsage(const char *argv0, bool privileged)
+@@ -915,10 +812,10 @@ libvirt management daemon:\n"), argv0);
+   Default paths:\n\
+ \n\
+     Configuration file (unless overridden by -f):\n\
+-      $XDG_CONFIG_HOME/libvirt/libvirtd.conf\n\
++      $HOME/.libvirt/libvirtd.conf\n\
+ \n\
+     Sockets:\n\
+-      $XDG_RUNTIME_DIR/libvirt/libvirt-sock (in UNIX abstract namespace)\n\
++      $HOME/.libvirt/libvirt-sock (in UNIX abstract namespace)\n \
+ \n\
+     TLS:\n\
+       CA certificate:     $HOME/.pki/libvirt/cacert.pem\n\
+@@ -926,7 +823,7 @@ libvirt management daemon:\n"), argv0);
+       Server private key: $HOME/.pki/libvirt/serverkey.pem\n\
+ \n\
+     PID file:\n\
+-      $XDG_RUNTIME_DIR/libvirt/libvirtd.pid\n\
++      $HOME/.libvirt/libvirtd.pid\n   \
+ \n"));
+     }
+ }
+@@ -1103,12 +1000,6 @@ int main(int argc, char **argv) {
+         exit(EXIT_FAILURE);
+     }
+ 
+-    if (!privileged &&
+-        migrateProfile() < 0) {
+-        VIR_ERROR(_("Exiting due to failure to migrate profile"));
+-        exit(EXIT_FAILURE);
+-    }
+-
+     if (config->host_uuid &&
+         virSetHostUUIDStr(config->host_uuid) < 0) {
+         VIR_ERROR(_("invalid host UUID: %s"), config->host_uuid);
+@@ -1158,22 +1049,21 @@ int main(int argc, char **argv) {
+     if (privileged) {
+         run_dir = strdup(LOCALSTATEDIR "/run/libvirt");
+     } else {
+-        run_dir = virGetUserRuntimeDirectory();
++        char *user_dir = virGetUserDirectory();
+ 
+-        if (!run_dir) {
++        if (!user_dir) {
+             VIR_ERROR(_("Can't determine user directory"));
+             goto cleanup;
+         }
++        ignore_value(virAsprintf(&run_dir, "%s/.libvirt/", user_dir));
++        VIR_FREE(user_dir);
+     }
+     if (!run_dir) {
+         virReportOOMError();
+         goto cleanup;
+     }
+ 
+-    if (privileged)
+-        old_umask = umask(022);
+-    else
+-        old_umask = umask(077);
++    old_umask = umask(022);
+     VIR_DEBUG("Ensuring run dir '%s' exists", run_dir);
+     if (virFileMakePath(run_dir) < 0) {
+         char ebuf[1024];
+diff --git a/daemon/libvirtd.pod.in b/daemon/libvirtd.pod.in
+index 930b752..c0712fd 100644
+--- a/daemon/libvirtd.pod.in
++++ b/daemon/libvirtd.pod.in
+@@ -112,12 +112,12 @@ The PID file to use, unless overridden by the B<-p>|B<--pid-file> option.
+ 
+ =over
+ 
+-=item F<$XDG_CONFIG_HOME/libvirtd.conf>
++=item F<$HOME/.libvirt/libvirtd.conf>
+ 
+ The default configuration file used by libvirtd, unless overridden on the
+ command line using the B<-f>|B<--config> option.
+ 
+-=item F<$XDG_RUNTIME_DIR/libvirt/libvirt-sock>
++=item F<$HOME/.libvirt/libvirt-sock>
+ 
+ The socket libvirtd will use.
+ 
+@@ -133,14 +133,10 @@ The TLS B<Server> certificate libvirtd will use.
+ 
+ The TLS B<Server> private key libvirtd will use.
+ 
+-=item F<$XDG_RUNTIME_DIR/libvirt/libvirtd.pid>
++=item F<$HOME/.libvirt/libvirtd.pid>
+ 
+ The PID file to use, unless overridden by the B<-p>|B<--pid-file> option.
+ 
+-=item If $XDG_CONFIG_HOME is not set in your environment, libvirtd will use F<$HOME/.config>
+-
+-=item If $XDG_RUNTIME_DIR is not set in your environment, libvirtd will use F<$HOME/.cache>
+-
+ =back
+ 
+ =head1 EXAMPLES
+diff --git a/docs/auth.html.in b/docs/auth.html.in
+index 60e4f11..ecff0fc 100644
+--- a/docs/auth.html.in
++++ b/docs/auth.html.in
+@@ -25,7 +25,7 @@ for the authentication file using the following sequence:
+         variable.</li>
+       <li>The file path specified by the "authfile=/some/file" URI
+         query parameter</li>
+-      <li>The file $XDG_CONFIG_DIR/libvirt/auth.conf</li>
++      <li>The file $HOME/.libvirt/auth.conf</li>
+       <li>The file /etc/libvirt/auth.conf</li>
+     </ol>
+ 
+diff --git a/docs/uri.html.in b/docs/uri.html.in
+index 5812ca9..2f76e8f 100644
+--- a/docs/uri.html.in
++++ b/docs/uri.html.in
+@@ -30,7 +30,7 @@ virConnectPtr conn = virConnectOpenReadOnly (<b>"test:///default"</b>);
+     <p>
+ To simplify life for administrators, it is possible to setup URI aliases in a
+ libvirt client configuration file. The configuration file is <code>/etc/libvirt/libvirt.conf</code>
+-for the root user, or <code>$XDG_CONFIG_DIR/libvirt/libvirt.conf</code> for any unprivileged user.
++for the root user, or <code>$HOME/.libvirt/libvirt.conf</code> for any unprivileged user.
+ In this file, the following syntax can be used to setup aliases
+     </p>
+ 
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 0cbcfbf..80f3473 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -914,11 +914,11 @@ virConnectGetConfigFilePath(void)
+                         SYSCONFDIR) < 0)
+             goto no_memory;
+     } else {
+-        char *userdir = virGetUserConfigDirectory();
++        char *userdir = virGetUserDirectory();
+         if (!userdir)
+             goto error;
+ 
+-        if (virAsprintf(&path, "%s/libvirt.conf",
++        if (virAsprintf(&path, "%s/.libvirt/libvirt.conf",
+                         userdir) < 0) {
+             VIR_FREE(userdir);
+             goto no_memory;
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 6e029ef..22e8b90 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1220,7 +1220,6 @@ virFileHasSuffix;
+ virFileIsAbsPath;
+ virFileIsExecutable;
+ virFileIsLink;
+-virFileIsDir;
+ virFileLinkPointsTo;
+ virFileLock;
+ virFileMakePath;
+@@ -1243,9 +1242,6 @@ virGetGroupID;
+ virGetGroupName;
+ virGetHostname;
+ virGetUserDirectory;
+-virGetUserConfigDirectory;
+-virGetUserCacheDirectory;
+-virGetUserRuntimeDirectory;
+ virGetUserID;
+ virGetUserName;
+ virHexToBin;
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index 6e260f7..c5b7e67 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -301,20 +301,18 @@ networkStartup(int privileged) {
+         if ((base = strdup (SYSCONFDIR "/libvirt")) == NULL)
+             goto out_of_memory;
+     } else {
+-        char *userdir = virGetUserCacheDirectory();
++        char *userdir = virGetUserDirectory();
+ 
+         if (!userdir)
+             goto error;
+ 
+         if (virAsprintf(&driverState->logDir,
+-                        "%s/qemu/log", userdir) == -1) {
++                        "%s/.libvirt/qemu/log", userdir) == -1) {
+             VIR_FREE(userdir);
+             goto out_of_memory;
+         }
+-        VIR_FREE(userdir);
+ 
+-        userdir = virGetUserConfigDirectory();
+-        if (virAsprintf(&base, "%s", userdir) == -1) {
++        if (virAsprintf(&base, "%s/.libvirt", userdir) == -1) {
+             VIR_FREE(userdir);
+             goto out_of_memory;
+         }
+diff --git a/src/nwfilter/nwfilter_driver.c b/src/nwfilter/nwfilter_driver.c
+index a80bb66..6fe86a3 100644
+--- a/src/nwfilter/nwfilter_driver.c
++++ b/src/nwfilter/nwfilter_driver.c
+@@ -219,9 +219,15 @@ nwfilterDriverStartup(int privileged)
+         if ((base = strdup (SYSCONFDIR "/libvirt")) == NULL)
+             goto out_of_memory;
+     } else {
+-        base = virGetUserConfigDirectory();
+-        if (!base)
++        char *userdir = virGetUserDirectory();
++        if (!userdir)
+             goto error;
++
++        if (virAsprintf(&base, "%s/.libvirt", userdir) == -1) {
++            VIR_FREE(userdir);
++            goto out_of_memory;
++        }
++        VIR_FREE(userdir);
+     }
+ 
+     if (virAsprintf(&driverState->configDir,
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index bd5b6d7..961850a 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -602,36 +602,22 @@ qemudStartup(int privileged) {
+                         "%s/lib/libvirt/qemu/dump", LOCALSTATEDIR) == -1)
+             goto out_of_memory;
+     } else {
+-        char *rundir;
+-        char *cachedir;
+-
+-        cachedir = virGetUserCacheDirectory();
+-        if (!cachedir)
++        char *userdir;
++        if (!(userdir = virGetUserDirectory()))
+             goto error;
+ 
+-        if (virAsprintf(&qemu_driver->logDir,
+-                        "%s/qemu/log", cachedir) == -1) {
+-            VIR_FREE(cachedir);
++        if (virAsprintf(&base, "%s/.libvirt", userdir) == -1) {
++            VIR_FREE(userdir);
+             goto out_of_memory;
+         }
+-        if (virAsprintf(&qemu_driver->cacheDir, "%s/qemu/cache", cachedir) == -1) {
+-            VIR_FREE(cachedir);
+-            goto out_of_memory;
+-        }
+-        VIR_FREE(cachedir);
++        VIR_FREE(userdir);
+ 
+-        rundir = virGetUserRuntimeDirectory();
+-        if (!rundir)
+-            goto error;
+-        if (virAsprintf(&qemu_driver->stateDir, "%s/qemu/run", rundir) == -1) {
+-            VIR_FREE(rundir);
++        if (virAsprintf(&qemu_driver->logDir, "%s/qemu/log", base) == -1)
++            goto out_of_memory;
++        if (virAsprintf(&qemu_driver->stateDir, "%s/qemu/run", base) == -1)
++            goto out_of_memory;
++        if (virAsprintf(&qemu_driver->cacheDir, "%s/qemu/cache", base) == -1)
+             goto out_of_memory;
+-        }
+-        VIR_FREE(rundir);
+-
+-        base = virGetUserConfigDirectory();
+-        if (!base)
+-            goto error;
+         if (virAsprintf(&qemu_driver->libDir, "%s/qemu/lib", base) == -1)
+             goto out_of_memory;
+         if (virAsprintf(&qemu_driver->saveDir, "%s/qemu/save", base) == -1)
+diff --git a/src/remote/remote_driver.c b/src/remote/remote_driver.c
+index fc4c696..83eaabb 100644
+--- a/src/remote/remote_driver.c
++++ b/src/remote/remote_driver.c
+@@ -640,12 +640,12 @@ doRemoteOpen(virConnectPtr conn,
+     case trans_unix:
+         if (!sockname) {
+             if (flags & VIR_DRV_OPEN_REMOTE_USER) {
+-                char *userdir = virGetUserRuntimeDirectory();
++                char *userdir = virGetUserDirectory();
+ 
+                 if (!userdir)
+                     goto failed;
+ 
+-                if (virAsprintf(&sockname, "%s/" LIBVIRTD_USER_UNIX_SOCKET, userdir) < 0) {
++                if (virAsprintf(&sockname, "%s" LIBVIRTD_USER_UNIX_SOCKET, userdir) < 0) {
+                     VIR_FREE(userdir);
+                     goto no_memory;
+                 }
+diff --git a/src/remote/remote_driver.h b/src/remote/remote_driver.h
+index 7288381..df6ded8 100644
+--- a/src/remote/remote_driver.h
++++ b/src/remote/remote_driver.h
+@@ -37,7 +37,7 @@ unsigned long remoteVersion(void);
+ # define LIBVIRTD_TCP_PORT "16509"
+ # define LIBVIRTD_PRIV_UNIX_SOCKET LOCALSTATEDIR "/run/libvirt/libvirt-sock"
+ # define LIBVIRTD_PRIV_UNIX_SOCKET_RO LOCALSTATEDIR "/run/libvirt/libvirt-sock-ro"
+-# define LIBVIRTD_USER_UNIX_SOCKET "libvirt-sock"
++# define LIBVIRTD_USER_UNIX_SOCKET "/.libvirt/libvirt-sock"
+ # define LIBVIRTD_CONFIGURATION_FILE SYSCONFDIR "/libvirtd.conf"
+ 
+ /* Defaults for PKI directory. */
+diff --git a/src/secret/secret_driver.c b/src/secret/secret_driver.c
+index 9ce1e33..e599b33 100644
+--- a/src/secret/secret_driver.c
++++ b/src/secret/secret_driver.c
+@@ -1091,9 +1091,15 @@ secretDriverStartup(int privileged)
+         if (base == NULL)
+             goto out_of_memory;
+     } else {
+-        base = virGetUserConfigDirectory();
+-        if (!base)
++        char *userdir = virGetUserDirectory();
++        if (!userdir)
+             goto error;
++
++        if (virAsprintf(&base, "%s/.libvirt", userdir) == -1) {
++            VIR_FREE(userdir);
++            goto out_of_memory;
++        }
++        VIR_FREE(userdir);
+     }
+     if (virAsprintf(&driverState->directory, "%s/secrets", base) == -1)
+         goto out_of_memory;
+diff --git a/src/storage/storage_driver.c b/src/storage/storage_driver.c
+index 5ba3076..0533c25 100644
+--- a/src/storage/storage_driver.c
++++ b/src/storage/storage_driver.c
+@@ -145,9 +145,16 @@ storageDriverStartup(int privileged)
+         if ((base = strdup (SYSCONFDIR "/libvirt")) == NULL)
+             goto out_of_memory;
+     } else {
+-        base = virGetUserConfigDirectory();
+-        if (!base)
++        char *userdir = virGetUserDirectory();
++
++        if (!userdir)
+             goto error;
++
++        if (virAsprintf(&base, "%s/.libvirt", userdir) < 0) {
++            VIR_FREE(userdir);
++            goto out_of_memory;
++        }
++        VIR_FREE(userdir);
+     }
+ 
+     /* Configuration paths are either $USER_CONFIG_HOME/libvirt/storage/... (session) or
+diff --git a/src/uml/uml_driver.c b/src/uml/uml_driver.c
+index 8fd18f9..e07974e 100644
+--- a/src/uml/uml_driver.c
++++ b/src/uml/uml_driver.c
+@@ -461,9 +461,9 @@ umlStartup(int privileged)
+                         "%s/run/libvirt/uml-guest", LOCALSTATEDIR) == -1)
+             goto out_of_memory;
+     } else {
+-        base = virGetUserConfigDirectory();
+-        if (!base)
+-            goto error;
++        if (virAsprintf(&base, "%s/.libvirt", userdir) == -1) {
++            goto out_of_memory;
++        }
+ 
+         if (virAsprintf(&uml_driver->logDir,
+                         "%s/uml/log", base) == -1)
+@@ -474,7 +474,7 @@ umlStartup(int privileged)
+             goto out_of_memory;
+     }
+ 
+-    /* Configuration paths are either $XDG_CONFIG_HOME/libvirt/uml/... (session) or
++    /* Configuration paths are either $HOME/.libvirt/uml/... (session) or
+      * /etc/libvirt/uml/... (system).
+      */
+     if (virAsprintf(&uml_driver->configDir, "%s/uml", base) == -1)
+diff --git a/src/util/virauth.c b/src/util/virauth.c
+index 6d9935d..b9b787c 100644
+--- a/src/util/virauth.c
++++ b/src/util/virauth.c
+@@ -68,10 +68,10 @@ int virAuthGetConfigFilePath(virConnectPtr conn,
+         }
+     }
+ 
+-    if (!(userdir = virGetUserConfigDirectory()))
++    if (!(userdir = virGetUserDirectory()))
+         goto cleanup;
+ 
+-    if (virAsprintf(path, "%s/auth.conf", userdir) < 0)
++    if (virAsprintf(path, "%s/.libvirt/auth.conf", userdir) < 0)
+         goto no_memory;
+ 
+     VIR_DEBUG("Checking for readability of '%s'", *path);
+diff --git a/tools/virsh.c b/tools/virsh.c
+index b32ee8b..07bedf0 100644
+--- a/tools/virsh.c
++++ b/tools/virsh.c
+@@ -2464,15 +2464,15 @@ vshReadlineInit(vshControl *ctl)
+     /* Limit the total size of the history buffer */
+     stifle_history(500);
+ 
+-    /* Prepare to read/write history from/to the $XDG_CACHE_HOME/virsh/history file */
+-    userdir = virGetUserCacheDirectory();
++    /* Prepare to read/write history from/to the $HOME/.virsh/history file */
++    userdir = virGetUserDirectory();
+ 
+     if (userdir == NULL) {
+         vshError(ctl, "%s", _("Could not determine home directory"));
+         return -1;
+     }
+ 
+-    if (virAsprintf(&ctl->historydir, "%s/virsh", userdir) < 0) {
++    if (virAsprintf(&ctl->historydir, "%s/.virsh", userdir) < 0) {
+         vshError(ctl, "%s", _("Out of memory"));
+         VIR_FREE(userdir);
+         return -1;
+-- 
+1.7.12.3
+

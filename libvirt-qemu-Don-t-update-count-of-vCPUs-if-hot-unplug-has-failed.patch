@@ -1,0 +1,39 @@
+From 386b448deb2df4fbe2cf57df6bcf91a108b83baa Mon Sep 17 00:00:00 2001
+Message-Id: <386b448deb2df4fbe2cf57df6bcf91a108b83baa.1373271642.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 13 Jun 2013 11:12:21 +0200
+Subject: [PATCH] qemu: Don't update count of vCPUs if hot-unplug has failed
+
+https://bugzilla.redhat.com/show_bug.cgi?id=895424
+
+After live change of cpu counts, the number of processor threads is
+verified. This patch makes use of this approach to check if qemu ignored
+the request for cpu hot-unplug and report an appropriate message.
+(cherry picked from commit 761fc481365703b861429d73a341bde352ba8d41)
+---
+ src/qemu/qemu_driver.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 04b9e51..6a57074 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3760,6 +3760,15 @@ static int qemudDomainHotplugVcpus(struct qemud_driver *driver,
+         goto cleanup;
+     }
+ 
++    /* check if hotplug has failed */
++    if (vcpus < oldvcpus && ncpupids == oldvcpus) {
++        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
++                       _("qemu didn't unplug the vCPUs properly"));
++        vcpus = oldvcpus;
++        ret = -1;
++        goto cleanup;
++    }
++
+     if (ncpupids != vcpus) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("got wrong number of vCPU pids from QEMU monitor. "
+-- 
+1.8.2.1
+

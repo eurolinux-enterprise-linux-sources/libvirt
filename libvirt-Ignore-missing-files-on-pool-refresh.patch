@@ -1,0 +1,52 @@
+From e637a008907ba559470bed2d268288807e8ead3d Mon Sep 17 00:00:00 2001
+Message-Id: <e637a008907ba559470bed2d268288807e8ead3d@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 9 Apr 2014 10:56:29 +0200
+Subject: [PATCH] Ignore missing files on pool refresh
+
+If we cannot stat/open a file on pool refresh, returning -1 aborts
+the refresh and the pool is undefined.
+
+Only treat missing files as fatal unless VolOpenCheckMode is called
+with the VIR_STORAGE_VOL_OPEN_ERROR flag. If this flag is missing
+(when it's called from virStorageBackendProbeTarget in
+virStorageBackendFileSystemRefresh), only emit a warning and return
+-2 to let the caller skip over the file.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=977706
+(cherry picked from commit ee640f444bbdc976bdaed305f0d64d241d275376)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/storage/storage_backend.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/storage/storage_backend.c b/src/storage/storage_backend.c
+index 6a2c51d..81e00e1 100644
+--- a/src/storage/storage_backend.c
++++ b/src/storage/storage_backend.c
+@@ -1035,6 +1035,10 @@ virStorageBackendVolOpenCheckMode(const char *path, struct stat *sb,
+     char *base = last_component(path);
+ 
+     if (lstat(path, sb) < 0) {
++        if (errno == ENOENT && !(flags & VIR_STORAGE_VOL_OPEN_ERROR)) {
++            VIR_WARN("ignoring missing file '%s'", path);
++            return -2;
++        }
+         virReportSystemError(errno,
+                              _("cannot stat file '%s'"),
+                              path);
+@@ -1055,6 +1059,10 @@ virStorageBackendVolOpenCheckMode(const char *path, struct stat *sb,
+             VIR_WARN("ignoring dangling symlink '%s'", path);
+             return -2;
+         }
++        if (errno == ENOENT && !(flags & VIR_STORAGE_VOL_OPEN_ERROR)) {
++            VIR_WARN("ignoring missing file '%s'", path);
++            return -2;
++        }
+ 
+         virReportSystemError(errno,
+                              _("cannot open volume '%s'"),
+-- 
+1.9.2
+

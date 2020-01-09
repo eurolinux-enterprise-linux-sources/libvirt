@@ -1,0 +1,34 @@
+From 72c5c7ea0cb378f48b317ebf00d6511d55663512 Mon Sep 17 00:00:00 2001
+Message-Id: <72c5c7ea0cb378f48b317ebf00d6511d55663512@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Sep 2015 09:33:12 +0200
+Subject: [PATCH] daemon: Suppress logging of VIR_ERR_NO_DOMAIN_METADATA
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1260864
+
+Similarly to other error codes that notify the user that the object does
+not exist lower the priority of VIR_ERR_NO_DOMAIN_METADATA to
+VIR_LOG_DEBUG when writing the log entry.
+
+(cherry picked from commit ecc997fd43b1b1987dadb45fb0ef987d56638476)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ daemon/libvirtd.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/daemon/libvirtd.c b/daemon/libvirtd.c
+index c39ca3c..6fc0b6a 100644
+--- a/daemon/libvirtd.c
++++ b/daemon/libvirtd.c
+@@ -329,6 +329,7 @@ static int daemonErrorLogFilter(virErrorPtr err, int priority)
+     case VIR_ERR_NO_SECRET:
+     case VIR_ERR_NO_DOMAIN_SNAPSHOT:
+     case VIR_ERR_OPERATION_INVALID:
++    case VIR_ERR_NO_DOMAIN_METADATA:
+         return VIR_LOG_DEBUG;
+     }
+ 
+-- 
+2.6.2
+

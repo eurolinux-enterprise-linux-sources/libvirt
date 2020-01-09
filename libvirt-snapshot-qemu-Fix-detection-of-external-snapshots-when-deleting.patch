@@ -1,0 +1,107 @@
+From 3c868513846d0557f7a6d1e5837284ea7fc1b9fa Mon Sep 17 00:00:00 2001
+Message-Id: <3c868513846d0557f7a6d1e5837284ea7fc1b9fa.1353944810.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 19 Nov 2012 15:22:26 -0700
+Subject: [PATCH] snapshot: qemu: Fix detection of external snapshots when
+ deleting
+
+https://bugzilla.redhat.com/show_bug.cgi?id=876816
+
+This patch adds a helper to determine if snapshots are external and uses
+the helper to fix detection of those in snapshot deletion code.
+
+Snapshots are external if they have an external memory image or if the
+disk locations are external. As mixed snapshots are forbidden for now
+we need to check just one disk to know.
+(cherry picked from commit 30f1bccf332c93aa646c6d5a69f1287a5d170983)
+---
+ src/conf/snapshot_conf.c | 17 +++++++++++++++++
+ src/conf/snapshot_conf.h |  2 ++
+ src/libvirt_private.syms |  1 +
+ src/qemu/qemu_driver.c   |  6 +++---
+ 4 files changed, 23 insertions(+), 3 deletions(-)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index 9e92f2a..41d5542 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -1027,3 +1027,20 @@ cleanup:
+     }
+     return ret;
+ }
++
++
++bool
++virDomainSnapshotIsExternal(virDomainSnapshotObjPtr snap)
++{
++    int i;
++
++    if (snap->def->memory == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL)
++        return true;
++
++    for (i = 0; i < snap->def->ndisks; i++) {
++        if (snap->def->disks[i].snapshot == VIR_DOMAIN_SNAPSHOT_LOCATION_EXTERNAL)
++            return true;
++    }
++
++    return false;
++}
+diff --git a/src/conf/snapshot_conf.h b/src/conf/snapshot_conf.h
+index 00775ae..b5c6e25 100644
+--- a/src/conf/snapshot_conf.h
++++ b/src/conf/snapshot_conf.h
+@@ -155,6 +155,8 @@ int virDomainListSnapshots(virDomainSnapshotObjListPtr snapshots,
+                            virDomainSnapshotPtr **snaps,
+                            unsigned int flags);
+ 
++bool virDomainSnapshotIsExternal(virDomainSnapshotObjPtr snap);
++
+ VIR_ENUM_DECL(virDomainSnapshotLocation)
+ VIR_ENUM_DECL(virDomainSnapshotState)
+ 
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index da6e679..c48a6a4 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1084,6 +1084,7 @@ virDomainSnapshotFindByName;
+ virDomainSnapshotForEach;
+ virDomainSnapshotForEachChild;
+ virDomainSnapshotForEachDescendant;
++virDomainSnapshotIsExternal;
+ virDomainSnapshotLocationTypeFromString;
+ virDomainSnapshotLocationTypeToString;
+ virDomainSnapshotObjListGetNames;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index e3063bc..225e89c 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -2003,7 +2003,7 @@ cleanup:
+ }
+ 
+ 
+-/* Count how many snapshots in a set have external disk snapshots.  */
++/* Count how many snapshots in a set are external snapshots or checkpoints.  */
+ static void
+ qemuDomainSnapshotCountExternal(void *payload,
+                                 const void *name ATTRIBUTE_UNUSED,
+@@ -2012,7 +2012,7 @@ qemuDomainSnapshotCountExternal(void *payload,
+     virDomainSnapshotObjPtr snap = payload;
+     int *count = data;
+ 
+-    if (snap->def->state == VIR_DOMAIN_DISK_SNAPSHOT)
++    if (virDomainSnapshotIsExternal(snap))
+         (*count)++;
+ }
+ 
+@@ -12497,7 +12497,7 @@ static int qemuDomainSnapshotDelete(virDomainSnapshotPtr snapshot,
+ 
+     if (!(flags & VIR_DOMAIN_SNAPSHOT_DELETE_METADATA_ONLY)) {
+         if (!(flags & VIR_DOMAIN_SNAPSHOT_DELETE_CHILDREN_ONLY) &&
+-            snap->def->state == VIR_DOMAIN_DISK_SNAPSHOT)
++            virDomainSnapshotIsExternal(snap))
+             external++;
+         if (flags & VIR_DOMAIN_SNAPSHOT_DELETE_CHILDREN)
+             virDomainSnapshotForEachDescendant(snap,
+-- 
+1.8.0
+

@@ -1,0 +1,44 @@
+From 48105e62d06e1a93d09d05c2bfc53a8df1907f9e Mon Sep 17 00:00:00 2001
+Message-Id: <48105e62d06e1a93d09d05c2bfc53a8df1907f9e.1358948742.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 21 Jan 2013 12:14:53 +0100
+Subject: [PATCH] qemu: Don't return success if creation of snapshot save file
+ fails
+
+https://bugzilla.redhat.com/show_bug.cgi?id=896403
+
+When the snapshot definition can't be saved, the
+qemuDomainSnapshotCreate function succeeded without filling some of the
+fields in the internal definition.
+
+This patch removes the snapshot and returns failure if the XML file
+cannot be written.
+(cherry picked from commit 27054e1217e2787b1806f55c5f6eb8908612d690)
+---
+ src/qemu/qemu_driver.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 505c659..5a115df 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -11786,8 +11786,14 @@ cleanup:
+         if (snapshot && !(flags & VIR_DOMAIN_SNAPSHOT_CREATE_NO_METADATA)) {
+             if (qemuDomainSnapshotWriteMetadata(vm, snap,
+                                                 driver->snapshotDir) < 0) {
+-                VIR_WARN("unable to save metadata for snapshot %s",
+-                         snap->def->name);
++                /* if writing of metadata fails, error out rather than trying
++                 * to silently carry on  without completing the snapshot */
++                virDomainSnapshotFree(snapshot);
++                snapshot = NULL;
++                virReportError(VIR_ERR_INTERNAL_ERROR,
++                               _("unable to save metadata for snapshot %s"),
++                               snap->def->name);
++                virDomainSnapshotObjListRemove(vm->snapshots, snap);
+             } else {
+                 if (update_current)
+                     vm->current_snapshot = snap;
+-- 
+1.8.1.1
+

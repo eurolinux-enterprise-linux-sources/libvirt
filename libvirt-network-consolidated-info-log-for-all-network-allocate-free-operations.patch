@@ -1,0 +1,195 @@
+From f252f5e62a06871e5f53f26c1966b5397b2c29d6 Mon Sep 17 00:00:00 2001
+Message-Id: <f252f5e62a06871e5f53f26c1966b5397b2c29d6@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Mon, 15 Feb 2016 06:19:43 -0500
+Subject: [PATCH] network: consolidated info log for all network allocate/free
+ operations
+
+Part of fix for: https://bugzilla.redhat.com/show_bug.cgi?id=1300843
+
+There are three functions that deal with allocating and freeing
+devices from a networks netdev/pci device pool:
+network(Allocate|Notify|Release)ActualDevice(). These functions also
+maintain a counter of the number of domains currently using a network
+(regardless of whether or not that network uses a device pool). Each
+of these functions had multiple log messages (output using VIR_DEBUG)
+that were in slightly different formats and gave varying amounts of
+information.
+
+This patch creates a single function to log the pertinent information
+in a consistent manner for all three of these functions. Along with
+assuring that all the functions produce a consistent form of output
+(and making it simpler to change), it adds the MAC address of the
+domain interface involved in the operation, making it possible to
+verify which interface of which domain the operation is being done for
+(assuming that all MAC addresses are unique, of course).
+
+All of these messages are raised from DEBUG to INFO, since they don't
+happen that often (once per interface per domain/libvirtd start or
+domain stop), and can be very informative and helpful - eliminating
+the need to log debug level messages makes it much easier to sort
+these out.
+
+(cherry pick from commit eb72bd63c15817b1b74f0528f86bfe3c8da2bc2c, with
+addition of "enum" to virDomainNetType in definition of networkLogAllocation)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/network/bridge_driver.c | 78 ++++++++++++++++++++++++---------------------
+ 1 file changed, 41 insertions(+), 37 deletions(-)
+
+diff --git a/src/network/bridge_driver.c b/src/network/bridge_driver.c
+index cec8c7e..e74e046 100644
+--- a/src/network/bridge_driver.c
++++ b/src/network/bridge_driver.c
+@@ -3613,6 +3613,43 @@ networkCreateInterfacePool(virNetworkDefPtr netdef)
+     return ret;
+ }
+ 
++
++/* A unified function to log network connections and disconnections */
++
++static void
++networkLogAllocation(virNetworkDefPtr netdef,
++                     enum virDomainNetType actualType,
++                     virNetworkForwardIfDefPtr dev,
++                     virDomainNetDefPtr iface,
++                     bool inUse)
++{
++    char macStr[VIR_MAC_STRING_BUFLEN];
++    const char *verb = inUse ? "using" : "releasing";
++
++    if (!dev) {
++        VIR_INFO("MAC %s %s network %s (%d connections)",
++                 virMacAddrFormat(&iface->mac, macStr), verb,
++                 netdef->name, netdef->connections);
++    } else {
++        if (actualType == VIR_DOMAIN_NET_TYPE_HOSTDEV) {
++            VIR_INFO("MAC %s %s network %s (%d connections) "
++                     "physical device %04x:%02x:%02x.%x (%d connections)",
++                     virMacAddrFormat(&iface->mac, macStr), verb,
++                     netdef->name, netdef->connections,
++                     dev->device.pci.domain, dev->device.pci.bus,
++                     dev->device.pci.slot, dev->device.pci.function,
++                     dev->connections);
++        } else {
++            VIR_INFO("MAC %s %s network %s (%d connections) "
++                     "physical device %s (%d connections)",
++                     virMacAddrFormat(&iface->mac, macStr), verb,
++                     netdef->name, netdef->connections,
++                     dev->device.dev, dev->connections);
++        }
++    }
++}
++
++
+ /* networkAllocateActualDevice:
+  * @dom: domain definition that @iface belongs to
+  * @iface: the original NetDef from the domain
+@@ -3940,23 +3977,8 @@ validate:
+ 
+     if (netdef) {
+         netdef->connections++;
+-        VIR_DEBUG("Using network %s, %d connections",
+-                  netdef->name, netdef->connections);
+-
+-        if (dev) {
+-            /* mark the allocation */
++        if (dev)
+             dev->connections++;
+-            if (actualType != VIR_DOMAIN_NET_TYPE_HOSTDEV) {
+-                VIR_DEBUG("Using physical device %s, %d connections",
+-                          dev->device.dev, dev->connections);
+-            } else {
+-                VIR_DEBUG("Using physical device %04x:%02x:%02x.%x, connections %d",
+-                          dev->device.pci.domain, dev->device.pci.bus,
+-                          dev->device.pci.slot, dev->device.pci.function,
+-                          dev->connections);
+-            }
+-        }
+-
+         /* finally we can call the 'plugged' hook script if any */
+         if (networkRunHook(network, dom, iface,
+                            VIR_HOOK_NETWORK_OP_IFACE_PLUGGED,
+@@ -3967,6 +3989,7 @@ validate:
+                 dev->connections--;
+             goto error;
+         }
++        networkLogAllocation(netdef, actualType, dev, iface, true);
+     }
+ 
+     ret = 0;
+@@ -4084,10 +4107,6 @@ networkNotifyActualDevice(virDomainDefPtr dom,
+                            netdef->name, actualDev);
+             goto error;
+         }
+-
+-        VIR_DEBUG("Using physical device %s, connections %d",
+-                  dev->device.dev, dev->connections + 1);
+-
+     }  else /* if (actualType == VIR_DOMAIN_NET_TYPE_HOSTDEV) */ {
+         virDomainHostdevDefPtr hostdev;
+ 
+@@ -4137,20 +4156,12 @@ networkNotifyActualDevice(virDomainDefPtr dom,
+                            dev->device.pci.slot, dev->device.pci.function);
+             goto error;
+         }
+-
+-        VIR_DEBUG("Using physical device %04x:%02x:%02x.%x, connections %d",
+-                  dev->device.pci.domain, dev->device.pci.bus,
+-                  dev->device.pci.slot, dev->device.pci.function,
+-                  dev->connections);
+     }
+ 
+  success:
+     netdef->connections++;
+     if (dev)
+         dev->connections++;
+-    VIR_DEBUG("Using network %s, %d connections",
+-              netdef->name, netdef->connections);
+-
+     /* finally we can call the 'plugged' hook script if any */
+     if (networkRunHook(network, dom, iface, VIR_HOOK_NETWORK_OP_IFACE_PLUGGED,
+                        VIR_HOOK_SUBOP_BEGIN) < 0) {
+@@ -4160,6 +4171,7 @@ networkNotifyActualDevice(virDomainDefPtr dom,
+         netdef->connections--;
+         goto error;
+     }
++    networkLogAllocation(netdef, actualType, dev, iface, true);
+ 
+     ret = 0;
+ cleanup:
+@@ -4250,10 +4262,6 @@ networkReleaseActualDevice(virDomainDefPtr dom,
+                            netdef->name, actualDev);
+             goto error;
+         }
+-
+-        VIR_DEBUG("Releasing physical device %s, connections %d",
+-                  dev->device.dev, dev->connections - 1);
+-
+     } else /* if (actualType == VIR_DOMAIN_NET_TYPE_HOSTDEV) */ {
+         virDomainHostdevDefPtr hostdev;
+ 
+@@ -4285,11 +4293,6 @@ networkReleaseActualDevice(virDomainDefPtr dom,
+                            hostdev->source.subsys.u.pci.function);
+                 goto error;
+         }
+-
+-        VIR_DEBUG("Releasing physical device %04x:%02x:%02x.%x, connections %d",
+-                  dev->device.pci.domain, dev->device.pci.bus,
+-                  dev->device.pci.slot, dev->device.pci.function,
+-                  dev->connections - 1);
+     }
+ 
+  success:
+@@ -4303,6 +4306,7 @@ networkReleaseActualDevice(virDomainDefPtr dom,
+         /* finally we can call the 'unplugged' hook script if any */
+         networkRunHook(network, dom, iface, VIR_HOOK_NETWORK_OP_IFACE_UNPLUGGED,
+                        VIR_HOOK_SUBOP_BEGIN);
++        networkLogAllocation(netdef, actualType, dev, iface, false);
+     }
+     ret = 0;
+ cleanup:
+-- 
+2.7.1
+

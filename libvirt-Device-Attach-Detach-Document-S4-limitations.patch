@@ -1,0 +1,78 @@
+From fbb9fd206b8caaf2052218ee028163934433f754 Mon Sep 17 00:00:00 2001
+Message-Id: <fbb9fd206b8caaf2052218ee028163934433f754@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Fri, 2 May 2014 10:14:21 +0200
+Subject: [PATCH] Device{Attach, Detach}: Document S4 limitations
+
+https://bugzilla.redhat.com/show_bug.cgi?id=808463
+
+Well, libvirt doesn't distinguish between domain poweroff and
+hibernation (S4). It's hard to differentiate these two on a real
+machine anyway. As a result, any device that is hot(un-)plugged is
+lost (appears again) when domain is started again as from our POV
+it is a fresh cold boot. Instead of doing anything wise here, we
+should just document this as known limitation.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 7a6ae35dbe9a87b331ef395cb31f4253e740e597)
+
+Conflicts:
+	src/libvirt.c: Context as 1f71de59f
+    (the VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED event) is not backported
+    yet.
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/src/libvirt.c b/src/libvirt.c
+index 94e7125..442bd32 100644
+--- a/src/libvirt.c
++++ b/src/libvirt.c
+@@ -9682,6 +9682,10 @@ error:
+  * in an existing CDROM/Floppy device, however, applications are
+  * recommended to use the virDomainUpdateDeviceFlag method instead.
+  *
++ * Be aware that hotplug changes might not persist across a domain going
++ * into S4 state (also known as hibernation) unless you also modify the
++ * persistent domain definition.
++ *
+  * Returns 0 in case of success, -1 in case of failure.
+  */
+ int
+@@ -9744,6 +9748,10 @@ error:
+  * in an existing CDROM/Floppy device, however, applications are
+  * recommended to use the virDomainUpdateDeviceFlag method instead.
+  *
++ * Be aware that hotplug changes might not persist across a domain going
++ * into S4 state (also known as hibernation) unless you also modify the
++ * persistent domain definition.
++ *
+  * Returns 0 in case of success, -1 in case of failure.
+  */
+ int
+@@ -9793,6 +9801,10 @@ error:
+  * Destroy a virtual device attachment to backend.  This function,
+  * having hot-unplug semantics, is only allowed on an active domain.
+  *
++ * Be aware that hotplug changes might not persist across a domain going
++ * into S4 state (also known as hibernation) unless you also modify the
++ * persistent domain definition.
++ *
+  * Returns 0 in case of success, -1 in case of failure.
+  */
+ int
+@@ -9855,6 +9867,10 @@ error:
+  * block copy operation on the device being detached; in that case,
+  * use virDomainBlockJobAbort() to stop the block copy first.
+  *
++ * Be aware that hotplug changes might not persist across a domain going
++ * into S4 state (also known as hibernation) unless you also modify the
++ * persistent domain definition.
++ *
+  * Returns 0 in case of success, -1 in case of failure.
+  */
+ int
+-- 
+1.9.2
+

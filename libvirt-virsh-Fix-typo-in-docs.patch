@@ -1,0 +1,33 @@
+From 2692998c770f85ae20e37986655768e8b33c5cf5 Mon Sep 17 00:00:00 2001
+Message-Id: <2692998c770f85ae20e37986655768e8b33c5cf5@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 8 Apr 2014 11:45:55 +0200
+Subject: [PATCH] virsh: Fix typo in docs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=949776
+
+s/persitent/persistent/
+
+(cherry picked from commit f006f1956184184b7531b72231d43f3246cbfd32)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh.pod | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index e343170..6ed2509 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -2036,7 +2036,7 @@ Returns basic information about the I<network> object.
+ Returns the list of active networks, if I<--all> is specified this will also
+ include defined but inactive networks, if I<--inactive> is specified only the
+ inactive ones will be listed. You may also want to filter the returned networks
+-by I<--persistent> to list the persitent ones, I<--transient> to list the
++by I<--persistent> to list the persistent ones, I<--transient> to list the
+ transient ones, I<--autostart> to list the ones with autostart enabled, and
+ I<--no-autostart> to list the ones with autostart disabled.
+ 
+-- 
+1.9.2
+

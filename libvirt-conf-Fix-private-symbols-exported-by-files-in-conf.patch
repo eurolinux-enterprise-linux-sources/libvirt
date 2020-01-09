@@ -1,0 +1,97 @@
+From 3d969bdd2726e07a178672833dc482e84eaa7085 Mon Sep 17 00:00:00 2001
+Message-Id: <3d969bdd2726e07a178672833dc482e84eaa7085.1353944810.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Mon, 19 Nov 2012 15:22:25 -0700
+Subject: [PATCH] conf: Fix private symbols exported by files in conf
+
+https://bugzilla.redhat.com/show_bug.cgi?id=876816
+
+Some of the functions were moved to other files but the private symbol
+file wasn't tweaked to reflect that.
+(cherry picked from commit 8cd327fa7f193460124c065b816fefa89aeb1f78)
+---
+ src/libvirt_private.syms | 47 ++++++++++++++++++++++++-----------------------
+ 1 file changed, 24 insertions(+), 23 deletions(-)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 859ea61..da6e679 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -426,6 +426,7 @@ virDomainLifecycleCrashTypeFromString;
+ virDomainLifecycleCrashTypeToString;
+ virDomainLifecycleTypeFromString;
+ virDomainLifecycleTypeToString;
++virDomainList;
+ virDomainLiveConfigHelperMethod;
+ virDomainLoadAllConfigs;
+ virDomainLockFailureTypeFromString;
+@@ -497,24 +498,6 @@ virDomainSmartcardTypeFromString;
+ virDomainSmartcardTypeToString;
+ virDomainSmbiosModeTypeFromString;
+ virDomainSmbiosModeTypeToString;
+-virDomainSnapshotAlignDisks;
+-virDomainSnapshotAssignDef;
+-virDomainSnapshotDefFormat;
+-virDomainSnapshotDefFree;
+-virDomainSnapshotDefParseString;
+-virDomainSnapshotDropParent;
+-virDomainSnapshotFindByName;
+-virDomainSnapshotForEach;
+-virDomainSnapshotForEachChild;
+-virDomainSnapshotForEachDescendant;
+-virDomainSnapshotLocationTypeFromString;
+-virDomainSnapshotLocationTypeToString;
+-virDomainSnapshotObjListGetNames;
+-virDomainSnapshotObjListNum;
+-virDomainSnapshotObjListRemove;
+-virDomainSnapshotStateTypeFromString;
+-virDomainSnapshotStateTypeToString;
+-virDomainSnapshotUpdateRelations;
+ virDomainSoundDefFree;
+ virDomainSoundModelTypeFromString;
+ virDomainSoundModelTypeToString;
+@@ -1088,6 +1071,29 @@ sexpr_u64;
+ sexpr2string;
+ string2sexpr;
+ 
++
++# snapshot_conf.h
++virDomainListSnapshots;
++virDomainSnapshotAlignDisks;
++virDomainSnapshotAssignDef;
++virDomainSnapshotDefFormat;
++virDomainSnapshotDefFree;
++virDomainSnapshotDefParseString;
++virDomainSnapshotDropParent;
++virDomainSnapshotFindByName;
++virDomainSnapshotForEach;
++virDomainSnapshotForEachChild;
++virDomainSnapshotForEachDescendant;
++virDomainSnapshotLocationTypeFromString;
++virDomainSnapshotLocationTypeToString;
++virDomainSnapshotObjListGetNames;
++virDomainSnapshotObjListNum;
++virDomainSnapshotObjListRemove;
++virDomainSnapshotStateTypeFromString;
++virDomainSnapshotStateTypeToString;
++virDomainSnapshotUpdateRelations;
++
++
+ # storage_conf.h
+ virStoragePartedFsTypeTypeToString;
+ virStoragePoolDefFormat;
+@@ -1323,11 +1329,6 @@ virConsoleOpen;
+ virDBusGetSystemBus;
+ 
+ 
+-# virdomainlist.h
+-virDomainList;
+-virDomainListSnapshots;
+-
+-
+ # virfile.h
+ virFileLoopDeviceAssociate;
+ virFileClose;
+-- 
+1.8.0
+

@@ -1,0 +1,561 @@
+From e3a95cc153661214b9c2d0f9c0158eb84a99e8a4 Mon Sep 17 00:00:00 2001
+Message-Id: <e3a95cc153661214b9c2d0f9c0158eb84a99e8a4.1379585484.git.jdenemar@redhat.com>
+From: "Daniel P. Berrange" <berrange@redhat.com>
+Date: Thu, 12 Sep 2013 17:00:04 +0100
+Subject: [PATCH] Move virProcess{Kill, Abort, TranslateStatus} into
+ virprocess.{c, h}
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1006266
+
+Continue consolidation of process functions by moving some
+helpers out of command.{c,h} into virprocess.{c,h}
+
+Signed-off-by: Daniel P. Berrange <berrange@redhat.com>
+(cherry picked from commit 9467ab6074d02bd90248b5710b1c83856fefe9b4)
+---
+ daemon/libvirtd.c        |   1 +
+ daemon/remote.c          |   1 +
+ po/POTFILES.in           |   1 +
+ src/libvirt_private.syms |   7 ++-
+ src/lxc/lxc_container.c  |   1 +
+ src/lxc/lxc_controller.c |   1 +
+ src/rpc/virnetsocket.c   |   1 +
+ src/util/command.c       | 143 +------------------------------------------
+ src/util/command.h       |   8 ---
+ src/util/util.c          |   1 +
+ src/util/virprocess.c    | 153 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/util/virprocess.h    |  11 ++++
+ tests/testutils.c        |   1 +
+ 13 files changed, 177 insertions(+), 153 deletions(-)
+
+diff --git a/daemon/libvirtd.c b/daemon/libvirtd.c
+index 4e8e3e5..c39ca3c 100644
+--- a/daemon/libvirtd.c
++++ b/daemon/libvirtd.c
+@@ -36,6 +36,7 @@
+ #include "virterror_internal.h"
+ #include "virfile.h"
+ #include "virpidfile.h"
++#include "virprocess.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_QEMU
+ 
+diff --git a/daemon/remote.c b/daemon/remote.c
+index 449e89e..9acf6f8 100644
+--- a/daemon/remote.c
++++ b/daemon/remote.c
+@@ -46,6 +46,7 @@
+ #include "virfile.h"
+ #include "virtypedparam.h"
+ #include "virdbus.h"
++#include "virprocess.h"
+ #include "remote_protocol.h"
+ #include "qemu_protocol.h"
+ 
+diff --git a/po/POTFILES.in b/po/POTFILES.in
+index 82f5105..86fc4c9 100644
+--- a/po/POTFILES.in
++++ b/po/POTFILES.in
+@@ -158,6 +158,7 @@ src/util/virnetdevvportprofile.c
+ src/util/virnetlink.c
+ src/util/virnodesuspend.c
+ src/util/virpidfile.c
++src/util/virprocess.c
+ src/util/virrandom.c
+ src/util/virsocketaddr.c
+ src/util/virterror.c
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 5312535..cb4032e 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -167,12 +167,9 @@ virCommandSetPreExecHook;
+ virCommandSetWorkingDirectory;
+ virCommandToString;
+ virCommandTransferFD;
+-virProcessTranslateStatus;
+ virCommandWait;
+ virCommandWriteArgLog;
+ virFork;
+-virProcessAbort;
+-virProcessWait;
+ virRun;
+ 
+ 
+@@ -1763,7 +1760,11 @@ virPidFileDeletePath;
+ 
+ 
+ # virprocess.h
++virProcessAbort;
+ virProcessKill;
++virProcessTranslateStatus;
++virProcessWait;
++
+ 
+ # virrandom.h
+ virRandom;
+diff --git a/src/lxc/lxc_container.c b/src/lxc/lxc_container.c
+index 0c0b208..af4759a 100644
+--- a/src/lxc/lxc_container.c
++++ b/src/lxc/lxc_container.c
+@@ -63,6 +63,7 @@
+ #include "virfile.h"
+ #include "command.h"
+ #include "virnetdev.h"
++#include "virprocess.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_LXC
+ 
+diff --git a/src/lxc/lxc_controller.c b/src/lxc/lxc_controller.c
+index bd8f0c8..f988189 100644
+--- a/src/lxc/lxc_controller.c
++++ b/src/lxc/lxc_controller.c
+@@ -70,6 +70,7 @@
+ #include "processinfo.h"
+ #include "nodeinfo.h"
+ #include "virrandom.h"
++#include "virprocess.h"
+ #include "rpc/virnetserver.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_LXC
+diff --git a/src/rpc/virnetsocket.c b/src/rpc/virnetsocket.c
+index a39d6e9..55d5ca8 100644
+--- a/src/rpc/virnetsocket.c
++++ b/src/rpc/virnetsocket.c
+@@ -44,6 +44,7 @@
+ #include "virfile.h"
+ #include "event.h"
+ #include "threads.h"
++#include "virprocess.h"
+ 
+ #include "passfd.h"
+ 
+diff --git a/src/util/command.c b/src/util/command.c
+index e7ef8e1..5dd81ee 100644
+--- a/src/util/command.c
++++ b/src/util/command.c
+@@ -40,6 +40,7 @@
+ #include "logging.h"
+ #include "virfile.h"
+ #include "virpidfile.h"
++#include "virprocess.h"
+ #include "buf.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_NONE
+@@ -1715,31 +1716,6 @@ virCommandToString(virCommandPtr cmd)
+ }
+ 
+ 
+-/**
+- * virProcessTranslateStatus:
+- * @status: child exit status to translate
+- *
+- * Translate an exit status into a malloc'd string.  Generic helper
+- * for virCommandRun(), virCommandWait(), virRun(), and virProcessWait()
+- * status argument, as well as raw waitpid().
+- */
+-char *
+-virProcessTranslateStatus(int status)
+-{
+-    char *buf;
+-    if (WIFEXITED(status)) {
+-        ignore_value(virAsprintf(&buf, _("exit status %d"),
+-                                 WEXITSTATUS(status)));
+-    } else if (WIFSIGNALED(status)) {
+-        ignore_value(virAsprintf(&buf, _("fatal signal %d"),
+-                                 WTERMSIG(status)));
+-    } else {
+-        ignore_value(virAsprintf(&buf, _("invalid value %d"), status));
+-    }
+-    return buf;
+-}
+-
+-
+ /*
+  * Manage input and output to the child process.
+  */
+@@ -2289,55 +2265,6 @@ virCommandRunAsync(virCommandPtr cmd, pid_t *pid)
+ 
+ 
+ /**
+- * virProcessWait:
+- * @pid: child to wait on
+- * @exitstatus: optional status collection
+- *
+- * Wait for a child process to complete.
+- * Return -1 on any error waiting for
+- * completion. Returns 0 if the command
+- * finished with the exit status set.  If @exitstatus is NULL, then the
+- * child must exit with status 0 for this to succeed.
+- */
+-int
+-virProcessWait(pid_t pid, int *exitstatus)
+-{
+-    int ret;
+-    int status;
+-
+-    if (pid <= 0) {
+-        virReportSystemError(EINVAL, _("unable to wait for process %lld"),
+-                             (long long) pid);
+-        return -1;
+-    }
+-
+-    /* Wait for intermediate process to exit */
+-    while ((ret = waitpid(pid, &status, 0)) == -1 &&
+-           errno == EINTR);
+-
+-    if (ret == -1) {
+-        virReportSystemError(errno, _("unable to wait for process %lld"),
+-                             (long long) pid);
+-        return -1;
+-    }
+-
+-    if (exitstatus == NULL) {
+-        if (status != 0) {
+-            char *st = virProcessTranslateStatus(status);
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("Child process (%lld) unexpected %s"),
+-                           (long long) pid, NULLSTR(st));
+-            VIR_FREE(st);
+-            return -1;
+-        }
+-    } else {
+-        *exitstatus = status;
+-    }
+-
+-    return 0;
+-}
+-
+-/**
+  * virCommandWait:
+  * @cmd: command to wait on
+  * @exitstatus: optional status collection
+@@ -2402,67 +2329,6 @@ virCommandWait(virCommandPtr cmd, int *exitstatus)
+ 
+ #ifndef WIN32
+ /**
+- * virProcessAbort:
+- * @pid: child process to kill
+- *
+- * Abort a child process if PID is positive and that child is still
+- * running, without issuing any errors or affecting errno.  Designed
+- * for error paths where some but not all paths to the cleanup code
+- * might have started the child process.  If @pid is 0 or negative,
+- * this does nothing.
+- */
+-void
+-virProcessAbort(pid_t pid)
+-{
+-    int saved_errno;
+-    int ret;
+-    int status;
+-    char *tmp = NULL;
+-
+-    if (pid <= 0)
+-        return;
+-
+-    /* See if intermediate process has exited; if not, try a nice
+-     * SIGTERM followed by a more severe SIGKILL.
+-     */
+-    saved_errno = errno;
+-    VIR_DEBUG("aborting child process %d", pid);
+-    while ((ret = waitpid(pid, &status, WNOHANG)) == -1 &&
+-           errno == EINTR);
+-    if (ret == pid) {
+-        tmp = virProcessTranslateStatus(status);
+-        VIR_DEBUG("process has ended: %s", tmp);
+-        goto cleanup;
+-    } else if (ret == 0) {
+-        VIR_DEBUG("trying SIGTERM to child process %d", pid);
+-        kill(pid, SIGTERM);
+-        usleep(10 * 1000);
+-        while ((ret = waitpid(pid, &status, WNOHANG)) == -1 &&
+-               errno == EINTR);
+-        if (ret == pid) {
+-            tmp = virProcessTranslateStatus(status);
+-            VIR_DEBUG("process has ended: %s", tmp);
+-            goto cleanup;
+-        } else if (ret == 0) {
+-            VIR_DEBUG("trying SIGKILL to child process %d", pid);
+-            kill(pid, SIGKILL);
+-            while ((ret = waitpid(pid, &status, 0)) == -1 &&
+-                   errno == EINTR);
+-            if (ret == pid) {
+-                tmp = virProcessTranslateStatus(status);
+-                VIR_DEBUG("process has ended: %s", tmp);
+-                goto cleanup;
+-            }
+-        }
+-    }
+-    VIR_DEBUG("failed to reap child %lld, abandoning it", (long long) pid);
+-
+-cleanup:
+-    VIR_FREE(tmp);
+-    errno = saved_errno;
+-}
+-
+-/**
+  * virCommandAbort:
+  * @cmd: command to abort
+  *
+@@ -2482,13 +2348,6 @@ virCommandAbort(virCommandPtr cmd)
+ }
+ #else /* WIN32 */
+ void
+-virProcessAbort(pid_t pid)
+-{
+-    /* Not yet ported to mingw.  Any volunteers?  */
+-    VIR_DEBUG("failed to reap child %lld, abandoning it", (long long)pid);
+-}
+-
+-void
+ virCommandAbort(virCommandPtr cmd ATTRIBUTE_UNUSED)
+ {
+     /* Mingw lacks WNOHANG and kill().  But since we haven't ported
+diff --git a/src/util/command.h b/src/util/command.h
+index 68bedf7..cc363d2 100644
+--- a/src/util/command.h
++++ b/src/util/command.h
+@@ -144,9 +144,6 @@ void virCommandWriteArgLog(virCommandPtr cmd,
+ 
+ char *virCommandToString(virCommandPtr cmd) ATTRIBUTE_RETURN_CHECK;
+ 
+-
+-char *virProcessTranslateStatus(int exitstatus) ATTRIBUTE_RETURN_CHECK;
+-
+ int virCommandExec(virCommandPtr cmd) ATTRIBUTE_RETURN_CHECK;
+ 
+ int virCommandRun(virCommandPtr cmd,
+@@ -155,9 +152,6 @@ int virCommandRun(virCommandPtr cmd,
+ int virCommandRunAsync(virCommandPtr cmd,
+                        pid_t *pid) ATTRIBUTE_RETURN_CHECK;
+ 
+-int virProcessWait(pid_t pid,
+-                   int *exitstatus) ATTRIBUTE_RETURN_CHECK;
+-
+ int virCommandWait(virCommandPtr cmd,
+                    int *exitstatus) ATTRIBUTE_RETURN_CHECK;
+ 
+@@ -169,8 +163,6 @@ int virCommandHandshakeWait(virCommandPtr cmd)
+ int virCommandHandshakeNotify(virCommandPtr cmd)
+     ATTRIBUTE_RETURN_CHECK;
+ 
+-void virProcessAbort(pid_t pid);
+-
+ void virCommandAbort(virCommandPtr cmd);
+ 
+ void virCommandFree(virCommandPtr cmd);
+diff --git a/src/util/util.c b/src/util/util.c
+index a6c0d47..cb93a16 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -91,6 +91,7 @@
+ #include "command.h"
+ #include "nonblocking.h"
+ #include "passfd.h"
++#include "virprocess.h"
+ 
+ #ifndef NSIG
+ # define NSIG 32
+diff --git a/src/util/virprocess.c b/src/util/virprocess.c
+index e7db68f..958f5f7 100644
+--- a/src/util/virprocess.c
++++ b/src/util/virprocess.c
+@@ -24,8 +24,161 @@
+ 
+ #include <signal.h>
+ #include <errno.h>
++#include <sys/wait.h>
+ 
+ #include "virprocess.h"
++#include "virterror_internal.h"
++#include "memory.h"
++#include "logging.h"
++#include "util.h"
++
++#define VIR_FROM_THIS VIR_FROM_NONE
++
++/**
++ * virProcessTranslateStatus:
++ * @status: child exit status to translate
++ *
++ * Translate an exit status into a malloc'd string.  Generic helper
++ * for virCommandRun(), virCommandWait(), virRun(), and virProcessWait()
++ * status argument, as well as raw waitpid().
++ */
++char *
++virProcessTranslateStatus(int status)
++{
++    char *buf;
++    if (WIFEXITED(status)) {
++        ignore_value(virAsprintf(&buf, _("exit status %d"),
++                                 WEXITSTATUS(status)));
++    } else if (WIFSIGNALED(status)) {
++        ignore_value(virAsprintf(&buf, _("fatal signal %d"),
++                                 WTERMSIG(status)));
++    } else {
++        ignore_value(virAsprintf(&buf, _("invalid value %d"), status));
++    }
++    return buf;
++}
++
++
++#ifndef WIN32
++/**
++ * virProcessAbort:
++ * @pid: child process to kill
++ *
++ * Abort a child process if PID is positive and that child is still
++ * running, without issuing any errors or affecting errno.  Designed
++ * for error paths where some but not all paths to the cleanup code
++ * might have started the child process.  If @pid is 0 or negative,
++ * this does nothing.
++ */
++void
++virProcessAbort(pid_t pid)
++{
++    int saved_errno;
++    int ret;
++    int status;
++    char *tmp = NULL;
++
++    if (pid <= 0)
++        return;
++
++    /* See if intermediate process has exited; if not, try a nice
++     * SIGTERM followed by a more severe SIGKILL.
++     */
++    saved_errno = errno;
++    VIR_DEBUG("aborting child process %d", pid);
++    while ((ret = waitpid(pid, &status, WNOHANG)) == -1 &&
++           errno == EINTR);
++    if (ret == pid) {
++        tmp = virProcessTranslateStatus(status);
++        VIR_DEBUG("process has ended: %s", tmp);
++        goto cleanup;
++    } else if (ret == 0) {
++        VIR_DEBUG("trying SIGTERM to child process %d", pid);
++        kill(pid, SIGTERM);
++        usleep(10 * 1000);
++        while ((ret = waitpid(pid, &status, WNOHANG)) == -1 &&
++               errno == EINTR);
++        if (ret == pid) {
++            tmp = virProcessTranslateStatus(status);
++            VIR_DEBUG("process has ended: %s", tmp);
++            goto cleanup;
++        } else if (ret == 0) {
++            VIR_DEBUG("trying SIGKILL to child process %d", pid);
++            kill(pid, SIGKILL);
++            while ((ret = waitpid(pid, &status, 0)) == -1 &&
++                   errno == EINTR);
++            if (ret == pid) {
++                tmp = virProcessTranslateStatus(status);
++                VIR_DEBUG("process has ended: %s", tmp);
++                goto cleanup;
++            }
++        }
++    }
++    VIR_DEBUG("failed to reap child %lld, abandoning it", (long long) pid);
++
++cleanup:
++    VIR_FREE(tmp);
++    errno = saved_errno;
++}
++#else
++void
++virProcessAbort(pid_t pid)
++{
++    /* Not yet ported to mingw.  Any volunteers?  */
++    VIR_DEBUG("failed to reap child %lld, abandoning it", (long long)pid);
++}
++#endif
++
++
++/**
++ * virProcessWait:
++ * @pid: child to wait on
++ * @exitstatus: optional status collection
++ *
++ * Wait for a child process to complete.
++ * Return -1 on any error waiting for
++ * completion. Returns 0 if the command
++ * finished with the exit status set.  If @exitstatus is NULL, then the
++ * child must exit with status 0 for this to succeed.
++ */
++int
++virProcessWait(pid_t pid, int *exitstatus)
++{
++    int ret;
++    int status;
++
++    if (pid <= 0) {
++        virReportSystemError(EINVAL, _("unable to wait for process %lld"),
++                             (long long) pid);
++        return -1;
++    }
++
++    /* Wait for intermediate process to exit */
++    while ((ret = waitpid(pid, &status, 0)) == -1 &&
++           errno == EINTR);
++
++    if (ret == -1) {
++        virReportSystemError(errno, _("unable to wait for process %lld"),
++                             (long long) pid);
++        return -1;
++    }
++
++    if (exitstatus == NULL) {
++        if (status != 0) {
++            char *st = virProcessTranslateStatus(status);
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("Child process (%lld) unexpected %s"),
++                           (long long) pid, NULLSTR(st));
++            VIR_FREE(st);
++            return -1;
++        }
++    } else {
++        *exitstatus = status;
++    }
++
++    return 0;
++}
++
+ 
+ /* send signal to a single process */
+ int virProcessKill(pid_t pid, int sig)
+diff --git a/src/util/virprocess.h b/src/util/virprocess.h
+index b1000c6..048a73c 100644
+--- a/src/util/virprocess.h
++++ b/src/util/virprocess.h
+@@ -26,6 +26,17 @@
+ 
+ # include "internal.h"
+ 
++char *
++virProcessTranslateStatus(int status);
++
++void
++virProcessAbort(pid_t pid);
++
++int
++virProcessWait(pid_t pid, int *exitstatus)
++    ATTRIBUTE_RETURN_CHECK;
++
+ int virProcessKill(pid_t pid, int sig);
+ 
++
+ #endif /* __VIR_PROCESS_H__ */
+diff --git a/tests/testutils.c b/tests/testutils.c
+index 004731d..4d4f589 100644
+--- a/tests/testutils.c
++++ b/tests/testutils.c
+@@ -48,6 +48,7 @@
+ #include "command.h"
+ #include "virrandom.h"
+ #include "dirname.h"
++#include "virprocess.h"
+ 
+ #if TEST_OOM_TRACE
+ # include <execinfo.h>
+-- 
+1.8.3.2
+

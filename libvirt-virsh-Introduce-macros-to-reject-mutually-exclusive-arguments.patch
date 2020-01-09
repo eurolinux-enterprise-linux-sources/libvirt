@@ -1,0 +1,104 @@
+From b39155a2489528eef740185083fd962c1c04eade Mon Sep 17 00:00:00 2001
+Message-Id: <b39155a2489528eef740185083fd962c1c04eade@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 15 Jul 2014 17:33:36 +0200
+Subject: [PATCH] virsh: Introduce macros to reject mutually exclusive
+ arguments
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1117177
+
+This patch adds three macros to the virsh source tree that help to
+easily check for mutually exclusive parameters.
+
+VSH_EXCLUSIVE_OPTIONS_EXPR has four arguments, two expressions to check
+and two names of the parameters to print in the message.
+
+VSH_EXCLUSIVE_OPTIONS is more specific and check the command structure
+for the parameters using vshCommandOptBool.
+
+VSH_EXCLUSIVE_OPTIONS_VAR is meant to check boolean variables with the
+same name as the parameters.
+
+(cherry picked from commit 7e437ee78fe976d9371533f40f9cb68dd068af76)
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ po/POTFILES.in |  1 +
+ tools/virsh.h  | 51 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 52 insertions(+)
+
+diff --git a/po/POTFILES.in b/po/POTFILES.in
+index b58ae96..220c894 100644
+--- a/po/POTFILES.in
++++ b/po/POTFILES.in
+@@ -190,6 +190,7 @@ src/xenxs/xen_xm.c
+ tools/console.c
+ tools/libvirt-guests.init.sh
+ tools/virsh.c
++tools/virsh.h
+ tools/virsh-domain-monitor.c
+ tools/virsh-domain.c
+ tools/virsh-edit.c
+diff --git a/tools/virsh.h b/tools/virsh.h
+index 6913ed1..9c0d16a 100644
+--- a/tools/virsh.h
++++ b/tools/virsh.h
+@@ -371,4 +371,55 @@ char *_vshStrdup(vshControl *ctl, const char *s, const char *filename,
+ # define realloc use_vshRealloc_instead_of_realloc
+ # define strdup use_vshStrdup_instead_of_strdup
+ 
++/* Macros to help dealing with mutually exclusive options. */
++
++/* VSH_EXCLUSIVE_OPTIONS_EXPR:
++ *
++ * @NAME1: String containing the name of the option.
++ * @EXPR1: Expression to validate the variable (boolean variable)
++ * @NAME2: String containing the name of the option.
++ * @EXPR2: Expression to validate the variable (boolean variable)
++ *
++ * Reject mutually exclusive command options in virsh. Use the
++ * provided expression to check the variables.
++ *
++ * This helper does an early return and therefore it has to be called
++ * before anything that would require cleanup.
++ */
++# define VSH_EXCLUSIVE_OPTIONS_EXPR(NAME1, EXPR1, NAME2, EXPR2)             \
++    if ((EXPR1) && (EXPR2)) {                                               \
++        vshError(ctl, _("Options --%s and --%s are mutually exclusive"),    \
++                 NAME1, NAME2);                                             \
++        return false;                                                       \
++    }
++
++/* VSH_EXCLUSIVE_OPTIONS:
++ *
++ * @NAME1: String containing the name of the option.
++ * @NAME2: String containing the name of the option.
++ *
++ * Reject mutually exclusive command options in virsh. Use the
++ * vshCommandOptBool call to request them.
++ *
++ * This helper does an early return and therefore it has to be called
++ * before anything that would require cleanup.
++ */
++# define VSH_EXCLUSIVE_OPTIONS(NAME1, NAME2)                                \
++    VSH_EXCLUSIVE_OPTIONS_EXPR(NAME1, vshCommandOptBool(cmd, NAME1),        \
++                               NAME2, vshCommandOptBool(cmd, NAME2))
++
++/* VSH_EXCLUSIVE_OPTIONS_VAR:
++ *
++ * @VARNAME1: Boolean variable containing the value of the option of same name
++ * @VARNAME2: Boolean variable containing the value of the option of same name
++ *
++ * Reject mutually exclusive command options in virsh. Check in variables that
++ * contain the value and have same name as the option.
++ *
++ * This helper does an early return and therefore it has to be called
++ * before anything that would require cleanup.
++ */
++# define VSH_EXCLUSIVE_OPTIONS_VAR(VARNAME1, VARNAME2)                      \
++    VSH_EXCLUSIVE_OPTIONS_EXPR(#VARNAME1, VARNAME1, #VARNAME2, VARNAME2)
++
+ #endif /* VIRSH_H */
+-- 
+2.0.0
+

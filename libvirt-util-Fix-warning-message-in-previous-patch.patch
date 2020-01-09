@@ -1,0 +1,39 @@
+From ee1bf79c646c39eda6416ab284ad2ae9b183f438 Mon Sep 17 00:00:00 2001
+Message-Id: <ee1bf79c646c39eda6416ab284ad2ae9b183f438.1355319681.git.jdenemar@redhat.com>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 12 Dec 2012 14:31:02 +0100
+Subject: [PATCH] util: Fix warning message in previous patch
+
+https://bugzilla.redhat.com/show_bug.cgi?id=883832
+
+I didn't notice the extra "does" in the previous patch. Remove it.
+(cherry picked from commit ab8d323319cf698b54a218ca1a0f6d1f40792c6a)
+---
+ src/util/util.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/util.c b/src/util/util.c
+index 0fb976d..ffa269d 100644
+--- a/src/util/util.c
++++ b/src/util/util.c
+@@ -2557,7 +2557,7 @@ virGetUserIDByName(const char *name, uid_t *uid)
+             /* log the possible error from getpwnam_r. Unfortunately error
+              * reporting from this function is bad and we can't really
+              * rely on it, so we just report that the user wasn't found */
+-            VIR_WARN("User record for user '%s' does was not found: %s",
++            VIR_WARN("User record for user '%s' was not found: %s",
+                      name, virStrerror(rc, buf, sizeof(buf)));
+         }
+ 
+@@ -2641,7 +2641,7 @@ virGetGroupIDByName(const char *name, gid_t *gid)
+             /* log the possible error from getgrnam_r. Unfortunately error
+              * reporting from this function is bad and we can't really
+              * rely on it, so we just report that the user wasn't found */
+-            VIR_WARN("Group record for user '%s' does was not found: %s",
++            VIR_WARN("Group record for user '%s' was not found: %s",
+                      name, virStrerror(rc, buf, sizeof(buf)));
+         }
+ 
+-- 
+1.8.0
+

@@ -1,0 +1,43 @@
+From 2731deacf158daf7e87c43ced886909cec399a9e Mon Sep 17 00:00:00 2001
+Message-Id: <2731deacf158daf7e87c43ced886909cec399a9e.1357206168.git.jdenemar@redhat.com>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Sun, 30 Dec 2012 10:15:08 +0100
+Subject: [PATCH] sanlock: Chown lease files as well
+
+https://bugzilla.redhat.com/show_bug.cgi?id=820173
+
+Since sanlock doesn't run under root:root, we have chown()'ed the
+__LIBVIRT__DISKS__ lease file to the user:group defined in the
+sanlock config. However, when writing the patch I've forgot about
+lease files for each disk (this is the
+/var/lib/libvirt/sanlock/<md5>) file.
+(cherry picked from commit ce753ec5d6098ad467a817ba32fe75d608effc08)
+---
+ src/locking/lock_driver_sanlock.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/src/locking/lock_driver_sanlock.c b/src/locking/lock_driver_sanlock.c
+index 6a6220a..82b4515 100644
+--- a/src/locking/lock_driver_sanlock.c
++++ b/src/locking/lock_driver_sanlock.c
+@@ -679,6 +679,17 @@ static int virLockManagerSanlockCreateLease(struct sanlk_resource *res)
+             }
+             VIR_DEBUG("Someone else just created lockspace %s", res->disks[0].path);
+         } else {
++            /* chown() the path to make sure sanlock can access it */
++            if ((driver->user != -1 || driver->group != -1) &&
++                (fchown(fd, driver->user, driver->group) < 0)) {
++                virReportSystemError(errno,
++                                     _("cannot chown '%s' to (%u, %u)"),
++                                     res->disks[0].path,
++                                     (unsigned int) driver->user,
++                                     (unsigned int) driver->group);
++                goto error_unlink;
++            }
++
+             if ((rv = sanlock_align(&res->disks[0])) < 0) {
+                 if (rv <= -200)
+                     virReportError(VIR_ERR_INTERNAL_ERROR,
+-- 
+1.8.0.2
+

@@ -1,0 +1,104 @@
+From 43e9d50cdc4df5330da9fe1a316a64991017d934 Mon Sep 17 00:00:00 2001
+Message-Id: <43e9d50cdc4df5330da9fe1a316a64991017d934.1350297259.git.jdenemar@redhat.com>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Tue, 9 Oct 2012 02:48:11 +0200
+Subject: [PATCH] fix kvm_pv_eoi with kvmclock
+
+https://bugzilla.redhat.com/show_bug.cgi?id=860971
+
+When both kvmclock and kvm_pv_eoi are configured (either disabled or
+enabled) libvirt will generate invalid CPU specification due to the
+fact that even though kvmclock causes the CPU to be specified, it
+doesn't set have_cpu flag to true (and the new kvm_pv_eoi as well).
+This patch fixes the issue and adds a test exactly for that to show
+that it is fixed correctly (and also to keep it that way in the future
+of course).
+
+(cherry picked from commit 5d692cc7143084d841de79888fc249040ff40061)
+---
+ src/qemu/qemu_command.c                            |  2 ++
+ .../qemuxml2argv-kvmclock+eoi-disabled.args        |  4 ++++
+ .../qemuxml2argv-kvmclock+eoi-disabled.xml         | 27 ++++++++++++++++++++++
+ tests/qemuxml2argvtest.c                           |  1 +
+ 4 files changed, 34 insertions(+)
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-kvmclock+eoi-disabled.args
+ create mode 100644 tests/qemuxml2argvdata/qemuxml2argv-kvmclock+eoi-disabled.xml
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 1515a70..b99e19c 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4281,6 +4281,7 @@ qemuBuildCpuArgStr(const struct qemud_driver *driver,
+             virBufferAsprintf(&buf, "%s,%ckvmclock",
+                               have_cpu ? "" : default_model,
+                               sign);
++            have_cpu = true;
+             break;
+         }
+     }
+@@ -4295,6 +4296,7 @@ qemuBuildCpuArgStr(const struct qemud_driver *driver,
+         virBufferAsprintf(&buf, "%s,%ckvm_pv_eoi",
+                           have_cpu ? "" : default_model,
+                           sign);
++        have_cpu = true;
+     }
+ 
+     if (virBufferError(&buf))
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-kvmclock+eoi-disabled.args b/tests/qemuxml2argvdata/qemuxml2argv-kvmclock+eoi-disabled.args
+new file mode 100644
+index 0000000..f7ade0a
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-kvmclock+eoi-disabled.args
+@@ -0,0 +1,4 @@
++LC_ALL=C PATH=/bin HOME=/home/test USER=test LOGNAME=test /usr/bin/qemu -S -M pc \
++-cpu qemu32,-kvmclock,-kvm_pv_eoi -m 214 -smp 6 -nographic -monitor \
++unix:/tmp/test-monitor,server,nowait -boot n -net none -serial \
++none -parallel none -usb
+diff --git a/tests/qemuxml2argvdata/qemuxml2argv-kvmclock+eoi-disabled.xml b/tests/qemuxml2argvdata/qemuxml2argv-kvmclock+eoi-disabled.xml
+new file mode 100644
+index 0000000..a79b09f
+--- /dev/null
++++ b/tests/qemuxml2argvdata/qemuxml2argv-kvmclock+eoi-disabled.xml
+@@ -0,0 +1,27 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static'>6</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='network'/>
++  </os>
++  <features>
++    <acpi/>
++    <apic eoi='off'/>
++    <pae/>
++  </features>
++  <clock offset='utc'>
++    <timer name='kvmclock' present='no'/>
++    </clock>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu</emulator>
++    <controller type='usb' index='0'/>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 90dad17..4918c86 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -397,6 +397,7 @@ mymain(void)
+     DO_TEST("cpu-eoi-enabled", QEMU_CAPS_ENABLE_KVM);
+     DO_TEST("eoi-disabled", NONE);
+     DO_TEST("eoi-enabled", NONE);
++    DO_TEST("kvmclock+eoi-disabled", QEMU_CAPS_ENABLE_KVM);
+ 
+     DO_TEST("hugepages", QEMU_CAPS_MEM_PATH);
+     DO_TEST("disk-cdrom", NONE);
+-- 
+1.7.12.3
+

@@ -1,0 +1,107 @@
+From 7b4f53abaa1c85ec539db8d416893a40527bfbc3 Mon Sep 17 00:00:00 2001
+Message-Id: <7b4f53abaa1c85ec539db8d416893a40527bfbc3@dist-git>
+From: Guannan Ren <gren@redhat.com>
+Date: Wed, 21 Aug 2013 19:18:08 +0800
+Subject: [PATCH] python: return dictionary without value in case of no
+ blockjob
+
+Resolves:https://bugzilla.redhat.com/show_bug.cgi?id=999454
+(cherry picked from commit 0f9e67bfad96c4a2e69769d8a5908ee145a86766)
+
+Currently, when there is no blockjob, dom.blockJobInfo('vda')
+still reports error because it doesn't distinguish return value 0 from -1.
+libvirt.libvirtError: virDomainGetBlockJobInfo() failed
+
+virDomainGetBlockJobInfo() API return value:
+ -1 in case of failure, 0 when nothing found, 1 found.
+
+And use PyDict_SetItemString instead of PyDict_SetItem when key is
+of string type. PyDict_SetItemString increments key/value reference
+count, so call Py_DECREF() for value. For key, we don't need to
+do this, because PyDict_SetItemString will handle it internally.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ python/libvirt-override.c | 54 ++++++++++++++++++++++++++++++++++-------------
+ 1 file changed, 39 insertions(+), 15 deletions(-)
+
+diff --git a/python/libvirt-override.c b/python/libvirt-override.c
+index 4d261e8..fb0dced 100644
+--- a/python/libvirt-override.c
++++ b/python/libvirt-override.c
+@@ -4111,33 +4111,57 @@ libvirt_virDomainGetBlockJobInfo(PyObject *self ATTRIBUTE_UNUSED,
+     unsigned int flags;
+     virDomainBlockJobInfo info;
+     int c_ret;
+-    PyObject *ret;
++    PyObject *type = NULL, *bandwidth = NULL, *cur = NULL, *end = NULL;
++    PyObject *dict;
+ 
+     if (!PyArg_ParseTuple(args, (char *)"Ozi:virDomainGetBlockJobInfo",
+                           &pyobj_domain, &path, &flags))
+         return NULL;
+     domain = (virDomainPtr) PyvirDomain_Get(pyobj_domain);
+ 
+-LIBVIRT_BEGIN_ALLOW_THREADS;
++    if ((dict = PyDict_New()) == NULL)
++        return NULL;
++
++    LIBVIRT_BEGIN_ALLOW_THREADS;
+     c_ret = virDomainGetBlockJobInfo(domain, path, &info, flags);
+-LIBVIRT_END_ALLOW_THREADS;
++    LIBVIRT_END_ALLOW_THREADS;
+ 
+-    if (c_ret != 1)
++    if (c_ret == 0) {
++        return dict;
++    } else if (c_ret < 0) {
++        Py_DECREF(dict);
+         return VIR_PY_NONE;
++    }
+ 
+-    if ((ret = PyDict_New()) == NULL)
+-        return VIR_PY_NONE;
++    if ((type = libvirt_intWrap(info.type)) == NULL ||
++        PyDict_SetItemString(dict, "type", type) < 0)
++        goto error;
++    Py_DECREF(type);
++
++    if ((bandwidth = libvirt_ulongWrap(info.bandwidth)) == NULL ||
++        PyDict_SetItemString(dict, "bandwidth", bandwidth) < 0)
++        goto error;
++    Py_DECREF(bandwidth);
+ 
+-    PyDict_SetItem(ret, libvirt_constcharPtrWrap("type"),
+-                   libvirt_intWrap(info.type));
+-    PyDict_SetItem(ret, libvirt_constcharPtrWrap("bandwidth"),
+-                   libvirt_ulongWrap(info.bandwidth));
+-    PyDict_SetItem(ret, libvirt_constcharPtrWrap("cur"),
+-                   libvirt_ulonglongWrap(info.cur));
+-    PyDict_SetItem(ret, libvirt_constcharPtrWrap("end"),
+-                   libvirt_ulonglongWrap(info.end));
++    if ((cur = libvirt_ulonglongWrap(info.cur)) == NULL ||
++        PyDict_SetItemString(dict, "cur", cur) < 0)
++        goto error;
++    Py_DECREF(cur);
+ 
+-    return ret;
++    if ((end = libvirt_ulonglongWrap(info.end)) == NULL ||
++        PyDict_SetItemString(dict, "end", end) < 0)
++        goto error;
++    Py_DECREF(end);
++
++    return dict;
++
++error:
++    Py_DECREF(dict);
++    Py_XDECREF(type);
++    Py_XDECREF(bandwidth);
++    Py_XDECREF(cur);
++    Py_XDECREF(end);
++    return NULL;
+ }
+ 
+ static PyObject *
+-- 
+1.9.1
+

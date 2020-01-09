@@ -1,0 +1,90 @@
+From bbea09dccbbc0fda042850a4d6577874701c44d8 Mon Sep 17 00:00:00 2001
+Message-Id: <bbea09dccbbc0fda042850a4d6577874701c44d8@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 29 Jan 2015 13:04:02 +0100
+Subject: [PATCH] qemu: Update fsfreeze status on domain state transitions
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1136251
+https://bugzilla.redhat.com/show_bug.cgi?id=1160084
+
+As of b6d4dad1 (1.2.5) libvirt keeps track if domain disks have been
+frozen. However, this falls into that set of information which don't
+survive domain restart. Therefore, we need to clear the flag upon some
+state transitions. Moreover, once we clear the flag we must update the
+status file too.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 6ea54769ba1816b382698c4311588d7d1a9cd095)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+
+Conflicts:
+	src/qemu/qemu_driver.c -- no driver->xmlopt
+	src/qemu/qemu_process.c -- no fsfreeze in 6.7
+
+(cherry picked from commit 76b5c8de02143e3f7038c77c7c9ea7be2165159c)
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_driver.c | 17 +++++++++++------
+ 1 file changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 97ece61..7187005 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3854,11 +3854,6 @@ processGuestPanicEvent(struct qemud_driver *driver,
+         VIR_WARN("Unable to release lease on %s", vm->def->name);
+     VIR_DEBUG("Preserving lock state '%s'", NULLSTR(priv->lockState));
+ 
+-    if (virDomainSaveStatus(driver->caps, driver->stateDir, vm) < 0) {
+-        VIR_WARN("Unable to save status on vm %s after state change",
+-                 vm->def->name);
+-     }
+-
+     switch (action) {
+     case VIR_DOMAIN_LIFECYCLE_CRASH_COREDUMP_DESTROY:
+         if (doCoreDumpToAutoDumpPath(driver, vm, VIR_DUMP_MEMORY_ONLY) < 0) {
+@@ -3879,6 +3874,7 @@ processGuestPanicEvent(struct qemud_driver *driver,
+         if (!virDomainObjIsActive(vm)) {
+             virReportError(VIR_ERR_OPERATION_INVALID,
+                            "%s", _("domain is not running"));
++            vm = NULL;
+             goto cleanup;
+         }
+ 
+@@ -3894,6 +3890,7 @@ processGuestPanicEvent(struct qemud_driver *driver,
+ 
+         if (!vm->persistent) {
+             qemuDomainRemoveInactive(driver, vm);
++            vm = NULL;
+         }
+         break;
+ 
+@@ -3905,7 +3902,12 @@ processGuestPanicEvent(struct qemud_driver *driver,
+ 
+     case VIR_DOMAIN_LIFECYCLE_CRASH_RESTART:
+         qemuDomainSetFakeReboot(driver, vm, true);
++        if (virDomainSaveStatus(driver->caps, driver->stateDir, vm) < 0) {
++            VIR_WARN("Unable to save status on vm %s after state change",
++                     vm->def->name);
++        }
+         qemuProcessShutdownOrReboot(driver, vm);
++        vm = NULL;
+         break;
+ 
+     case VIR_DOMAIN_LIFECYCLE_CRASH_PRESERVE:
+@@ -3916,7 +3918,10 @@ processGuestPanicEvent(struct qemud_driver *driver,
+     }
+ 
+ cleanup:
+-    ;
++    if (vm && virDomainSaveStatus(driver->caps, driver->stateDir, vm) < 0) {
++        VIR_WARN("Unable to save status on vm %s after state change",
++                 vm->def->name);
++    }
+ }
+ 
+ 
+-- 
+2.2.2
+

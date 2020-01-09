@@ -1,0 +1,30 @@
+From dea78264147e5924638d180009b2f201f3cd4c7f Mon Sep 17 00:00:00 2001
+Message-Id: <dea78264147e5924638d180009b2f201f3cd4c7f.1373271643.git.jdenemar@redhat.com>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Mon, 24 Jun 2013 16:33:41 +0200
+Subject: [PATCH] conf: Fix cpumask leak in virDomainDefFree
+
+def->cpumask is a bitmap and needs to be freed by virBitmapFree.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=977430
+(cherry picked from commit 31f1f6bf4a8a3d68734207765364542348a98230)
+---
+ src/conf/domain_conf.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 4234541..8bdb2b7 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -1708,7 +1708,7 @@ void virDomainDefFree(virDomainDefPtr def)
+     virDomainClockDefClear(&def->clock);
+ 
+     VIR_FREE(def->name);
+-    VIR_FREE(def->cpumask);
++    virBitmapFree(def->cpumask);
+     VIR_FREE(def->emulator);
+     VIR_FREE(def->description);
+     VIR_FREE(def->title);
+-- 
+1.8.2.1
+
