@@ -319,7 +319,7 @@
 Summary: Library providing a simple virtualization API
 Name: libvirt
 Version: 0.10.2
-Release: 62%{?dist}.1%{?extra_release}
+Release: 62%{?dist}.2%{?extra_release}
 License: LGPLv2+
 Group: Development/Libraries
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
@@ -1278,6 +1278,7 @@ Patch943: libvirt-util-add-virFileReadHeaderQuiet-wrapper-around-virFileReadHead
 Patch944: libvirt-util-introduce-virHostCPUGetMicrocodeVersion.patch
 Patch945: libvirt-conf-include-x86-microcode-version-in-virsh-capabiltiies.patch
 Patch946: libvirt-cpu-add-CPU-features-and-model-for-indirect-branch-prediction-protection.patch
+Patch947: libvirt-cpu-define-the-ssbd-CPUID-feature-bit-CVE-2018-3639.patch
 
 
 # All runtime requirements for the libvirt package (runtime requrements
@@ -2458,6 +2459,9 @@ rm -f $RPM_BUILD_ROOT%{_sysconfdir}/sysctl.d/libvirtd
 %endif
 
 %changelog
+* Thu May 10 2018 Jiri Denemark <jdenemar@redhat.com> - 0.10.2-62.el6_9.2
+- cpu: define the 'ssbd' CPUID feature bit (CVE-2018-3639)
+
 * Fri Dec 15 2017 Jiri Denemark <jdenemar@redhat.com> - 0.10.2-62.el6_9.1
 - util: Implement virFileReadHeaderFD (CVE-2017-5715)
 - util: add virFileReadHeaderQuiet wrapper around virFileReadHeaderFD (CVE-2017-5715)
