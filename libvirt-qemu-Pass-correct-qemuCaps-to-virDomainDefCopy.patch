@@ -1,0 +1,504 @@
+From bdb0a40645dc91fe4fea4327634e118cc22c3c1c Mon Sep 17 00:00:00 2001
+Message-Id: <bdb0a40645dc91fe4fea4327634e118cc22c3c1c@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 Aug 2019 14:52:33 +0200
+Subject: [PATCH] qemu: Pass correct qemuCaps to virDomainDefCopy
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since qemuDomainDefPostParse callback requires qemuCaps, we need to make
+sure it gets the capabilities stored in the domain's private data if the
+domain is running. Passing NULL may cause QEMU capabilities probing to
+be triggered in case QEMU binary changed in the meantime. When this
+happens while a running domain object is locked, QMP event delivered to
+the domain before QEMU capabilities probing finishes will deadlock the
+event loop.
+
+Several general functions from domain_conf.c were lazily passing NULL as
+the parseOpaque pointer instead of letting their callers pass the right
+data. This patch fixes all paths leading to virDomainDefCopy to do the
+right thing.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit bbcfa07bea4fbe2fe8a51f99f20c77ddefd2d40d)
+
+Conflicts:
+	src/lxc/lxc_driver.c
+            - context
+
+	src/qemu/qemu_driver.c
+            - qemuDomainAttachDeviceLiveAndConfig is quite different
+            - context in qemuDomainRevertToSnapshot
+            - ProcessAttach API was removed upstream
+
+	src/uml/uml_driver.c
+            - uml driver was removed upstream
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1731783
+https://bugzilla.redhat.com/show_bug.cgi?id=1742023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <eadbc85f47469abe211d649d5414c2474a65f56c.1565959866.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c      | 18 +++++++++++-------
+ src/conf/domain_conf.h      |  9 ++++++---
+ src/libxl/libxl_domain.c    |  2 +-
+ src/libxl/libxl_driver.c    | 10 +++++-----
+ src/libxl/libxl_migration.c |  2 +-
+ src/lxc/lxc_driver.c        |  8 ++++----
+ src/lxc/lxc_process.c       |  2 +-
+ src/qemu/qemu_driver.c      | 28 ++++++++++++++++++++--------
+ src/qemu/qemu_migration.c   |  4 +++-
+ src/qemu/qemu_process.c     |  4 ++--
+ src/test/test_driver.c      |  2 +-
+ src/uml/uml_driver.c        |  2 +-
+ tests/qemuhotplugtest.c     |  2 +-
+ 13 files changed, 57 insertions(+), 36 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index aaf6a6bab1..0fdf1742fd 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -3374,7 +3374,8 @@ virDomainObjWaitUntil(virDomainObjPtr vm,
+ int
+ virDomainObjSetDefTransient(virCapsPtr caps,
+                             virDomainXMLOptionPtr xmlopt,
+-                            virDomainObjPtr domain)
++                            virDomainObjPtr domain,
++                            void *parseOpaque)
+ {
+     int ret = -1;
+ 
+@@ -3384,7 +3385,8 @@ virDomainObjSetDefTransient(virCapsPtr caps,
+     if (domain->newDef)
+         return 0;
+ 
+-    if (!(domain->newDef = virDomainDefCopy(domain->def, caps, xmlopt, NULL, false)))
++    if (!(domain->newDef = virDomainDefCopy(domain->def, caps, xmlopt,
++                                            parseOpaque, false)))
+         goto out;
+ 
+     ret = 0;
+@@ -3423,10 +3425,11 @@ virDomainObjRemoveTransientDef(virDomainObjPtr domain)
+ virDomainDefPtr
+ virDomainObjGetPersistentDef(virCapsPtr caps,
+                              virDomainXMLOptionPtr xmlopt,
+-                             virDomainObjPtr domain)
++                             virDomainObjPtr domain,
++                             void *parseOpaque)
+ {
+     if (virDomainObjIsActive(domain) &&
+-        virDomainObjSetDefTransient(caps, xmlopt, domain) < 0)
++        virDomainObjSetDefTransient(caps, xmlopt, domain, parseOpaque) < 0)
+         return NULL;
+ 
+     if (domain->newDef)
+@@ -29180,12 +29183,13 @@ virDomainDefCopy(virDomainDefPtr src,
+ virDomainDefPtr
+ virDomainObjCopyPersistentDef(virDomainObjPtr dom,
+                               virCapsPtr caps,
+-                              virDomainXMLOptionPtr xmlopt)
++                              virDomainXMLOptionPtr xmlopt,
++                              void *parseOpaque)
+ {
+     virDomainDefPtr cur;
+ 
+-    cur = virDomainObjGetPersistentDef(caps, xmlopt, dom);
+-    return virDomainDefCopy(cur, caps, xmlopt, NULL, false);
++    cur = virDomainObjGetPersistentDef(caps, xmlopt, dom, parseOpaque);
++    return virDomainDefCopy(cur, caps, xmlopt, parseOpaque, false);
+ }
+ 
+ 
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 2d272f907f..9e4fed6d4e 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2940,12 +2940,14 @@ void virDomainObjAssignDef(virDomainObjPtr domain,
+                            virDomainDefPtr *oldDef);
+ int virDomainObjSetDefTransient(virCapsPtr caps,
+                                 virDomainXMLOptionPtr xmlopt,
+-                                virDomainObjPtr domain);
++                                virDomainObjPtr domain,
++                                void *parseOpaque);
+ void virDomainObjRemoveTransientDef(virDomainObjPtr domain);
+ virDomainDefPtr
+ virDomainObjGetPersistentDef(virCapsPtr caps,
+                              virDomainXMLOptionPtr xmlopt,
+-                             virDomainObjPtr domain);
++                             virDomainObjPtr domain,
++                             void *parseOpaque);
+ 
+ int virDomainObjUpdateModificationImpact(virDomainObjPtr vm,
+                                          unsigned int *flags);
+@@ -2966,7 +2968,8 @@ virDomainDefPtr virDomainDefCopy(virDomainDefPtr src,
+                                  bool migratable);
+ virDomainDefPtr virDomainObjCopyPersistentDef(virDomainObjPtr dom,
+                                               virCapsPtr caps,
+-                                              virDomainXMLOptionPtr xmlopt);
++                                              virDomainXMLOptionPtr xmlopt,
++                                              void *parseOpaque);
+ 
+ typedef enum {
+     /* parse internal domain status information */
+diff --git a/src/libxl/libxl_domain.c b/src/libxl/libxl_domain.c
+index 2ab78ac9a5..f52540e6a7 100644
+--- a/src/libxl/libxl_domain.c
++++ b/src/libxl/libxl_domain.c
+@@ -1208,7 +1208,7 @@ libxlDomainStart(libxlDriverPrivatePtr driver,
+         VIR_FREE(managed_save_path);
+     }
+ 
+-    if (virDomainObjSetDefTransient(cfg->caps, driver->xmlopt, vm) < 0)
++    if (virDomainObjSetDefTransient(cfg->caps, driver->xmlopt, vm, NULL) < 0)
+         goto cleanup;
+ 
+     /* Run an early hook to set-up missing devices */
+diff --git a/src/libxl/libxl_driver.c b/src/libxl/libxl_driver.c
+index 5a5e792957..be6b66ce7e 100644
+--- a/src/libxl/libxl_driver.c
++++ b/src/libxl/libxl_driver.c
+@@ -1461,7 +1461,7 @@ virDomainLiveConfigHelperMethod(virCapsPtr caps,
+         return -1;
+ 
+     if (*flags & VIR_DOMAIN_AFFECT_CONFIG) {
+-        if (!(*persistentDef = virDomainObjGetPersistentDef(caps, xmlopt, dom))) {
++        if (!(*persistentDef = virDomainObjGetPersistentDef(caps, xmlopt, dom, NULL))) {
+             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                            _("Get persistent config failed"));
+             return -1;
+@@ -2147,7 +2147,7 @@ libxlDomainSetVcpusFlags(virDomainPtr dom, unsigned int nvcpus,
+         goto endjob;
+     }
+ 
+-    if (!(def = virDomainObjGetPersistentDef(cfg->caps, driver->xmlopt, vm)))
++    if (!(def = virDomainObjGetPersistentDef(cfg->caps, driver->xmlopt, vm, NULL)))
+         goto endjob;
+ 
+     maplen = VIR_CPU_MAPLEN(nvcpus);
+@@ -3961,7 +3961,7 @@ libxlDomainAttachDeviceFlags(virDomainPtr dom, const char *xml,
+ 
+         /* Make a copy for updated domain. */
+         if (!(vmdef = virDomainObjCopyPersistentDef(vm, cfg->caps,
+-                                                    driver->xmlopt)))
++                                                    driver->xmlopt, NULL)))
+             goto endjob;
+ 
+         if (libxlDomainAttachDeviceConfig(vmdef, dev) < 0)
+@@ -4051,7 +4051,7 @@ libxlDomainDetachDeviceFlags(virDomainPtr dom, const char *xml,
+ 
+         /* Make a copy for updated domain. */
+         if (!(vmdef = virDomainObjCopyPersistentDef(vm, cfg->caps,
+-                                                    driver->xmlopt)))
++                                                    driver->xmlopt, NULL)))
+             goto endjob;
+ 
+         if (libxlDomainDetachDeviceConfig(vmdef, dev) < 0)
+@@ -4138,7 +4138,7 @@ libxlDomainUpdateDeviceFlags(virDomainPtr dom, const char *xml,
+ 
+         /* Make a copy for updated domain. */
+         if (!(vmdef = virDomainObjCopyPersistentDef(vm, cfg->caps,
+-                                                    driver->xmlopt)))
++                                                    driver->xmlopt, NULL)))
+             goto cleanup;
+ 
+         if ((ret = libxlDomainUpdateDeviceConfig(vmdef, dev)) < 0)
+diff --git a/src/libxl/libxl_migration.c b/src/libxl/libxl_migration.c
+index b2e5847c58..f207bd7b02 100644
+--- a/src/libxl/libxl_migration.c
++++ b/src/libxl/libxl_migration.c
+@@ -1293,7 +1293,7 @@ libxlDomainMigrationDstFinish(virConnectPtr dconn,
+ 
+         vm->persistent = 1;
+         if (!(vmdef = virDomainObjGetPersistentDef(cfg->caps,
+-                                                   driver->xmlopt, vm)))
++                                                   driver->xmlopt, vm, NULL)))
+             goto cleanup;
+ 
+         if (virDomainSaveConfig(cfg->configDir, cfg->caps, vmdef) < 0)
+diff --git a/src/lxc/lxc_driver.c b/src/lxc/lxc_driver.c
+index f9794e0655..b182fa3759 100644
+--- a/src/lxc/lxc_driver.c
++++ b/src/lxc/lxc_driver.c
+@@ -1936,7 +1936,7 @@ lxcDomainSetSchedulerParametersFlags(virDomainPtr dom,
+ 
+     if (persistentDef) {
+         /* Make a copy for updated domain. */
+-        persistentDefCopy = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt);
++        persistentDefCopy = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt, NULL);
+         if (!persistentDefCopy)
+             goto endjob;
+     }
+@@ -4755,7 +4755,7 @@ static int lxcDomainAttachDeviceFlags(virDomainPtr dom,
+ 
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         /* Make a copy for updated domain. */
+-        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt);
++        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt, NULL);
+         if (!vmdef)
+             goto endjob;
+ 
+@@ -4870,7 +4870,7 @@ static int lxcDomainUpdateDeviceFlags(virDomainPtr dom,
+ 
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         /* Make a copy for updated domain. */
+-        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt);
++        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt, NULL);
+         if (!vmdef)
+             goto endjob;
+ 
+@@ -4961,7 +4961,7 @@ static int lxcDomainDetachDeviceFlags(virDomainPtr dom,
+ 
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         /* Make a copy for updated domain. */
+-        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt);
++        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt, NULL);
+         if (!vmdef)
+             goto endjob;
+ 
+diff --git a/src/lxc/lxc_process.c b/src/lxc/lxc_process.c
+index 14502e12fe..d40c7acaaa 100644
+--- a/src/lxc/lxc_process.c
++++ b/src/lxc/lxc_process.c
+@@ -1274,7 +1274,7 @@ int virLXCProcessStart(virConnectPtr conn,
+      * report implicit runtime defaults in the XML, like vnc listen/socket
+      */
+     VIR_DEBUG("Setting current domain def as transient");
+-    if (virDomainObjSetDefTransient(caps, driver->xmlopt, vm) < 0)
++    if (virDomainObjSetDefTransient(caps, driver->xmlopt, vm, NULL) < 0)
+         goto cleanup;
+ 
+     /* Run an early hook to set-up missing devices */
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 3f8530eb0e..82371b9a66 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -8379,6 +8379,7 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObjPtr vm,
+                                     const char *xml,
+                                     unsigned int flags)
+ {
++    qemuDomainObjPrivatePtr priv = vm->privateData;
+     virDomainDefPtr vmdef = NULL;
+     virQEMUDriverConfigPtr cfg = NULL;
+     virDomainDeviceDefPtr dev = NULL, dev_copy = NULL;
+@@ -8417,7 +8418,7 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObjPtr vm,
+ 
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         /* Make a copy for updated domain. */
+-        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt);
++        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt, priv->qemuCaps);
+         if (!vmdef)
+             goto cleanup;
+ 
+@@ -8520,6 +8521,7 @@ static int qemuDomainUpdateDeviceFlags(virDomainPtr dom,
+ {
+     virQEMUDriverPtr driver = dom->conn->privateData;
+     virDomainObjPtr vm = NULL;
++    qemuDomainObjPrivatePtr priv;
+     virDomainDefPtr vmdef = NULL;
+     virDomainDeviceDefPtr dev = NULL, dev_copy = NULL;
+     bool force = (flags & VIR_DOMAIN_DEVICE_MODIFY_FORCE) != 0;
+@@ -8542,6 +8544,8 @@ static int qemuDomainUpdateDeviceFlags(virDomainPtr dom,
+     if (!(vm = qemuDomObjFromDomain(dom)))
+         goto cleanup;
+ 
++    priv = vm->privateData;
++
+     if (virDomainUpdateDeviceFlagsEnsureACL(dom->conn, vm->def, flags) < 0)
+         goto cleanup;
+ 
+@@ -8574,7 +8578,8 @@ static int qemuDomainUpdateDeviceFlags(virDomainPtr dom,
+ 
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         /* Make a copy for updated domain. */
+-        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt);
++        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt,
++                                              priv->qemuCaps);
+         if (!vmdef)
+             goto endjob;
+ 
+@@ -8632,6 +8637,7 @@ qemuDomainDetachDeviceLiveAndConfig(virQEMUDriverPtr driver,
+                                     const char *xml,
+                                     unsigned int flags)
+ {
++    qemuDomainObjPrivatePtr priv = vm->privateData;
+     virCapsPtr caps = NULL;
+     virQEMUDriverConfigPtr cfg = NULL;
+     virDomainDeviceDefPtr dev = NULL, dev_copy = NULL;
+@@ -8670,7 +8676,7 @@ qemuDomainDetachDeviceLiveAndConfig(virQEMUDriverPtr driver,
+ 
+     if (flags & VIR_DOMAIN_AFFECT_CONFIG) {
+         /* Make a copy for updated domain. */
+-        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt);
++        vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt, priv->qemuCaps);
+         if (!vmdef)
+             goto cleanup;
+ 
+@@ -8726,6 +8732,7 @@ qemuDomainDetachDeviceAliasLiveAndConfig(virQEMUDriverPtr driver,
+                                          const char *alias,
+                                          unsigned int flags)
+ {
++    qemuDomainObjPrivatePtr priv = vm->privateData;
+     virCapsPtr caps = NULL;
+     virQEMUDriverConfigPtr cfg = NULL;
+     virDomainDefPtr def = NULL;
+@@ -8752,7 +8759,8 @@ qemuDomainDetachDeviceAliasLiveAndConfig(virQEMUDriverPtr driver,
+     if (persistentDef) {
+         virDomainDeviceDef dev;
+ 
+-        if (!(vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt)))
++        if (!(vmdef = virDomainObjCopyPersistentDef(vm, caps, driver->xmlopt,
++                                                    priv->qemuCaps)))
+             goto cleanup;
+ 
+         if (virDomainDefFindDevice(vmdef, alias, &dev, true) < 0)
+@@ -10368,7 +10376,8 @@ qemuDomainSetSchedulerParametersFlags(virDomainPtr dom,
+     if (persistentDef) {
+         /* Make a copy for updated domain. */
+         if (!(persistentDefCopy = virDomainObjCopyPersistentDef(vm, caps,
+-                                                                driver->xmlopt)))
++                                                                driver->xmlopt,
++                                                                priv->qemuCaps)))
+             goto endjob;
+     }
+ 
+@@ -15975,6 +15984,7 @@ qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+     if (!(vm = qemuDomObjFromSnapshot(snapshot)))
+         goto cleanup;
+ 
++    priv = vm->privateData;
+     cfg = virQEMUDriverGetConfig(driver);
+ 
+     if (virDomainRevertToSnapshotEnsureACL(snapshot->domain->conn, vm->def) < 0)
+@@ -16052,7 +16062,7 @@ qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+     snap->def->current = true;
+     if (snap->def->dom) {
+         config = virDomainDefCopy(snap->def->dom, caps,
+-                                  driver->xmlopt, NULL, true);
++                                  driver->xmlopt, priv->qemuCaps, true);
+         if (!config)
+             goto endjob;
+     }
+@@ -16062,7 +16072,6 @@ qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+     switch ((virDomainState) snap->def->state) {
+     case VIR_DOMAIN_RUNNING:
+     case VIR_DOMAIN_PAUSED:
+-        priv = vm->privateData;
+         start_flags |= VIR_QEMU_PROCESS_START_PAUSED;
+ 
+         /* Transitions 2, 3, 5, 6, 8, 9 */
+@@ -20500,6 +20509,7 @@ qemuDomainGetFSInfo(virDomainPtr dom,
+                     unsigned int flags)
+ {
+     virQEMUDriverPtr driver = dom->conn->privateData;
++    qemuDomainObjPrivatePtr priv;
+     virDomainObjPtr vm;
+     qemuAgentPtr agent;
+     virCapsPtr caps = NULL;
+@@ -20511,6 +20521,8 @@ qemuDomainGetFSInfo(virDomainPtr dom,
+     if (!(vm = qemuDomObjFromDomain(dom)))
+         return ret;
+ 
++    priv = vm->privateData;
++
+     if (virDomainGetFSInfoEnsureACL(dom->conn, vm->def) < 0)
+         goto cleanup;
+ 
+@@ -20526,7 +20538,7 @@ qemuDomainGetFSInfo(virDomainPtr dom,
+     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
+         goto endjob;
+ 
+-    if (!(def = virDomainDefCopy(vm->def, caps, driver->xmlopt, NULL, false)))
++    if (!(def = virDomainDefCopy(vm->def, caps, driver->xmlopt, priv->qemuCaps, false)))
+         goto endjob;
+ 
+     agent = qemuDomainObjEnterAgent(vm);
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index f5d77d2508..b7f4110baf 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -4850,6 +4850,7 @@ qemuMigrationDstPersist(virQEMUDriverPtr driver,
+                         bool ignoreSaveError)
+ {
+     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
++    qemuDomainObjPrivatePtr priv = vm->privateData;
+     virCapsPtr caps = NULL;
+     virDomainDefPtr vmdef;
+     virDomainDefPtr oldDef = NULL;
+@@ -4864,7 +4865,8 @@ qemuMigrationDstPersist(virQEMUDriverPtr driver,
+     oldDef = vm->newDef;
+     vm->newDef = qemuMigrationCookieGetPersistent(mig);
+ 
+-    if (!(vmdef = virDomainObjGetPersistentDef(caps, driver->xmlopt, vm)))
++    if (!(vmdef = virDomainObjGetPersistentDef(caps, driver->xmlopt, vm,
++                                               priv->qemuCaps)))
+         goto error;
+ 
+     if (virDomainSaveConfig(cfg->configDir, driver->caps, vmdef) < 0 &&
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 34686b4d92..08e1d91fcc 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -5375,7 +5375,7 @@ qemuProcessInit(virQEMUDriverPtr driver,
+      * report implicit runtime defaults in the XML, like vnc listen/socket
+      */
+     VIR_DEBUG("Setting current domain def as transient");
+-    if (virDomainObjSetDefTransient(caps, driver->xmlopt, vm) < 0)
++    if (virDomainObjSetDefTransient(caps, driver->xmlopt, vm, priv->qemuCaps) < 0)
+         goto cleanup;
+ 
+     if (flags & VIR_QEMU_PROCESS_START_PRETEND) {
+@@ -7314,7 +7314,7 @@ int qemuProcessAttach(virConnectPtr conn ATTRIBUTE_UNUSED,
+      * report implicit runtime defaults in the XML, like vnc listen/socket
+      */
+     VIR_DEBUG("Setting current domain def as transient");
+-    if (virDomainObjSetDefTransient(caps, driver->xmlopt, vm) < 0)
++    if (virDomainObjSetDefTransient(caps, driver->xmlopt, vm, NULL) < 0)
+         goto error;
+ 
+     vm->def->id = qemuDriverAllocateID(driver);
+diff --git a/src/test/test_driver.c b/src/test/test_driver.c
+index 5494d51017..1a25b37729 100644
+--- a/src/test/test_driver.c
++++ b/src/test/test_driver.c
+@@ -657,7 +657,7 @@ testDomainStartState(testDriverPtr privconn,
+ 
+     if (virDomainObjSetDefTransient(privconn->caps,
+                                     privconn->xmlopt,
+-                                    dom) < 0) {
++                                    dom, NULL) < 0) {
+         goto cleanup;
+     }
+ 
+diff --git a/src/uml/uml_driver.c b/src/uml/uml_driver.c
+index c77988f01e..796de53d43 100644
+--- a/src/uml/uml_driver.c
++++ b/src/uml/uml_driver.c
+@@ -1092,7 +1092,7 @@ static int umlStartVMDaemon(virConnectPtr conn,
+      * report implicit runtime defaults in the XML, like vnc listen/socket
+      */
+     VIR_DEBUG("Setting current domain def as transient");
+-    if (virDomainObjSetDefTransient(driver->caps, driver->xmlopt, vm) < 0) {
++    if (virDomainObjSetDefTransient(driver->caps, driver->xmlopt, vm, NULL) < 0) {
+         VIR_FORCE_CLOSE(logfd);
+         return -1;
+     }
+diff --git a/tests/qemuhotplugtest.c b/tests/qemuhotplugtest.c
+index bc199685c6..2dbf768e16 100644
+--- a/tests/qemuhotplugtest.c
++++ b/tests/qemuhotplugtest.c
+@@ -425,7 +425,7 @@ testQemuHotplugCpuPrepare(const char *test,
+ 
+     /* create vm->newDef */
+     data->vm->persistent = true;
+-    if (virDomainObjSetDefTransient(caps, driver.xmlopt, data->vm) < 0)
++    if (virDomainObjSetDefTransient(caps, driver.xmlopt, data->vm, NULL) < 0)
+         goto error;
+ 
+     priv = data->vm->privateData;
+-- 
+2.22.1
+

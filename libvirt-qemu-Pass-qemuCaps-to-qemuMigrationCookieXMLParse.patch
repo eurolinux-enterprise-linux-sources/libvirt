@@ -1,0 +1,82 @@
+From 2178a6fc22688ff6c6464593823f11ead8cbe981 Mon Sep 17 00:00:00 2001
+Message-Id: <2178a6fc22688ff6c6464593823f11ead8cbe981@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 Aug 2019 14:52:32 +0200
+Subject: [PATCH] qemu: Pass qemuCaps to qemuMigrationCookieXMLParse
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since qemuDomainDefPostParse callback requires qemuCaps, we need to make
+sure it gets the capabilities stored in the domain's private data if the
+domain is running. Passing NULL may cause QEMU capabilities probing to
+be triggered in case QEMU binary changed in the meantime. When this
+happens while a running domain object is locked, QMP event delivered to
+the domain before QEMU capabilities probing finishes will deadlock the
+event loop.
+
+This patch fixes all paths leading to qemuMigrationCookieXMLParse.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit bf15b145ec473c0ca5bfe8aee2bf0eb1691b6f1c)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1731783
+https://bugzilla.redhat.com/show_bug.cgi?id=1742023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <bb8b9769eaec4dcbbaef5e5acc84d1a28d6e82a0.1565959866.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_migration_cookie.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_migration_cookie.c b/src/qemu/qemu_migration_cookie.c
+index 901b1ae9ac..b9933b9e04 100644
+--- a/src/qemu/qemu_migration_cookie.c
++++ b/src/qemu/qemu_migration_cookie.c
+@@ -1194,6 +1194,7 @@ qemuMigrationCookieCapsXMLParse(xmlXPathContextPtr ctxt)
+ static int
+ qemuMigrationCookieXMLParse(qemuMigrationCookiePtr mig,
+                             virQEMUDriverPtr driver,
++                            virQEMUCapsPtr qemuCaps,
+                             xmlDocPtr doc,
+                             xmlXPathContextPtr ctxt,
+                             unsigned int flags)
+@@ -1335,7 +1336,7 @@ qemuMigrationCookieXMLParse(qemuMigrationCookiePtr mig,
+             goto error;
+         }
+         mig->persistent = virDomainDefParseNode(doc, nodes[0],
+-                                                caps, driver->xmlopt, NULL,
++                                                caps, driver->xmlopt, qemuCaps,
+                                                 VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                                 VIR_DOMAIN_DEF_PARSE_ABI_UPDATE_MIGRATION |
+                                                 VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
+@@ -1388,6 +1389,7 @@ qemuMigrationCookieXMLParse(qemuMigrationCookiePtr mig,
+ static int
+ qemuMigrationCookieXMLParseStr(qemuMigrationCookiePtr mig,
+                                virQEMUDriverPtr driver,
++                               virQEMUCapsPtr qemuCaps,
+                                const char *xml,
+                                unsigned int flags)
+ {
+@@ -1400,7 +1402,7 @@ qemuMigrationCookieXMLParseStr(qemuMigrationCookiePtr mig,
+     if (!(doc = virXMLParseStringCtxt(xml, _("(qemu_migration_cookie)"), &ctxt)))
+         goto cleanup;
+ 
+-    ret = qemuMigrationCookieXMLParse(mig, driver, doc, ctxt, flags);
++    ret = qemuMigrationCookieXMLParse(mig, driver, qemuCaps, doc, ctxt, flags);
+ 
+  cleanup:
+     xmlXPathFreeContext(ctxt);
+@@ -1501,6 +1503,7 @@ qemuMigrationEatCookie(virQEMUDriverPtr driver,
+     if (cookiein && cookieinlen &&
+         qemuMigrationCookieXMLParseStr(mig,
+                                        driver,
++                                       priv->qemuCaps,
+                                        cookiein,
+                                        flags) < 0)
+         goto error;
+-- 
+2.22.1
+

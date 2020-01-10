@@ -1,0 +1,45 @@
+From f8aa84166ddd8a603cce1ec02ff7630e78bb1a9b Mon Sep 17 00:00:00 2001
+Message-Id: <f8aa84166ddd8a603cce1ec02ff7630e78bb1a9b@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 Aug 2019 14:52:37 +0200
+Subject: [PATCH] qemu: Fix crash on incoming migration
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In the first stage of incoming migration (qemuMigrationDstPrepareAny) we
+call qemuMigrationEatCookie when there's no vm object created yet and
+thus we don't have any private data to pass.
+
+Broken by me in commit v5.6.0-109-gbf15b145ec.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit 69b1ecde25aef6545cc077fe3c92ba19f1623828)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1731783
+https://bugzilla.redhat.com/show_bug.cgi?id=1742023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <7e7b2059ff2bcbc082c3fdd8f6723b1771db289b.1565959866.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_migration_cookie.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_migration_cookie.c b/src/qemu/qemu_migration_cookie.c
+index b9933b9e04..8c8df89b1b 100644
+--- a/src/qemu/qemu_migration_cookie.c
++++ b/src/qemu/qemu_migration_cookie.c
+@@ -1503,7 +1503,7 @@ qemuMigrationEatCookie(virQEMUDriverPtr driver,
+     if (cookiein && cookieinlen &&
+         qemuMigrationCookieXMLParseStr(mig,
+                                        driver,
+-                                       priv->qemuCaps,
++                                       priv ? priv->qemuCaps : NULL,
+                                        cookiein,
+                                        flags) < 0)
+         goto error;
+-- 
+2.22.1
+

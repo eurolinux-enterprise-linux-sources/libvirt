@@ -1,0 +1,201 @@
+From 7a3e5357cdd44f372dc8020395bdfd818d3453ed Mon Sep 17 00:00:00 2001
+Message-Id: <7a3e5357cdd44f372dc8020395bdfd818d3453ed@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 Aug 2019 14:52:27 +0200
+Subject: [PATCH] qemu: Pass qemuCaps to qemuDomainDefCopy
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since qemuDomainDefPostParse callback requires qemuCaps, we need to make
+sure it gets the capabilities stored in the domain's private data if the
+domain is running. Passing NULL may cause QEMU capabilities probing to
+be triggered in case QEMU binary changed in the meantime. When this
+happens while a running domain object is locked, QMP event delivered to
+the domain before QEMU capabilities probing finishes will deadlock the
+event loop.
+
+This patch fixes all paths leading to qemuDomainDefCopy.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit a42f889591c16235e0fe349e509af896fa1ea5ff)
+
+Conflicts:
+	src/qemu/qemu_driver.c
+            - context
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1731783
+https://bugzilla.redhat.com/show_bug.cgi?id=1742023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <6ecee413894eadadaf37884be7dd4136ad2de403.1565959866.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_domain.c    | 16 ++++++++++------
+ src/qemu/qemu_domain.h    |  2 ++
+ src/qemu/qemu_driver.c    |  9 +++++----
+ src/qemu/qemu_migration.c |  4 ++--
+ 4 files changed, 19 insertions(+), 12 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 81699110fc..bf6013d42a 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -7203,6 +7203,7 @@ qemuDomainObjExitRemote(virDomainObjPtr obj,
+ 
+ static virDomainDefPtr
+ qemuDomainDefFromXML(virQEMUDriverPtr driver,
++                     virQEMUCapsPtr qemuCaps,
+                      const char *xml)
+ {
+     virCapsPtr caps;
+@@ -7211,7 +7212,7 @@ qemuDomainDefFromXML(virQEMUDriverPtr driver,
+     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
+         return NULL;
+ 
+-    def = virDomainDefParseString(xml, caps, driver->xmlopt, NULL,
++    def = virDomainDefParseString(xml, caps, driver->xmlopt, qemuCaps,
+                                   VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                   VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
+ 
+@@ -7222,6 +7223,7 @@ qemuDomainDefFromXML(virQEMUDriverPtr driver,
+ 
+ virDomainDefPtr
+ qemuDomainDefCopy(virQEMUDriverPtr driver,
++                  virQEMUCapsPtr qemuCaps,
+                   virDomainDefPtr src,
+                   unsigned int flags)
+ {
+@@ -7231,7 +7233,7 @@ qemuDomainDefCopy(virQEMUDriverPtr driver,
+     if (!(xml = qemuDomainDefFormatXML(driver, src, flags)))
+         return NULL;
+ 
+-    ret = qemuDomainDefFromXML(driver, xml);
++    ret = qemuDomainDefFromXML(driver, qemuCaps, xml);
+ 
+     VIR_FREE(xml);
+     return ret;
+@@ -9052,6 +9054,7 @@ qemuDomainMigratableDefCheckABIStability(virQEMUDriverPtr driver,
+ 
+ bool
+ qemuDomainDefCheckABIStability(virQEMUDriverPtr driver,
++                               virQEMUCapsPtr qemuCaps,
+                                virDomainDefPtr src,
+                                virDomainDefPtr dst)
+ {
+@@ -9059,8 +9062,8 @@ qemuDomainDefCheckABIStability(virQEMUDriverPtr driver,
+     virDomainDefPtr migratableDefDst = NULL;
+     bool ret = false;
+ 
+-    if (!(migratableDefSrc = qemuDomainDefCopy(driver, src, COPY_FLAGS)) ||
+-        !(migratableDefDst = qemuDomainDefCopy(driver, dst, COPY_FLAGS)))
++    if (!(migratableDefSrc = qemuDomainDefCopy(driver, qemuCaps, src, COPY_FLAGS)) ||
++        !(migratableDefDst = qemuDomainDefCopy(driver, qemuCaps, dst, COPY_FLAGS)))
+         goto cleanup;
+ 
+     ret = qemuDomainMigratableDefCheckABIStability(driver,
+@@ -9079,14 +9082,15 @@ qemuDomainCheckABIStability(virQEMUDriverPtr driver,
+                             virDomainObjPtr vm,
+                             virDomainDefPtr dst)
+ {
++    qemuDomainObjPrivatePtr priv = vm->privateData;
+     virDomainDefPtr migratableSrc = NULL;
+     virDomainDefPtr migratableDst = NULL;
+     char *xml = NULL;
+     bool ret = false;
+ 
+     if (!(xml = qemuDomainFormatXML(driver, vm, COPY_FLAGS)) ||
+-        !(migratableSrc = qemuDomainDefFromXML(driver, xml)) ||
+-        !(migratableDst = qemuDomainDefCopy(driver, dst, COPY_FLAGS)))
++        !(migratableSrc = qemuDomainDefFromXML(driver, priv->qemuCaps, xml)) ||
++        !(migratableDst = qemuDomainDefCopy(driver, priv->qemuCaps, dst, COPY_FLAGS)))
+         goto cleanup;
+ 
+     ret = qemuDomainMigratableDefCheckABIStability(driver,
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index cc406e3ca0..29283105cb 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -594,6 +594,7 @@ int qemuDomainObjExitRemote(virDomainObjPtr obj,
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+ 
+ virDomainDefPtr qemuDomainDefCopy(virQEMUDriverPtr driver,
++                                  virQEMUCapsPtr qemuCaps,
+                                   virDomainDefPtr src,
+                                   unsigned int flags);
+ 
+@@ -769,6 +770,7 @@ int qemuDomainUpdateMemoryDeviceInfo(virQEMUDriverPtr driver,
+                                      int asyncJob);
+ 
+ bool qemuDomainDefCheckABIStability(virQEMUDriverPtr driver,
++                                    virQEMUCapsPtr qemuCaps,
+                                     virDomainDefPtr src,
+                                     virDomainDefPtr dst);
+ 
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 25818f5d8c..a486c66a5f 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -6325,7 +6325,7 @@ qemuDomainSaveImageUpdateDef(virQEMUDriverPtr driver,
+                                            VIR_DOMAIN_DEF_PARSE_INACTIVE)))
+         goto cleanup;
+ 
+-    if (!(newdef_migr = qemuDomainDefCopy(driver,
++    if (!(newdef_migr = qemuDomainDefCopy(driver, NULL,
+                                           newdef,
+                                           QEMU_DOMAIN_FORMAT_LIVE_FLAGS |
+                                           VIR_DOMAIN_XML_MIGRATABLE)))
+@@ -16052,7 +16052,7 @@ qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+     switch ((virDomainState) snap->def->state) {
+     case VIR_DOMAIN_RUNNING:
+     case VIR_DOMAIN_PAUSED:
+-
++        priv = vm->privateData;
+         start_flags |= VIR_QEMU_PROCESS_START_PAUSED;
+ 
+         /* Transitions 2, 3, 5, 6, 8, 9 */
+@@ -16079,7 +16079,9 @@ qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+                     if (!(config->cpu = virCPUDefCopy(cookie->cpu)))
+                         goto endjob;
+ 
+-                    compatible = qemuDomainDefCheckABIStability(driver, vm->def,
++                    compatible = qemuDomainDefCheckABIStability(driver,
++                                                                priv->qemuCaps,
++                                                                vm->def,
+                                                                 config);
+                 } else {
+                     compatible = qemuDomainCheckABIStability(driver, vm, config);
+@@ -16123,7 +16125,6 @@ qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+                 }
+             }
+ 
+-            priv = vm->privateData;
+             if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_RUNNING) {
+                 /* Transitions 5, 6 */
+                 if (qemuProcessStopCPUs(driver, vm,
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 67940330aa..4af105b997 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -2378,7 +2378,7 @@ qemuMigrationDstPrepareAny(virQEMUDriverPtr driver,
+                 if (!newdef)
+                     goto cleanup;
+ 
+-                if (!qemuDomainDefCheckABIStability(driver, *def, newdef)) {
++                if (!qemuDomainDefCheckABIStability(driver, NULL, *def, newdef)) {
+                     virDomainDefFree(newdef);
+                     goto cleanup;
+                 }
+@@ -3417,7 +3417,7 @@ qemuMigrationSrcRun(virQEMUDriverPtr driver,
+                 goto error;
+         } else {
+             virDomainDefPtr def = vm->newDef ? vm->newDef : vm->def;
+-            if (!(persistDef = qemuDomainDefCopy(driver, def,
++            if (!(persistDef = qemuDomainDefCopy(driver, priv->qemuCaps, def,
+                                                  VIR_DOMAIN_XML_SECURE |
+                                                  VIR_DOMAIN_XML_MIGRATABLE)))
+                 goto error;
+-- 
+2.22.1
+

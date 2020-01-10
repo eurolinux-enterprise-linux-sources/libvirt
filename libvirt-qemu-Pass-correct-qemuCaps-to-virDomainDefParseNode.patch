@@ -1,0 +1,261 @@
+From d563ed75402973b6df254268c17b93edbbaee651 Mon Sep 17 00:00:00 2001
+Message-Id: <d563ed75402973b6df254268c17b93edbbaee651@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 Aug 2019 14:52:35 +0200
+Subject: [PATCH] qemu: Pass correct qemuCaps to virDomainDefParseNode
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since qemuDomainDefPostParse callback requires qemuCaps, we need to make
+sure it gets the capabilities stored in the domain's private data if the
+domain is running. Passing NULL may cause QEMU capabilities probing to
+be triggered in case QEMU binary changed in the meantime. When this
+happens while a running domain object is locked, QMP event delivered to
+the domain before QEMU capabilities probing finishes will deadlock the
+event loop.
+
+Several general snapshot and checkpoint APIs were lazily passing NULL as
+the parseOpaque pointer instead of letting their callers pass the right
+data. This patch fixes all paths leading to virDomainDefParseNode.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 577a1f98fc84e4152c246695942502ef9a45c7f7)
+
+Conflicts:
+	src/conf/checkpoint_conf.c
+	src/conf/checkpoint_conf.h
+	src/conf/snapshot_conf.c
+	src/conf/snapshot_conf.h
+	src/esx/esx_driver.c
+	src/qemu/qemu_driver.c
+	src/test/test_driver.c
+	src/vbox/vbox_common.c
+	tests/qemudomaincheckpointxml2xmltest.c
+            - no checkpoint APIs
+            - snapshot parsing APIs do not have bool *current parameter
+
+	tests/qemudomainsnapshotxml2xmltest.c
+            - this is called domainsnapshotxml2xmltest.c downstream
+            - snapshot parsing APIs do not have bool *current parameter
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1731783
+https://bugzilla.redhat.com/show_bug.cgi?id=1742023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <da71e1d080893d3290d18281cb375588d5bc7e7b.1565959866.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/snapshot_conf.c          |  9 ++++++---
+ src/conf/snapshot_conf.h          |  2 ++
+ src/esx/esx_driver.c              |  2 +-
+ src/qemu/qemu_driver.c            | 10 +++++++---
+ src/test/test_driver.c            |  3 ++-
+ src/vbox/vbox_common.c            |  4 ++--
+ tests/domainsnapshotxml2xmltest.c |  2 +-
+ 7 files changed, 21 insertions(+), 11 deletions(-)
+
+diff --git a/src/conf/snapshot_conf.c b/src/conf/snapshot_conf.c
+index 9c537ac7d1..75df496201 100644
+--- a/src/conf/snapshot_conf.c
++++ b/src/conf/snapshot_conf.c
+@@ -203,6 +203,7 @@ static virDomainSnapshotDefPtr
+ virDomainSnapshotDefParse(xmlXPathContextPtr ctxt,
+                           virCapsPtr caps,
+                           virDomainXMLOptionPtr xmlopt,
++                          void *parseOpaque,
+                           unsigned int flags)
+ {
+     virDomainSnapshotDefPtr def = NULL;
+@@ -284,7 +285,7 @@ virDomainSnapshotDefParse(xmlXPathContextPtr ctxt,
+                 goto cleanup;
+             }
+             def->dom = virDomainDefParseNode(ctxt->node->doc, domainNode,
+-                                             caps, xmlopt, NULL, domainflags);
++                                             caps, xmlopt, parseOpaque, domainflags);
+             if (!def->dom)
+                 goto cleanup;
+         } else {
+@@ -389,6 +390,7 @@ virDomainSnapshotDefParseNode(xmlDocPtr xml,
+                               xmlNodePtr root,
+                               virCapsPtr caps,
+                               virDomainXMLOptionPtr xmlopt,
++                              void *parseOpaque,
+                               unsigned int flags)
+ {
+     xmlXPathContextPtr ctxt = NULL;
+@@ -406,7 +408,7 @@ virDomainSnapshotDefParseNode(xmlDocPtr xml,
+     }
+ 
+     ctxt->node = root;
+-    def = virDomainSnapshotDefParse(ctxt, caps, xmlopt, flags);
++    def = virDomainSnapshotDefParse(ctxt, caps, xmlopt, parseOpaque, flags);
+  cleanup:
+     xmlXPathFreeContext(ctxt);
+     return def;
+@@ -416,6 +418,7 @@ virDomainSnapshotDefPtr
+ virDomainSnapshotDefParseString(const char *xmlStr,
+                                 virCapsPtr caps,
+                                 virDomainXMLOptionPtr xmlopt,
++                                void *parseOpaque,
+                                 unsigned int flags)
+ {
+     virDomainSnapshotDefPtr ret = NULL;
+@@ -425,7 +428,7 @@ virDomainSnapshotDefParseString(const char *xmlStr,
+     if ((xml = virXMLParse(NULL, xmlStr, _("(domain_snapshot)")))) {
+         xmlKeepBlanksDefault(keepBlanksDefault);
+         ret = virDomainSnapshotDefParseNode(xml, xmlDocGetRootElement(xml),
+-                                            caps, xmlopt, flags);
++                                            caps, xmlopt, parseOpaque, flags);
+         xmlFreeDoc(xml);
+     }
+     xmlKeepBlanksDefault(keepBlanksDefault);
+diff --git a/src/conf/snapshot_conf.h b/src/conf/snapshot_conf.h
+index 20a42bd572..733f1dd071 100644
+--- a/src/conf/snapshot_conf.h
++++ b/src/conf/snapshot_conf.h
+@@ -106,11 +106,13 @@ typedef enum {
+ virDomainSnapshotDefPtr virDomainSnapshotDefParseString(const char *xmlStr,
+                                                         virCapsPtr caps,
+                                                         virDomainXMLOptionPtr xmlopt,
++                                                        void *parseOpaque,
+                                                         unsigned int flags);
+ virDomainSnapshotDefPtr virDomainSnapshotDefParseNode(xmlDocPtr xml,
+                                                       xmlNodePtr root,
+                                                       virCapsPtr caps,
+                                                       virDomainXMLOptionPtr xmlopt,
++                                                      void *parseOpaque,
+                                                       unsigned int flags);
+ void virDomainSnapshotDefFree(virDomainSnapshotDefPtr def);
+ char *virDomainSnapshotDefFormat(const char *domain_uuid,
+diff --git a/src/esx/esx_driver.c b/src/esx/esx_driver.c
+index 60aa5fc252..4ef856d71c 100644
+--- a/src/esx/esx_driver.c
++++ b/src/esx/esx_driver.c
+@@ -4156,7 +4156,7 @@ esxDomainSnapshotCreateXML(virDomainPtr domain, const char *xmlDesc,
+         return NULL;
+ 
+     def = virDomainSnapshotDefParseString(xmlDesc, priv->caps,
+-                                          priv->xmlopt, 0);
++                                          priv->xmlopt, NULL, 0);
+ 
+     if (!def)
+         return NULL;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index cc7210c6f4..00213a5f80 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -431,8 +431,12 @@ qemuDomainSnapshotLoad(virDomainObjPtr vm,
+     int ret = -1;
+     virCapsPtr caps = NULL;
+     int direrr;
++    qemuDomainObjPrivatePtr priv;
+ 
+     virObjectLock(vm);
++
++    priv = vm->privateData;
++
+     if (virAsprintf(&snapDir, "%s/%s", baseDir, vm->def->name) < 0) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("Failed to allocate memory for "
+@@ -472,6 +476,7 @@ qemuDomainSnapshotLoad(virDomainObjPtr vm,
+ 
+         def = virDomainSnapshotDefParseString(xmlStr, caps,
+                                               qemu_driver->xmlopt,
++                                              priv->qemuCaps,
+                                               flags);
+         if (def == NULL) {
+             /* Nothing we can do here, skip this one */
+@@ -15312,6 +15317,7 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+     if (!(vm = qemuDomObjFromDomain(domain)))
+         goto cleanup;
+ 
++    priv = vm->privateData;
+     cfg = virQEMUDriverGetConfig(driver);
+ 
+     if (virDomainSnapshotCreateXMLEnsureACL(domain->conn, vm->def, flags) < 0)
+@@ -15336,7 +15342,7 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+         parse_flags |= VIR_DOMAIN_SNAPSHOT_PARSE_OFFLINE;
+ 
+     if (!(def = virDomainSnapshotDefParseString(xmlDesc, caps, driver->xmlopt,
+-                                                parse_flags)))
++                                                priv->qemuCaps, parse_flags)))
+         goto cleanup;
+ 
+     /* reject snapshot names containing slashes or starting with dot as
+@@ -15405,8 +15411,6 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+ 
+     qemuDomainObjSetAsyncJobMask(vm, QEMU_JOB_NONE);
+ 
+-    priv = vm->privateData;
+-
+     if (redefine) {
+         if (virDomainSnapshotRedefinePrep(domain, vm, &def, &snap,
+                                           driver->xmlopt,
+diff --git a/src/test/test_driver.c b/src/test/test_driver.c
+index 1a25b37729..1c7e4f4982 100644
+--- a/src/test/test_driver.c
++++ b/src/test/test_driver.c
+@@ -849,6 +849,7 @@ testParseDomainSnapshots(testDriverPtr privconn,
+         def = virDomainSnapshotDefParseNode(ctxt->doc, node,
+                                             privconn->caps,
+                                             privconn->xmlopt,
++                                            NULL,
+                                             VIR_DOMAIN_SNAPSHOT_PARSE_DISKS |
+                                             VIR_DOMAIN_SNAPSHOT_PARSE_INTERNAL |
+                                             VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE);
+@@ -6403,6 +6404,7 @@ testDomainSnapshotCreateXML(virDomainPtr domain,
+     if (!(def = virDomainSnapshotDefParseString(xmlDesc,
+                                                 privconn->caps,
+                                                 privconn->xmlopt,
++                                                NULL,
+                                                 parse_flags)))
+         goto cleanup;
+ 
+@@ -6808,7 +6810,6 @@ testDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+ }
+ 
+ 
+-
+ static virHypervisorDriver testHypervisorDriver = {
+     .name = "Test",
+     .connectOpen = testConnectOpen, /* 0.1.1 */
+diff --git a/src/vbox/vbox_common.c b/src/vbox/vbox_common.c
+index 664650f217..46d2b7afa3 100644
+--- a/src/vbox/vbox_common.c
++++ b/src/vbox/vbox_common.c
+@@ -5496,7 +5496,7 @@ vboxDomainSnapshotCreateXML(virDomainPtr dom,
+                   VIR_DOMAIN_SNAPSHOT_CREATE_CURRENT, NULL);
+ 
+     if (!(def = virDomainSnapshotDefParseString(xmlDesc, data->caps,
+-                                                data->xmlopt,
++                                                data->xmlopt, NULL,
+                                                 VIR_DOMAIN_SNAPSHOT_PARSE_DISKS |
+                                                 VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE)))
+         goto cleanup;
+@@ -6941,7 +6941,7 @@ vboxDomainSnapshotDeleteMetadataOnly(virDomainSnapshotPtr snapshot)
+     }
+     def = virDomainSnapshotDefParseString(defXml,
+                                           data->caps,
+-                                          data->xmlopt,
++                                          data->xmlopt, NULL,
+                                           VIR_DOMAIN_SNAPSHOT_PARSE_DISKS |
+                                           VIR_DOMAIN_SNAPSHOT_PARSE_REDEFINE);
+     if (!def) {
+diff --git a/tests/domainsnapshotxml2xmltest.c b/tests/domainsnapshotxml2xmltest.c
+index 5ea0f325de..061da9fbca 100644
+--- a/tests/domainsnapshotxml2xmltest.c
++++ b/tests/domainsnapshotxml2xmltest.c
+@@ -96,7 +96,7 @@ testCompareXMLToXMLFiles(const char *inxml,
+         goto cleanup;
+ 
+     if (!(def = virDomainSnapshotDefParseString(inXmlData, driver.caps,
+-                                                driver.xmlopt,
++                                                driver.xmlopt, NULL,
+                                                 flags)))
+         goto cleanup;
+ 
+-- 
+2.22.1
+

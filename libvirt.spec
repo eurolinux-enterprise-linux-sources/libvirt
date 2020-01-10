@@ -253,7 +253,7 @@
 Summary: Library providing a simple virtualization API
 Name: libvirt
 Version: 4.5.0
-Release: 23%{?dist}%{?extra_release}
+Release: 23%{?dist}.1%{?extra_release}
 License: LGPLv2+
 URL: https://libvirt.org/
 
@@ -579,6 +579,17 @@ Patch313: libvirt-api-disallow-virDomainSaveImageGetXMLDesc-on-read-only-connect
 Patch314: libvirt-api-disallow-virDomainManagedSaveDefineXML-on-read-only-connections.patch
 Patch315: libvirt-api-disallow-virConnectGetDomainCapabilities-on-read-only-connections.patch
 Patch316: libvirt-api-disallow-virConnect-HypervisorCPU-on-read-only-connections.patch
+Patch317: libvirt-qemu-Pass-qemuCaps-to-qemuDomainDefCopy.patch
+Patch318: libvirt-qemu-Pass-qemuCaps-to-qemuDomainDefFormatBufInternal.patch
+Patch319: libvirt-qemu-Pass-qemuCaps-to-qemuDomainSaveImageOpen.patch
+Patch320: libvirt-qemu-Pass-qemuCaps-to-qemuMigrationAnyPrepareDef.patch
+Patch321: libvirt-qemu-Pass-correct-qemuCaps-to-virDomainDefParseString.patch
+Patch322: libvirt-qemu-Pass-qemuCaps-to-qemuMigrationCookieXMLParse.patch
+Patch323: libvirt-qemu-Pass-correct-qemuCaps-to-virDomainDefCopy.patch
+Patch324: libvirt-qemu-Pass-correct-qemuCaps-to-virDomainDefPostParse.patch
+Patch325: libvirt-qemu-Pass-correct-qemuCaps-to-virDomainDefParseNode.patch
+Patch326: libvirt-qemu-Pass-correct-qemuCaps-to-virDomainDeviceDefPostParse.patch
+Patch327: libvirt-qemu-Fix-crash-on-incoming-migration.patch
 
 Requires: libvirt-daemon = %{version}-%{release}
 Requires: libvirt-daemon-config-network = %{version}-%{release}
@@ -2480,6 +2491,19 @@ exit 0
 
 
 %changelog
+* Fri Aug 16 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-23.el7_7.1
+- qemu: Pass qemuCaps to qemuDomainDefCopy (rhbz#1742023)
+- qemu: Pass qemuCaps to qemuDomainDefFormatBufInternal (rhbz#1742023)
+- qemu: Pass qemuCaps to qemuDomainSaveImageOpen (rhbz#1742023)
+- qemu: Pass qemuCaps to qemuMigrationAnyPrepareDef (rhbz#1742023)
+- qemu: Pass correct qemuCaps to virDomainDefParseString (rhbz#1742023)
+- qemu: Pass qemuCaps to qemuMigrationCookieXMLParse (rhbz#1742023)
+- qemu: Pass correct qemuCaps to virDomainDefCopy (rhbz#1742023)
+- qemu: Pass correct qemuCaps to virDomainDefPostParse (rhbz#1742023)
+- qemu: Pass correct qemuCaps to virDomainDefParseNode (rhbz#1742023)
+- qemu: Pass correct qemuCaps to virDomainDeviceDefPostParse (rhbz#1742023)
+- qemu: Fix crash on incoming migration (rhbz#1742023)
+
 * Thu Jun 20 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-23
 - api: disallow virDomainSaveImageGetXMLDesc on read-only connections (CVE-2019-10161)
 - api: disallow virDomainManagedSaveDefineXML on read-only connections (CVE-2019-10166)

@@ -1,0 +1,430 @@
+From 0379563f7961e019ceef28ed28e56bb24f78d778 Mon Sep 17 00:00:00 2001
+Message-Id: <0379563f7961e019ceef28ed28e56bb24f78d778@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 Aug 2019 14:52:28 +0200
+Subject: [PATCH] qemu: Pass qemuCaps to qemuDomainDefFormatBufInternal
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since qemuDomainDefPostParse callback requires qemuCaps, we need to make
+sure it gets the capabilities stored in the domain's private data if the
+domain is running. Passing NULL may cause QEMU capabilities probing to
+be triggered in case QEMU binary changed in the meantime. When this
+happens while a running domain object is locked, QMP event delivered to
+the domain before QEMU capabilities probing finishes will deadlock the
+event loop.
+
+This patch fixes all paths leading to qemuDomainDefFormatBufInternal.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 900c5952499fb233a9c0d2e6d0a5fde84a99cf72)
+
+Conflicts:
+	src/qemu/qemu_driver.c
+            - no checkpoint APIs
+            - no VIR_AUTOUNREF
+            - ProcessAttach and XMLFromNative APIs were removed upstream
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1731783
+https://bugzilla.redhat.com/show_bug.cgi?id=1742023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <fb9a50220d762c69ee9d8b38c60a03b061b4127b.1565959866.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_domain.c           | 37 ++++++++++++++++++++------------
+ src/qemu/qemu_domain.h           |  3 +++
+ src/qemu/qemu_driver.c           | 22 ++++++++++++-------
+ src/qemu/qemu_migration.c        |  6 +++---
+ src/qemu/qemu_migration_cookie.c |  9 ++++++--
+ src/qemu/qemu_process.c          | 11 +++++-----
+ 6 files changed, 56 insertions(+), 32 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index bf6013d42a..249ec4d259 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -7230,7 +7230,7 @@ qemuDomainDefCopy(virQEMUDriverPtr driver,
+     virDomainDefPtr ret = NULL;
+     char *xml;
+ 
+-    if (!(xml = qemuDomainDefFormatXML(driver, src, flags)))
++    if (!(xml = qemuDomainDefFormatXML(driver, qemuCaps, src, flags)))
+         return NULL;
+ 
+     ret = qemuDomainDefFromXML(driver, qemuCaps, xml);
+@@ -7242,6 +7242,7 @@ qemuDomainDefCopy(virQEMUDriverPtr driver,
+ 
+ static int
+ qemuDomainDefFormatBufInternal(virQEMUDriverPtr driver,
++                               virQEMUCapsPtr qemuCaps,
+                                virDomainDefPtr def,
+                                virCPUDefPtr origCPU,
+                                unsigned int flags,
+@@ -7250,7 +7251,7 @@ qemuDomainDefFormatBufInternal(virQEMUDriverPtr driver,
+     int ret = -1;
+     virDomainDefPtr copy = NULL;
+     virCapsPtr caps = NULL;
+-    virQEMUCapsPtr qemuCaps = NULL;
++    virQEMUCapsPtr qCaps = NULL;
+ 
+     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
+         goto cleanup;
+@@ -7258,7 +7259,7 @@ qemuDomainDefFormatBufInternal(virQEMUDriverPtr driver,
+     if (!(flags & (VIR_DOMAIN_XML_UPDATE_CPU | VIR_DOMAIN_XML_MIGRATABLE)))
+         goto format;
+ 
+-    if (!(copy = virDomainDefCopy(def, caps, driver->xmlopt, NULL,
++    if (!(copy = virDomainDefCopy(def, caps, driver->xmlopt, qemuCaps,
+                                   flags & VIR_DOMAIN_XML_MIGRATABLE)))
+         goto cleanup;
+ 
+@@ -7269,13 +7270,17 @@ qemuDomainDefFormatBufInternal(virQEMUDriverPtr driver,
+         def->cpu &&
+         (def->cpu->mode != VIR_CPU_MODE_CUSTOM ||
+          def->cpu->model)) {
+-        if (!(qemuCaps = virQEMUCapsCacheLookupCopy(driver->qemuCapsCache,
+-                                                    def->emulator,
+-                                                    def->os.machine)))
+-            goto cleanup;
++        if (qemuCaps) {
++            qCaps = virObjectRef(qemuCaps);
++        } else {
++            if (!(qCaps = virQEMUCapsCacheLookupCopy(driver->qemuCapsCache,
++                                                     def->emulator,
++                                                     def->os.machine)))
++                goto cleanup;
++        }
+ 
+         if (virCPUUpdate(def->os.arch, def->cpu,
+-                         virQEMUCapsGetHostModel(qemuCaps, def->virtType,
++                         virQEMUCapsGetHostModel(qCaps, def->virtType,
+                                                  VIR_QEMU_CAPS_HOST_CPU_MIGRATABLE)) < 0)
+             goto cleanup;
+     }
+@@ -7424,30 +7429,32 @@ qemuDomainDefFormatBufInternal(virQEMUDriverPtr driver,
+  cleanup:
+     virDomainDefFree(copy);
+     virObjectUnref(caps);
+-    virObjectUnref(qemuCaps);
++    virObjectUnref(qCaps);
+     return ret;
+ }
+ 
+ 
+ int
+ qemuDomainDefFormatBuf(virQEMUDriverPtr driver,
++                       virQEMUCapsPtr qemuCaps,
+                        virDomainDefPtr def,
+                        unsigned int flags,
+                        virBufferPtr buf)
+ {
+-    return qemuDomainDefFormatBufInternal(driver, def, NULL, flags, buf);
++    return qemuDomainDefFormatBufInternal(driver, qemuCaps, def, NULL, flags, buf);
+ }
+ 
+ 
+ static char *
+ qemuDomainDefFormatXMLInternal(virQEMUDriverPtr driver,
++                               virQEMUCapsPtr qemuCaps,
+                                virDomainDefPtr def,
+                                virCPUDefPtr origCPU,
+                                unsigned int flags)
+ {
+     virBuffer buf = VIR_BUFFER_INITIALIZER;
+ 
+-    if (qemuDomainDefFormatBufInternal(driver, def, origCPU, flags, &buf) < 0)
++    if (qemuDomainDefFormatBufInternal(driver, qemuCaps, def, origCPU, flags, &buf) < 0)
+         return NULL;
+ 
+     return virBufferContentAndReset(&buf);
+@@ -7456,10 +7463,11 @@ qemuDomainDefFormatXMLInternal(virQEMUDriverPtr driver,
+ 
+ char *
+ qemuDomainDefFormatXML(virQEMUDriverPtr driver,
++                       virQEMUCapsPtr qemuCaps,
+                        virDomainDefPtr def,
+                        unsigned int flags)
+ {
+-    return qemuDomainDefFormatXMLInternal(driver, def, NULL, flags);
++    return qemuDomainDefFormatXMLInternal(driver, qemuCaps, def, NULL, flags);
+ }
+ 
+ 
+@@ -7478,11 +7486,12 @@ char *qemuDomainFormatXML(virQEMUDriverPtr driver,
+         origCPU = priv->origCPU;
+     }
+ 
+-    return qemuDomainDefFormatXMLInternal(driver, def, origCPU, flags);
++    return qemuDomainDefFormatXMLInternal(driver, priv->qemuCaps, def, origCPU, flags);
+ }
+ 
+ char *
+ qemuDomainDefFormatLive(virQEMUDriverPtr driver,
++                        virQEMUCapsPtr qemuCaps,
+                         virDomainDefPtr def,
+                         virCPUDefPtr origCPU,
+                         bool inactive,
+@@ -7495,7 +7504,7 @@ qemuDomainDefFormatLive(virQEMUDriverPtr driver,
+     if (compatible)
+         flags |= VIR_DOMAIN_XML_MIGRATABLE;
+ 
+-    return qemuDomainDefFormatXMLInternal(driver, def, origCPU, flags);
++    return qemuDomainDefFormatXMLInternal(driver, qemuCaps, def, origCPU, flags);
+ }
+ 
+ 
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 29283105cb..9546216f30 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -599,11 +599,13 @@ virDomainDefPtr qemuDomainDefCopy(virQEMUDriverPtr driver,
+                                   unsigned int flags);
+ 
+ int qemuDomainDefFormatBuf(virQEMUDriverPtr driver,
++                           virQEMUCapsPtr qemuCaps,
+                            virDomainDefPtr vm,
+                            unsigned int flags,
+                            virBuffer *buf);
+ 
+ char *qemuDomainDefFormatXML(virQEMUDriverPtr driver,
++                             virQEMUCapsPtr qemuCaps,
+                              virDomainDefPtr vm,
+                              unsigned int flags);
+ 
+@@ -612,6 +614,7 @@ char *qemuDomainFormatXML(virQEMUDriverPtr driver,
+                           unsigned int flags);
+ 
+ char *qemuDomainDefFormatLive(virQEMUDriverPtr driver,
++                              virQEMUCapsPtr qemuCaps,
+                               virDomainDefPtr def,
+                               virCPUDefPtr origCPU,
+                               bool inactive,
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index a486c66a5f..7d87215904 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3316,9 +3316,10 @@ qemuDomainSaveInternal(virQEMUDriverPtr driver,
+             virDomainDefFree(def);
+             goto endjob;
+         }
+-        xml = qemuDomainDefFormatLive(driver, def, NULL, true, true);
++        xml = qemuDomainDefFormatLive(driver, priv->qemuCaps, def, NULL, true, true);
+     } else {
+-        xml = qemuDomainDefFormatLive(driver, vm->def, priv->origCPU, true, true);
++        xml = qemuDomainDefFormatLive(driver, priv->qemuCaps, vm->def,
++                                      priv->origCPU, true, true);
+     }
+     if (!xml) {
+         virReportError(VIR_ERR_OPERATION_FAILED,
+@@ -6787,7 +6788,7 @@ qemuDomainSaveImageGetXMLDesc(virConnectPtr conn, const char *path,
+     if (virDomainSaveImageGetXMLDescEnsureACL(conn, def) < 0)
+         goto cleanup;
+ 
+-    ret = qemuDomainDefFormatXML(driver, def, flags);
++    ret = qemuDomainDefFormatXML(driver, NULL, def, flags);
+ 
+  cleanup:
+     virQEMUSaveDataFree(data);
+@@ -6840,7 +6841,7 @@ qemuDomainSaveImageDefineXML(virConnectPtr conn, const char *path,
+ 
+     VIR_FREE(data->xml);
+ 
+-    if (!(data->xml = qemuDomainDefFormatXML(driver, newdef,
++    if (!(data->xml = qemuDomainDefFormatXML(driver, NULL, newdef,
+                                              VIR_DOMAIN_XML_INACTIVE |
+                                              VIR_DOMAIN_XML_SECURE |
+                                              VIR_DOMAIN_XML_MIGRATABLE)))
+@@ -6879,6 +6880,7 @@ qemuDomainManagedSaveGetXMLDesc(virDomainPtr dom, unsigned int flags)
+     virDomainDefPtr def = NULL;
+     int fd = -1;
+     virQEMUSaveDataPtr data = NULL;
++    qemuDomainObjPrivatePtr priv;
+ 
+     /* We only take subset of virDomainDefFormat flags.  */
+     virCheckFlags(VIR_DOMAIN_XML_SECURE, NULL);
+@@ -6886,6 +6888,8 @@ qemuDomainManagedSaveGetXMLDesc(virDomainPtr dom, unsigned int flags)
+     if (!(vm = qemuDomObjFromDomain(dom)))
+         return ret;
+ 
++    priv = vm->privateData;
++
+     if (virDomainManagedSaveGetXMLDescEnsureACL(dom->conn, vm->def, flags) < 0)
+         goto cleanup;
+ 
+@@ -6902,7 +6906,7 @@ qemuDomainManagedSaveGetXMLDesc(virDomainPtr dom, unsigned int flags)
+                                       false, NULL, false, false)) < 0)
+         goto cleanup;
+ 
+-    ret = qemuDomainDefFormatXML(driver, def, flags);
++    ret = qemuDomainDefFormatXML(driver, priv->qemuCaps, def, flags);
+ 
+  cleanup:
+     virQEMUSaveDataFree(data);
+@@ -7097,7 +7101,7 @@ static char *qemuConnectDomainXMLFromNative(virConnectPtr conn,
+     if (!def->name && VIR_STRDUP(def->name, "unnamed") < 0)
+         goto cleanup;
+ 
+-    xml = qemuDomainDefFormatXML(driver, def, VIR_DOMAIN_XML_INACTIVE);
++    xml = qemuDomainDefFormatXML(driver, NULL, def, VIR_DOMAIN_XML_INACTIVE);
+ 
+  cleanup:
+     virDomainDefFree(def);
+@@ -15151,7 +15155,8 @@ qemuDomainSnapshotCreateActiveExternal(virQEMUDriverPtr driver,
+                                                     "snapshot", false)) < 0)
+             goto cleanup;
+ 
+-        if (!(xml = qemuDomainDefFormatLive(driver, vm->def, priv->origCPU,
++        if (!(xml = qemuDomainDefFormatLive(driver, priv->qemuCaps,
++                                            vm->def, priv->origCPU,
+                                             true, true)) ||
+             !(snap->def->cookie = (virObjectPtr) qemuDomainSaveCookieNew(vm)))
+             goto cleanup;
+@@ -15395,7 +15400,8 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+     } else {
+         /* Easiest way to clone inactive portion of vm->def is via
+          * conversion in and back out of xml.  */
+-        if (!(xml = qemuDomainDefFormatLive(driver, vm->def, priv->origCPU,
++        if (!(xml = qemuDomainDefFormatLive(driver, priv->qemuCaps,
++                                            vm->def, priv->origCPU,
+                                             true, true)) ||
+             !(def->dom = virDomainDefParseString(xml, caps, driver->xmlopt, NULL,
+                                                  VIR_DOMAIN_DEF_PARSE_INACTIVE |
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 4af105b997..111038b971 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -2081,9 +2081,9 @@ qemuMigrationSrcBeginPhase(virQEMUDriverPtr driver,
+         if (!qemuDomainCheckABIStability(driver, vm, def))
+             goto cleanup;
+ 
+-        rv = qemuDomainDefFormatLive(driver, def, NULL, false, true);
++        rv = qemuDomainDefFormatLive(driver, priv->qemuCaps, def, NULL, false, true);
+     } else {
+-        rv = qemuDomainDefFormatLive(driver, vm->def, priv->origCPU,
++        rv = qemuDomainDefFormatLive(driver, priv->qemuCaps, vm->def, priv->origCPU,
+                                      false, true);
+     }
+ 
+@@ -2352,7 +2352,7 @@ qemuMigrationDstPrepareAny(virQEMUDriverPtr driver,
+         char *xml;
+         int hookret;
+ 
+-        if (!(xml = qemuDomainDefFormatXML(driver, *def,
++        if (!(xml = qemuDomainDefFormatXML(driver, NULL, *def,
+                                            VIR_DOMAIN_XML_SECURE |
+                                            VIR_DOMAIN_XML_MIGRATABLE)))
+             goto cleanup;
+diff --git a/src/qemu/qemu_migration_cookie.c b/src/qemu/qemu_migration_cookie.c
+index 60df449d53..901b1ae9ac 100644
+--- a/src/qemu/qemu_migration_cookie.c
++++ b/src/qemu/qemu_migration_cookie.c
+@@ -777,6 +777,7 @@ qemuMigrationCookieCapsXMLFormat(virBufferPtr buf,
+ 
+ static int
+ qemuMigrationCookieXMLFormat(virQEMUDriverPtr driver,
++                             virQEMUCapsPtr qemuCaps,
+                              virBufferPtr buf,
+                              qemuMigrationCookiePtr mig)
+ {
+@@ -818,6 +819,7 @@ qemuMigrationCookieXMLFormat(virQEMUDriverPtr driver,
+     if ((mig->flags & QEMU_MIGRATION_COOKIE_PERSISTENT) &&
+         mig->persistent) {
+         if (qemuDomainDefFormatBuf(driver,
++                                   qemuCaps,
+                                    mig->persistent,
+                                    VIR_DOMAIN_XML_INACTIVE |
+                                    VIR_DOMAIN_XML_SECURE |
+@@ -869,11 +871,12 @@ qemuMigrationCookieXMLFormat(virQEMUDriverPtr driver,
+ 
+ static char *
+ qemuMigrationCookieXMLFormatStr(virQEMUDriverPtr driver,
++                                virQEMUCapsPtr qemuCaps,
+                                 qemuMigrationCookiePtr mig)
+ {
+     virBuffer buf = VIR_BUFFER_INITIALIZER;
+ 
+-    if (qemuMigrationCookieXMLFormat(driver, &buf, mig) < 0) {
++    if (qemuMigrationCookieXMLFormat(driver, qemuCaps, &buf, mig) < 0) {
+         virBufferFreeAndReset(&buf);
+         return NULL;
+     }
+@@ -1416,6 +1419,8 @@ qemuMigrationBakeCookie(qemuMigrationCookiePtr mig,
+                         int *cookieoutlen,
+                         unsigned int flags)
+ {
++    qemuDomainObjPrivatePtr priv = dom->privateData;
++
+     if (!cookieout || !cookieoutlen)
+         return 0;
+ 
+@@ -1459,7 +1464,7 @@ qemuMigrationBakeCookie(qemuMigrationCookiePtr mig,
+         qemuMigrationCookieAddCaps(mig, dom, party) < 0)
+         return -1;
+ 
+-    if (!(*cookieout = qemuMigrationCookieXMLFormatStr(driver, mig)))
++    if (!(*cookieout = qemuMigrationCookieXMLFormatStr(driver, priv->qemuCaps, mig)))
+         return -1;
+ 
+     *cookieoutlen = strlen(*cookieout) + 1;
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 9e6e6528e2..34686b4d92 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -4434,13 +4434,14 @@ qemuProcessStartHook(virQEMUDriverPtr driver,
+                      virHookQemuOpType op,
+                      virHookSubopType subop)
+ {
++    qemuDomainObjPrivatePtr priv = vm->privateData;
+     char *xml;
+     int ret;
+ 
+     if (!virHookPresent(VIR_HOOK_DRIVER_QEMU))
+         return 0;
+ 
+-    if (!(xml = qemuDomainDefFormatXML(driver, vm->def, 0)))
++    if (!(xml = qemuDomainDefFormatXML(driver, priv->qemuCaps, vm->def, 0)))
+         return -1;
+ 
+     ret = virHookCall(VIR_HOOK_DRIVER_QEMU, vm->def->name, op, subop,
+@@ -7091,7 +7092,7 @@ void qemuProcessStop(virQEMUDriverPtr driver,
+ 
+     /* now that we know it's stopped call the hook if present */
+     if (virHookPresent(VIR_HOOK_DRIVER_QEMU)) {
+-        char *xml = qemuDomainDefFormatXML(driver, vm->def, 0);
++        char *xml = qemuDomainDefFormatXML(driver, NULL, vm->def, 0);
+ 
+         /* we can't stop the operation even if the script raised an error */
+         ignore_value(virHookCall(VIR_HOOK_DRIVER_QEMU, vm->def->name,
+@@ -7249,7 +7250,7 @@ void qemuProcessStop(virQEMUDriverPtr driver,
+ 
+     /* The "release" hook cleans up additional resources */
+     if (virHookPresent(VIR_HOOK_DRIVER_QEMU)) {
+-        char *xml = qemuDomainDefFormatXML(driver, vm->def, 0);
++        char *xml = qemuDomainDefFormatXML(driver, NULL, vm->def, 0);
+ 
+         /* we can't stop the operation even if the script raised an error */
+         virHookCall(VIR_HOOK_DRIVER_QEMU, vm->def->name,
+@@ -7473,7 +7474,7 @@ int qemuProcessAttach(virConnectPtr conn ATTRIBUTE_UNUSED,
+ 
+     /* Run an hook to allow admins to do some magic */
+     if (virHookPresent(VIR_HOOK_DRIVER_QEMU)) {
+-        char *xml = qemuDomainDefFormatXML(driver, vm->def, 0);
++        char *xml = qemuDomainDefFormatXML(driver, priv->qemuCaps, vm->def, 0);
+         int hookret;
+ 
+         hookret = virHookCall(VIR_HOOK_DRIVER_QEMU, vm->def->name,
+@@ -7934,7 +7935,7 @@ qemuProcessReconnect(void *opaque)
+ 
+     /* Run an hook to allow admins to do some magic */
+     if (virHookPresent(VIR_HOOK_DRIVER_QEMU)) {
+-        char *xml = qemuDomainDefFormatXML(driver, obj->def, 0);
++        char *xml = qemuDomainDefFormatXML(driver, priv->qemuCaps, obj->def, 0);
+         int hookret;
+ 
+         hookret = virHookCall(VIR_HOOK_DRIVER_QEMU, obj->def->name,
+-- 
+2.22.1
+

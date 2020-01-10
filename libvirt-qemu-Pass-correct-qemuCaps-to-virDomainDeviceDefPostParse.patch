@@ -1,0 +1,419 @@
+From 9ca9c90ecfc021f735769307253319a730bc2565 Mon Sep 17 00:00:00 2001
+Message-Id: <9ca9c90ecfc021f735769307253319a730bc2565@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 Aug 2019 14:52:36 +0200
+Subject: [PATCH] qemu: Pass correct qemuCaps to virDomainDeviceDefPostParse
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since qemuDomainDeviceDefPostParse callback requires qemuCaps, we need
+to make sure it gets the capabilities stored in the domain's private
+data if the domain is running. Passing NULL may cause QEMU capabilities
+probing to be triggered in case QEMU binary changed in the meantime.
+When this happens while a running domain object is locked, QMP event
+delivered to the domain before QEMU capabilities probing finishes will
+deadlock the event loop.
+
+QEMU capabilities lookup (via domainPostParseDataAlloc callback) is
+hidden inside virDomainDeviceDefPostParseOne with no way to pass
+qemuCaps to virDomainDeviceDef* functions. This patch fixes all
+remaining paths leading to virDomainDeviceDefPostParse.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit b449c270416468ec8b73670b49a9aff87c8902a2)
+
+Conflicts:
+	src/conf/domain_conf.c
+	src/conf/domain_conf.h
+            - context
+
+	src/lxc/lxc_driver.c
+            - lxcDomainUpdateDeviceFlags is different upstream
+
+	src/qemu/qemu_driver.c
+            - qemuDomainAttachDeviceLiveAndConfig is different upstream
+
+	src/uml/uml_driver.c
+            - uml driver was removed upstream
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1731783
+https://bugzilla.redhat.com/show_bug.cgi?id=1742023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <26b6c56b3da907b14e201b23bec6164037151fb6.1565959866.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c     | 23 ++++++++++++++---------
+ src/conf/domain_conf.h     |  4 +++-
+ src/libxl/libxl_driver.c   | 12 ++++++------
+ src/lxc/lxc_driver.c       | 12 ++++++------
+ src/openvz/openvz_driver.c |  2 +-
+ src/phyp/phyp_driver.c     |  2 +-
+ src/qemu/qemu_driver.c     | 19 +++++++++++--------
+ src/uml/uml_driver.c       |  3 ++-
+ src/vbox/vbox_common.c     |  4 ++--
+ tests/qemuhotplugtest.c    |  2 +-
+ 10 files changed, 47 insertions(+), 36 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 0fdf1742fd..637d971e21 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -4961,22 +4961,24 @@ virDomainDeviceDefPostParseOne(virDomainDeviceDefPtr dev,
+                                const virDomainDef *def,
+                                virCapsPtr caps,
+                                unsigned int flags,
+-                               virDomainXMLOptionPtr xmlopt)
++                               virDomainXMLOptionPtr xmlopt,
++                               void *parseOpaque)
+ {
+-    void *parseOpaque = NULL;
++    void *data = NULL;
+     int ret;
+ 
+-    if (xmlopt->config.domainPostParseDataAlloc) {
++    if (!parseOpaque && xmlopt->config.domainPostParseDataAlloc) {
+         if (xmlopt->config.domainPostParseDataAlloc(def, caps, flags,
+                                                     xmlopt->config.priv,
+-                                                    &parseOpaque) < 0)
++                                                    &data) < 0)
+             return -1;
++        parseOpaque = data;
+     }
+ 
+     ret = virDomainDeviceDefPostParse(dev, def, caps, flags, xmlopt, parseOpaque);
+ 
+-    if (parseOpaque && xmlopt->config.domainPostParseDataFree)
+-        xmlopt->config.domainPostParseDataFree(parseOpaque);
++    if (data && xmlopt->config.domainPostParseDataFree)
++        xmlopt->config.domainPostParseDataFree(data);
+ 
+     return ret;
+ }
+@@ -16321,6 +16323,7 @@ virDomainDeviceDefParse(const char *xmlStr,
+                         const virDomainDef *def,
+                         virCapsPtr caps,
+                         virDomainXMLOptionPtr xmlopt,
++                        void *parseOpaque,
+                         unsigned int flags)
+ {
+     xmlDocPtr xml;
+@@ -16482,7 +16485,8 @@ virDomainDeviceDefParse(const char *xmlStr,
+     }
+ 
+     /* callback to fill driver specific device aspects */
+-    if (virDomainDeviceDefPostParseOne(dev, def, caps, flags, xmlopt) < 0)
++    if (virDomainDeviceDefPostParseOne(dev, def, caps, flags,
++                                       xmlopt, parseOpaque) < 0)
+         goto error;
+ 
+     /* validate the configuration */
+@@ -29593,7 +29597,8 @@ virDomainDeviceDefPtr
+ virDomainDeviceDefCopy(virDomainDeviceDefPtr src,
+                        const virDomainDef *def,
+                        virCapsPtr caps,
+-                       virDomainXMLOptionPtr xmlopt)
++                       virDomainXMLOptionPtr xmlopt,
++                       void *parseOpaque)
+ {
+     virDomainDeviceDefPtr ret = NULL;
+     virBuffer buf = VIR_BUFFER_INITIALIZER;
+@@ -29682,7 +29687,7 @@ virDomainDeviceDefCopy(virDomainDeviceDefPtr src,
+         goto cleanup;
+ 
+     xmlStr = virBufferContentAndReset(&buf);
+-    ret = virDomainDeviceDefParse(xmlStr, def, caps, xmlopt,
++    ret = virDomainDeviceDefParse(xmlStr, def, caps, xmlopt, parseOpaque,
+                                   VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                   VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
+ 
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 9e4fed6d4e..0989368e7c 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2906,7 +2906,8 @@ void virDomainDeviceDefFree(virDomainDeviceDefPtr def);
+ virDomainDeviceDefPtr virDomainDeviceDefCopy(virDomainDeviceDefPtr src,
+                                              const virDomainDef *def,
+                                              virCapsPtr caps,
+-                                             virDomainXMLOptionPtr xmlopt);
++                                             virDomainXMLOptionPtr xmlopt,
++                                             void *parseOpaque);
+ int virDomainDeviceAddressIsValid(virDomainDeviceInfoPtr info,
+                                   int type);
+ virDomainDeviceInfoPtr virDomainDeviceGetInfo(virDomainDeviceDefPtr device);
+@@ -3039,6 +3040,7 @@ virDomainDeviceDefPtr virDomainDeviceDefParse(const char *xmlStr,
+                                               const virDomainDef *def,
+                                               virCapsPtr caps,
+                                               virDomainXMLOptionPtr xmlopt,
++                                              void *parseOpaque,
+                                               unsigned int flags);
+ virDomainDiskDefPtr virDomainDiskDefParse(const char *xmlStr,
+                                           const virDomainDef *def,
+diff --git a/src/libxl/libxl_driver.c b/src/libxl/libxl_driver.c
+index be6b66ce7e..1eb63c5b64 100644
+--- a/src/libxl/libxl_driver.c
++++ b/src/libxl/libxl_driver.c
+@@ -3955,7 +3955,7 @@ libxlDomainAttachDeviceFlags(virDomainPtr dom, const char *xml,
+ 
+     if (flags & VIR_DOMAIN_DEVICE_MODIFY_CONFIG) {
+         if (!(dev = virDomainDeviceDefParse(xml, vm->def,
+-                                            cfg->caps, driver->xmlopt,
++                                            cfg->caps, driver->xmlopt, NULL,
+                                             VIR_DOMAIN_DEF_PARSE_INACTIVE)))
+             goto endjob;
+ 
+@@ -3972,7 +3972,7 @@ libxlDomainAttachDeviceFlags(virDomainPtr dom, const char *xml,
+         /* If dev exists it was created to modify the domain config. Free it. */
+         virDomainDeviceDefFree(dev);
+         if (!(dev = virDomainDeviceDefParse(xml, vm->def,
+-                                            cfg->caps, driver->xmlopt,
++                                            cfg->caps, driver->xmlopt, NULL,
+                                             VIR_DOMAIN_DEF_PARSE_INACTIVE)))
+             goto endjob;
+ 
+@@ -4044,7 +4044,7 @@ libxlDomainDetachDeviceFlags(virDomainPtr dom, const char *xml,
+ 
+     if (flags & VIR_DOMAIN_DEVICE_MODIFY_CONFIG) {
+         if (!(dev = virDomainDeviceDefParse(xml, vm->def,
+-                                            cfg->caps, driver->xmlopt,
++                                            cfg->caps, driver->xmlopt, NULL,
+                                             VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                             VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
+             goto endjob;
+@@ -4062,7 +4062,7 @@ libxlDomainDetachDeviceFlags(virDomainPtr dom, const char *xml,
+         /* If dev exists it was created to modify the domain config. Free it. */
+         virDomainDeviceDefFree(dev);
+         if (!(dev = virDomainDeviceDefParse(xml, vm->def,
+-                                            cfg->caps, driver->xmlopt,
++                                            cfg->caps, driver->xmlopt, NULL,
+                                             VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                             VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
+             goto endjob;
+@@ -4132,7 +4132,7 @@ libxlDomainUpdateDeviceFlags(virDomainPtr dom, const char *xml,
+ 
+     if (flags & VIR_DOMAIN_DEVICE_MODIFY_CONFIG) {
+         if (!(dev = virDomainDeviceDefParse(xml, vm->def,
+-                                            cfg->caps, driver->xmlopt,
++                                            cfg->caps, driver->xmlopt, NULL,
+                                             VIR_DOMAIN_DEF_PARSE_INACTIVE)))
+             goto cleanup;
+ 
+@@ -4151,7 +4151,7 @@ libxlDomainUpdateDeviceFlags(virDomainPtr dom, const char *xml,
+         /* If dev exists it was created to modify the domain config. Free it. */
+         virDomainDeviceDefFree(dev);
+         if (!(dev = virDomainDeviceDefParse(xml, vm->def,
+-                                            cfg->caps, driver->xmlopt,
++                                            cfg->caps, driver->xmlopt, NULL,
+                                             VIR_DOMAIN_DEF_PARSE_INACTIVE)))
+             goto cleanup;
+ 
+diff --git a/src/lxc/lxc_driver.c b/src/lxc/lxc_driver.c
+index b182fa3759..5978183e7f 100644
+--- a/src/lxc/lxc_driver.c
++++ b/src/lxc/lxc_driver.c
+@@ -4736,7 +4736,7 @@ static int lxcDomainAttachDeviceFlags(virDomainPtr dom,
+         goto endjob;
+ 
+     dev = dev_copy = virDomainDeviceDefParse(xml, vm->def,
+-                                             caps, driver->xmlopt,
++                                             caps, driver->xmlopt, NULL,
+                                              VIR_DOMAIN_DEF_PARSE_INACTIVE);
+     if (dev == NULL)
+         goto endjob;
+@@ -4748,7 +4748,7 @@ static int lxcDomainAttachDeviceFlags(virDomainPtr dom,
+          * to CONFIG takes one instance.
+          */
+         dev_copy = virDomainDeviceDefCopy(dev, vm->def,
+-                                          caps, driver->xmlopt);
++                                          caps, driver->xmlopt, NULL);
+         if (!dev_copy)
+             goto endjob;
+     }
+@@ -4851,7 +4851,7 @@ static int lxcDomainUpdateDeviceFlags(virDomainPtr dom,
+         goto endjob;
+ 
+     dev = dev_copy = virDomainDeviceDefParse(xml, vm->def,
+-                                             caps, driver->xmlopt,
++                                             caps, driver->xmlopt, NULL,
+                                              VIR_DOMAIN_DEF_PARSE_INACTIVE);
+     if (dev == NULL)
+         goto endjob;
+@@ -4863,7 +4863,7 @@ static int lxcDomainUpdateDeviceFlags(virDomainPtr dom,
+          * to CONFIG takes one instance.
+          */
+         dev_copy = virDomainDeviceDefCopy(dev, vm->def,
+-                                          caps, driver->xmlopt);
++                                          caps, driver->xmlopt, NULL);
+         if (!dev_copy)
+             goto endjob;
+     }
+@@ -4941,7 +4941,7 @@ static int lxcDomainDetachDeviceFlags(virDomainPtr dom,
+         goto endjob;
+ 
+     dev = dev_copy = virDomainDeviceDefParse(xml, vm->def,
+-                                             caps, driver->xmlopt,
++                                             caps, driver->xmlopt, NULL,
+                                              VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                              VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
+     if (dev == NULL)
+@@ -4954,7 +4954,7 @@ static int lxcDomainDetachDeviceFlags(virDomainPtr dom,
+          * to CONFIG takes one instance.
+          */
+         dev_copy = virDomainDeviceDefCopy(dev, vm->def,
+-                                          caps, driver->xmlopt);
++                                          caps, driver->xmlopt, NULL);
+         if (!dev_copy)
+             goto endjob;
+     }
+diff --git a/src/openvz/openvz_driver.c b/src/openvz/openvz_driver.c
+index 14295dfda0..d6efb70209 100644
+--- a/src/openvz/openvz_driver.c
++++ b/src/openvz/openvz_driver.c
+@@ -1972,7 +1972,7 @@ openvzDomainUpdateDeviceFlags(virDomainPtr dom, const char *xml,
+     if (!(def = virDomainObjGetOneDef(vm, flags)))
+         goto cleanup;
+ 
+-    dev = virDomainDeviceDefParse(xml, def, driver->caps, driver->xmlopt,
++    dev = virDomainDeviceDefParse(xml, def, driver->caps, driver->xmlopt, NULL,
+                                   VIR_DOMAIN_DEF_PARSE_INACTIVE);
+     if (!dev)
+         goto cleanup;
+diff --git a/src/phyp/phyp_driver.c b/src/phyp/phyp_driver.c
+index 67ce7903ba..430472e724 100644
+--- a/src/phyp/phyp_driver.c
++++ b/src/phyp/phyp_driver.c
+@@ -1721,7 +1721,7 @@ phypDomainAttachDevice(virDomainPtr domain, const char *xml)
+ 
+     def->os.type = VIR_DOMAIN_OSTYPE_LINUX;
+ 
+-    dev = virDomainDeviceDefParse(xml, def, phyp_driver->caps, NULL,
++    dev = virDomainDeviceDefParse(xml, def, phyp_driver->caps, NULL, NULL,
+                                   VIR_DOMAIN_DEF_PARSE_INACTIVE);
+     if (!dev)
+         goto cleanup;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 00213a5f80..8ecdcf3440 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -8405,7 +8405,7 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObjPtr vm,
+         goto cleanup;
+ 
+     dev = dev_copy = virDomainDeviceDefParse(xml, vm->def,
+-                                             caps, driver->xmlopt,
++                                             caps, driver->xmlopt, priv->qemuCaps,
+                                              parse_flags);
+     if (dev == NULL)
+         goto cleanup;
+@@ -8419,7 +8419,8 @@ qemuDomainAttachDeviceLiveAndConfig(virDomainObjPtr vm,
+          * create a deep copy of device as adding
+          * to CONFIG takes one instance.
+          */
+-        dev_copy = virDomainDeviceDefCopy(dev, vm->def, caps, driver->xmlopt);
++        dev_copy = virDomainDeviceDefCopy(dev, vm->def, caps, driver->xmlopt,
++                                          priv->qemuCaps);
+         if (!dev_copy)
+             goto cleanup;
+     }
+@@ -8567,8 +8568,8 @@ static int qemuDomainUpdateDeviceFlags(virDomainPtr dom,
+         !(flags & VIR_DOMAIN_AFFECT_LIVE))
+         parse_flags |= VIR_DOMAIN_DEF_PARSE_INACTIVE;
+ 
+-    dev = dev_copy = virDomainDeviceDefParse(xml, vm->def,
+-                                             caps, driver->xmlopt,
++    dev = dev_copy = virDomainDeviceDefParse(xml, vm->def, caps,
++                                             driver->xmlopt, priv->qemuCaps,
+                                              parse_flags);
+     if (dev == NULL)
+         goto endjob;
+@@ -8579,7 +8580,8 @@ static int qemuDomainUpdateDeviceFlags(virDomainPtr dom,
+          * create a deep copy of device as adding
+          * to CONFIG takes one instance.
+          */
+-        dev_copy = virDomainDeviceDefCopy(dev, vm->def, caps, driver->xmlopt);
++        dev_copy = virDomainDeviceDefCopy(dev, vm->def, caps,
++                                          driver->xmlopt, priv->qemuCaps);
+         if (!dev_copy)
+             goto endjob;
+     }
+@@ -8665,8 +8667,8 @@ qemuDomainDetachDeviceLiveAndConfig(virQEMUDriverPtr driver,
+         !(flags & VIR_DOMAIN_AFFECT_LIVE))
+         parse_flags |= VIR_DOMAIN_DEF_PARSE_INACTIVE;
+ 
+-    dev = dev_copy = virDomainDeviceDefParse(xml, vm->def,
+-                                             caps, driver->xmlopt,
++    dev = dev_copy = virDomainDeviceDefParse(xml, vm->def, caps,
++                                             driver->xmlopt, priv->qemuCaps,
+                                              parse_flags);
+     if (dev == NULL)
+         goto cleanup;
+@@ -8677,7 +8679,8 @@ qemuDomainDetachDeviceLiveAndConfig(virQEMUDriverPtr driver,
+          * create a deep copy of device as adding
+          * to CONFIG takes one instance.
+          */
+-        dev_copy = virDomainDeviceDefCopy(dev, vm->def, caps, driver->xmlopt);
++        dev_copy = virDomainDeviceDefCopy(dev, vm->def, caps,
++                                          driver->xmlopt, priv->qemuCaps);
+         if (!dev_copy)
+             goto cleanup;
+     }
+diff --git a/src/uml/uml_driver.c b/src/uml/uml_driver.c
+index 796de53d43..175d6c9c2e 100644
+--- a/src/uml/uml_driver.c
++++ b/src/uml/uml_driver.c
+@@ -2089,7 +2089,7 @@ static int umlDomainAttachDevice(virDomainPtr dom, const char *xml)
+     }
+ 
+     dev = virDomainDeviceDefParse(xml, vm->def, driver->caps, driver->xmlopt,
+-                                  VIR_DOMAIN_DEF_PARSE_INACTIVE);
++                                  NULL, VIR_DOMAIN_DEF_PARSE_INACTIVE);
+ 
+     if (dev == NULL)
+         goto cleanup;
+@@ -2202,6 +2202,7 @@ static int umlDomainDetachDevice(virDomainPtr dom, const char *xml)
+     }
+ 
+     dev = virDomainDeviceDefParse(xml, vm->def, driver->caps, driver->xmlopt,
++                                  NULL,
+                                   VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                   VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
+     if (dev == NULL)
+diff --git a/src/vbox/vbox_common.c b/src/vbox/vbox_common.c
+index 46d2b7afa3..eed7c83913 100644
+--- a/src/vbox/vbox_common.c
++++ b/src/vbox/vbox_common.c
+@@ -4313,7 +4313,7 @@ static int vboxDomainAttachDeviceImpl(virDomainPtr dom,
+ 
+     def->os.type = VIR_DOMAIN_OSTYPE_HVM;
+ 
+-    dev = virDomainDeviceDefParse(xml, def, data->caps, data->xmlopt,
++    dev = virDomainDeviceDefParse(xml, def, data->caps, data->xmlopt, NULL,
+                                   VIR_DOMAIN_DEF_PARSE_INACTIVE);
+     if (dev == NULL)
+         goto cleanup;
+@@ -4432,7 +4432,7 @@ static int vboxDomainDetachDevice(virDomainPtr dom, const char *xml)
+ 
+     def->os.type = VIR_DOMAIN_OSTYPE_HVM;
+ 
+-    dev = virDomainDeviceDefParse(xml, def, data->caps, data->xmlopt,
++    dev = virDomainDeviceDefParse(xml, def, data->caps, data->xmlopt, NULL,
+                                   VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                   VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE);
+     if (dev == NULL)
+diff --git a/tests/qemuhotplugtest.c b/tests/qemuhotplugtest.c
+index 2dbf768e16..b202ade286 100644
+--- a/tests/qemuhotplugtest.c
++++ b/tests/qemuhotplugtest.c
+@@ -272,7 +272,7 @@ testQemuHotplug(const void *data)
+         device_parse_flags = VIR_DOMAIN_DEF_PARSE_INACTIVE;
+ 
+     if (!(dev = virDomainDeviceDefParse(device_xml, vm->def,
+-                                        caps, driver.xmlopt,
++                                        caps, driver.xmlopt, NULL,
+                                         device_parse_flags)))
+         goto cleanup;
+ 
+-- 
+2.22.1
+

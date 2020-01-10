@@ -1,0 +1,141 @@
+From 54ca487f3777497fb419884d187bf2be00ed60f1 Mon Sep 17 00:00:00 2001
+Message-Id: <54ca487f3777497fb419884d187bf2be00ed60f1@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 Aug 2019 14:52:30 +0200
+Subject: [PATCH] qemu: Pass qemuCaps to qemuMigrationAnyPrepareDef
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since qemuDomainDefPostParse callback requires qemuCaps, we need to make
+sure it gets the capabilities stored in the domain's private data if the
+domain is running. Passing NULL may cause QEMU capabilities probing to
+be triggered in case QEMU binary changed in the meantime. When this
+happens while a running domain object is locked, QMP event delivered to
+the domain before QEMU capabilities probing finishes will deadlock the
+event loop.
+
+This patch fixes all paths leading to qemuMigrationAnyPrepareDef.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit b900f7387fca1cf3567935c81136579d6bee95ca)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1731783
+https://bugzilla.redhat.com/show_bug.cgi?id=1742023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <9c8ee8580063e52b001b969a2fbb1f1cc3ebfc37.1565959866.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_driver.c    | 12 ++++++------
+ src/qemu/qemu_migration.c |  8 ++++++--
+ src/qemu/qemu_migration.h |  1 +
+ 3 files changed, 13 insertions(+), 8 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 04915798ab..590596a421 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -12184,7 +12184,7 @@ qemuDomainMigratePrepareTunnel(virConnectPtr dconn,
+         goto cleanup;
+     }
+ 
+-    if (!(def = qemuMigrationAnyPrepareDef(driver, dom_xml, dname, &origname)))
++    if (!(def = qemuMigrationAnyPrepareDef(driver, NULL, dom_xml, dname, &origname)))
+         goto cleanup;
+ 
+     if (virDomainMigratePrepareTunnelEnsureACL(dconn, def) < 0)
+@@ -12245,7 +12245,7 @@ qemuDomainMigratePrepare2(virConnectPtr dconn,
+         goto cleanup;
+     }
+ 
+-    if (!(def = qemuMigrationAnyPrepareDef(driver, dom_xml, dname, &origname)))
++    if (!(def = qemuMigrationAnyPrepareDef(driver, NULL, dom_xml, dname, &origname)))
+         goto cleanup;
+ 
+     if (virDomainMigratePrepare2EnsureACL(dconn, def) < 0)
+@@ -12487,7 +12487,7 @@ qemuDomainMigratePrepare3(virConnectPtr dconn,
+                                                    QEMU_MIGRATION_DESTINATION)))
+         goto cleanup;
+ 
+-    if (!(def = qemuMigrationAnyPrepareDef(driver, dom_xml, dname, &origname)))
++    if (!(def = qemuMigrationAnyPrepareDef(driver, NULL, dom_xml, dname, &origname)))
+         goto cleanup;
+ 
+     if (virDomainMigratePrepare3EnsureACL(dconn, def) < 0)
+@@ -12574,7 +12574,7 @@ qemuDomainMigratePrepare3Params(virConnectPtr dconn,
+         goto cleanup;
+     }
+ 
+-    if (!(def = qemuMigrationAnyPrepareDef(driver, dom_xml, dname, &origname)))
++    if (!(def = qemuMigrationAnyPrepareDef(driver, NULL, dom_xml, dname, &origname)))
+         goto cleanup;
+ 
+     if (virDomainMigratePrepare3ParamsEnsureACL(dconn, def) < 0)
+@@ -12628,7 +12628,7 @@ qemuDomainMigratePrepareTunnel3(virConnectPtr dconn,
+                                                    QEMU_MIGRATION_DESTINATION)))
+         goto cleanup;
+ 
+-    if (!(def = qemuMigrationAnyPrepareDef(driver, dom_xml, dname, &origname)))
++    if (!(def = qemuMigrationAnyPrepareDef(driver, NULL, dom_xml, dname, &origname)))
+         goto cleanup;
+ 
+     if (virDomainMigratePrepareTunnel3EnsureACL(dconn, def) < 0)
+@@ -12687,7 +12687,7 @@ qemuDomainMigratePrepareTunnel3Params(virConnectPtr dconn,
+                                                    QEMU_MIGRATION_DESTINATION)))
+         goto cleanup;
+ 
+-    if (!(def = qemuMigrationAnyPrepareDef(driver, dom_xml, dname, &origname)))
++    if (!(def = qemuMigrationAnyPrepareDef(driver, NULL, dom_xml, dname, &origname)))
+         goto cleanup;
+ 
+     if (virDomainMigratePrepareTunnel3ParamsEnsureACL(dconn, def) < 0)
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 111038b971..f5d77d2508 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -2852,6 +2852,7 @@ qemuMigrationDstPrepareDirect(virQEMUDriverPtr driver,
+ 
+ virDomainDefPtr
+ qemuMigrationAnyPrepareDef(virQEMUDriverPtr driver,
++                           virQEMUCapsPtr qemuCaps,
+                            const char *dom_xml,
+                            const char *dname,
+                            char **origname)
+@@ -2869,7 +2870,8 @@ qemuMigrationAnyPrepareDef(virQEMUDriverPtr driver,
+     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
+         return NULL;
+ 
+-    if (!(def = virDomainDefParseString(dom_xml, caps, driver->xmlopt, NULL,
++    if (!(def = virDomainDefParseString(dom_xml, caps, driver->xmlopt,
++                                        qemuCaps,
+                                         VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                         VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
+         goto cleanup;
+@@ -3412,7 +3414,9 @@ qemuMigrationSrcRun(virQEMUDriverPtr driver,
+ 
+     if (flags & VIR_MIGRATE_PERSIST_DEST) {
+         if (persist_xml) {
+-            if (!(persistDef = qemuMigrationAnyPrepareDef(driver, persist_xml,
++            if (!(persistDef = qemuMigrationAnyPrepareDef(driver,
++                                                          priv->qemuCaps,
++                                                          persist_xml,
+                                                           NULL, NULL)))
+                 goto error;
+         } else {
+diff --git a/src/qemu/qemu_migration.h b/src/qemu/qemu_migration.h
+index e12b6972db..b9feffaf93 100644
+--- a/src/qemu/qemu_migration.h
++++ b/src/qemu/qemu_migration.h
+@@ -115,6 +115,7 @@ qemuMigrationSrcBegin(virConnectPtr conn,
+ 
+ virDomainDefPtr
+ qemuMigrationAnyPrepareDef(virQEMUDriverPtr driver,
++                           virQEMUCapsPtr qemuCaps,
+                            const char *dom_xml,
+                            const char *dname,
+                            char **origname);
+-- 
+2.22.1
+

@@ -1,0 +1,65 @@
+From 05516528f7ef69e84eb3edc8a00bc9fba44ea538 Mon Sep 17 00:00:00 2001
+Message-Id: <05516528f7ef69e84eb3edc8a00bc9fba44ea538@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 16 Aug 2019 14:52:31 +0200
+Subject: [PATCH] qemu: Pass correct qemuCaps to virDomainDefParseString
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since qemuDomainDefPostParse callback requires qemuCaps, we need to make
+sure it gets the capabilities stored in the domain's private data if the
+domain is running. Passing NULL may cause QEMU capabilities probing to
+be triggered in case QEMU binary changed in the meantime. When this
+happens while a running domain object is locked, QMP event delivered to
+the domain before QEMU capabilities probing finishes will deadlock the
+event loop.
+
+This patch fixes all paths leading to virDomainDefParseString.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 6e7c33dad7f2f90182c452917f3a555e2c878d42)
+
+Conflicts:
+	src/qemu/qemu_driver.c
+            - snapshots are not based on virDomainMomentDef
+            - no checkpoint APIs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1731783
+https://bugzilla.redhat.com/show_bug.cgi?id=1742023
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <2728b24106e1e361cf9766ea8f9eeec782df6b20.1565959866.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_driver.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 590596a421..3f8530eb0e 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3307,7 +3307,8 @@ qemuDomainSaveInternal(virQEMUDriverPtr driver,
+     if (xmlin) {
+         virDomainDefPtr def = NULL;
+ 
+-        if (!(def = virDomainDefParseString(xmlin, caps, driver->xmlopt, NULL,
++        if (!(def = virDomainDefParseString(xmlin, caps, driver->xmlopt,
++                                            priv->qemuCaps,
+                                             VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                             VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE))) {
+             goto endjob;
+@@ -15405,7 +15406,8 @@ qemuDomainSnapshotCreateXML(virDomainPtr domain,
+         if (!(xml = qemuDomainDefFormatLive(driver, priv->qemuCaps,
+                                             vm->def, priv->origCPU,
+                                             true, true)) ||
+-            !(def->dom = virDomainDefParseString(xml, caps, driver->xmlopt, NULL,
++            !(def->dom = virDomainDefParseString(xml, caps, driver->xmlopt,
++                                                 priv->qemuCaps,
+                                                  VIR_DOMAIN_DEF_PARSE_INACTIVE |
+                                                  VIR_DOMAIN_DEF_PARSE_SKIP_VALIDATE)))
+             goto endjob;
+-- 
+2.22.1
+
