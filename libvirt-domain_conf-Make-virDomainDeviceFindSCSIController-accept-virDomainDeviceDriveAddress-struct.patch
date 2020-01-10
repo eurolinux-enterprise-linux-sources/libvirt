@@ -1,0 +1,102 @@
+From 0c063a84897d357af0c1d04ec70deee47f97a3a1 Mon Sep 17 00:00:00 2001
+Message-Id: <0c063a84897d357af0c1d04ec70deee47f97a3a1@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 28 Oct 2019 14:02:22 +0100
+Subject: [PATCH] domain_conf: Make virDomainDeviceFindSCSIController accept
+ virDomainDeviceDriveAddress struct
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+So far, the virDomainDeviceFindSCSIController() takes
+virDomainDeviceInfo structure which is an overkill. It assumes
+that the passed structure is type of
+VIR_DOMAIN_DEVICE_ADDRESS_TYPE_DRIVE which is not obvious.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 9cddc6e8ee9d9ce62dd20a6317c3148f4cd1c0e9)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1766086
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <b8ec50bafde8e4a8cce3699bd7c8625c9f648ccb.1572267657.git.mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c         | 6 +++---
+ src/conf/domain_conf.h         | 2 +-
+ src/qemu/qemu_domain_address.c | 2 +-
+ src/vbox/vbox_common.c         | 2 +-
+ 4 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 637d971e21..3bc603b48c 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -8235,13 +8235,13 @@ virDomainHostdevDefParseXMLCaps(xmlNodePtr node ATTRIBUTE_UNUSED,
+ 
+ virDomainControllerDefPtr
+ virDomainDeviceFindSCSIController(const virDomainDef *def,
+-                                  virDomainDeviceInfoPtr info)
++                                  const virDomainDeviceDriveAddress *addr)
+ {
+     size_t i;
+ 
+     for (i = 0; i < def->ncontrollers; i++) {
+         if (def->controllers[i]->type == VIR_DOMAIN_CONTROLLER_TYPE_SCSI &&
+-            def->controllers[i]->idx == info->addr.drive.controller)
++            def->controllers[i]->idx == addr->controller)
+             return def->controllers[i];
+     }
+ 
+@@ -18565,7 +18565,7 @@ virDomainDefMaybeAddHostdevSCSIcontroller(virDomainDefPtr def)
+              * So let's grab the model from it and update the model we're
+              * going to add as long as this one isn't undefined. The premise
+              * being keeping the same controller model for all SCSI hostdevs. */
+-            cont = virDomainDeviceFindSCSIController(def, hostdev->info);
++            cont = virDomainDeviceFindSCSIController(def, &hostdev->info->addr.drive);
+             if (cont && cont->model != -1)
+                 newModel = cont->model;
+         }
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 0989368e7c..934850b28d 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2866,7 +2866,7 @@ int virDomainDiskGetFormat(virDomainDiskDefPtr def);
+ void virDomainDiskSetFormat(virDomainDiskDefPtr def, int format);
+ virDomainControllerDefPtr
+ virDomainDeviceFindSCSIController(const virDomainDef *def,
+-                                  virDomainDeviceInfoPtr info);
++                                  const virDomainDeviceDriveAddress *addr);
+ virDomainDiskDefPtr virDomainDiskFindByBusAndDst(virDomainDefPtr def,
+                                                  int bus,
+                                                  char *dst);
+diff --git a/src/qemu/qemu_domain_address.c b/src/qemu/qemu_domain_address.c
+index 0cb5af4a87..4f0278d348 100644
+--- a/src/qemu/qemu_domain_address.c
++++ b/src/qemu/qemu_domain_address.c
+@@ -113,7 +113,7 @@ qemuDomainFindSCSIControllerModel(const virDomainDef *def,
+ {
+     virDomainControllerDefPtr cont;
+ 
+-    if (!(cont = virDomainDeviceFindSCSIController(def, info))) {
++    if (!(cont = virDomainDeviceFindSCSIController(def, &info->addr.drive))) {
+         virReportError(VIR_ERR_INTERNAL_ERROR,
+                        _("unable to find a SCSI controller for idx=%d"),
+                        info->addr.drive.controller);
+diff --git a/src/vbox/vbox_common.c b/src/vbox/vbox_common.c
+index eed7c83913..fe3c3ab2aa 100644
+--- a/src/vbox/vbox_common.c
++++ b/src/vbox/vbox_common.c
+@@ -1118,7 +1118,7 @@ vboxAttachDrives(virDomainDefPtr def, vboxDriverPtr data, IMachine *machine)
+         case VIR_DOMAIN_DISK_BUS_SCSI:
+             VBOX_UTF8_TO_UTF16(VBOX_CONTROLLER_SCSI_NAME, &storageCtlName);
+ 
+-            cont = virDomainDeviceFindSCSIController(def, &disk->info);
++            cont = virDomainDeviceFindSCSIController(def, &disk->info.addr.drive);
+             if (cont && cont->model == VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSISAS1068) {
+                 VBOX_UTF16_FREE(storageCtlName);
+                 VBOX_UTF8_TO_UTF16(VBOX_CONTROLLER_SAS_NAME, &storageCtlName);
+-- 
+2.23.0
+

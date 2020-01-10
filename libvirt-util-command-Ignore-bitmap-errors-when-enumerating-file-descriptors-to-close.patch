@@ -1,0 +1,60 @@
+From a84a200ecb3867645f051e5c09826facf34786e0 Mon Sep 17 00:00:00 2001
+Message-Id: <a84a200ecb3867645f051e5c09826facf34786e0@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 9 Oct 2019 14:27:45 +0200
+Subject: [PATCH] util: command: Ignore bitmap errors when enumerating file
+ descriptors to close
+
+virCommandMassCloseGetFDsLinux fails when running libvird on valgrind
+with the following message:
+
+libvirt:  error : internal error: unable to set FD as open: 1024
+
+This is because valgrind opens few file descriptors beyond the limit:
+
+65701125 lr-x------. 1 root root 64 Jul 18 14:48 1024 -> /home/pipo/build/libvirt/gcc/src/.libs/libvirtd
+65701126 lrwx------. 1 root root 64 Jul 18 14:48 1025 -> '/tmp/valgrind_proc_3849_cmdline_186612e3 (deleted)'
+65701127 lrwx------. 1 root root 64 Jul 18 14:48 1026 -> '/tmp/valgrind_proc_3849_auxv_186612e3 (deleted)'
+65701128 lrwx------. 1 root root 64 Jul 18 14:48 1027 -> /dev/pts/11
+65701129 lr-x------. 1 root root 64 Jul 18 14:48 1028 -> 'pipe:[65689522]'
+65701130 l-wx------. 1 root root 64 Jul 18 14:48 1029 -> 'pipe:[65689522]'
+65701131 lr-x------. 1 root root 64 Jul 18 14:48 1030 -> /tmp/vgdb-pipe-from-vgdb-to-3849-by-root-on-angien
+
+Ignore bitmap errors in this case since we'd leak those FD's anyways in
+the previous scenario.
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 728343983787cbd4d7ae8fa2007a157bb140f02a)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1759904
+https://bugzilla.redhat.com/show_bug.cgi?id=1760470
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <30a3508e2903b58e695d467844f6d84cd008a0d9.1570623892.git.mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/vircommand.c | 7 +------
+ 1 file changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/src/util/vircommand.c b/src/util/vircommand.c
+index 2d0c987fe2..17405ceea4 100644
+--- a/src/util/vircommand.c
++++ b/src/util/vircommand.c
+@@ -520,12 +520,7 @@ virCommandMassCloseGetFDsLinux(virCommandPtr cmd ATTRIBUTE_UNUSED,
+             goto cleanup;
+         }
+ 
+-        if (virBitmapSetBit(fds, fd) < 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("unable to set FD as open: %d"),
+-                           fd);
+-            goto cleanup;
+-        }
++        ignore_value(virBitmapSetBit(fds, fd));
+     }
+ 
+     if (rc < 0)
+-- 
+2.23.0
+

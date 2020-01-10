@@ -1,0 +1,45 @@
+From 6f186e44c26abd373c927215a0aba4f5892bcd32 Mon Sep 17 00:00:00 2001
+Message-Id: <6f186e44c26abd373c927215a0aba4f5892bcd32@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 9 Oct 2019 14:27:46 +0200
+Subject: [PATCH] util: Avoid possible error in virCommandMassClose
+
+Avoid the chance that sysconf(_SC_OPEN_MAX) returns -1 and thus
+would cause virBitmapNew would attempt to allocate a very large
+bitmap.
+
+Found by Coverity
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit 6ae4f4a4ceb123417b732e869d53099983ae8d3f)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1759904
+https://bugzilla.redhat.com/show_bug.cgi?id=1760470
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <69ca4c7bcf0e3c7588fad50d68dbf75180109b31.1570623892.git.mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/vircommand.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/util/vircommand.c b/src/util/vircommand.c
+index 17405ceea4..083a8bbee5 100644
+--- a/src/util/vircommand.c
++++ b/src/util/vircommand.c
+@@ -561,6 +561,11 @@ virCommandMassClose(virCommandPtr cmd,
+      * Therefore we can safely allocate memory here (and transitively call
+      * opendir/readdir) without a deadlock. */
+ 
++    if (openmax < 0) {
++        virReportSystemError(errno, "%s", _("sysconf(_SC_OPEN_MAX) failed"));
++        return -1;
++    }
++
+     if (!(fds = virBitmapNew(openmax)))
+         return -1;
+ 
+-- 
+2.23.0
+

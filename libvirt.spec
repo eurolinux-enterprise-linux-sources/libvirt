@@ -253,7 +253,7 @@
 Summary: Library providing a simple virtualization API
 Name: libvirt
 Version: 4.5.0
-Release: 23%{?dist}.1%{?extra_release}
+Release: 23%{?dist}.3%{?extra_release}
 License: LGPLv2+
 URL: https://libvirt.org/
 
@@ -590,6 +590,14 @@ Patch324: libvirt-qemu-Pass-correct-qemuCaps-to-virDomainDefPostParse.patch
 Patch325: libvirt-qemu-Pass-correct-qemuCaps-to-virDomainDefParseNode.patch
 Patch326: libvirt-qemu-Pass-correct-qemuCaps-to-virDomainDeviceDefPostParse.patch
 Patch327: libvirt-qemu-Fix-crash-on-incoming-migration.patch
+Patch328: libvirt-virNetDevOpenvswitchInterfaceStats-Optimize-for-speed.patch
+Patch329: libvirt-test-Introduce-virnetdevopenvswitchtest.patch
+Patch330: libvirt-vircommand-Separate-mass-FD-closing-into-a-function.patch
+Patch331: libvirt-virCommand-use-procfs-to-learn-opened-FDs.patch
+Patch332: libvirt-util-command-Ignore-bitmap-errors-when-enumerating-file-descriptors-to-close.patch
+Patch333: libvirt-util-Avoid-possible-error-in-virCommandMassClose.patch
+Patch334: libvirt-domain_conf-Make-virDomainDeviceFindSCSIController-accept-virDomainDeviceDriveAddress-struct.patch
+Patch335: libvirt-domain_conf-Relax-SCSI-addr-used-check.patch
 
 Requires: libvirt-daemon = %{version}-%{release}
 Requires: libvirt-daemon-config-network = %{version}-%{release}
@@ -2491,6 +2499,18 @@ exit 0
 
 
 %changelog
+* Mon Oct 28 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-23.el7_7.3
+- domain_conf: Make virDomainDeviceFindSCSIController accept virDomainDeviceDriveAddress struct (rhbz#1766086)
+- domain_conf: Relax SCSI addr used check (rhbz#1766086)
+
+* Mon Oct 14 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-23.el7_7.2
+- virNetDevOpenvswitchInterfaceStats: Optimize for speed (rhbz#1760470)
+- test: Introduce virnetdevopenvswitchtest (rhbz#1760470)
+- vircommand: Separate mass FD closing into a function (rhbz#1760470)
+- virCommand: use procfs to learn opened FDs (rhbz#1760470)
+- util: command: Ignore bitmap errors when enumerating file descriptors to close (rhbz#1760470)
+- util: Avoid possible error in virCommandMassClose (rhbz#1760470)
+
 * Fri Aug 16 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-23.el7_7.1
 - qemu: Pass qemuCaps to qemuDomainDefCopy (rhbz#1742023)
 - qemu: Pass qemuCaps to qemuDomainDefFormatBufInternal (rhbz#1742023)

@@ -1,0 +1,362 @@
+From 4654a9aba4691204f083d6742940437cca0d87b9 Mon Sep 17 00:00:00 2001
+Message-Id: <4654a9aba4691204f083d6742940437cca0d87b9@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 9 Oct 2019 14:27:42 +0200
+Subject: [PATCH] test: Introduce virnetdevopenvswitchtest
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Test if our parsing of interface stats as returned by ovs-vsctl
+works as expected. To achieve this without having to mock
+virCommand* I'm separating parsing of stats into a separate
+function.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit cc34260f5a8715d208ee45a6ebaa79e5264cbe68)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1759904
+https://bugzilla.redhat.com/show_bug.cgi?id=1760470
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <a1ed18fa73eadd5b2a87c0829555771b38a003a7.1570623892.git.mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms                   |   1 +
+ src/util/virnetdevopenvswitch.c            |  98 ++++++++++++--------
+ src/util/virnetdevopenvswitch.h            |   4 +
+ tests/Makefile.am                          |  13 ++-
+ tests/virnetdevopenvswitchdata/stats1.json |   1 +
+ tests/virnetdevopenvswitchdata/stats2.json |   1 +
+ tests/virnetdevopenvswitchtest.c           | 101 +++++++++++++++++++++
+ 7 files changed, 181 insertions(+), 38 deletions(-)
+ create mode 100644 tests/virnetdevopenvswitchdata/stats1.json
+ create mode 100644 tests/virnetdevopenvswitchdata/stats2.json
+ create mode 100644 tests/virnetdevopenvswitchtest.c
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index bf99930802..ac34ea0290 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -2400,6 +2400,7 @@ virNetDevMidonetUnbindPort;
+ virNetDevOpenvswitchAddPort;
+ virNetDevOpenvswitchGetMigrateData;
+ virNetDevOpenvswitchGetVhostuserIfname;
++virNetDevOpenvswitchInterfaceParseStats;
+ virNetDevOpenvswitchInterfaceStats;
+ virNetDevOpenvswitchRemovePort;
+ virNetDevOpenvswitchSetMigrateData;
+diff --git a/src/util/virnetdevopenvswitch.c b/src/util/virnetdevopenvswitch.c
+index fc92ab2e7f..80da5ad3db 100644
+--- a/src/util/virnetdevopenvswitch.c
++++ b/src/util/virnetdevopenvswitch.c
+@@ -326,50 +326,31 @@ int virNetDevOpenvswitchSetMigrateData(char *migrate, const char *ifname)
+     return ret;
+ }
+ 
++
+ /**
+- * virNetDevOpenvswitchInterfaceStats:
+- * @ifname: the name of the interface
+- * @stats: the retreived domain interface stat
++ * virNetDevOpenvswitchInterfaceParseStats:
++ * @json: Input string in JSON format
++ * @stats: parsed stats
+  *
+- * Retrieves the OVS interfaces stats
++ * For given input string @json parse interface statistics and store them into
++ * @stats.
+  *
+- * Returns 0 in case of success or -1 in case of failure
++ * Returns: 0 on success,
++ *         -1 otherwise (with error reported).
+  */
+ int
+-virNetDevOpenvswitchInterfaceStats(const char *ifname,
+-                                   virDomainInterfaceStatsPtr stats)
++virNetDevOpenvswitchInterfaceParseStats(const char *json,
++                                        virDomainInterfaceStatsPtr stats)
+ {
+-    virCommandPtr cmd = NULL;
+-    VIR_AUTOFREE(char *) output = NULL;
+     virJSONValuePtr jsonStats = NULL;
+     virJSONValuePtr jsonMap = NULL;
+     size_t i;
+     int ret = -1;
+ 
+-    cmd = virCommandNew(OVSVSCTL);
+-    virNetDevOpenvswitchAddTimeout(cmd);
+-    virCommandAddArgList(cmd, "--if-exists", "--format=list", "--data=json",
+-                         "--no-headings", "--columns=statistics", "list",
+-                         "Interface", ifname, NULL);
+-    virCommandSetOutputBuffer(cmd, &output);
+-
+-    /* The above command returns either:
+-     * 1) empty string if @ifname doesn't exist, or
+-     * 2) a JSON array, for instance:
+-     *    ["map",[["collisions",0],["rx_bytes",0],["rx_crc_err",0],["rx_dropped",0],
+-     *    ["rx_errors",0],["rx_frame_err",0],["rx_over_err",0],["rx_packets",0],
+-     *    ["tx_bytes",12406],["tx_dropped",0],["tx_errors",0],["tx_packets",173]]]
+-     */
+-
+-    if (virCommandRun(cmd, NULL) < 0 ||
+-        STREQ_NULLABLE(output, "")) {
+-        /* no ovs-vsctl or interface 'ifname' doesn't exists in ovs */
+-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-                       _("Interface not found"));
+-        goto cleanup;
+-    }
++    stats->rx_bytes = stats->rx_packets = stats->rx_errs = stats->rx_drop = -1;
++    stats->tx_bytes = stats->tx_packets = stats->tx_errs = stats->tx_drop = -1;
+ 
+-    if (!(jsonStats = virJSONValueFromString(output)) ||
++    if (!(jsonStats = virJSONValueFromString(json)) ||
+         !virJSONValueIsArray(jsonStats) ||
+         !(jsonMap = virJSONValueArrayGet(jsonStats, 1))) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+@@ -377,9 +358,6 @@ virNetDevOpenvswitchInterfaceStats(const char *ifname,
+         goto cleanup;
+     }
+ 
+-    stats->rx_bytes = stats->rx_packets = stats->rx_errs = stats->rx_drop = -1;
+-    stats->tx_bytes = stats->tx_packets = stats->tx_errs = stats->tx_drop = -1;
+-
+     for (i = 0; i < virJSONValueArraySize(jsonMap); i++) {
+         virJSONValuePtr item = virJSONValueArrayGet(jsonMap, i);
+         virJSONValuePtr jsonKey;
+@@ -420,6 +398,55 @@ virNetDevOpenvswitchInterfaceStats(const char *ifname,
+         }
+     }
+ 
++    ret = 0;
++ cleanup:
++    virJSONValueFree(jsonStats);
++    return ret;
++}
++
++/**
++ * virNetDevOpenvswitchInterfaceStats:
++ * @ifname: the name of the interface
++ * @stats: the retrieved domain interface stat
++ *
++ * Retrieves the OVS interfaces stats
++ *
++ * Returns 0 in case of success or -1 in case of failure
++ */
++int
++virNetDevOpenvswitchInterfaceStats(const char *ifname,
++                                   virDomainInterfaceStatsPtr stats)
++{
++    virCommandPtr cmd = NULL;
++    VIR_AUTOFREE(char *) output = NULL;
++    int ret = -1;
++
++    cmd = virCommandNew(OVSVSCTL);
++    virNetDevOpenvswitchAddTimeout(cmd);
++    virCommandAddArgList(cmd, "--if-exists", "--format=list", "--data=json",
++                         "--no-headings", "--columns=statistics", "list",
++                         "Interface", ifname, NULL);
++    virCommandSetOutputBuffer(cmd, &output);
++
++    /* The above command returns either:
++     * 1) empty string if @ifname doesn't exist, or
++     * 2) a JSON array, for instance:
++     *    ["map",[["collisions",0],["rx_bytes",0],["rx_crc_err",0],["rx_dropped",0],
++     *    ["rx_errors",0],["rx_frame_err",0],["rx_over_err",0],["rx_packets",0],
++     *    ["tx_bytes",12406],["tx_dropped",0],["tx_errors",0],["tx_packets",173]]]
++     */
++
++    if (virCommandRun(cmd, NULL) < 0 ||
++        STREQ_NULLABLE(output, "")) {
++        /* no ovs-vsctl or interface 'ifname' doesn't exists in ovs */
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("Interface not found"));
++        return -1;
++    }
++
++    if (virNetDevOpenvswitchInterfaceParseStats(output, stats) < 0)
++        return -1;
++
+     if (stats->rx_bytes == -1 &&
+         stats->rx_packets == -1 &&
+         stats->rx_errs == -1 &&
+@@ -436,7 +463,6 @@ virNetDevOpenvswitchInterfaceStats(const char *ifname,
+     ret = 0;
+ 
+  cleanup:
+-    virJSONValueFree(jsonStats);
+     virCommandFree(cmd);
+     return ret;
+ }
+diff --git a/src/util/virnetdevopenvswitch.h b/src/util/virnetdevopenvswitch.h
+index 6f6e620c22..c1a211dec1 100644
+--- a/src/util/virnetdevopenvswitch.h
++++ b/src/util/virnetdevopenvswitch.h
+@@ -53,6 +53,10 @@ int virNetDevOpenvswitchGetMigrateData(char **migrate, const char *ifname)
+ int virNetDevOpenvswitchSetMigrateData(char *migrate, const char *ifname)
+     ATTRIBUTE_NONNULL(2) ATTRIBUTE_RETURN_CHECK;
+ 
++int virNetDevOpenvswitchInterfaceParseStats(const char *json,
++                                            virDomainInterfaceStatsPtr stats)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
++
+ int virNetDevOpenvswitchInterfaceStats(const char *ifname,
+                                        virDomainInterfaceStatsPtr stats)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_RETURN_CHECK;
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index f871a8a102..8cff413a78 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -158,6 +158,7 @@ EXTRA_DIST = \
+ 	virmock.h \
+ 	virnetdaemondata \
+ 	virnetdevtestdata \
++	virnetdevopenvswitchdata \
+ 	virnwfilterbindingxml2xmldata \
+ 	virpcitestdata \
+ 	virscsidata \
+@@ -1243,9 +1244,17 @@ virmacmaptest_SOURCES = \
+ 	virmacmaptest.c testutils.h testutils.c
+ virmacmaptest_LDADD = $(LDADDS)
+ 
+-test_programs += virmacmaptest
++virnetdevopenvswitchtest_SOURCES = \
++	virnetdevopenvswitchtest.c testutils.h testutils.c
++virnetdevopenvswitchtest_LDADD = $(LDADDS)
++
++test_programs += \
++	virmacmaptest \
++	virnetdevopenvswitchtest
+ else ! WITH_YAJL
+-EXTRA_DIST +=  virmacmaptest.c
++EXTRA_DIST += \
++	virmacmaptest.c \
++	virnetdevopenvswitchtest.c
+ endif ! WITH_YAJL
+ 
+ virnetdevtest_SOURCES = \
+diff --git a/tests/virnetdevopenvswitchdata/stats1.json b/tests/virnetdevopenvswitchdata/stats1.json
+new file mode 100644
+index 0000000000..1138c6271e
+--- /dev/null
++++ b/tests/virnetdevopenvswitchdata/stats1.json
+@@ -0,0 +1 @@
++["map",[["collisions",1],["rx_bytes",2],["rx_crc_err",3],["rx_dropped",4],["rx_errors",5],["rx_frame_err",6],["rx_over_err",7],["rx_packets",8],["tx_bytes",9],["tx_dropped",10],["tx_errors",11],["tx_packets",12]]]
+diff --git a/tests/virnetdevopenvswitchdata/stats2.json b/tests/virnetdevopenvswitchdata/stats2.json
+new file mode 100644
+index 0000000000..d84be7e011
+--- /dev/null
++++ b/tests/virnetdevopenvswitchdata/stats2.json
+@@ -0,0 +1 @@
++["map",[["collisions",0],["rx_bytes",0],["rx_crc_err",0],["rx_dropped",0],["rx_errors",0],["rx_frame_err",0],["rx_over_err",0],["rx_packets",0],["tx_bytes",12406],["tx_dropped",0],["tx_errors",0],["tx_packets",173]]]
+diff --git a/tests/virnetdevopenvswitchtest.c b/tests/virnetdevopenvswitchtest.c
+new file mode 100644
+index 0000000000..f01e77cbba
+--- /dev/null
++++ b/tests/virnetdevopenvswitchtest.c
+@@ -0,0 +1,101 @@
++/*
++ * Copyright (C) 2019 Red Hat, Inc.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library.  If not, see
++ * <http://www.gnu.org/licenses/>.
++ */
++
++#include <config.h>
++
++#include "testutils.h"
++#include "virnetdevopenvswitch.h"
++
++#define VIR_FROM_THIS VIR_FROM_NONE
++
++typedef struct _InterfaceParseStatsData InterfaceParseStatsData;
++struct _InterfaceParseStatsData {
++    const char *filename;
++    const virDomainInterfaceStatsStruct stats;
++};
++
++
++static int
++testInterfaceParseStats(const void *opaque)
++{
++    const InterfaceParseStatsData *data = opaque;
++    VIR_AUTOFREE(char *) filename = NULL;
++    VIR_AUTOFREE(char *) buf = NULL;
++    virDomainInterfaceStatsStruct actual;
++
++    if (virAsprintf(&filename, "%s/virnetdevopenvswitchdata/%s",
++                    abs_srcdir, data->filename) < 0)
++        return -1;
++
++    if (virFileReadAll(filename, 1024, &buf) < 0)
++        return -1;
++
++    if (virNetDevOpenvswitchInterfaceParseStats(buf, &actual) < 0)
++        return -1;
++
++    if (memcmp(&actual, &data->stats, sizeof(actual)) != 0) {
++        fprintf(stderr,
++                "Expected stats: %lld %lld %lld %lld %lld %lld %lld %lld\n"
++                "Actual stats: %lld %lld %lld %lld %lld %lld %lld %lld",
++                data->stats.rx_bytes,
++                data->stats.rx_packets,
++                data->stats.rx_errs,
++                data->stats.rx_drop,
++                data->stats.tx_bytes,
++                data->stats.tx_packets,
++                data->stats.tx_errs,
++                data->stats.tx_drop,
++                actual.rx_bytes,
++                actual.rx_packets,
++                actual.rx_errs,
++                actual.rx_drop,
++                actual.tx_bytes,
++                actual.tx_packets,
++                actual.tx_errs,
++                actual.tx_drop);
++
++        return -1;
++    }
++
++    return 0;
++}
++
++
++static int
++mymain(void)
++{
++    int ret = 0;
++
++#define TEST_INTERFACE_STATS(file, \
++                             rxBytes, rxPackets, rxErrs, rxDrop, \
++                             txBytes, txPackets, txErrs, txDrop) \
++    do { \
++        const InterfaceParseStatsData data = {.filename = file, .stats = { \
++                             rxBytes, rxPackets, rxErrs, rxDrop, \
++                             txBytes, txPackets, txErrs, txDrop}}; \
++        if (virTestRun("Interface stats " file, testInterfaceParseStats, &data) < 0) \
++            ret = -1; \
++    } while (0)
++
++    TEST_INTERFACE_STATS("stats1.json", 9, 12, 11, 10, 2, 8, 5, 4);
++    TEST_INTERFACE_STATS("stats2.json", 12406, 173, 0, 0, 0, 0, 0, 0);
++
++    return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
++}
++
++VIR_TEST_MAIN(mymain);
+-- 
+2.23.0
+

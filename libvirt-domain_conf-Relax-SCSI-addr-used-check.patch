@@ -1,0 +1,102 @@
+From 99a886eeddb5d208871d149e720b13365cc6d261 Mon Sep 17 00:00:00 2001
+Message-Id: <99a886eeddb5d208871d149e720b13365cc6d261@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 28 Oct 2019 14:02:23 +0100
+Subject: [PATCH] domain_conf: Relax SCSI addr used check
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In domain_conf.c we have virDomainSCSIDriveAddressIsUsed()
+function which returns true or false if given drive address is
+already in use for given domain config or not. However, it also
+takes a shortcut and returns true (meaning address in use) if the
+unit number equals 7. This is because for some controllers this
+is reserved address. The limitation comes mostly from vmware and
+applies to lsilogic, buslogic, spapr-vscsi and vmpvscsi models.
+On the other hand, we were not checking for the maximum unit
+number (aka LUN number) which is also relevant and differs from
+model to model.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit c8007fdc5d2ce43fec2753cda60fb4963f55abd5)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1766086
+
+I had to drop
+VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_TRANSITIONAL and
+VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_NON_TRANSITIONAL from
+virDomainSCSIDriveAddressIsUsed() because those don't exist in
+RHEL-7.7 branch.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <1408596266780329bf02f2537aeb4eae3aa589cf.1572267657.git.mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 49 +++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 44 insertions(+), 5 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 3bc603b48c..f0e948d80a 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -4407,11 +4407,50 @@ bool
+ virDomainSCSIDriveAddressIsUsed(const virDomainDef *def,
+                                 const virDomainDeviceDriveAddress *addr)
+ {
+-    /* In current implementation, the maximum unit number of a controller
+-     * is either 16 or 7 (narrow SCSI bus), and if the maximum unit number
+-     * is 16, the controller itself is on unit 7 */
+-    if (addr->unit == 7)
+-        return true;
++    const virDomainControllerDef *cont;
++
++    cont = virDomainDeviceFindSCSIController(def, addr);
++    if (cont) {
++        int max = -1;
++        int reserved = -1;
++
++        /* Different controllers have different limits. These limits here are
++         * taken from QEMU source code, but nevertheless they should apply to
++         * other hypervisors too. */
++        switch ((virDomainControllerModelSCSI) cont->model) {
++        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VIRTIO_SCSI:
++            max = 16383;
++            break;
++        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_IBMVSCSI:
++            max = 31;
++            reserved = 7;
++            break;
++        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSISAS1068:
++            max = 1;
++            break;
++        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSISAS1078:
++            max = 255;
++            break;
++        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LSILOGIC:
++            reserved = 7;
++            break;
++        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_VMPVSCSI:
++            reserved = 7;
++            break;
++        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_BUSLOGIC:
++            reserved = 7;
++            break;
++        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_DEFAULT:
++        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_AUTO:
++        case VIR_DOMAIN_CONTROLLER_MODEL_SCSI_LAST:
++            break;
++        }
++
++        if (max != -1 && addr->unit >= max)
++            return true;
++        if (reserved != -1 && addr->unit == reserved)
++            return true;
++    }
+ 
+     if (virDomainDriveAddressIsUsedByDisk(def, VIR_DOMAIN_DISK_BUS_SCSI,
+                                           addr) ||
+-- 
+2.23.0
+
