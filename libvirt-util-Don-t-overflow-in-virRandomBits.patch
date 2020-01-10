@@ -1,0 +1,46 @@
+From 9f6fbc0d4d4fd12d51ae8e9ac4152bc0bc835c24 Mon Sep 17 00:00:00 2001
+Message-Id: <9f6fbc0d4d4fd12d51ae8e9ac4152bc0bc835c24@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 21 Jan 2019 09:04:10 -0500
+Subject: [PATCH] util: Don't overflow in virRandomBits
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1667329 (RHEL 7.6.z)
+https://bugzilla.redhat.com/show_bug.cgi?id=1652894 (RHEL 7.7)
+
+The function is supposed to return up to 64bit long integer. In
+order to do that it calls virRandomBytes() to fill the integer
+with random bytes and then masks out everything but requested
+bits. However, when doing that it shifts 1U and not 1ULL. So
+effectively, requesting 32 random bis or more always return 0
+which is not random enough.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+Reviewed-by: Pino Toscano <ptoscano@redhat.com>
+(cherry picked from commit 78c47a92ecb450c9f8bcabd35da7006dc2547882)
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Message-Id: <20190121140412.27804-2-jferlan@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/util/virrandom.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/util/virrandom.c b/src/util/virrandom.c
+index 01cc82a052..3c011a8615 100644
+--- a/src/util/virrandom.c
++++ b/src/util/virrandom.c
+@@ -68,7 +68,7 @@ uint64_t virRandomBits(int nbits)
+         return 0;
+     }
+ 
+-    ret &= (1U << nbits) - 1;
++    ret &= (1ULL << nbits) - 1;
+     return ret;
+ }
+ 
+-- 
+2.20.1
+

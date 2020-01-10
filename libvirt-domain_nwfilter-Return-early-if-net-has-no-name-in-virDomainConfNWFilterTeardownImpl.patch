@@ -1,0 +1,46 @@
+From 01d4d47593cc3e8c10c37a899b9edb70234c0547 Mon Sep 17 00:00:00 2001
+Message-Id: <01d4d47593cc3e8c10c37a899b9edb70234c0547@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 25 Jul 2018 13:52:55 +0200
+Subject: [PATCH] domain_nwfilter: Return early if net has no name in
+ virDomainConfNWFilterTeardownImpl
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1607831
+
+This function is called from various clean up paths (e.g.
+from qemuBuildInterfaceCommandLine). However, depending on the
+stage the interface creation process failed at, net->ifname might
+still be not filled in when control jumps to cleanup label. If
+that is the case return early (avoiding useless error message
+produced in virNWFilterBindingLookupByPortDev) as there is no
+NWFilter to tear down anyway.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit 3087b27cffdd46ad0e953e061d6f3c519aefd5d8)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_nwfilter.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/conf/domain_nwfilter.c b/src/conf/domain_nwfilter.c
+index 24b5f42ddd..f39c8a1f9b 100644
+--- a/src/conf/domain_nwfilter.c
++++ b/src/conf/domain_nwfilter.c
+@@ -133,6 +133,9 @@ virDomainConfNWFilterTeardownImpl(virConnectPtr conn,
+ {
+     virNWFilterBindingPtr binding;
+ 
++    if (!net->ifname)
++        return;
++
+     binding = virNWFilterBindingLookupByPortDev(conn, net->ifname);
+     if (!binding)
+         return;
+-- 
+2.18.0
+

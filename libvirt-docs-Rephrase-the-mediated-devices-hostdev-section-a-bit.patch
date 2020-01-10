@@ -1,0 +1,44 @@
+From 2cde7a2663e01123a88c5c6436a41e88d8a1f5c5 Mon Sep 17 00:00:00 2001
+Message-Id: <2cde7a2663e01123a88c5c6436a41e88d8a1f5c5@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:04:04 +0200
+Subject: [PATCH] docs: Rephrase the mediated devices hostdev section a bit
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Currently it reads:
+Refer MDEV to create a mediated device on the host
+
+...even though it resembles English, it's not a proper English.
+
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit 32b52ed838dd393b4249ddcb9d4b17f1deafbc2b)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ docs/formatdomain.html.in | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 3554c3dc30..0e8f0a125f 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -4509,8 +4509,9 @@
+           determines how the host's vfio driver will expose the device to the
+           guest. Currently, <code>model='vfio-pci'</code> and
+           <code>model='vfio-ccw'</code> (<span class="since">Since 4.4.0</span>)
+-          is supported. Refer <a href="drvnodedev.html#MDEV">MDEV</a> to create
+-          a mediated device on the host.
++          is supported. <a href="drvnodedev.html#MDEV">MDEV</a> section
++          provides more information about mediated devices as well as how to
++          create mediated devices on the host.
+           <span class="since">Since 4.6.0 (QEMU 2.12)</span> an optional
+           <code>display</code> attribute may be used to enable or disable
+           support for an accelerated remote desktop backed by a mediated
+-- 
+2.18.0
+

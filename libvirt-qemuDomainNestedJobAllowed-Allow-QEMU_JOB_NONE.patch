@@ -1,0 +1,47 @@
+From 91562c1fe9b578b9d96f259b45bdb7866262ff88 Mon Sep 17 00:00:00 2001
+Message-Id: <91562c1fe9b578b9d96f259b45bdb7866262ff88@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 4 Jul 2018 14:51:17 +0200
+Subject: [PATCH] qemuDomainNestedJobAllowed: Allow QEMU_JOB_NONE
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1598084
+
+When creating a snapshot with --quiesce an async job is grabbed
+and just before executing guest fs-freeze command an agent job is
+grabbed. This is achieved by calling
+
+  qemuDomainObjBeginJobInternal(job = QEMU_JOB_NONE,
+                                agentJob = QEMU_AGENT_JOB_MODIFY);
+
+Since there already is an async job set on the domain (by the
+same thread) qemuDomainNestedJobAllowed(priv, job) is consulted
+if @job is allowed by job mask. But this function returns false
+(meaning sync @job is not allowed) which leads to a deadlock.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 2647a363676833371ba400374ecfa51c84fec5c0)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_domain.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 3f3bb94685..fa952f8306 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -6386,7 +6386,9 @@ qemuDomainObjReleaseAsyncJob(virDomainObjPtr obj)
+ static bool
+ qemuDomainNestedJobAllowed(qemuDomainObjPrivatePtr priv, qemuDomainJob job)
+ {
+-    return !priv->job.asyncJob || (priv->job.mask & JOB_MASK(job)) != 0;
++    return !priv->job.asyncJob ||
++           job == QEMU_JOB_NONE ||
++           (priv->job.mask & JOB_MASK(job)) != 0;
+ }
+ 
+ bool
+-- 
+2.18.0
+

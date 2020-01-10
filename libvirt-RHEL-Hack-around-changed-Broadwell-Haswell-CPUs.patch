@@ -1,0 +1,165 @@
+From af7f65d5ce4fe129b0844eb031212a3fb397b8da Mon Sep 17 00:00:00 2001
+Message-Id: <af7f65d5ce4fe129b0844eb031212a3fb397b8da@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Fri, 27 Mar 2015 12:48:40 +0100
+Subject: [PATCH] RHEL: Hack around changed Broadwell/Haswell CPUs
+
+RHEL-only
+
+Upstream tried to solve the change of Broadwell and Haswell CPUs by
+removing rtm and hle features from the corresponding CPU models for new
+machine types. Then they reverted this and introduced new *-noTSX models
+instead. However, the original fix was backported to RHEL.
+
+This patch makes sure Broadwell and Haswell will always contain rtm and
+hle features regardless on RHEL version or machine type used.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1199446
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c                       | 29 +++++++++++++++++++
+ tests/qemuxml2argvdata/cpu-Haswell.args       |  2 +-
+ .../qemuxml2argvdata/cpu-host-model-cmt.args  |  3 +-
+ tests/qemuxml2argvdata/cpu-tsc-frequency.args |  2 +-
+ tests/qemuxml2argvdata/q35-acpi-nouefi.args   |  2 +-
+ tests/qemuxml2argvdata/q35-acpi-uefi.args     |  2 +-
+ tests/qemuxml2argvdata/q35-noacpi-nouefi.args |  2 +-
+ 7 files changed, 36 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 4fc3176ad3..c1eefca639 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -6677,6 +6677,8 @@ qemuBuildCpuModelArgStr(virQEMUDriverPtr driver,
+     size_t i;
+     virCapsPtr caps = NULL;
+     virCPUDefPtr cpu = def->cpu;
++    bool hle = false;
++    bool rtm = false;
+ 
+     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
+         goto cleanup;
+@@ -6734,6 +6736,11 @@ qemuBuildCpuModelArgStr(virQEMUDriverPtr driver,
+         virBufferAsprintf(buf, ",vendor=%s", cpu->vendor_id);
+ 
+     for (i = 0; i < cpu->nfeatures; i++) {
++        if (STREQ("rtm", cpu->features[i].name))
++            rtm = true;
++        if (STREQ("hle", cpu->features[i].name))
++            hle = true;
++
+         switch ((virCPUFeaturePolicy) cpu->features[i].policy) {
+         case VIR_CPU_FEATURE_FORCE:
+         case VIR_CPU_FEATURE_REQUIRE:
+@@ -6757,6 +6764,28 @@ qemuBuildCpuModelArgStr(virQEMUDriverPtr driver,
+         }
+     }
+ 
++    /* Some versions of qemu-kvm in RHEL provide Broadwell and Haswell CPU
++     * models which lack rtm and hle features when used with some machine
++     * types. Let's make sure Broadwell and Haswell will always have these
++     * features. But only if the features were not explicitly mentioned in
++     * the guest CPU definition.
++     */
++    if (STREQ_NULLABLE(cpu->model, "Broadwell") ||
++        STREQ_NULLABLE(cpu->model, "Haswell")) {
++        if (!rtm) {
++            if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_QUERY_CPU_MODEL_EXPANSION))
++                virBufferAddLit(buf, ",rtm=on");
++            else
++                virBufferAddLit(buf, ",+rtm");
++        }
++        if (!hle) {
++            if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_QUERY_CPU_MODEL_EXPANSION))
++                virBufferAddLit(buf, ",hle=on");
++            else
++                virBufferAddLit(buf, ",+hle");
++        }
++    }
++
+     ret = 0;
+  cleanup:
+     virObjectUnref(caps);
+diff --git a/tests/qemuxml2argvdata/cpu-Haswell.args b/tests/qemuxml2argvdata/cpu-Haswell.args
+index c7ce396d05..6f20359524 100644
+--- a/tests/qemuxml2argvdata/cpu-Haswell.args
++++ b/tests/qemuxml2argvdata/cpu-Haswell.args
+@@ -8,7 +8,7 @@ QEMU_AUDIO_DRV=none \
+ -name QEMUGuest1 \
+ -S \
+ -machine pc,accel=kvm,usb=off,dump-guest-core=off \
+--cpu Haswell \
++-cpu Haswell,+rtm,+hle \
+ -m 214 \
+ -smp 6,sockets=6,cores=1,threads=1 \
+ -uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
+diff --git a/tests/qemuxml2argvdata/cpu-host-model-cmt.args b/tests/qemuxml2argvdata/cpu-host-model-cmt.args
+index 8767278d11..d236aa9e09 100644
+--- a/tests/qemuxml2argvdata/cpu-host-model-cmt.args
++++ b/tests/qemuxml2argvdata/cpu-host-model-cmt.args
+@@ -9,7 +9,8 @@ QEMU_AUDIO_DRV=none \
+ -S \
+ -machine pc,accel=tcg,usb=off,dump-guest-core=off \
+ -cpu Haswell,+vme,+ds,+acpi,+ss,+ht,+tm,+pbe,+dtes64,+monitor,+ds_cpl,+vmx,\
+-+smx,+est,+tm2,+xtpr,+pdcm,+osxsave,+f16c,+rdrand,+pdpe1gb,+abm,+lahf_lm \
+++smx,+est,+tm2,+xtpr,+pdcm,+osxsave,+f16c,+rdrand,+pdpe1gb,+abm,+lahf_lm,+rtm,\
+++hle \
+ -m 214 \
+ -smp 6,sockets=6,cores=1,threads=1 \
+ -uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
+diff --git a/tests/qemuxml2argvdata/cpu-tsc-frequency.args b/tests/qemuxml2argvdata/cpu-tsc-frequency.args
+index 7824dea96f..216fd43014 100644
+--- a/tests/qemuxml2argvdata/cpu-tsc-frequency.args
++++ b/tests/qemuxml2argvdata/cpu-tsc-frequency.args
+@@ -10,7 +10,7 @@ QEMU_AUDIO_DRV=none \
+ -machine pc,accel=kvm,usb=off,dump-guest-core=off \
+ -cpu Haswell,+vme,+ds,+acpi,+ss,+ht,+tm,+pbe,+dtes64,+monitor,+ds_cpl,+vmx,\
+ +smx,+est,+tm2,+xtpr,+pdcm,+osxsave,+f16c,+rdrand,+pdpe1gb,+abm,+lahf_lm,\
+-+invtsc,tsc-frequency=3504000000 \
+++invtsc,+rtm,+hle,tsc-frequency=3504000000 \
+ -m 214 \
+ -smp 1,sockets=1,cores=1,threads=1 \
+ -uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
+diff --git a/tests/qemuxml2argvdata/q35-acpi-nouefi.args b/tests/qemuxml2argvdata/q35-acpi-nouefi.args
+index caef49ea16..a9375a35db 100644
+--- a/tests/qemuxml2argvdata/q35-acpi-nouefi.args
++++ b/tests/qemuxml2argvdata/q35-acpi-nouefi.args
+@@ -8,7 +8,7 @@ QEMU_AUDIO_DRV=none \
+ -name guest \
+ -S \
+ -machine q35,accel=tcg,usb=off,dump-guest-core=off \
+--cpu Haswell \
++-cpu Haswell,+rtm,+hle \
+ -m 1024 \
+ -smp 1,sockets=1,cores=1,threads=1 \
+ -uuid 496d7ea8-9739-544b-4ebd-ef08be936e8b \
+diff --git a/tests/qemuxml2argvdata/q35-acpi-uefi.args b/tests/qemuxml2argvdata/q35-acpi-uefi.args
+index a3293aeb9d..8e3368b9e9 100644
+--- a/tests/qemuxml2argvdata/q35-acpi-uefi.args
++++ b/tests/qemuxml2argvdata/q35-acpi-uefi.args
+@@ -8,7 +8,7 @@ QEMU_AUDIO_DRV=none \
+ -name guest \
+ -S \
+ -machine q35,accel=tcg,usb=off,dump-guest-core=off \
+--cpu Haswell \
++-cpu Haswell,+rtm,+hle \
+ -drive file=/usr/share/OVMF/OVMF_CODE.fd,if=pflash,format=raw,unit=0,\
+ readonly=on \
+ -drive file=/var/lib/libvirt/qemu/nvram/guest_VARS.fd,if=pflash,format=raw,\
+diff --git a/tests/qemuxml2argvdata/q35-noacpi-nouefi.args b/tests/qemuxml2argvdata/q35-noacpi-nouefi.args
+index fab2a6fcb0..0dd61840ef 100644
+--- a/tests/qemuxml2argvdata/q35-noacpi-nouefi.args
++++ b/tests/qemuxml2argvdata/q35-noacpi-nouefi.args
+@@ -8,7 +8,7 @@ QEMU_AUDIO_DRV=none \
+ -name guest \
+ -S \
+ -machine q35,accel=tcg,usb=off,dump-guest-core=off \
+--cpu Haswell \
++-cpu Haswell,+rtm,+hle \
+ -m 1024 \
+ -smp 1,sockets=1,cores=1,threads=1 \
+ -uuid 496d7ea8-9739-544b-4ebd-ef08be936e8b \
+-- 
+2.18.0
+

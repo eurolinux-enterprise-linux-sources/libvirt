@@ -1,0 +1,77 @@
+From ceeba568bf66491826fdd2c16002890375790a4f Mon Sep 17 00:00:00 2001
+Message-Id: <ceeba568bf66491826fdd2c16002890375790a4f@dist-git>
+From: Ales Musil <amusil@redhat.com>
+Date: Sun, 29 Jul 2018 16:56:18 +0200
+Subject: [PATCH] examples: Add clean-traffic-gateway into nwfilters
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The filter purpose is to simulate isolated private VLAN.
+
+The behavior can be achieved by limiting network traffic
+to traffic between VM and gateway. Because there is no
+concept of the PVLAN in the linux bridge.
+
+The filter also contains parts from clean-traffic
+to prevent VM from spoofing its IP and MAC address.
+
+To use this filter the user just needs to set
+the GATEWAY_MAC variable to gateway MAC address.
+
+Signed-off-by: Ales Musil <amusil@redhat.com>
+Reviewed-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit ac01fbc90b7eb4ccc7a6140d618d1a3859365155)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1603115
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ .../xml/nwfilter/clean-traffic-gateway.xml    | 34 +++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+ create mode 100644 examples/xml/nwfilter/clean-traffic-gateway.xml
+
+diff --git a/examples/xml/nwfilter/clean-traffic-gateway.xml b/examples/xml/nwfilter/clean-traffic-gateway.xml
+new file mode 100644
+index 0000000000..b8c204041a
+--- /dev/null
++++ b/examples/xml/nwfilter/clean-traffic-gateway.xml
+@@ -0,0 +1,34 @@
++<filter name='clean-traffic-gateway'>
++    <!-- An example of a traffic filter enforcing clean traffic
++            from a VM by
++              - preventing MAC spoofing -->
++    <filterref filter='no-mac-spoofing'/>
++
++    <!-- preventing IP spoofing on outgoing -->
++    <filterref filter='no-ip-spoofing'/>
++
++    <!-- preventing ARP spoofing/poisoning -->
++    <filterref filter='no-arp-spoofing'/>
++
++    <!-- accept all other incoming and outgoing ARP traffic -->
++    <rule action='accept' direction='inout' priority='-500'>
++        <mac protocolid='arp'/>
++    </rule>
++
++    <!-- accept traffic only from specified MAC address -->
++    <rule action='accept' direction='in'>
++        <mac match='yes' srcmacaddr='$GATEWAY_MAC'/>
++    </rule>
++
++    <!-- allow traffic only to specified MAC address -->
++    <rule action='accept' direction='out'>
++        <mac match='yes' dstmacaddr='$GATEWAY_MAC'/>
++    </rule>
++
++    <!-- preventing any other traffic than between specified MACs
++    and ARP -->
++    <filterref filter='no-other-l2-traffic'/>
++
++    <!-- allow qemu to send a self-announce upon migration end -->
++    <filterref filter='qemu-announce-self'/>
++</filter>
+-- 
+2.18.0
+

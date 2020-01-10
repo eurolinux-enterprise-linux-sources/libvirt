@@ -1,0 +1,184 @@
+From 2c55b2cc4900b59217e808e75af2ef7012846a4b Mon Sep 17 00:00:00 2001
+Message-Id: <2c55b2cc4900b59217e808e75af2ef7012846a4b@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:09 +0200
+Subject: [PATCH] tests: rename hugepages-pages into hugepages-numa-nodeset
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Remove unnecessary XML elements as well.
+
+<numatune> for numa guest is tested by numatune-memnode test.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit a83461b09af48dd22ebf7794e66268244387e3f1)
+
+Conflicts:
+    tests/qemuxml2argvdata/hugepages-numa-nodeset.args
+        - missing upstream commit <caccbba64a>
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ ...s-pages.args => hugepages-numa-nodeset.args} | 17 +++++------------
+ ...ges-pages.xml => hugepages-numa-nodeset.xml} | 12 +-----------
+ tests/qemuxml2argvtest.c                        |  2 +-
+ ...ges-pages.xml => hugepages-numa-nodeset.xml} | 17 +----------------
+ tests/qemuxml2xmltest.c                         |  2 +-
+ 5 files changed, 9 insertions(+), 41 deletions(-)
+ rename tests/qemuxml2argvdata/{hugepages-pages.args => hugepages-numa-nodeset.args} (77%)
+ rename tests/qemuxml2argvdata/{hugepages-pages.xml => hugepages-numa-nodeset.xml} (74%)
+ rename tests/qemuxml2xmloutdata/{hugepages-pages.xml => hugepages-numa-nodeset.xml} (66%)
+
+diff --git a/tests/qemuxml2argvdata/hugepages-pages.args b/tests/qemuxml2argvdata/hugepages-numa-nodeset.args
+similarity index 77%
+rename from tests/qemuxml2argvdata/hugepages-pages.args
+rename to tests/qemuxml2argvdata/hugepages-numa-nodeset.args
+index 7ece0272a0..22f0e605fe 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages.args
++++ b/tests/qemuxml2argvdata/hugepages-numa-nodeset.args
+@@ -11,20 +11,16 @@ QEMU_AUDIO_DRV=none \
+ -m 4096 \
+ -smp 4,sockets=4,cores=1,threads=1 \
+ -object memory-backend-file,id=ram-node0,prealloc=yes,\
+-mem-path=/dev/hugepages1G/libvirt/qemu/-1-QEMUGuest1,size=1073741824,\
+-host-nodes=0-3,policy=bind \
++mem-path=/dev/hugepages1G/libvirt/qemu/-1-QEMUGuest1,size=1073741824 \
+ -numa node,nodeid=0,cpus=0,memdev=ram-node0 \
+ -object memory-backend-file,id=ram-node1,prealloc=yes,\
+-mem-path=/dev/hugepages2M/libvirt/qemu/-1-QEMUGuest1,size=1073741824,\
+-host-nodes=0-3,policy=bind \
++mem-path=/dev/hugepages2M/libvirt/qemu/-1-QEMUGuest1,size=1073741824 \
+ -numa node,nodeid=1,cpus=1,memdev=ram-node1 \
+ -object memory-backend-file,id=ram-node2,prealloc=yes,\
+-mem-path=/dev/hugepages1G/libvirt/qemu/-1-QEMUGuest1,size=1073741824,\
+-host-nodes=0-3,policy=bind \
++mem-path=/dev/hugepages1G/libvirt/qemu/-1-QEMUGuest1,size=1073741824 \
+ -numa node,nodeid=2,cpus=2,memdev=ram-node2 \
+ -object memory-backend-file,id=ram-node3,prealloc=yes,\
+-mem-path=/dev/hugepages1G/libvirt/qemu/-1-QEMUGuest1,size=1073741824,\
+-host-nodes=3,policy=bind \
++mem-path=/dev/hugepages1G/libvirt/qemu/-1-QEMUGuest1,size=1073741824 \
+ -numa node,nodeid=3,cpus=3,memdev=ram-node3 \
+ -uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
+ -display none \
+@@ -37,7 +33,4 @@ server,nowait \
+ -no-shutdown \
+ -no-acpi \
+ -boot c \
+--usb \
+--drive file=/dev/HostVG/QEMUGuest1,format=raw,if=none,id=drive-ide0-0-0 \
+--device ide-drive,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0 \
+--device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3
++-usb
+diff --git a/tests/qemuxml2argvdata/hugepages-pages.xml b/tests/qemuxml2argvdata/hugepages-numa-nodeset.xml
+similarity index 74%
+rename from tests/qemuxml2argvdata/hugepages-pages.xml
+rename to tests/qemuxml2argvdata/hugepages-numa-nodeset.xml
+index f9270782d4..e81fa44d58 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages.xml
++++ b/tests/qemuxml2argvdata/hugepages-numa-nodeset.xml
+@@ -10,10 +10,6 @@
+     </hugepages>
+   </memoryBacking>
+   <vcpu placement='static'>4</vcpu>
+-  <numatune>
+-    <memory mode='strict' nodeset='0-3'/>
+-    <memnode cellid='3' mode='strict' nodeset='3'/>
+-  </numatune>
+   <os>
+     <type arch='i686' machine='pc'>hvm</type>
+     <boot dev='hd'/>
+@@ -32,16 +28,10 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <emulator>/usr/bin/qemu-system-i686</emulator>
+-    <disk type='block' device='disk'>
+-      <source dev='/dev/HostVG/QEMUGuest1'/>
+-      <target dev='hda' bus='ide'/>
+-      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+-    </disk>
+     <controller type='usb' index='0'/>
+-    <controller type='ide' index='0'/>
+     <controller type='pci' index='0' model='pci-root'/>
+     <input type='mouse' bus='ps2'/>
+     <input type='keyboard' bus='ps2'/>
+-    <memballoon model='virtio'/>
++    <memballoon model='none'/>
+   </devices>
+ </domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index ea26d17a63..3bb5efbd8d 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -954,7 +954,7 @@ mymain(void)
+     DO_TEST("hugepages-numa-default-dimm",
+             QEMU_CAPS_DEVICE_PC_DIMM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+-    DO_TEST("hugepages-pages",
++    DO_TEST("hugepages-numa-nodeset",
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-pages2", QEMU_CAPS_OBJECT_MEMORY_RAM,
+diff --git a/tests/qemuxml2xmloutdata/hugepages-pages.xml b/tests/qemuxml2xmloutdata/hugepages-numa-nodeset.xml
+similarity index 66%
+rename from tests/qemuxml2xmloutdata/hugepages-pages.xml
+rename to tests/qemuxml2xmloutdata/hugepages-numa-nodeset.xml
+index 498610a217..affd124048 100644
+--- a/tests/qemuxml2xmloutdata/hugepages-pages.xml
++++ b/tests/qemuxml2xmloutdata/hugepages-numa-nodeset.xml
+@@ -10,10 +10,6 @@
+     </hugepages>
+   </memoryBacking>
+   <vcpu placement='static'>4</vcpu>
+-  <numatune>
+-    <memory mode='strict' nodeset='0-3'/>
+-    <memnode cellid='3' mode='strict' nodeset='3'/>
+-  </numatune>
+   <os>
+     <type arch='i686' machine='pc'>hvm</type>
+     <boot dev='hd'/>
+@@ -32,23 +28,12 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <emulator>/usr/bin/qemu-system-i686</emulator>
+-    <disk type='block' device='disk'>
+-      <driver name='qemu' type='raw'/>
+-      <source dev='/dev/HostVG/QEMUGuest1'/>
+-      <target dev='hda' bus='ide'/>
+-      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+-    </disk>
+     <controller type='usb' index='0'>
+       <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
+     </controller>
+-    <controller type='ide' index='0'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
+-    </controller>
+     <controller type='pci' index='0' model='pci-root'/>
+     <input type='mouse' bus='ps2'/>
+     <input type='keyboard' bus='ps2'/>
+-    <memballoon model='virtio'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+-    </memballoon>
++    <memballoon model='none'/>
+   </devices>
+ </domain>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index b4bd9ebc4c..2c3d16495e 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -333,7 +333,7 @@ mymain(void)
+     DO_TEST("pages-discard", NONE);
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-numa-default-dimm", NONE);
+-    DO_TEST("hugepages-pages", NONE);
++    DO_TEST("hugepages-numa-nodeset", NONE);
+     DO_TEST("hugepages-pages2", NONE);
+     DO_TEST("hugepages-pages3", NONE);
+     DO_TEST("hugepages-pages4", NONE);
+-- 
+2.18.0
+

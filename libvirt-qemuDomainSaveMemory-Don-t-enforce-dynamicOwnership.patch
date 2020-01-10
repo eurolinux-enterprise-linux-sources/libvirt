@@ -1,0 +1,90 @@
+From 427a75470c813205af2ea6bd81daacb0281ef58a Mon Sep 17 00:00:00 2001
+Message-Id: <427a75470c813205af2ea6bd81daacb0281ef58a@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 25 Jul 2018 08:27:10 +0200
+Subject: [PATCH] qemuDomainSaveMemory: Don't enforce dynamicOwnership
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1589115
+
+When doing a memory snapshot qemuOpenFile() is used. This means
+that the file where memory is saved is firstly attempted to be
+created under root:root (because that's what libvirtd is running
+under) and if this fails the second attempt is done under
+domain's uid:gid. This does not make much sense - qemu is given
+opened FD so it does not need to access the file. Moreover, if
+dynamicOwnership is set in qemu.conf and the file lives on a
+squashed NFS this is deadly combination and very likely to fail.
+
+The fix consists of using:
+
+  qemuOpenFileAs(fallback_uid = cfg->user,
+                 fallback_gid = cfg->group,
+                 dynamicOwnership = false)
+
+In other words, dynamicOwnership is turned off for memory
+snapshot (chown() will still be attempted if the file does not
+live on NFS) and instead of using domain DAC label, configured
+user:group is set as fallback.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 8c8c32339ae965fa6991462e98be1f5890ac7499)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_driver.c | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index efd0a05c90..c7689cc239 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -3185,6 +3185,7 @@ qemuDomainSaveMemory(virQEMUDriverPtr driver,
+                      unsigned int flags,
+                      qemuDomainAsyncJob asyncJob)
+ {
++    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
+     bool needUnlink = false;
+     int ret = -1;
+     int fd = -1;
+@@ -3202,9 +3203,10 @@ qemuDomainSaveMemory(virQEMUDriverPtr driver,
+             goto cleanup;
+         }
+     }
+-    fd = qemuOpenFile(driver, vm, path,
+-                      O_WRONLY | O_TRUNC | O_CREAT | directFlag,
+-                      &needUnlink);
++
++    fd = qemuOpenFileAs(cfg->user, cfg->group, false, path,
++                        O_WRONLY | O_TRUNC | O_CREAT | directFlag,
++                        &needUnlink);
+     if (fd < 0)
+         goto cleanup;
+ 
+@@ -3244,6 +3246,7 @@ qemuDomainSaveMemory(virQEMUDriverPtr driver,
+  cleanup:
+     VIR_FORCE_CLOSE(fd);
+     virFileWrapperFdFree(wrapperFd);
++    virObjectUnref(cfg);
+ 
+     if (ret < 0 && needUnlink)
+         unlink(path);
+@@ -3793,9 +3796,9 @@ doCoreDump(virQEMUDriverPtr driver,
+     /* Core dumps usually imply last-ditch analysis efforts are
+      * desired, so we intentionally do not unlink even if a file was
+      * created.  */
+-    if ((fd = qemuOpenFile(driver, vm, path,
+-                           O_CREAT | O_TRUNC | O_WRONLY | directFlag,
+-                           NULL)) < 0)
++    if ((fd = qemuOpenFileAs(cfg->user, cfg->group, false, path,
++                             O_CREAT | O_TRUNC | O_WRONLY | directFlag,
++                             NULL)) < 0)
+         goto cleanup;
+ 
+     if (!(wrapperFd = virFileWrapperFdNew(&fd, path, flags)))
+-- 
+2.18.0
+

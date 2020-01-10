@@ -1,0 +1,208 @@
+From 4d7421af3a29312a38ea08ed9ac44c866f5f1371 Mon Sep 17 00:00:00 2001
+Message-Id: <4d7421af3a29312a38ea08ed9ac44c866f5f1371@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:22 +0200
+Subject: [PATCH] conf: Introduce virDomainDefPostParseMemtune
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Previously we were ignoring "nodeset" attribute for hugepage pages
+if there was no guest NUMA topology configured in the domain XML.
+Commit <fa6bdf6afa878b8d7c5ed71664ee72be8967cdc5> partially fixed
+that issue but it introduced a somehow valid regression.
+
+In case that there is no guest NUMA topology configured and the
+"nodeset" attribute is set to "0" it was accepted and was working
+properly even though it was not completely valid XML.
+
+This patch introduces a workaround that it will ignore the nodeset="0"
+only in case that there is no guest NUMA topology in order not to
+hit the validation error.
+
+After this commit the following XML configuration is valid:
+
+  <memoryBacking>
+    <hugepages>
+      <page size='2048' unit='KiB' nodeset='0'/>
+    </hugepages>
+  </memoryBacking>
+
+but this configuration remains invalid:
+
+  <memoryBacking>
+    <hugepages>
+      <page size='2048' unit='KiB' nodeset='0'/>
+      <page size='1048576' unit='KiB'/>
+    </hugepages>
+  </memoryBacking>
+
+The issue with the second configuration is that it was originally
+working, however changing the order of the <page> elements resolved
+into using different page size for the guest.  The code is written
+in a way that it expect only one page configured and always uses only
+the first page in case that there is no guest NUMA topology configured.
+See qemuBuildMemPathStr() function for details.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 0a476f152150f62306f9f8d124aa44e4adb9158c)
+
+Conflicts:
+    tests/qemuxml2argvdata/hugepages-nodeset.args
+        - missing upstream commit <caccbba64a>
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c                        | 27 +++++++++++++++++
+ tests/qemuxml2argvdata/hugepages-nodeset.args | 26 ++++++++++++++++
+ tests/qemuxml2argvtest.c                      |  2 +-
+ .../qemuxml2xmloutdata/hugepages-nodeset.xml  | 30 +++++++++++++++++++
+ tests/qemuxml2xmltest.c                       |  1 +
+ 5 files changed, 85 insertions(+), 1 deletion(-)
+ create mode 100644 tests/qemuxml2argvdata/hugepages-nodeset.args
+ create mode 100644 tests/qemuxml2xmloutdata/hugepages-nodeset.xml
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 98e833c5bb..8a43e607e9 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -4088,6 +4088,31 @@ virDomainDefPostParseMemory(virDomainDefPtr def,
+ }
+ 
+ 
++static void
++virDomainDefPostParseMemtune(virDomainDefPtr def)
++{
++    size_t i;
++
++    if (virDomainNumaGetNodeCount(def->numa) == 0) {
++        /* If guest NUMA is not configured and any hugepage page has nodemask
++         * set to "0" free and clear that nodemas, otherwise we would rise
++         * an error that there is no guest NUMA node configured. */
++        for (i = 0; i < def->mem.nhugepages; i++) {
++            ssize_t nextBit;
++
++            if (!def->mem.hugepages[i].nodemask)
++                continue;
++
++            nextBit = virBitmapNextSetBit(def->mem.hugepages[i].nodemask, 0);
++            if (nextBit < 0) {
++                virBitmapFree(def->mem.hugepages[i].nodemask);
++                def->mem.hugepages[i].nodemask = NULL;
++            }
++        }
++    }
++}
++
++
+ static int
+ virDomainDefAddConsoleCompat(virDomainDefPtr def)
+ {
+@@ -5155,6 +5180,8 @@ virDomainDefPostParseCommon(virDomainDefPtr def,
+     if (virDomainDefPostParseMemory(def, data->parseFlags) < 0)
+         return -1;
+ 
++    virDomainDefPostParseMemtune(def);
++
+     if (virDomainDefRejectDuplicateControllers(def) < 0)
+         return -1;
+ 
+diff --git a/tests/qemuxml2argvdata/hugepages-nodeset.args b/tests/qemuxml2argvdata/hugepages-nodeset.args
+new file mode 100644
+index 0000000000..d094be1252
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hugepages-nodeset.args
+@@ -0,0 +1,26 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++QEMU_AUDIO_DRV=none \
++/usr/bin/qemu-system-i686 \
++-name SomeDummyHugepagesGuest \
++-S \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 1024 \
++-mem-prealloc \
++-mem-path /dev/hugepages2M/libvirt/qemu/-1-SomeDummyHugepagesGu \
++-smp 2,sockets=2,cores=1,threads=1 \
++-uuid ef1bdff4-27f3-4e85-a807-5fb4d58463cc \
++-display none \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,\
++path=/tmp/lib/domain--1-SomeDummyHugepagesGu/monitor.sock,server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot c \
++-usb
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index f82bca2637..e6c0120670 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -960,7 +960,7 @@ mymain(void)
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
+     DO_TEST_PARSE_ERROR("hugepages-default-1G-nodeset-2M", NONE);
+-    DO_TEST_PARSE_ERROR("hugepages-nodeset", NONE);
++    DO_TEST("hugepages-nodeset", NONE);
+     DO_TEST_PARSE_ERROR("hugepages-nodeset-nonexist",
+                         QEMU_CAPS_DEVICE_PC_DIMM,
+                         QEMU_CAPS_OBJECT_MEMORY_FILE,
+diff --git a/tests/qemuxml2xmloutdata/hugepages-nodeset.xml b/tests/qemuxml2xmloutdata/hugepages-nodeset.xml
+new file mode 100644
+index 0000000000..ac219a7800
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/hugepages-nodeset.xml
+@@ -0,0 +1,30 @@
++<domain type='qemu'>
++  <name>SomeDummyHugepagesGuest</name>
++  <uuid>ef1bdff4-27f3-4e85-a807-5fb4d58463cc</uuid>
++  <memory unit='KiB'>1048576</memory>
++  <currentMemory unit='KiB'>1048576</currentMemory>
++  <memoryBacking>
++    <hugepages>
++      <page size='2048' unit='KiB'/>
++    </hugepages>
++  </memoryBacking>
++  <vcpu placement='static'>2</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <controller type='usb' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <input type='mouse' bus='ps2'/>
++    <input type='keyboard' bus='ps2'/>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index aa543e9e51..b76410b2c1 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -336,6 +336,7 @@ mymain(void)
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
++    DO_TEST("hugepages-nodeset", NONE);
+     DO_TEST("hugepages-numa-default-2M", NONE);
+     DO_TEST("hugepages-numa-default-dimm", NONE);
+     DO_TEST("hugepages-numa-nodeset", NONE);
+-- 
+2.18.0
+

@@ -1,0 +1,47 @@
+From 8942f48f8ba0a7f3e68cf4a0c9b9ad5e1c35b88b Mon Sep 17 00:00:00 2001
+Message-Id: <8942f48f8ba0a7f3e68cf4a0c9b9ad5e1c35b88b@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Fri, 17 Aug 2018 12:05:13 +0200
+Subject: [PATCH] qemu: hotplug: Fix asynchronous unplug of 'shmem'
+
+commit 5c81c342a7 forgot to skip the detaching of the shmem backend
+when async unplug is requested which meant that we've tried to unplug
+the backend prior to delivery of the DEVICE_DELETED event.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1618622
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit 69c20e1090059d8b359fdd435e8ba50db7269be1)
+https: //bugzilla.redhat.com/show_bug.cgi?id=1618680
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 053ddb14ec..397a2bdde2 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -5262,11 +5262,16 @@ qemuDomainDetachShmemDevice(virQEMUDriverPtr driver,
+     if (qemuDomainObjExitMonitor(driver, vm) < 0)
+         goto cleanup;
+ 
+-    if ((ret = qemuDomainWaitForDeviceRemoval(vm)) == 1)
+-        ret = qemuDomainRemoveShmemDevice(driver, vm, shmem);
++    if (async) {
++        ret = 0;
++    } else {
++        if ((ret = qemuDomainWaitForDeviceRemoval(vm)) == 1)
++            ret = qemuDomainRemoveShmemDevice(driver, vm, shmem);
++    }
+ 
+  cleanup:
+-    qemuDomainResetDeviceRemoval(vm);
++    if (!async)
++        qemuDomainResetDeviceRemoval(vm);
+     return ret;
+ }
+ 
+-- 
+2.18.0
+

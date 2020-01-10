@@ -1,0 +1,146 @@
+From 7ccf7cf1bb0a2d1783bb98f5fd5aa99738aa912a Mon Sep 17 00:00:00 2001
+Message-Id: <7ccf7cf1bb0a2d1783bb98f5fd5aa99738aa912a@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:10 +0200
+Subject: [PATCH] tests: rename hugepages-pages2 into hugepages-numa-default-2M
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Remove unnecessary XML elements as well.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 1abcfa5c17b4ea26f75b2b37281d4990eb6be20f)
+
+Conflicts:
+    tests/qemuxml2argvdata/hugepages-numa-default-2M.args
+        - missing upstream commit <caccbba64a>
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ ...s-pages2.args => hugepages-numa-default-2M.args} |  5 +----
+ ...ges-pages2.xml => hugepages-numa-default-2M.xml} |  8 +-------
+ tests/qemuxml2argvtest.c                            |  5 +++--
+ ...ges-pages2.xml => hugepages-numa-default-2M.xml} | 13 +------------
+ tests/qemuxml2xmltest.c                             |  2 +-
+ 5 files changed, 7 insertions(+), 26 deletions(-)
+ rename tests/qemuxml2argvdata/{hugepages-pages2.args => hugepages-numa-default-2M.args} (77%)
+ rename tests/qemuxml2argvdata/{hugepages-pages2.xml => hugepages-numa-default-2M.xml} (77%)
+ rename tests/qemuxml2xmloutdata/{hugepages-pages2.xml => hugepages-numa-default-2M.xml} (67%)
+
+diff --git a/tests/qemuxml2argvdata/hugepages-pages2.args b/tests/qemuxml2argvdata/hugepages-numa-default-2M.args
+similarity index 77%
+rename from tests/qemuxml2argvdata/hugepages-pages2.args
+rename to tests/qemuxml2argvdata/hugepages-numa-default-2M.args
+index 21105ef844..2dfacefe4a 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages2.args
++++ b/tests/qemuxml2argvdata/hugepages-numa-default-2M.args
+@@ -25,7 +25,4 @@ path=/tmp/lib/domain--1-SomeDummyHugepagesGu/monitor.sock,server,nowait \
+ -no-shutdown \
+ -no-acpi \
+ -boot c \
+--usb \
+--drive file=/dev/HostVG/QEMUGuest1,format=raw,if=none,id=drive-ide0-0-0 \
+--device ide-drive,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0 \
+--device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3
++-usb
+diff --git a/tests/qemuxml2argvdata/hugepages-pages2.xml b/tests/qemuxml2argvdata/hugepages-numa-default-2M.xml
+similarity index 77%
+rename from tests/qemuxml2argvdata/hugepages-pages2.xml
+rename to tests/qemuxml2argvdata/hugepages-numa-default-2M.xml
+index 3b2d72ef3c..357c77da2a 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages2.xml
++++ b/tests/qemuxml2argvdata/hugepages-numa-default-2M.xml
+@@ -25,16 +25,10 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <emulator>/usr/bin/qemu-system-i686</emulator>
+-    <disk type='block' device='disk'>
+-      <source dev='/dev/HostVG/QEMUGuest1'/>
+-      <target dev='hda' bus='ide'/>
+-      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+-    </disk>
+     <controller type='usb' index='0'/>
+-    <controller type='ide' index='0'/>
+     <controller type='pci' index='0' model='pci-root'/>
+     <input type='mouse' bus='ps2'/>
+     <input type='keyboard' bus='ps2'/>
+-    <memballoon model='virtio'/>
++    <memballoon model='none'/>
+   </devices>
+ </domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 3bb5efbd8d..6a79918f67 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -951,14 +951,15 @@ mymain(void)
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-numa-default",
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
++    DO_TEST("hugepages-numa-default-2M",
++            QEMU_CAPS_OBJECT_MEMORY_RAM,
++            QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-numa-default-dimm",
+             QEMU_CAPS_DEVICE_PC_DIMM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-numa-nodeset",
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+-    DO_TEST("hugepages-pages2", QEMU_CAPS_OBJECT_MEMORY_RAM,
+-            QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-pages3", QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE,
+             QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
+diff --git a/tests/qemuxml2xmloutdata/hugepages-pages2.xml b/tests/qemuxml2xmloutdata/hugepages-numa-default-2M.xml
+similarity index 67%
+rename from tests/qemuxml2xmloutdata/hugepages-pages2.xml
+rename to tests/qemuxml2xmloutdata/hugepages-numa-default-2M.xml
+index cd79960f1b..3777824e1a 100644
+--- a/tests/qemuxml2xmloutdata/hugepages-pages2.xml
++++ b/tests/qemuxml2xmloutdata/hugepages-numa-default-2M.xml
+@@ -25,23 +25,12 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <emulator>/usr/bin/qemu-system-i686</emulator>
+-    <disk type='block' device='disk'>
+-      <driver name='qemu' type='raw'/>
+-      <source dev='/dev/HostVG/QEMUGuest1'/>
+-      <target dev='hda' bus='ide'/>
+-      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+-    </disk>
+     <controller type='usb' index='0'>
+       <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
+     </controller>
+-    <controller type='ide' index='0'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
+-    </controller>
+     <controller type='pci' index='0' model='pci-root'/>
+     <input type='mouse' bus='ps2'/>
+     <input type='keyboard' bus='ps2'/>
+-    <memballoon model='virtio'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+-    </memballoon>
++    <memballoon model='none'/>
+   </devices>
+ </domain>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 2c3d16495e..a4448ff168 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -332,9 +332,9 @@ mymain(void)
+ 
+     DO_TEST("pages-discard", NONE);
+     DO_TEST("hugepages-default", NONE);
++    DO_TEST("hugepages-numa-default-2M", NONE);
+     DO_TEST("hugepages-numa-default-dimm", NONE);
+     DO_TEST("hugepages-numa-nodeset", NONE);
+-    DO_TEST("hugepages-pages2", NONE);
+     DO_TEST("hugepages-pages3", NONE);
+     DO_TEST("hugepages-pages4", NONE);
+     DO_TEST("hugepages-pages5", NONE);
+-- 
+2.18.0
+

@@ -1,0 +1,141 @@
+From 77aaad5d32de197cb3c18c54061fbe807d1f907a Mon Sep 17 00:00:00 2001
+Message-Id: <77aaad5d32de197cb3c18c54061fbe807d1f907a@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:15 +0200
+Subject: [PATCH] tests: rename hugepages-pages6 into
+ hugepages-default-system-size
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Remove unnecessary XML elements as well.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 3d553f4d4bfa94bc0ba4111454a85a0f16cf89c3)
+
+Conflicts:
+    tests/qemuxml2argvdata/hugepages-default-system-size.args
+        - missing upstream commit <caccbba64a>
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ ...ges6.args => hugepages-default-system-size.args} |  5 +----
+ ...pages6.xml => hugepages-default-system-size.xml} | 13 +------------
+ tests/qemuxml2argvtest.c                            |  2 +-
+ .../hugepages-default-system-size.xml               |  1 +
+ tests/qemuxml2xmloutdata/hugepages-pages6.xml       |  1 -
+ tests/qemuxml2xmltest.c                             |  2 +-
+ 6 files changed, 5 insertions(+), 19 deletions(-)
+ rename tests/qemuxml2argvdata/{hugepages-pages6.args => hugepages-default-system-size.args} (72%)
+ rename tests/qemuxml2argvdata/{hugepages-pages6.xml => hugepages-default-system-size.xml} (63%)
+ create mode 120000 tests/qemuxml2xmloutdata/hugepages-default-system-size.xml
+ delete mode 120000 tests/qemuxml2xmloutdata/hugepages-pages6.xml
+
+diff --git a/tests/qemuxml2argvdata/hugepages-pages6.args b/tests/qemuxml2argvdata/hugepages-default-system-size.args
+similarity index 72%
+rename from tests/qemuxml2argvdata/hugepages-pages6.args
+rename to tests/qemuxml2argvdata/hugepages-default-system-size.args
+index 51467c0ae1..eeb7d142ce 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages6.args
++++ b/tests/qemuxml2argvdata/hugepages-default-system-size.args
+@@ -21,7 +21,4 @@ path=/tmp/lib/domain--1-SomeDummyHugepagesGu/monitor.sock,server,nowait \
+ -no-shutdown \
+ -no-acpi \
+ -boot c \
+--usb \
+--drive file=/dev/HostVG/QEMUGuest1,format=raw,if=none,id=drive-ide0-0-0 \
+--device ide-drive,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0 \
+--device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3
++-usb
+diff --git a/tests/qemuxml2argvdata/hugepages-pages6.xml b/tests/qemuxml2argvdata/hugepages-default-system-size.xml
+similarity index 63%
+rename from tests/qemuxml2argvdata/hugepages-pages6.xml
+rename to tests/qemuxml2argvdata/hugepages-default-system-size.xml
+index fc4f57fbc0..8a809ead5e 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages6.xml
++++ b/tests/qemuxml2argvdata/hugepages-default-system-size.xml
+@@ -19,23 +19,12 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <emulator>/usr/bin/qemu-system-i686</emulator>
+-    <disk type='block' device='disk'>
+-      <driver name='qemu' type='raw'/>
+-      <source dev='/dev/HostVG/QEMUGuest1'/>
+-      <target dev='hda' bus='ide'/>
+-      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+-    </disk>
+     <controller type='usb' index='0'>
+       <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
+     </controller>
+-    <controller type='ide' index='0'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
+-    </controller>
+     <controller type='pci' index='0' model='pci-root'/>
+     <input type='mouse' bus='ps2'/>
+     <input type='keyboard' bus='ps2'/>
+-    <memballoon model='virtio'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+-    </memballoon>
++    <memballoon model='none'/>
+   </devices>
+ </domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 57cfce1b7b..1aab23408d 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -954,6 +954,7 @@ mymain(void)
+             QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-default-2M", NONE);
++    DO_TEST("hugepages-default-system-size", NONE);
+     DO_TEST("hugepages-numa-default",
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-numa-default-2M",
+@@ -975,7 +976,6 @@ mymain(void)
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST_PARSE_ERROR("hugepages-memaccess-invalid", NONE);
+-    DO_TEST("hugepages-pages6", NONE);
+     DO_TEST("hugepages-pages7",
+             QEMU_CAPS_DEVICE_PC_DIMM, QEMU_CAPS_OBJECT_MEMORY_FILE,
+             QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
+diff --git a/tests/qemuxml2xmloutdata/hugepages-default-system-size.xml b/tests/qemuxml2xmloutdata/hugepages-default-system-size.xml
+new file mode 120000
+index 0000000000..e64e3fb282
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/hugepages-default-system-size.xml
+@@ -0,0 +1 @@
++../qemuxml2argvdata/hugepages-default-system-size.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmloutdata/hugepages-pages6.xml b/tests/qemuxml2xmloutdata/hugepages-pages6.xml
+deleted file mode 120000
+index 584b7c92c8..0000000000
+--- a/tests/qemuxml2xmloutdata/hugepages-pages6.xml
++++ /dev/null
+@@ -1 +0,0 @@
+-../qemuxml2argvdata/hugepages-pages6.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 2f860e548c..a3555b348e 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -334,12 +334,12 @@ mymain(void)
+     DO_TEST("pages-discard-hugepages", NONE);
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-default-2M", NONE);
++    DO_TEST("hugepages-default-system-size", NONE);
+     DO_TEST("hugepages-numa-default-2M", NONE);
+     DO_TEST("hugepages-numa-default-dimm", NONE);
+     DO_TEST("hugepages-numa-nodeset", NONE);
+     DO_TEST("hugepages-numa-nodeset-part", NONE);
+     DO_TEST("hugepages-numa-nodeset-nonexist", NONE);
+-    DO_TEST("hugepages-pages6", NONE);
+     DO_TEST("hugepages-pages7", NONE);
+     DO_TEST("hugepages-shared", NONE);
+     DO_TEST("hugepages-memaccess", NONE);
+-- 
+2.18.0
+

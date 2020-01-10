@@ -1,0 +1,144 @@
+From 5f87f644dea3f05b30c8011b274f8c37530210e9 Mon Sep 17 00:00:00 2001
+Message-Id: <5f87f644dea3f05b30c8011b274f8c37530210e9@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:18 +0200
+Subject: [PATCH] tests: introduce hugepages-default-1G-nodeset-2M
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This test case is currently working but it uncovers existing issue
+in our code that the generated QEMU commandline uses the default 1G
+hugepage instead of the 2M hugepage specified for exact node.
+
+The issue in our code is that for non-numa guests we take into account
+only the first hugepage.  This will be fixed as invalid configuration
+since it doesn't make any sense to set default and specific hugepage
+for non-numa guest.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 6ff69e936e4185983fc331c45b76d3b3d8b717ae)
+
+Conflicts:
+    tests/qemuxml2argvdata/hugepages-default-1G-nodeset-2M.args
+        - missing upstream commit <caccbba64a>
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ .../hugepages-default-1G-nodeset-2M.args      | 26 ++++++++++++++++
+ .../hugepages-default-1G-nodeset-2M.xml       | 31 +++++++++++++++++++
+ tests/qemuxml2argvtest.c                      |  1 +
+ .../hugepages-default-1G-nodeset-2M.xml       |  1 +
+ tests/qemuxml2xmltest.c                       |  1 +
+ 5 files changed, 60 insertions(+)
+ create mode 100644 tests/qemuxml2argvdata/hugepages-default-1G-nodeset-2M.args
+ create mode 100644 tests/qemuxml2argvdata/hugepages-default-1G-nodeset-2M.xml
+ create mode 120000 tests/qemuxml2xmloutdata/hugepages-default-1G-nodeset-2M.xml
+
+diff --git a/tests/qemuxml2argvdata/hugepages-default-1G-nodeset-2M.args b/tests/qemuxml2argvdata/hugepages-default-1G-nodeset-2M.args
+new file mode 100644
+index 0000000000..d1f8974032
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hugepages-default-1G-nodeset-2M.args
+@@ -0,0 +1,26 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++QEMU_AUDIO_DRV=none \
++/usr/bin/qemu-system-i686 \
++-name SomeDummyHugepagesGuest \
++-S \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 1024 \
++-mem-prealloc \
++-mem-path /dev/hugepages1G/libvirt/qemu/-1-SomeDummyHugepagesGu \
++-smp 2,sockets=2,cores=1,threads=1 \
++-uuid ef1bdff4-27f3-4e85-a807-5fb4d58463cc \
++-display none \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,\
++path=/tmp/lib/domain--1-SomeDummyHugepagesGu/monitor.sock,server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot c \
++-usb
+diff --git a/tests/qemuxml2argvdata/hugepages-default-1G-nodeset-2M.xml b/tests/qemuxml2argvdata/hugepages-default-1G-nodeset-2M.xml
+new file mode 100644
+index 0000000000..eb0943b105
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hugepages-default-1G-nodeset-2M.xml
+@@ -0,0 +1,31 @@
++<domain type='qemu'>
++  <name>SomeDummyHugepagesGuest</name>
++  <uuid>ef1bdff4-27f3-4e85-a807-5fb4d58463cc</uuid>
++  <memory unit='KiB'>1048576</memory>
++  <currentMemory unit='KiB'>1048576</currentMemory>
++  <memoryBacking>
++    <hugepages>
++      <page size='1048576' unit='KiB'/>
++      <page size='2048' unit='KiB' nodeset='0'/>
++    </hugepages>
++  </memoryBacking>
++  <vcpu placement='static'>2</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <controller type='usb' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <input type='mouse' bus='ps2'/>
++    <input type='keyboard' bus='ps2'/>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index d4251eff3e..f92c46cec5 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -959,6 +959,7 @@ mymain(void)
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
++    DO_TEST("hugepages-default-1G-nodeset-2M", NONE);
+     DO_TEST_FAILURE("hugepages-nodeset-nonexist",
+                     QEMU_CAPS_DEVICE_PC_DIMM,
+                     QEMU_CAPS_OBJECT_MEMORY_FILE,
+diff --git a/tests/qemuxml2xmloutdata/hugepages-default-1G-nodeset-2M.xml b/tests/qemuxml2xmloutdata/hugepages-default-1G-nodeset-2M.xml
+new file mode 120000
+index 0000000000..3d8eb7616e
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/hugepages-default-1G-nodeset-2M.xml
+@@ -0,0 +1 @@
++../qemuxml2argvdata/hugepages-default-1G-nodeset-2M.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 6afc48f98e..6ba8f97e20 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -336,6 +336,7 @@ mymain(void)
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
++    DO_TEST("hugepages-default-1G-nodeset-2M", NONE);
+     DO_TEST("hugepages-numa-default-2M", NONE);
+     DO_TEST("hugepages-numa-default-dimm", NONE);
+     DO_TEST("hugepages-numa-nodeset", NONE);
+-- 
+2.18.0
+

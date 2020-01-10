@@ -1,0 +1,110 @@
+From 35c8afb44903ae12239323873af0c0376082b02b Mon Sep 17 00:00:00 2001
+Message-Id: <35c8afb44903ae12239323873af0c0376082b02b@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 15 Nov 2018 11:16:43 +0100
+Subject: [PATCH] qemu: Fix post-copy migration on the source
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Post-copy migration has been broken on the source since commit
+v3.8.0-245-g32c29f10db which implemented support for
+pause-before-switchover QEMU migration capability.
+
+Even though the migration itself went well, the source did not really
+know when it switched to the post-copy mode despite the messages logged
+by MIGRATION event handler. As a result of this, the events emitted by
+source libvirtd were not accurate and statistics of the completed
+migration would cover only the pre-copy part of migration. Moreover, if
+migration failed during the post-copy phase for some reason, the source
+libvirtd would just happily resume the domain, which could lead to disk
+corruption.
+
+With the pause-before-switchover capability enabled, the order of events
+emitted by QEMU changed:
+
+                    pause-before-switchover
+           disabled                        enabled
+    MIGRATION, postcopy-active      STOP
+    STOP                            MIGRATION, pre-switchover
+                                    MIGRATION, postcopy-active
+
+The STOP even handler checks the migration status (postcopy-active) and
+sets the domain state accordingly. Which is sufficient when
+pause-before-switchover is disabled, but once we enable it, the
+migration status is still active when we get STOP from QEMU. Thus the
+domain state set in the STOP handler has to be corrected once we are
+notified that migration changed to postcopy-active.
+
+This results in two SUSPENDED events to be emitted by the source
+libvirtd during post-copy migration. The first one with
+VIR_DOMAIN_EVENT_SUSPENDED_MIGRATED detail, while the second one reports
+the corrected VIR_DOMAIN_EVENT_SUSPENDED_POSTCOPY detail. This is
+inevitable because we don't know whether migration will eventually
+switch to post-copy at the time we emit the first event.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1647365
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit eca9d21e6cc8129ec4426fbf1ace30e215b9cfbc)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1649169
+https://bugzilla.redhat.com/show_bug.cgi?id=1654732
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c | 26 +++++++++++++++++++++++++-
+ 1 file changed, 25 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 9b5cb93325..485e455a44 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1521,9 +1521,13 @@ static int
+ qemuProcessHandleMigrationStatus(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+                                  virDomainObjPtr vm,
+                                  int status,
+-                                 void *opaque ATTRIBUTE_UNUSED)
++                                 void *opaque)
+ {
+     qemuDomainObjPrivatePtr priv;
++    virQEMUDriverPtr driver = opaque;
++    virObjectEventPtr event = NULL;
++    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
++    int reason;
+ 
+     virObjectLock(vm);
+ 
+@@ -1540,8 +1544,28 @@ qemuProcessHandleMigrationStatus(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+     priv->job.current->stats.mig.status = status;
+     virDomainObjBroadcast(vm);
+ 
++    if (status == QEMU_MONITOR_MIGRATION_STATUS_POSTCOPY &&
++        virDomainObjGetState(vm, &reason) == VIR_DOMAIN_PAUSED &&
++        reason == VIR_DOMAIN_PAUSED_MIGRATION) {
++        VIR_DEBUG("Correcting paused state reason for domain %s to %s",
++                  vm->def->name,
++                  virDomainPausedReasonTypeToString(VIR_DOMAIN_PAUSED_POSTCOPY));
++
++        virDomainObjSetState(vm, VIR_DOMAIN_PAUSED, VIR_DOMAIN_PAUSED_POSTCOPY);
++        event = virDomainEventLifecycleNewFromObj(vm,
++                                                  VIR_DOMAIN_EVENT_SUSPENDED,
++                                                  VIR_DOMAIN_EVENT_SUSPENDED_POSTCOPY);
++
++        if (virDomainSaveStatus(driver->xmlopt, cfg->stateDir, vm, driver->caps) < 0) {
++            VIR_WARN("Unable to save status on vm %s after state change",
++                     vm->def->name);
++        }
++    }
++
+  cleanup:
+     virObjectUnlock(vm);
++    virObjectEventStateQueue(driver->domainEventState, event);
++    virObjectUnref(cfg);
+     return 0;
+ }
+ 
+-- 
+2.20.1
+

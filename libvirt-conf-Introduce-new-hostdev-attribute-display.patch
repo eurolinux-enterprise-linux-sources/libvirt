@@ -1,0 +1,416 @@
+From 2d16cb96407ed22af46b892e3319f04ac61924ed Mon Sep 17 00:00:00 2001
+Message-Id: <2d16cb96407ed22af46b892e3319f04ac61924ed@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:04:02 +0200
+Subject: [PATCH] conf: Introduce new <hostdev> attribute 'display'
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+QEMU 2.12 introduced a new type of display for mediated devices using
+vfio-pci backend which allows a mediated device to be used as a VGA
+compatible device as an alternative to an emulated video device. QEMU
+exposes this feature via a vfio device property 'display' with supported
+values 'on/off/auto' (libvirt will default to 'off').
+
+This patch adds the necessary bits to domain config handling in order to
+expose this feature. Since there's no convenient way for libvirt to come
+up with usable defaults for the display setting, simply because libvirt
+is not able to figure out which of the display implementations - dma-buf
+which requires OpenGL support vs vfio regions which doesn't need OpenGL
+(works with OpenGL enabled too) - the underlying mdev uses.
+
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit d54e45b6edd7623e488a19e30bc4148a21fa8b03)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ docs/formatdomain.html.in                     | 20 +++-
+ docs/schemas/domaincommon.rng                 |  5 +
+ src/conf/domain_conf.c                        | 19 +++-
+ src/conf/domain_conf.h                        |  1 +
+ src/qemu/qemu_domain.c                        | 98 ++++++++++++++++++-
+ .../qemuxml2argvdata/hostdev-mdev-display.xml | 39 ++++++++
+ .../hostdev-mdev-display.xml                  | 47 +++++++++
+ tests/qemuxml2xmltest.c                       |  1 +
+ 8 files changed, 222 insertions(+), 8 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/hostdev-mdev-display.xml
+ create mode 100644 tests/qemuxml2xmloutdata/hostdev-mdev-display.xml
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 9dd22554ad..3554c3dc30 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -4510,9 +4510,23 @@
+           guest. Currently, <code>model='vfio-pci'</code> and
+           <code>model='vfio-ccw'</code> (<span class="since">Since 4.4.0</span>)
+           is supported. Refer <a href="drvnodedev.html#MDEV">MDEV</a> to create
+-          a mediated device on the host. There are also some implications on the
+-          usage of guest's address type depending on the <code>model</code>
+-          attribute, see the <code>address</code> element below.
++          a mediated device on the host.
++          <span class="since">Since 4.6.0 (QEMU 2.12)</span> an optional
++          <code>display</code> attribute may be used to enable or disable
++          support for an accelerated remote desktop backed by a mediated
++          device (such as NVIDIA vGPU or Intel GVT-g) as an alternative to
++          emulated <a href="#elementsVideo">video devices</a>. This attribute
++          is limited to <code>model='vfio-pci'</code> only. Supported values
++          are either <code>on</code> or <code>off</code> (default is 'off').
++          It is required to use a
++          <a href="#elementsGraphics">graphical framebuffer</a> in order to
++          use this attribute, currently only supported with VNC, Spice and
++          egl-headless graphics devices.
++          <p>
++            Note: There are also some implications on the usage of guest's
++            address type depending on the <code>model</code> attribute,
++            see the <code>address</code> element below.
++          </p>
+           </dd>
+         </dl>
+         <p>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 157726752c..be8430ab22 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -4579,6 +4579,11 @@
+         <value>vfio-ccw</value>
+       </choice>
+     </attribute>
++    <optional>
++      <attribute name="display">
++        <ref name="virOnOff"/>
++      </attribute>
++    </optional>
+     <element name="source">
+       <ref name="mdevaddress"/>
+     </element>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 72086f9e86..830c298158 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -7656,6 +7656,7 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
+     char *rawio = NULL;
+     char *backendStr = NULL;
+     char *model = NULL;
++    char *display = NULL;
+     int backend;
+     int ret = -1;
+     virDomainHostdevSubsysPCIPtr pcisrc = &def->source.subsys.u.pci;
+@@ -7675,6 +7676,7 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
+     sgio = virXMLPropString(node, "sgio");
+     rawio = virXMLPropString(node, "rawio");
+     model = virXMLPropString(node, "model");
++    display = virXMLPropString(node, "display");
+ 
+     /* @type is passed in from the caller rather than read from the
+      * xml document, because it is specified in different places for
+@@ -7762,6 +7764,15 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
+                            model);
+             goto cleanup;
+         }
++
++        if (display &&
++            (mdevsrc->display = virTristateSwitchTypeFromString(display)) <= 0) {
++            virReportError(VIR_ERR_XML_ERROR,
++                           _("unknown value '%s' for <hostdev> attribute "
++                             "'display'"),
++                           display);
++            goto cleanup;
++        }
+     }
+ 
+     switch (def->source.subsys.type) {
+@@ -7815,6 +7826,7 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
+     VIR_FREE(rawio);
+     VIR_FREE(backendStr);
+     VIR_FREE(model);
++    VIR_FREE(display);
+     return ret;
+ }
+ 
+@@ -26568,9 +26580,14 @@ virDomainHostdevDefFormat(virBufferPtr buf,
+                               virTristateBoolTypeToString(scsisrc->rawio));
+         }
+ 
+-        if (def->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV)
++        if (def->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV) {
+             virBufferAsprintf(buf, " model='%s'",
+                               virMediatedDeviceModelTypeToString(mdevsrc->model));
++            if (mdevsrc->display != VIR_TRISTATE_SWITCH_ABSENT)
++                virBufferAsprintf(buf, " display='%s'",
++                                  virTristateSwitchTypeToString(mdevsrc->display));
++        }
++
+     }
+     virBufferAddLit(buf, ">\n");
+     virBufferAdjustIndent(buf, 2);
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 3deda1d978..8ca9558ceb 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -382,6 +382,7 @@ typedef struct _virDomainHostdevSubsysMediatedDev virDomainHostdevSubsysMediated
+ typedef virDomainHostdevSubsysMediatedDev *virDomainHostdevSubsysMediatedDevPtr;
+ struct _virDomainHostdevSubsysMediatedDev {
+     int model;                          /* enum virMediatedDeviceModelType */
++    int display; /* virTristateSwitch */
+     char uuidstr[VIR_UUID_STRING_BUFLEN];   /* mediated device's uuid string */
+ };
+ 
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 9498594857..5337f1ce55 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -4451,9 +4451,48 @@ qemuDomainDeviceDefValidateNetwork(const virDomainNetDef *net)
+ 
+ 
+ static int
+-qemuDomainDeviceDefValidateHostdev(const virDomainHostdevDef *hostdev,
+-                                   const virDomainDef *def)
++qemuDomainMdevDefValidate(const virDomainHostdevSubsysMediatedDev *mdevsrc,
++                          const virDomainDef *def,
++                          virQEMUCapsPtr qemuCaps)
+ {
++    if (mdevsrc->display == VIR_TRISTATE_SWITCH_ABSENT)
++        return 0;
++
++    if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_VFIO_PCI_DISPLAY)) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("display property of device vfio-pci is "
++                         "not supported by this version of QEMU"));
++        return -1;
++    }
++
++    if (mdevsrc->model != VIR_MDEV_MODEL_TYPE_VFIO_PCI) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("<hostdev> attribute 'display' is only supported"
++                         " with model='vfio-pci'"));
++
++        return -1;
++    }
++
++    if (mdevsrc->display == VIR_TRISTATE_SWITCH_ON) {
++        if (def->ngraphics == 0) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                           _("graphics device is needed for attribute value "
++                             "'display=on' in <hostdev>"));
++            return -1;
++        }
++    }
++
++    return 0;
++}
++
++
++static int
++qemuDomainDeviceDefValidateHostdev(const virDomainHostdevDef *hostdev,
++                                   const virDomainDef *def,
++                                   virQEMUCapsPtr qemuCaps)
++{
++    const virDomainHostdevSubsysMediatedDev *mdevsrc;
++
+     /* forbid capabilities mode hostdev in this kind of hypervisor */
+     if (hostdev->mode == VIR_DOMAIN_HOSTDEV_MODE_CAPABILITIES) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+@@ -4463,6 +4502,24 @@ qemuDomainDeviceDefValidateHostdev(const virDomainHostdevDef *hostdev,
+         return -1;
+     }
+ 
++    if (hostdev->mode == VIR_DOMAIN_HOSTDEV_MODE_SUBSYS) {
++        switch ((virDomainHostdevSubsysType) hostdev->source.subsys.type) {
++        case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB:
++        case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
++        case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI:
++        case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI_HOST:
++            break;
++        case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV:
++            mdevsrc = &hostdev->source.subsys.u.mdev;
++            return qemuDomainMdevDefValidate(mdevsrc, def, qemuCaps);
++        case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_LAST:
++        default:
++            virReportEnumRangeError(virDomainHostdevSubsysType,
++                                    hostdev->source.subsys.type);
++            return -1;
++        }
++    }
++
+     return 0;
+ }
+ 
+@@ -5595,7 +5652,8 @@ qemuDomainDeviceDefValidate(const virDomainDeviceDef *dev,
+         break;
+ 
+     case VIR_DOMAIN_DEVICE_HOSTDEV:
+-        ret = qemuDomainDeviceDefValidateHostdev(dev->data.hostdev, def);
++        ret = qemuDomainDeviceDefValidateHostdev(dev->data.hostdev, def,
++                                                 qemuCaps);
+         break;
+ 
+     case VIR_DOMAIN_DEVICE_VIDEO:
+@@ -6205,6 +6263,35 @@ qemuDomainVsockDefPostParse(virDomainVsockDefPtr vsock)
+ }
+ 
+ 
++static int
++qemuDomainHostdevDefMdevPostParse(virDomainHostdevSubsysMediatedDevPtr mdevsrc,
++                                  virQEMUCapsPtr qemuCaps)
++{
++    /* QEMU 2.12 added support for vfio-pci display type, we default to
++     * 'display=off' to stay safe from future changes */
++    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_VFIO_PCI_DISPLAY) &&
++        mdevsrc->display == VIR_TRISTATE_SWITCH_ABSENT)
++        mdevsrc->display = VIR_TRISTATE_SWITCH_OFF;
++
++    return 0;
++}
++
++
++static int
++qemuDomainHostdevDefPostParse(virDomainHostdevDefPtr hostdev,
++                              virQEMUCapsPtr qemuCaps)
++{
++    virDomainHostdevSubsysPtr subsys = &hostdev->source.subsys;
++
++    if (hostdev->mode == VIR_DOMAIN_HOSTDEV_MODE_SUBSYS &&
++        hostdev->source.subsys.type == VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV &&
++        qemuDomainHostdevDefMdevPostParse(&subsys->u.mdev, qemuCaps) < 0)
++        return -1;
++
++    return 0;
++}
++
++
+ static int
+ qemuDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
+                              const virDomainDef *def,
+@@ -6255,11 +6342,14 @@ qemuDomainDeviceDefPostParse(virDomainDeviceDefPtr dev,
+         ret = qemuDomainVsockDefPostParse(dev->data.vsock);
+         break;
+ 
++    case VIR_DOMAIN_DEVICE_HOSTDEV:
++        ret = qemuDomainHostdevDefPostParse(dev->data.hostdev, qemuCaps);
++        break;
++
+     case VIR_DOMAIN_DEVICE_LEASE:
+     case VIR_DOMAIN_DEVICE_FS:
+     case VIR_DOMAIN_DEVICE_INPUT:
+     case VIR_DOMAIN_DEVICE_SOUND:
+-    case VIR_DOMAIN_DEVICE_HOSTDEV:
+     case VIR_DOMAIN_DEVICE_WATCHDOG:
+     case VIR_DOMAIN_DEVICE_GRAPHICS:
+     case VIR_DOMAIN_DEVICE_HUB:
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display.xml b/tests/qemuxml2argvdata/hostdev-mdev-display.xml
+new file mode 100644
+index 0000000000..f37e08e1b9
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display.xml
+@@ -0,0 +1,39 @@
++<domain type='qemu'>
++  <name>QEMUGuest2</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <driver name='qemu' type='raw'/>
++      <source dev='/dev/HostVG/QEMUGuest2'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <controller type='ide' index='0'>
++    </controller>
++    <graphics type='vnc'/>
++    <hostdev mode='subsystem' type='mdev' model='vfio-pci' display='on'>
++      <source>
++        <address uuid='53764d0e-85a0-42b4-af5c-2046b460b1dc'/>
++      </source>
++    </hostdev>
++    <video>
++      <model type='qxl' heads='1'/>
++    </video>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2xmloutdata/hostdev-mdev-display.xml b/tests/qemuxml2xmloutdata/hostdev-mdev-display.xml
+new file mode 100644
+index 0000000000..94c11b1199
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/hostdev-mdev-display.xml
+@@ -0,0 +1,47 @@
++<domain type='qemu'>
++  <name>QEMUGuest2</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <driver name='qemu' type='raw'/>
++      <source dev='/dev/HostVG/QEMUGuest2'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <controller type='ide' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
++    </controller>
++    <input type='mouse' bus='ps2'/>
++    <input type='keyboard' bus='ps2'/>
++    <graphics type='vnc' port='-1' autoport='yes'>
++      <listen type='address'/>
++    </graphics>
++    <video>
++      <model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>
++    </video>
++    <hostdev mode='subsystem' type='mdev' managed='no' model='vfio-pci' display='on'>
++      <source>
++        <address uuid='53764d0e-85a0-42b4-af5c-2046b460b1dc'/>
++      </source>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
++    </hostdev>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index fa57221d62..e418e67f6c 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -479,6 +479,7 @@ mymain(void)
+     DO_TEST("hostdev-pci-address", NONE);
+     DO_TEST("hostdev-vfio", NONE);
+     DO_TEST("hostdev-mdev-precreated", NONE);
++    DO_TEST("hostdev-mdev-display", QEMU_CAPS_VFIO_PCI_DISPLAY);
+     DO_TEST("pci-rom", NONE);
+     DO_TEST("pci-rom-disabled", NONE);
+     DO_TEST("pci-rom-disabled-invalid", NONE);
+-- 
+2.18.0
+

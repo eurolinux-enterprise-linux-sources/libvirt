@@ -1,0 +1,54 @@
+From a520258a7d3d6bf144b2fac4717bccee91d5d0ca Mon Sep 17 00:00:00 2001
+Message-Id: <a520258a7d3d6bf144b2fac4717bccee91d5d0ca@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 26 Feb 2019 12:59:37 +0100
+Subject: [PATCH] cpu_map: Add more signatures for Nehalem CPU models
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit f349f3c53f6427d9955ab7c57900c094f06dfd87)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+	src/cpu_map/x86_Nehalem-IBRS.xml
+	src/cpu_map/x86_Nehalem.xml
+            - cpu_map split not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 33994be6a4..8733834071 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -858,6 +858,9 @@
+ 
+     <model name='Nehalem'>
+       <signature family='6' model='26'/> <!-- 0106a0 -->
++      <signature family='6' model='30'/> <!-- 0106e0 -->
++      <signature family='6' model='31'/> <!-- 0106f0 -->
++      <signature family='6' model='46'/> <!-- 0206e0 -->
+       <vendor name='Intel'/>
+       <feature name='apic'/>
+       <feature name='clflush'/>
+@@ -894,6 +897,9 @@
+ 
+     <model name='Nehalem-IBRS'>
+       <signature family='6' model='26'/> <!-- 0106a0 -->
++      <signature family='6' model='30'/> <!-- 0106e0 -->
++      <signature family='6' model='31'/> <!-- 0106f0 -->
++      <signature family='6' model='46'/> <!-- 0206e0 -->
+       <vendor name='Intel'/>
+       <feature name='apic'/>
+       <feature name='clflush'/>
+-- 
+2.21.0
+

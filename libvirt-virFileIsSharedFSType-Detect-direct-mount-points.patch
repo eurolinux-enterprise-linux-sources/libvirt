@@ -1,0 +1,80 @@
+From 691b33e397a7bd726160bc74202c8d0fdd944892 Mon Sep 17 00:00:00 2001
+Message-Id: <691b33e397a7bd726160bc74202c8d0fdd944892@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 10 Oct 2018 17:25:55 +0200
+Subject: [PATCH] virFileIsSharedFSType: Detect direct mount points
+
+RHEL-7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1632711
+RHEL-8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1634782
+RHEL-7.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1635705
+
+If the given path is already a mount point (e.g. a bind mount of
+a file, or simply a direct mount point of a FS), then our code
+fails to detect that because the first thing it does is cutting
+off part after last slash '/'.
+
+Conflicts:
+  src/util/virfile.c - VIR_AUTOFREE() stuff
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 98ca1d52a2a871e1c068504450b4dc15db063ef4)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virfile.c  | 9 +++++----
+ tests/virfiletest.c | 3 +--
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/src/util/virfile.c b/src/util/virfile.c
+index 46466ed136..05ecf7bf21 100644
+--- a/src/util/virfile.c
++++ b/src/util/virfile.c
+@@ -3609,7 +3609,8 @@ int
+ virFileIsSharedFSType(const char *path,
+                       int fstypes)
+ {
+-    char *dirpath, *p;
++    char *dirpath;
++    char *p = NULL;
+     struct statfs sb;
+     int statfs_ret;
+     long long f_type = 0;
+@@ -3617,8 +3618,9 @@ virFileIsSharedFSType(const char *path,
+     if (VIR_STRDUP(dirpath, path) < 0)
+         return -1;
+ 
+-    do {
++    statfs_ret = statfs(dirpath, &sb);
+ 
++    while ((statfs_ret < 0) && (p != dirpath)) {
+         /* Try less and less of the path until we get to a
+          * directory we can stat. Even if we don't have 'x'
+          * permission on any directory in the path on the NFS
+@@ -3640,8 +3642,7 @@ virFileIsSharedFSType(const char *path,
+             *p = '\0';
+ 
+         statfs_ret = statfs(dirpath, &sb);
+-
+-    } while ((statfs_ret < 0) && (p != dirpath));
++    }
+ 
+     VIR_FREE(dirpath);
+ 
+diff --git a/tests/virfiletest.c b/tests/virfiletest.c
+index 85f22063fe..80ea34bfa4 100644
+--- a/tests/virfiletest.c
++++ b/tests/virfiletest.c
+@@ -454,8 +454,7 @@ mymain(void)
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts1.txt", "/boot/vmlinuz", false);
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts2.txt", "/run/user/501/gvfs/some/file", false);
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/nfs/file", true);
+-    /* TODO Detect bind mounts */
+-    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/nfs/blah", true);
++    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/nfs/blah", false);
+ 
+     return ret != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+ }
+-- 
+2.19.1
+

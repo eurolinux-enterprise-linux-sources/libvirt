@@ -1,0 +1,43 @@
+From a74e5a0ea4e4a938bf9694b3d6194b68e5cffab1 Mon Sep 17 00:00:00 2001
+Message-Id: <a74e5a0ea4e4a938bf9694b3d6194b68e5cffab1@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 9 Jan 2019 15:39:49 +0100
+Subject: [PATCH] RHEL: cpu_map: Mark arch-facilities feature as non-migratable
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RHEL-only
+
+The arch-facilities feature, which was added only in RHEL, is not
+migratable and thus it should not be included in host-model features.
+
+The feature was introduced as arch-capabilities upstream in QEMU 3.1.0,
+which is later than QEMU 2.10, where we started probing what features
+cannot be migrated, so we don't need to add this cpu_map hack there.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1658406
+https://bugzilla.redhat.com/show_bug.cgi?id=1664793
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index f1f8048c14..9d53d4b43a 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -301,7 +301,7 @@
+     <feature name='stibp'>
+       <cpuid eax_in='0x07' ecx_in='0x00' edx='0x08000000'/>
+     </feature>
+-    <feature name='arch-facilities'>
++    <feature name='arch-facilities' migratable='no'>
+       <cpuid eax_in='0x07' ecx_in='0x00' edx='0x20000000'/>
+     </feature>
+     <feature name='ssbd'>
+-- 
+2.20.1
+

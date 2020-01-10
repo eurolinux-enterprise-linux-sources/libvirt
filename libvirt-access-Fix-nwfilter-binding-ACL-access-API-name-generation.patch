@@ -1,0 +1,60 @@
+From 99968171f09ae0f374b5e9c961032ffa6bd4dd11 Mon Sep 17 00:00:00 2001
+Message-Id: <99968171f09ae0f374b5e9c961032ffa6bd4dd11@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Mon, 27 Aug 2018 08:27:47 -0400
+Subject: [PATCH] access: Fix nwfilter-binding ACL access API name generation
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1611320
+
+Generation of the ACL API policy is a "automated process"
+based on this perl script which "worked" with the changes to
+add nwfilter binding API's because they had the "nwfilter"
+prefix; however, the generated output name was incorrect
+based on the remote protocol algorithm which expected to
+generate names such as 'nwfilter-binding.action' instead
+of 'nwfilter.binding-action'.
+
+This effectively changes src/access/org.libvirt.api.policy entries:
+
+  org.libvirt.api.nwfilter.binding-create ==>
+      org.libvirt.api.nwfilter-binding.create
+
+  org.libvirt.api.nwfilter.binding-delete ==>
+      org.libvirt.api.nwfilter-binding.delete
+
+  org.libvirt.api.nwfilter.binding-getattr ==>
+      org.libvirt.api.nwfilter-binding.getattr
+
+  org.libvirt.api.nwfilter.binding-read ==>
+      org.libvirt.api.nwfilter-binding.read
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 6ef65e3c96d5d1f16a16daca83b81b818d461e64)
+https: //bugzilla.redhat.com/show_bug.cgi?id=1622540
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/access/genpolkit.pl | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/access/genpolkit.pl b/src/access/genpolkit.pl
+index 968cb8c55c..e074c90eb6 100755
+--- a/src/access/genpolkit.pl
++++ b/src/access/genpolkit.pl
+@@ -22,8 +22,8 @@ use warnings;
+ 
+ my @objects = (
+     "CONNECT", "DOMAIN", "INTERFACE",
+-    "NETWORK","NODE_DEVICE", "NWFILTER",
+-     "SECRET", "STORAGE_POOL", "STORAGE_VOL",
++    "NETWORK","NODE_DEVICE", "NWFILTER_BINDING", "NWFILTER",
++    "SECRET", "STORAGE_POOL", "STORAGE_VOL",
+     );
+ 
+ my $objects = join ("|", @objects);
+-- 
+2.18.0
+

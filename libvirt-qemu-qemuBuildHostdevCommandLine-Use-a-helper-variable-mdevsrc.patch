@@ -1,0 +1,49 @@
+From f8afd7a1499d50b812a48ebedb41ebfebff0e490 Mon Sep 17 00:00:00 2001
+Message-Id: <f8afd7a1499d50b812a48ebedb41ebfebff0e490@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:03:56 +0200
+Subject: [PATCH] qemu: qemuBuildHostdevCommandLine: Use a helper variable
+ mdevsrc
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Decrease the number of accessors we have to use.
+
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit 3b61f333acd9266ff4f09e37515130d67d496f74)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_command.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 8a8cbfd7f6..fed4f8faf9 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -5394,7 +5394,9 @@ qemuBuildHostdevCommandLine(virCommandPtr cmd,
+ 
+         /* MDEV */
+         if (virHostdevIsMdevDevice(hostdev)) {
+-            switch ((virMediatedDeviceModelType) subsys->u.mdev.model) {
++            virDomainHostdevSubsysMediatedDevPtr mdevsrc = &subsys->u.mdev;
++
++            switch ((virMediatedDeviceModelType) mdevsrc->model) {
+             case VIR_MDEV_MODEL_TYPE_VFIO_PCI:
+                 if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VFIO_PCI)) {
+                     virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+@@ -5402,6 +5404,7 @@ qemuBuildHostdevCommandLine(virCommandPtr cmd,
+                                      "supported by this version of QEMU"));
+                     return -1;
+                 }
++
+                 break;
+             case VIR_MDEV_MODEL_TYPE_VFIO_CCW:
+                 if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VFIO_CCW)) {
+-- 
+2.18.0
+

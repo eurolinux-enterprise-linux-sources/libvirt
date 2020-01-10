@@ -1,0 +1,47 @@
+From 580641d2514592b4e21f49309c9f852165788fc7 Mon Sep 17 00:00:00 2001
+Message-Id: <580641d2514592b4e21f49309c9f852165788fc7@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 4 Sep 2018 10:41:02 +0200
+Subject: [PATCH] virDomainNetDefCheckABIStability: Check for MTU change too
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RHEL-7.6: https://bugzilla.redhat.com/show_bug.cgi?id=1623157
+RHEL-8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1623158
+
+Changing MTU on a running guest is not possible and trying to do
+so made us face many problems. That's why we forbid it in
+5f44d7e357f61f7. However, there is still one possible path where
+users can sneak in change: migration XML.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 4ea3693104c03ac40a6595f5b9bcda58fa18afe7)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 49b0a59918..ed9687fde9 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -21609,6 +21609,13 @@ virDomainNetDefCheckABIStability(virDomainNetDefPtr src,
+         return false;
+     }
+ 
++    if (src->mtu != dst->mtu) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                       _("Target network card MTU %d does not match source %d"),
++                       dst->mtu, src->mtu);
++        return false;
++    }
++
+     if (src->virtio && dst->virtio &&
+         !virDomainVirtioOptionsCheckABIStability(src->virtio, dst->virtio))
+         return false;
+-- 
+2.18.0
+

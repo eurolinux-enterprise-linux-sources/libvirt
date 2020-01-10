@@ -1,0 +1,184 @@
+From c34ca3d596e641381b3397958be5f584f6318777 Mon Sep 17 00:00:00 2001
+Message-Id: <c34ca3d596e641381b3397958be5f584f6318777@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 25 Feb 2019 16:44:11 +0100
+Subject: [PATCH] cpu_map: Add more signatures for Westmere CPU model
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This fixes several CPUs which were incorrectly detected as a different
+CPU model.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit e89f87721406f6ad6e811ff613a22dc804d69355)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+	src/cpu_map/x86_Westmere.xml
+            - cpu_map split not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml                                    |  2 ++
+ tests/cputestdata/x86_64-cpuid-Core-i5-650-json.xml    |  9 +++++----
+ tests/cputestdata/x86_64-cpuid-Pentium-P6100-guest.xml | 10 ++++++----
+ tests/cputestdata/x86_64-cpuid-Xeon-E7-4820-guest.xml  |  8 ++++----
+ tests/cputestdata/x86_64-cpuid-Xeon-E7-4820-json.xml   |  8 +++++---
+ tests/cputestdata/x86_64-cpuid-Xeon-E7-4830-json.xml   |  9 +++++----
+ 6 files changed, 27 insertions(+), 19 deletions(-)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 8733834071..1435a34bb9 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -937,6 +937,8 @@
+ 
+     <model name='Westmere'>
+       <signature family='6' model='44'/> <!-- 0206c0 -->
++      <signature family='6' model='47'/> <!-- 0206f0 -->
++      <signature family='6' model='37'/> <!-- 020650 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i5-650-json.xml b/tests/cputestdata/x86_64-cpuid-Core-i5-650-json.xml
+index f5980f53e5..cb21e48a9f 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i5-650-json.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i5-650-json.xml
+@@ -1,12 +1,13 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>SandyBridge</model>
++  <model fallback='forbid'>Westmere</model>
+   <vendor>Intel</vendor>
+   <feature policy='require' name='vme'/>
+   <feature policy='require' name='ss'/>
++  <feature policy='require' name='pclmuldq'/>
++  <feature policy='require' name='x2apic'/>
++  <feature policy='require' name='tsc-deadline'/>
+   <feature policy='require' name='hypervisor'/>
+   <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
+-  <feature policy='disable' name='xsave'/>
+-  <feature policy='disable' name='avx'/>
+-  <feature policy='disable' name='xsaveopt'/>
++  <feature policy='require' name='rdtscp'/>
+ </cpu>
+diff --git a/tests/cputestdata/x86_64-cpuid-Pentium-P6100-guest.xml b/tests/cputestdata/x86_64-cpuid-Pentium-P6100-guest.xml
+index db5e0ae6af..20e2fa363a 100644
+--- a/tests/cputestdata/x86_64-cpuid-Pentium-P6100-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Pentium-P6100-guest.xml
+@@ -1,6 +1,7 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>core2duo</model>
++  <model fallback='forbid'>Westmere</model>
+   <vendor>Intel</vendor>
++  <feature policy='require' name='vme'/>
+   <feature policy='require' name='ds'/>
+   <feature policy='require' name='acpi'/>
+   <feature policy='require' name='ss'/>
+@@ -8,16 +9,17 @@
+   <feature policy='require' name='tm'/>
+   <feature policy='require' name='pbe'/>
+   <feature policy='require' name='dtes64'/>
++  <feature policy='require' name='monitor'/>
+   <feature policy='require' name='ds_cpl'/>
+   <feature policy='require' name='est'/>
+   <feature policy='require' name='tm2'/>
+-  <feature policy='require' name='cx16'/>
+   <feature policy='require' name='xtpr'/>
+   <feature policy='require' name='pdcm'/>
+   <feature policy='require' name='pcid'/>
+-  <feature policy='require' name='popcnt'/>
+   <feature policy='require' name='arat'/>
+   <feature policy='require' name='rdtscp'/>
+-  <feature policy='require' name='lahf_lm'/>
+   <feature policy='require' name='invtsc'/>
++  <feature policy='disable' name='sse4.1'/>
++  <feature policy='disable' name='sse4.2'/>
++  <feature policy='disable' name='aes'/>
+ </cpu>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E7-4820-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E7-4820-guest.xml
+index dbf8580a0e..659779687a 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E7-4820-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E7-4820-guest.xml
+@@ -1,5 +1,5 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>SandyBridge</model>
++  <model fallback='forbid'>Westmere</model>
+   <vendor>Intel</vendor>
+   <feature policy='require' name='vme'/>
+   <feature policy='require' name='ds'/>
+@@ -8,6 +8,7 @@
+   <feature policy='require' name='ht'/>
+   <feature policy='require' name='tm'/>
+   <feature policy='require' name='pbe'/>
++  <feature policy='require' name='pclmuldq'/>
+   <feature policy='require' name='dtes64'/>
+   <feature policy='require' name='monitor'/>
+   <feature policy='require' name='ds_cpl'/>
+@@ -19,10 +20,9 @@
+   <feature policy='require' name='pdcm'/>
+   <feature policy='require' name='pcid'/>
+   <feature policy='require' name='dca'/>
++  <feature policy='require' name='x2apic'/>
+   <feature policy='require' name='arat'/>
+   <feature policy='require' name='pdpe1gb'/>
++  <feature policy='require' name='rdtscp'/>
+   <feature policy='require' name='invtsc'/>
+-  <feature policy='disable' name='tsc-deadline'/>
+-  <feature policy='disable' name='xsave'/>
+-  <feature policy='disable' name='avx'/>
+ </cpu>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E7-4820-json.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E7-4820-json.xml
+index d94a330f37..e8b74c5c30 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E7-4820-json.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E7-4820-json.xml
+@@ -1,12 +1,14 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>SandyBridge</model>
++  <model fallback='forbid'>Westmere</model>
+   <vendor>Intel</vendor>
+   <feature policy='require' name='vme'/>
+   <feature policy='require' name='ss'/>
++  <feature policy='require' name='pclmuldq'/>
+   <feature policy='require' name='pcid'/>
++  <feature policy='require' name='x2apic'/>
++  <feature policy='require' name='tsc-deadline'/>
+   <feature policy='require' name='hypervisor'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='pdpe1gb'/>
+-  <feature policy='disable' name='xsave'/>
+-  <feature policy='disable' name='avx'/>
++  <feature policy='require' name='rdtscp'/>
+ </cpu>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E7-4830-json.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E7-4830-json.xml
+index aae32bd7e2..da949ad25e 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E7-4830-json.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E7-4830-json.xml
+@@ -1,14 +1,15 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>SandyBridge</model>
++  <model fallback='forbid'>Westmere</model>
+   <vendor>Intel</vendor>
+   <feature policy='require' name='vme'/>
+   <feature policy='require' name='ss'/>
++  <feature policy='require' name='pclmuldq'/>
+   <feature policy='require' name='pcid'/>
++  <feature policy='require' name='x2apic'/>
++  <feature policy='require' name='tsc-deadline'/>
+   <feature policy='require' name='hypervisor'/>
+   <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='pdpe1gb'/>
+-  <feature policy='disable' name='xsave'/>
+-  <feature policy='disable' name='avx'/>
+-  <feature policy='disable' name='xsaveopt'/>
++  <feature policy='require' name='rdtscp'/>
+ </cpu>
+-- 
+2.21.0
+

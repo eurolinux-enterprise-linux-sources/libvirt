@@ -1,0 +1,837 @@
+From 95ee6c1b0ed500e86c24d57775b75190b6d10ddd Mon Sep 17 00:00:00 2001
+Message-Id: <95ee6c1b0ed500e86c24d57775b75190b6d10ddd@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:03:55 +0200
+Subject: [PATCH] tests: Update capabilities data for QEMU 3.0.0 x86_64
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The original capabilities didn't include a patched kernel for spectre,
+SPICE gl support and had xen support enabled which we already have
+dropped.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit aaf105da5997acf561cad23b3337c38324ba753b)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ .../caps_3.0.0.x86_64.replies                 | 211 +++++++++---------
+ .../caps_3.0.0.x86_64.xml                     |  57 ++---
+ 2 files changed, 127 insertions(+), 141 deletions(-)
+
+diff --git a/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.replies b/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.replies
+index 257f0ecbe2..b2f8377248 100644
+--- a/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.replies
++++ b/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.replies
+@@ -17,11 +17,11 @@
+ {
+   "return": {
+     "qemu": {
+-      "micro": 50,
++      "micro": 90,
+       "minor": 12,
+       "major": 2
+     },
+-    "package": "v2.12.0-2284-gab3257c281"
++    "package": "v3.0.0-rc0-31-g633e824037"
+   },
+   "id": "libvirt-2"
+ }
+@@ -818,10 +818,6 @@
+       "name": "virtio-keyboard-pci",
+       "parent": "virtio-input-hid-pci"
+     },
+-    {
+-      "name": "xen-sysbus",
+-      "parent": "bus"
+-    },
+     {
+       "name": "i440FX",
+       "parent": "pci-device"
+@@ -854,10 +850,6 @@
+       "name": "chardev-pty",
+       "parent": "chardev"
+     },
+-    {
+-      "name": "xen-apic",
+-      "parent": "apic-common"
+-    },
+     {
+       "name": "SUNW,fdtwo",
+       "parent": "base-sysbus-fdc"
+@@ -918,6 +910,10 @@
+       "name": "qemu64-x86_64-cpu",
+       "parent": "x86_64-cpu"
+     },
++    {
++      "name": "PIIX3-xen",
++      "parent": "pci-piix3"
++    },
+     {
+       "name": "virtio-input-host-pci",
+       "parent": "virtio-input-pci"
+@@ -935,16 +931,16 @@
+       "parent": "e1000-base"
+     },
+     {
+-      "name": "PIIX3-xen",
+-      "parent": "pci-piix3"
++      "name": "ICH9-LPC",
++      "parent": "pci-device"
+     },
+     {
+       "name": "pc-i440fx-1.4-machine",
+       "parent": "generic-pc-machine"
+     },
+     {
+-      "name": "ICH9-LPC",
+-      "parent": "pci-device"
++      "name": "ich9-usb-uhci6",
++      "parent": "pci-uhci-usb"
+     },
+     {
+       "name": "sysbus-ahci",
+@@ -954,10 +950,6 @@
+       "name": "ich9-usb-uhci4",
+       "parent": "pci-uhci-usb"
+     },
+-    {
+-      "name": "ich9-usb-uhci6",
+-      "parent": "pci-uhci-usb"
+-    },
+     {
+       "name": "pc-q35-2.6-machine",
+       "parent": "generic-pc-machine"
+@@ -966,6 +958,10 @@
+       "name": "usb-mtp",
+       "parent": "usb-device"
+     },
++    {
++      "name": "ccid-card-emulated",
++      "parent": "ccid-card"
++    },
+     {
+       "name": "ich9-usb-uhci5",
+       "parent": "pci-uhci-usb"
+@@ -1118,10 +1114,6 @@
+       "name": "pc-testdev",
+       "parent": "isa-device"
+     },
+-    {
+-      "name": "xen-backend",
+-      "parent": "xen-sysdev"
+-    },
+     {
+       "name": "Haswell-noTSX-IBRS-x86_64-cpu",
+       "parent": "x86_64-cpu"
+@@ -1206,6 +1198,10 @@
+       "name": "isa-cirrus-vga",
+       "parent": "isa-device"
+     },
++    {
++      "name": "qio-channel-rdma",
++      "parent": "qio-channel"
++    },
+     {
+       "name": "vhost-vsock-device",
+       "parent": "virtio-device"
+@@ -1322,14 +1318,14 @@
+       "name": "chardev-msmouse",
+       "parent": "chardev"
+     },
+-    {
+-      "name": "chardev-pipe",
+-      "parent": "chardev-fd"
+-    },
+     {
+       "name": "pc-q35-2.9-machine",
+       "parent": "generic-pc-machine"
+     },
++    {
++      "name": "chardev-pipe",
++      "parent": "chardev-fd"
++    },
+     {
+       "name": "pc-i440fx-1.7-machine",
+       "parent": "generic-pc-machine"
+@@ -1515,33 +1511,37 @@
+       "parent": "pci-uhci-usb"
+     },
+     {
+-      "name": "chardev-file",
+-      "parent": "chardev-fd"
++      "name": "chardev-braille",
++      "parent": "chardev"
+     },
+     {
+-      "name": "pc-q35-2.10-machine",
+-      "parent": "generic-pc-machine"
++      "name": "chardev-file",
++      "parent": "chardev-fd"
+     },
+     {
+       "name": "intel-iommu",
+       "parent": "x86-iommu"
+     },
+     {
+-      "name": "PCIE",
+-      "parent": "PCI"
++      "name": "pc-q35-2.10-machine",
++      "parent": "generic-pc-machine"
+     },
+     {
+       "name": "tpm-tis",
+       "parent": "isa-device"
+     },
+     {
+-      "name": "xen-sysdev",
+-      "parent": "sys-bus-device"
++      "name": "PCIE",
++      "parent": "PCI"
+     },
+     {
+       "name": "pcie-pci-bridge",
+       "parent": "base-pci-bridge"
+     },
++    {
++      "name": "ccid-card-passthru",
++      "parent": "ccid-card"
++    },
+     {
+       "name": "qio-dns-resolver",
+       "parent": "object"
+@@ -1582,10 +1582,6 @@
+       "name": "ccid-bus",
+       "parent": "bus"
+     },
+-    {
+-      "name": "xenpv-machine",
+-      "parent": "machine"
+-    },
+     {
+       "name": "EPYC-IBPB-x86_64-cpu",
+       "parent": "x86_64-cpu"
+@@ -1922,10 +1918,6 @@
+       "name": "pc-i440fx-2.2-machine",
+       "parent": "generic-pc-machine"
+     },
+-    {
+-      "name": "xen-pci-passthrough",
+-      "parent": "pci-device"
+-    },
+     {
+       "name": "cryptodev-backend",
+       "parent": "object"
+@@ -2058,18 +2050,10 @@
+       "name": "virtio-scsi-pci",
+       "parent": "virtio-pci"
+     },
+-    {
+-      "name": "piix3-ide",
+-      "parent": "pci-ide"
+-    },
+     {
+       "name": "ES1370",
+       "parent": "pci-device"
+     },
+-    {
+-      "name": "xen-pvdevice",
+-      "parent": "pci-device"
+-    },
+     {
+       "name": "virtio-pci-bus",
+       "parent": "virtio-bus"
+@@ -2079,8 +2063,8 @@
+       "parent": "pcie-port"
+     },
+     {
+-      "name": "xenfv-machine",
+-      "parent": "generic-pc-machine"
++      "name": "piix3-ide",
++      "parent": "pci-ide"
+     },
+     {
+       "name": "pci-testdev",
+@@ -2134,10 +2118,6 @@
+       "name": "pc-i440fx-2.6-machine",
+       "parent": "generic-pc-machine"
+     },
+-    {
+-      "name": "xen-platform",
+-      "parent": "pci-device"
+-    },
+     {
+       "name": "chardev-serial",
+       "parent": "chardev-fd"
+@@ -2230,10 +2210,6 @@
+       "name": "isa-applesmc",
+       "parent": "isa-device"
+     },
+-    {
+-      "name": "xen-accel",
+-      "parent": "accel"
+-    },
+     {
+       "name": "secret",
+       "parent": "object"
+@@ -2386,6 +2362,10 @@
+       "name": "generic-sdhci",
+       "parent": "sys-bus-device"
+     },
++    {
++      "name": "pvrdma",
++      "parent": "pci-device"
++    },
+     {
+       "name": "isa-pit",
+       "parent": "pit-common"
+@@ -5199,11 +5179,6 @@
+       "name": "pc-i440fx-2.7",
+       "cpu-max": 255
+     },
+-    {
+-      "hotpluggable-cpus": true,
+-      "name": "xenfv",
+-      "cpu-max": 128
+-    },
+     {
+       "hotpluggable-cpus": true,
+       "name": "pc-i440fx-2.3",
+@@ -5250,11 +5225,6 @@
+       "cpu-max": 288,
+       "alias": "q35"
+     },
+-    {
+-      "hotpluggable-cpus": false,
+-      "name": "xenpv",
+-      "cpu-max": 1
+-    },
+     {
+       "hotpluggable-cpus": true,
+       "name": "pc-q35-2.10",
+@@ -5506,7 +5476,6 @@
+       "name": "Westmere-IBRS",
+       "typename": "Westmere-IBRS-x86_64-cpu",
+       "unavailable-features": [
+-        "spec-ctrl"
+       ],
+       "static": false,
+       "migration-safe": true
+@@ -5529,7 +5498,6 @@
+         "avx512cd",
+         "avx512bw",
+         "avx512vl",
+-        "spec-ctrl",
+         "avx512f",
+         "avx512f",
+         "avx512f"
+@@ -5558,7 +5526,6 @@
+       "name": "Skylake-Client-IBRS",
+       "typename": "Skylake-Client-IBRS-x86_64-cpu",
+       "unavailable-features": [
+-        "spec-ctrl"
+       ],
+       "static": false,
+       "migration-safe": true
+@@ -5575,7 +5542,6 @@
+       "name": "SandyBridge-IBRS",
+       "typename": "SandyBridge-IBRS-x86_64-cpu",
+       "unavailable-features": [
+-        "spec-ctrl"
+       ],
+       "static": false,
+       "migration-safe": true
+@@ -5651,7 +5617,6 @@
+       "name": "Nehalem-IBRS",
+       "typename": "Nehalem-IBRS-x86_64-cpu",
+       "unavailable-features": [
+-        "spec-ctrl"
+       ],
+       "static": false,
+       "migration-safe": true
+@@ -5686,7 +5651,6 @@
+       "name": "IvyBridge-IBRS",
+       "typename": "IvyBridge-IBRS-x86_64-cpu",
+       "unavailable-features": [
+-        "spec-ctrl"
+       ],
+       "static": false,
+       "migration-safe": true
+@@ -5703,7 +5667,6 @@
+       "name": "Haswell-noTSX-IBRS",
+       "typename": "Haswell-noTSX-IBRS-x86_64-cpu",
+       "unavailable-features": [
+-        "spec-ctrl"
+       ],
+       "static": false,
+       "migration-safe": true
+@@ -5720,7 +5683,6 @@
+       "name": "Haswell-IBRS",
+       "typename": "Haswell-IBRS-x86_64-cpu",
+       "unavailable-features": [
+-        "spec-ctrl"
+       ],
+       "static": false,
+       "migration-safe": true
+@@ -5776,7 +5738,6 @@
+       "name": "Broadwell-noTSX-IBRS",
+       "typename": "Broadwell-noTSX-IBRS-x86_64-cpu",
+       "unavailable-features": [
+-        "spec-ctrl"
+       ],
+       "static": false,
+       "migration-safe": true
+@@ -5793,7 +5754,6 @@
+       "name": "Broadwell-IBRS",
+       "typename": "Broadwell-IBRS-x86_64-cpu",
+       "unavailable-features": [
+-        "spec-ctrl"
+       ],
+       "static": false,
+       "migration-safe": true
+@@ -5977,6 +5937,14 @@
+     },
+     {
+       "parameters": [
++        {
++          "name": "rendernode",
++          "type": "string"
++        },
++        {
++          "name": "gl",
++          "type": "boolean"
++        },
+         {
+           "name": "head",
+           "type": "number"
+@@ -6903,6 +6871,36 @@
+           "help": "file name",
+           "type": "string"
+         },
++        {
++          "name": "serial",
++          "help": "disk serial number",
++          "type": "string"
++        },
++        {
++          "name": "addr",
++          "help": "pci address (virtio only)",
++          "type": "string"
++        },
++        {
++          "name": "trans",
++          "help": "chs translation (auto, lba, none)",
++          "type": "string"
++        },
++        {
++          "name": "secs",
++          "help": "number of sectors (ide disk geometry)",
++          "type": "number"
++        },
++        {
++          "name": "heads",
++          "help": "number of heads (ide disk geometry)",
++          "type": "number"
++        },
++        {
++          "name": "cyls",
++          "help": "number of cylinders (ide disk geometry)",
++          "type": "number"
++        },
+         {
+           "name": "if",
+           "help": "interface (ide, scsi, sd, mtd, floppy, pflash, virtio)",
+@@ -18406,6 +18404,11 @@
+           "name": "inactive-l2",
+           "default": null,
+           "type": "bool"
++        },
++        {
++          "name": "bitmap-directory",
++          "default": null,
++          "type": "bool"
+         }
+       ],
+       "meta-type": "object"
+@@ -19557,7 +19560,7 @@
+         "osvw": false,
+         "apic": true,
+         "pmm": false,
+-        "spec-ctrl": false,
++        "spec-ctrl": true,
+         "tsc-adjust": true,
+         "kvm-steal-time": true,
+         "kvmclock": true,
+@@ -19578,7 +19581,7 @@
+         "vaes": false,
+         "xsaves": true,
+         "lm": true,
+-        "umip": false,
++        "umip": true,
+         "pse": true,
+         "avx2": true,
+         "sep": true,
+@@ -19610,12 +19613,12 @@
+         "rdseed": true,
+         "avx512-4vnniw": false,
+         "vme": true,
+-        "vmx": false,
++        "vmx": true,
+         "dtes64": false,
+         "mtrr": true,
+         "rdtscp": true,
+         "pse36": true,
+-        "kvm-pv-tlb-flush": false,
++        "kvm-pv-tlb-flush": true,
+         "tbm": false,
+         "wdt": false,
+         "model-id": "Intel(R) Xeon(R) CPU E3-1245 v5 @ 3.50GHz",
+@@ -19752,7 +19755,7 @@
+         "osvw": false,
+         "apic": true,
+         "pmm": false,
+-        "spec-ctrl": false,
++        "spec-ctrl": true,
+         "tsc-adjust": true,
+         "kvm-steal-time": true,
+         "kvmclock": true,
+@@ -19773,7 +19776,7 @@
+         "vaes": false,
+         "xsaves": true,
+         "lm": true,
+-        "umip": false,
++        "umip": true,
+         "pse": true,
+         "avx2": true,
+         "sep": true,
+@@ -19805,12 +19808,12 @@
+         "rdseed": true,
+         "avx512-4vnniw": false,
+         "vme": true,
+-        "vmx": false,
++        "vmx": true,
+         "dtes64": false,
+         "mtrr": true,
+         "rdtscp": true,
+         "pse36": true,
+-        "kvm-pv-tlb-flush": false,
++        "kvm-pv-tlb-flush": true,
+         "tbm": false,
+         "wdt": false,
+         "model-id": "Intel(R) Xeon(R) CPU E3-1245 v5 @ 3.50GHz",
+@@ -19992,7 +19995,7 @@
+         "pmu": false,
+         "pmm": false,
+         "apic": true,
+-        "spec-ctrl": false,
++        "spec-ctrl": true,
+         "min-xlevel2": 0,
+         "tsc-adjust": true,
+         "tsc_adjust": true,
+@@ -20019,7 +20022,7 @@
+         "xsaves": true,
+         "tcg-cpuid": true,
+         "lm": true,
+-        "umip": false,
++        "umip": true,
+         "pse": true,
+         "avx2": true,
+         "sep": true,
+@@ -20065,13 +20068,13 @@
+         "rdrand": true,
+         "rdseed": true,
+         "avx512-4vnniw": false,
+-        "vmx": false,
++        "vmx": true,
+         "vme": true,
+         "dtes64": false,
+         "mtrr": true,
+         "rdtscp": true,
+         "pse36": true,
+-        "kvm-pv-tlb-flush": false,
++        "kvm-pv-tlb-flush": true,
+         "tbm": false,
+         "wdt": false,
+         "pause_filter": false,
+@@ -20221,7 +20224,7 @@
+         "osvw": false,
+         "apic": true,
+         "pmm": false,
+-        "spec-ctrl": false,
++        "spec-ctrl": true,
+         "tsc-adjust": true,
+         "kvm-steal-time": true,
+         "kvmclock": true,
+@@ -20242,7 +20245,7 @@
+         "vaes": false,
+         "xsaves": true,
+         "lm": true,
+-        "umip": false,
++        "umip": true,
+         "pse": true,
+         "avx2": true,
+         "sep": true,
+@@ -20274,12 +20277,12 @@
+         "rdseed": true,
+         "avx512-4vnniw": false,
+         "vme": true,
+-        "vmx": false,
++        "vmx": true,
+         "dtes64": false,
+         "mtrr": true,
+         "rdtscp": true,
+         "pse36": true,
+-        "kvm-pv-tlb-flush": false,
++        "kvm-pv-tlb-flush": true,
+         "tbm": false,
+         "wdt": false,
+         "model-id": "Intel(R) Xeon(R) CPU E3-1245 v5 @ 3.50GHz",
+@@ -20416,7 +20419,7 @@
+         "osvw": false,
+         "apic": true,
+         "pmm": false,
+-        "spec-ctrl": false,
++        "spec-ctrl": true,
+         "tsc-adjust": true,
+         "kvm-steal-time": true,
+         "kvmclock": true,
+@@ -20437,7 +20440,7 @@
+         "vaes": false,
+         "xsaves": true,
+         "lm": true,
+-        "umip": false,
++        "umip": true,
+         "pse": true,
+         "avx2": true,
+         "sep": true,
+@@ -20469,12 +20472,12 @@
+         "rdseed": true,
+         "avx512-4vnniw": false,
+         "vme": true,
+-        "vmx": false,
++        "vmx": true,
+         "dtes64": false,
+         "mtrr": true,
+         "rdtscp": true,
+         "pse36": true,
+-        "kvm-pv-tlb-flush": false,
++        "kvm-pv-tlb-flush": true,
+         "tbm": false,
+         "wdt": false,
+         "model-id": "Intel(R) Xeon(R) CPU E3-1245 v5 @ 3.50GHz",
+@@ -20656,7 +20659,7 @@
+         "pmu": false,
+         "pmm": false,
+         "apic": true,
+-        "spec-ctrl": false,
++        "spec-ctrl": true,
+         "min-xlevel2": 0,
+         "tsc-adjust": true,
+         "tsc_adjust": true,
+@@ -20683,7 +20686,7 @@
+         "xsaves": true,
+         "tcg-cpuid": true,
+         "lm": true,
+-        "umip": false,
++        "umip": true,
+         "pse": true,
+         "avx2": true,
+         "sep": true,
+@@ -20729,13 +20732,13 @@
+         "rdrand": true,
+         "rdseed": true,
+         "avx512-4vnniw": false,
+-        "vmx": false,
++        "vmx": true,
+         "vme": true,
+         "dtes64": false,
+         "mtrr": true,
+         "rdtscp": true,
+         "pse36": true,
+-        "kvm-pv-tlb-flush": false,
++        "kvm-pv-tlb-flush": true,
+         "tbm": false,
+         "wdt": false,
+         "pause_filter": false,
+diff --git a/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml b/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
+index d7c25c65dd..cd036d9323 100644
+--- a/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
++++ b/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
+@@ -8,6 +8,8 @@
+   <flag name='spice'/>
+   <flag name='boot-index'/>
+   <flag name='hda-duplex'/>
++  <flag name='ccid-emulated'/>
++  <flag name='ccid-passthru'/>
+   <flag name='virtio-tx-alg'/>
+   <flag name='virtio-blk-pci.ioeventfd'/>
+   <flag name='sga'/>
+@@ -131,6 +133,7 @@
+   <flag name='vserport-change-event'/>
+   <flag name='virtio-balloon-pci.deflate-on-oom'/>
+   <flag name='mptsas1068'/>
++  <flag name='spice-gl'/>
+   <flag name='qxl.vram64_size_mb'/>
+   <flag name='chardev-logfile'/>
+   <flag name='debug-threads'/>
+@@ -160,6 +163,7 @@
+   <flag name='drive-iotune-group'/>
+   <flag name='query-cpu-model-expansion'/>
+   <flag name='virtio-net.host_mtu'/>
++  <flag name='spice-rendernode'/>
+   <flag name='nvdimm'/>
+   <flag name='pcie-root-port'/>
+   <flag name='query-cpu-definitions'/>
+@@ -210,10 +214,10 @@
+   <flag name='mch.extended-tseg-mbytes'/>
+   <flag name='sev-guest'/>
+   <flag name='usb-storage.werror'/>
+-  <version>2012050</version>
++  <version>2012090</version>
+   <kvmVersion>0</kvmVersion>
+-  <microcodeVersion>437827</microcodeVersion>
+-  <package>v2.12.0-2284-gab3257c281</package>
++  <microcodeVersion>438109</microcodeVersion>
++  <package>v3.0.0-rc0-31-g633e824037</package>
+   <arch>x86_64</arch>
+   <hostCPU type='kvm' model='base' migratability='yes'>
+     <property name='phys-bits' type='number' value='0'/>
+@@ -379,7 +383,7 @@
+     <property name='pmu' type='boolean' value='false'/>
+     <property name='pmm' type='boolean' value='false'/>
+     <property name='apic' type='boolean' value='true' migratable='yes'/>
+-    <property name='spec-ctrl' type='boolean' value='false'/>
++    <property name='spec-ctrl' type='boolean' value='true' migratable='yes'/>
+     <property name='min-xlevel2' type='number' value='0'/>
+     <property name='tsc-adjust' type='boolean' value='true' migratable='yes'/>
+     <property name='tsc_adjust' type='boolean' value='true' migratable='yes'/>
+@@ -406,7 +410,7 @@
+     <property name='xsaves' type='boolean' value='true' migratable='yes'/>
+     <property name='tcg-cpuid' type='boolean' value='true' migratable='yes'/>
+     <property name='lm' type='boolean' value='true' migratable='yes'/>
+-    <property name='umip' type='boolean' value='false'/>
++    <property name='umip' type='boolean' value='true' migratable='yes'/>
+     <property name='pse' type='boolean' value='true' migratable='yes'/>
+     <property name='avx2' type='boolean' value='true' migratable='yes'/>
+     <property name='sep' type='boolean' value='true' migratable='yes'/>
+@@ -452,13 +456,13 @@
+     <property name='rdrand' type='boolean' value='true' migratable='yes'/>
+     <property name='rdseed' type='boolean' value='true' migratable='yes'/>
+     <property name='avx512-4vnniw' type='boolean' value='false'/>
+-    <property name='vmx' type='boolean' value='false'/>
++    <property name='vmx' type='boolean' value='true' migratable='yes'/>
+     <property name='vme' type='boolean' value='true' migratable='yes'/>
+     <property name='dtes64' type='boolean' value='false'/>
+     <property name='mtrr' type='boolean' value='true' migratable='yes'/>
+     <property name='rdtscp' type='boolean' value='true' migratable='yes'/>
+     <property name='pse36' type='boolean' value='true' migratable='yes'/>
+-    <property name='kvm-pv-tlb-flush' type='boolean' value='false'/>
++    <property name='kvm-pv-tlb-flush' type='boolean' value='true' migratable='yes'/>
+     <property name='tbm' type='boolean' value='false'/>
+     <property name='wdt' type='boolean' value='false'/>
+     <property name='pause_filter' type='boolean' value='false'/>
+@@ -747,9 +751,7 @@
+     <blocker name='3dnowext'/>
+     <blocker name='3dnow'/>
+   </cpu>
+-  <cpu type='kvm' name='Westmere-IBRS' usable='no'>
+-    <blocker name='spec-ctrl'/>
+-  </cpu>
++  <cpu type='kvm' name='Westmere-IBRS' usable='yes'/>
+   <cpu type='kvm' name='Westmere' usable='yes'/>
+   <cpu type='kvm' name='Skylake-Server-IBRS' usable='no'>
+     <blocker name='avx512f'/>
+@@ -758,7 +760,6 @@
+     <blocker name='avx512cd'/>
+     <blocker name='avx512bw'/>
+     <blocker name='avx512vl'/>
+-    <blocker name='spec-ctrl'/>
+     <blocker name='avx512f'/>
+     <blocker name='avx512f'/>
+     <blocker name='avx512f'/>
+@@ -774,13 +775,9 @@
+     <blocker name='avx512f'/>
+     <blocker name='avx512f'/>
+   </cpu>
+-  <cpu type='kvm' name='Skylake-Client-IBRS' usable='no'>
+-    <blocker name='spec-ctrl'/>
+-  </cpu>
++  <cpu type='kvm' name='Skylake-Client-IBRS' usable='yes'/>
+   <cpu type='kvm' name='Skylake-Client' usable='yes'/>
+-  <cpu type='kvm' name='SandyBridge-IBRS' usable='no'>
+-    <blocker name='spec-ctrl'/>
+-  </cpu>
++  <cpu type='kvm' name='SandyBridge-IBRS' usable='yes'/>
+   <cpu type='kvm' name='SandyBridge' usable='yes'/>
+   <cpu type='kvm' name='Penryn' usable='yes'/>
+   <cpu type='kvm' name='Opteron_G5' usable='no'>
+@@ -802,9 +799,7 @@
+   </cpu>
+   <cpu type='kvm' name='Opteron_G2' usable='yes'/>
+   <cpu type='kvm' name='Opteron_G1' usable='yes'/>
+-  <cpu type='kvm' name='Nehalem-IBRS' usable='no'>
+-    <blocker name='spec-ctrl'/>
+-  </cpu>
++  <cpu type='kvm' name='Nehalem-IBRS' usable='yes'/>
+   <cpu type='kvm' name='Nehalem' usable='yes'/>
+   <cpu type='kvm' name='KnightsMill' usable='no'>
+     <blocker name='avx512f'/>
+@@ -818,17 +813,11 @@
+     <blocker name='avx512f'/>
+     <blocker name='avx512f'/>
+   </cpu>
+-  <cpu type='kvm' name='IvyBridge-IBRS' usable='no'>
+-    <blocker name='spec-ctrl'/>
+-  </cpu>
++  <cpu type='kvm' name='IvyBridge-IBRS' usable='yes'/>
+   <cpu type='kvm' name='IvyBridge' usable='yes'/>
+-  <cpu type='kvm' name='Haswell-noTSX-IBRS' usable='no'>
+-    <blocker name='spec-ctrl'/>
+-  </cpu>
++  <cpu type='kvm' name='Haswell-noTSX-IBRS' usable='yes'/>
+   <cpu type='kvm' name='Haswell-noTSX' usable='yes'/>
+-  <cpu type='kvm' name='Haswell-IBRS' usable='no'>
+-    <blocker name='spec-ctrl'/>
+-  </cpu>
++  <cpu type='kvm' name='Haswell-IBRS' usable='yes'/>
+   <cpu type='kvm' name='Haswell' usable='yes'/>
+   <cpu type='kvm' name='EPYC-IBPB' usable='no'>
+     <blocker name='sha-ni'/>
+@@ -850,13 +839,9 @@
+     <blocker name='osvw'/>
+   </cpu>
+   <cpu type='kvm' name='Conroe' usable='yes'/>
+-  <cpu type='kvm' name='Broadwell-noTSX-IBRS' usable='no'>
+-    <blocker name='spec-ctrl'/>
+-  </cpu>
++  <cpu type='kvm' name='Broadwell-noTSX-IBRS' usable='yes'/>
+   <cpu type='kvm' name='Broadwell-noTSX' usable='yes'/>
+-  <cpu type='kvm' name='Broadwell-IBRS' usable='no'>
+-    <blocker name='spec-ctrl'/>
+-  </cpu>
++  <cpu type='kvm' name='Broadwell-IBRS' usable='yes'/>
+   <cpu type='kvm' name='Broadwell' usable='yes'/>
+   <cpu type='kvm' name='486' usable='yes'/>
+   <cpu type='tcg' name='max' usable='yes'/>
+@@ -1180,7 +1165,6 @@
+   <machine name='pc-i440fx-2.9' hotplugCpus='yes' maxCpus='255'/>
+   <machine name='pc-i440fx-2.6' hotplugCpus='yes' maxCpus='255'/>
+   <machine name='pc-i440fx-2.7' hotplugCpus='yes' maxCpus='255'/>
+-  <machine name='xenfv' hotplugCpus='yes' maxCpus='128'/>
+   <machine name='pc-i440fx-2.3' hotplugCpus='yes' maxCpus='255'/>
+   <machine name='pc-i440fx-2.4' hotplugCpus='yes' maxCpus='255'/>
+   <machine name='pc-i440fx-2.5' hotplugCpus='yes' maxCpus='255'/>
+@@ -1190,7 +1174,6 @@
+   <machine name='pc-q35-2.11' hotplugCpus='yes' maxCpus='288'/>
+   <machine name='pc-q35-2.12' hotplugCpus='yes' maxCpus='288'/>
+   <machine name='pc-q35-3.0' alias='q35' hotplugCpus='yes' maxCpus='288'/>
+-  <machine name='xenpv' maxCpus='1'/>
+   <machine name='pc-q35-2.10' hotplugCpus='yes' maxCpus='288'/>
+   <machine name='pc-i440fx-1.7' hotplugCpus='yes' maxCpus='255'/>
+   <machine name='pc-q35-2.9' hotplugCpus='yes' maxCpus='288'/>
+-- 
+2.18.0
+

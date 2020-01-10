@@ -1,0 +1,243 @@
+From f01aeffaa7dbb4e9efe61f9826deed14c4cb3b41 Mon Sep 17 00:00:00 2001
+Message-Id: <f01aeffaa7dbb4e9efe61f9826deed14c4cb3b41@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 12 Sep 2018 14:34:33 +0200
+Subject: [PATCH] qemu: Avoid duplicate resume events and state changes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The only place where VIR_DOMAIN_EVENT_RESUMED should be generated is the
+RESUME event handler to make sure we don't generate duplicate events or
+state changes. In the worse case the duplicity can revert or cover
+changes done by other event handlers.
+
+For example, after QEMU sent RESUME, BLOCK_IO_ERROR, and STOP events
+we could happily mark the domain as running and report
+VIR_DOMAIN_EVENT_RESUMED to registered clients.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1612943
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit e6d77a75c4bf0c017d62b717b75e4bb6aa7a456b)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1634758
+https://bugzilla.redhat.com/show_bug.cgi?id=1634759
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_driver.c    | 13 -----------
+ src/qemu/qemu_migration.c | 49 ++++++++++++++++-----------------------
+ src/qemu/qemu_process.c   | 10 ++++----
+ 3 files changed, 24 insertions(+), 48 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 26aa557d9f..295613ba3c 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -1863,7 +1863,6 @@ static int qemuDomainResume(virDomainPtr dom)
+     virQEMUDriverPtr driver = dom->conn->privateData;
+     virDomainObjPtr vm;
+     int ret = -1;
+-    virObjectEventPtr event = NULL;
+     int state;
+     int reason;
+     virQEMUDriverConfigPtr cfg = NULL;
+@@ -1902,9 +1901,6 @@ static int qemuDomainResume(virDomainPtr dom)
+                                "%s", _("resume operation failed"));
+             goto endjob;
+         }
+-        event = virDomainEventLifecycleNewFromObj(vm,
+-                                         VIR_DOMAIN_EVENT_RESUMED,
+-                                         VIR_DOMAIN_EVENT_RESUMED_UNPAUSED);
+     }
+     if (virDomainSaveStatus(driver->xmlopt, cfg->stateDir, vm, driver->caps) < 0)
+         goto endjob;
+@@ -1915,7 +1911,6 @@ static int qemuDomainResume(virDomainPtr dom)
+ 
+  cleanup:
+     virDomainObjEndAPI(&vm);
+-    virObjectEventStateQueue(driver->domainEventState, event);
+     virObjectUnref(cfg);
+     return ret;
+ }
+@@ -16031,7 +16026,6 @@ qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+     virDomainDefPtr config = NULL;
+     virQEMUDriverConfigPtr cfg = NULL;
+     virCapsPtr caps = NULL;
+-    bool was_running = false;
+     bool was_stopped = false;
+     qemuDomainSaveCookiePtr cookie;
+     virCPUDefPtr origCPU = NULL;
+@@ -16222,7 +16216,6 @@ qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+             priv = vm->privateData;
+             if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_RUNNING) {
+                 /* Transitions 5, 6 */
+-                was_running = true;
+                 if (qemuProcessStopCPUs(driver, vm,
+                                         VIR_DOMAIN_PAUSED_FROM_SNAPSHOT,
+                                         QEMU_ASYNC_JOB_START) < 0)
+@@ -16319,12 +16312,6 @@ qemuDomainRevertToSnapshot(virDomainSnapshotPtr snapshot,
+                 event = virDomainEventLifecycleNewFromObj(vm,
+                                                  VIR_DOMAIN_EVENT_STARTED,
+                                                  detail);
+-            } else if (!was_running) {
+-                /* Transition 8 */
+-                detail = VIR_DOMAIN_EVENT_RESUMED_FROM_SNAPSHOT;
+-                event = virDomainEventLifecycleNewFromObj(vm,
+-                                                 VIR_DOMAIN_EVENT_RESUMED,
+-                                                 detail);
+             }
+         }
+         break;
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 825a9d399b..67940330aa 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -2982,14 +2982,10 @@ qemuMigrationSrcConfirmPhase(virQEMUDriverPtr driver,
+         virFreeError(orig_err);
+ 
+         if (virDomainObjGetState(vm, &reason) == VIR_DOMAIN_PAUSED &&
+-            reason == VIR_DOMAIN_PAUSED_POSTCOPY) {
++            reason == VIR_DOMAIN_PAUSED_POSTCOPY)
+             qemuMigrationAnyPostcopyFailed(driver, vm);
+-        } else if (qemuMigrationSrcRestoreDomainState(driver, vm)) {
+-            event = virDomainEventLifecycleNewFromObj(vm,
+-                                                      VIR_DOMAIN_EVENT_RESUMED,
+-                                                      VIR_DOMAIN_EVENT_RESUMED_MIGRATED);
+-            virObjectEventStateQueue(driver->domainEventState, event);
+-        }
++        else
++            qemuMigrationSrcRestoreDomainState(driver, vm);
+ 
+         qemuMigrationParamsReset(driver, vm, QEMU_ASYNC_JOB_MIGRATION_OUT,
+                                  priv->job.migParams, priv->job.apiFlags);
+@@ -4624,11 +4620,7 @@ qemuMigrationSrcPerformJob(virQEMUDriverPtr driver,
+         qemuMigrationParamsReset(driver, vm, QEMU_ASYNC_JOB_MIGRATION_OUT,
+                                  priv->job.migParams, priv->job.apiFlags);
+ 
+-    if (qemuMigrationSrcRestoreDomainState(driver, vm)) {
+-        event = virDomainEventLifecycleNewFromObj(vm,
+-                                         VIR_DOMAIN_EVENT_RESUMED,
+-                                         VIR_DOMAIN_EVENT_RESUMED_MIGRATED);
+-    }
++    qemuMigrationSrcRestoreDomainState(driver, vm);
+ 
+     qemuMigrationJobFinish(driver, vm);
+     if (!virDomainObjIsActive(vm) && ret == 0) {
+@@ -4672,7 +4664,6 @@ qemuMigrationSrcPerformPhase(virQEMUDriverPtr driver,
+                              unsigned long resource)
+ {
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+-    virObjectEventPtr event = NULL;
+     int ret = -1;
+ 
+     /* If we didn't start the job in the begin phase, start it now. */
+@@ -4694,11 +4685,7 @@ qemuMigrationSrcPerformPhase(virQEMUDriverPtr driver,
+                                         nmigrate_disks, migrate_disks, migParams);
+ 
+     if (ret < 0) {
+-        if (qemuMigrationSrcRestoreDomainState(driver, vm)) {
+-            event = virDomainEventLifecycleNewFromObj(vm,
+-                                                      VIR_DOMAIN_EVENT_RESUMED,
+-                                                      VIR_DOMAIN_EVENT_RESUMED_MIGRATED);
+-        }
++        qemuMigrationSrcRestoreDomainState(driver, vm);
+         goto endjob;
+     }
+ 
+@@ -4722,7 +4709,6 @@ qemuMigrationSrcPerformPhase(virQEMUDriverPtr driver,
+ 
+  cleanup:
+     virDomainObjEndAPI(&vm);
+-    virObjectEventStateQueue(driver->domainEventState, event);
+     return ret;
+ }
+ 
+@@ -5074,13 +5060,8 @@ qemuMigrationDstFinish(virQEMUDriverPtr driver,
+                 goto endjob;
+         }
+ 
+-        if (inPostCopy) {
++        if (inPostCopy)
+             doKill = false;
+-            event = virDomainEventLifecycleNewFromObj(vm,
+-                                        VIR_DOMAIN_EVENT_RESUMED,
+-                                        VIR_DOMAIN_EVENT_RESUMED_POSTCOPY);
+-            virObjectEventStateQueue(driver->domainEventState, event);
+-        }
+     }
+ 
+     if (mig->jobInfo) {
+@@ -5111,10 +5092,20 @@ qemuMigrationDstFinish(virQEMUDriverPtr driver,
+ 
+     dom = virGetDomain(dconn, vm->def->name, vm->def->uuid, vm->def->id);
+ 
+-    event = virDomainEventLifecycleNewFromObj(vm,
+-                                              VIR_DOMAIN_EVENT_RESUMED,
+-                                              VIR_DOMAIN_EVENT_RESUMED_MIGRATED);
+-    virObjectEventStateQueue(driver->domainEventState, event);
++    if (inPostCopy) {
++        /* The only RESUME event during post-copy migration is triggered by
++         * QEMU when the running domain moves from the source to the
++         * destination host, but then the migration keeps running until all
++         * modified memory is transferred from the source host. This will
++         * result in VIR_DOMAIN_EVENT_RESUMED with RESUMED_POSTCOPY detail.
++         * However, our API documentation says we need to fire another RESUMED
++         * event at the very end of migration with RESUMED_MIGRATED detail.
++         */
++        event = virDomainEventLifecycleNewFromObj(vm,
++                                                  VIR_DOMAIN_EVENT_RESUMED,
++                                                  VIR_DOMAIN_EVENT_RESUMED_MIGRATED);
++        virObjectEventStateQueue(driver->domainEventState, event);
++    }
+ 
+     if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_PAUSED) {
+         virDomainObjSetState(vm, VIR_DOMAIN_PAUSED, VIR_DOMAIN_PAUSED_USER);
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 37568165b7..2d51c0fa25 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -436,7 +436,6 @@ qemuProcessFakeReboot(void *opaque)
+     virDomainObjPtr vm = opaque;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     virQEMUDriverPtr driver = priv->driver;
+-    virObjectEventPtr event = NULL;
+     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
+     virDomainRunningReason reason = VIR_DOMAIN_RUNNING_BOOTED;
+     int ret = -1, rc;
+@@ -473,9 +472,6 @@ qemuProcessFakeReboot(void *opaque)
+         goto endjob;
+     }
+     priv->gotShutdown = false;
+-    event = virDomainEventLifecycleNewFromObj(vm,
+-                                     VIR_DOMAIN_EVENT_RESUMED,
+-                                     VIR_DOMAIN_EVENT_RESUMED_UNPAUSED);
+ 
+     if (virDomainSaveStatus(driver->xmlopt, cfg->stateDir, vm, driver->caps) < 0) {
+         VIR_WARN("Unable to save status on vm %s after state change",
+@@ -491,7 +487,6 @@ qemuProcessFakeReboot(void *opaque)
+     if (ret == -1)
+         ignore_value(qemuProcessKill(vm, VIR_QEMU_PROCESS_KILL_FORCE));
+     virDomainObjEndAPI(&vm);
+-    virObjectEventStateQueue(driver->domainEventState, event);
+     virObjectUnref(cfg);
+ }
+ 
+@@ -3073,7 +3068,10 @@ qemuProcessStartCPUs(virQEMUDriverPtr driver, virDomainObjPtr vm,
+     if (ret < 0)
+         goto release;
+ 
+-    virDomainObjSetState(vm, VIR_DOMAIN_RUNNING, reason);
++    /* The RESUME event handler will change the domain state with the reason
++     * saved in priv->runningReason and it will also emit corresponding domain
++     * lifecycle event.
++     */
+ 
+  cleanup:
+     virObjectUnref(cfg);
+-- 
+2.19.1
+

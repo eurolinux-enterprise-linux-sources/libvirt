@@ -1,0 +1,358 @@
+From 4a8593827fa1440e741b685e9ba3f0c7e3b17e99 Mon Sep 17 00:00:00 2001
+Message-Id: <4a8593827fa1440e741b685e9ba3f0c7e3b17e99@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 10 Oct 2018 17:25:54 +0200
+Subject: [PATCH] virfiletst: Test virFileIsSharedFS
+
+RHEL-7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1632711
+RHEL-8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1634782
+RHEL-7.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1635705
+
+Introduce some basic test cases for virFileIsSharedFS(). More
+will be added later. In order to achieve desired result, mocks
+for setmntent() and statfs() need to be invented because the
+first thing that virFileIsSharedFS() does is calling the latter.
+If it finds a FUSE mount it'll call the former.
+
+The mock might look a bit complicated, but in fact it's quite
+simple. The test sets LIBVIRT_MTAB env variable to hold the
+absolute path to a file containing mount table. Then, statfs()
+returns matching FS it finds, and setmntent() is there just to
+replace /proc/mounts with the file the test wants to load.
+
+Adding this test also exposed a bug we have - because we assume
+the given path points to a file we cut off what we assume is a
+file name to obtain directory path and only then we call
+statfs(). This is buggy because the passed path could be already
+a mount point.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit a7b4eb7d261255d70d90047ae34e8eea849053f2)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tests/Makefile.am             |   7 +-
+ tests/virfiledata/mounts3.txt |  33 ++++++++
+ tests/virfilemock.c           | 154 ++++++++++++++++++++++++++++++++++
+ tests/virfiletest.c           |  62 +++++++++++++-
+ 4 files changed, 254 insertions(+), 2 deletions(-)
+ create mode 100644 tests/virfiledata/mounts3.txt
+ create mode 100644 tests/virfilemock.c
+
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index f5872fa42b..a4ebed489a 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -242,6 +242,7 @@ test_libraries += virusbmock.la \
+ 	virnetdevbandwidthmock.la \
+ 	virnumamock.la \
+ 	virtestmock.la \
++	virfilemock.la \
+ 	$(NULL)
+ endif WITH_LINUX
+ 
+@@ -1163,9 +1164,13 @@ virresctrltest_SOURCES = \
+ 	virresctrltest.c testutils.h testutils.c virfilewrapper.h virfilewrapper.c
+ virresctrltest_LDADD = $(LDADDS)
+ 
++virfilemock_la_SOURCES = \
++	virfilemock.c
++virfilemock_la_LDFLAGS = $(MOCKLIBS_LDFLAGS)
++virfilemock_la_LIBADD = $(MOCKLIBS_LIBS)
+ else ! WITH_LINUX
+ EXTRA_DIST += vircaps2xmltest.c virnumamock.c virfilewrapper.c \
+-			  virfilewrapper.h virresctrltest.c
++			  virfilewrapper.h virresctrltest.c virfilemock.c
+ endif ! WITH_LINUX
+ 
+ if WITH_NSS
+diff --git a/tests/virfiledata/mounts3.txt b/tests/virfiledata/mounts3.txt
+new file mode 100644
+index 0000000000..226f67dc00
+--- /dev/null
++++ b/tests/virfiledata/mounts3.txt
+@@ -0,0 +1,33 @@
++/dev/root / xfs rw,noatime,attr2,inode64,noquota 0 0
++proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0
++tmpfs /run tmpfs rw,nodev,relatime,size=3281436k,mode=755 0 0
++sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0
++dev /dev devtmpfs rw,nosuid,relatime,size=10240k,nr_inodes=4093060,mode=755 0 0
++securityfs /sys/kernel/security securityfs rw,nosuid,nodev,noexec,relatime 0 0
++debugfs /sys/kernel/debug debugfs rw,nosuid,nodev,noexec,relatime 0 0
++mqueue /dev/mqueue mqueue rw,nosuid,nodev,noexec,relatime 0 0
++configfs /sys/kernel/config configfs rw,nosuid,nodev,noexec,relatime 0 0
++devpts /dev/pts devpts rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=000 0 0
++fusectl /sys/fs/fuse/connections fusectl rw,nosuid,nodev,noexec,relatime 0 0
++shm /dev/shm tmpfs rw,nosuid,nodev,noexec,relatime 0 0
++cgroup_root /sys/fs/cgroup tmpfs rw,nosuid,nodev,noexec,relatime,size=10240k,mode=755 0 0
++openrc /sys/fs/cgroup/openrc cgroup rw,nosuid,nodev,noexec,relatime,release_agent=/lib/rc/sh/cgroup-release-agent.sh,name=openrc 0 0
++none /sys/fs/cgroup/unified cgroup2 rw,nosuid,nodev,noexec,relatime,nsdelegate 0 0
++cpuset /sys/fs/cgroup/cpuset cgroup rw,nosuid,nodev,noexec,relatime,cpuset 0 0
++cpu /sys/fs/cgroup/cpu cgroup rw,nosuid,nodev,noexec,relatime,cpu 0 0
++cpuacct /sys/fs/cgroup/cpuacct cgroup rw,nosuid,nodev,noexec,relatime,cpuacct 0 0
++blkio /sys/fs/cgroup/blkio cgroup rw,nosuid,nodev,noexec,relatime,blkio 0 0
++memory /sys/fs/cgroup/memory cgroup rw,nosuid,nodev,noexec,relatime,memory 0 0
++devices /sys/fs/cgroup/devices cgroup rw,nosuid,nodev,noexec,relatime,devices 0 0
++freezer /sys/fs/cgroup/freezer cgroup rw,nosuid,nodev,noexec,relatime,freezer 0 0
++net_cls /sys/fs/cgroup/net_cls cgroup rw,nosuid,nodev,noexec,relatime,net_cls 0 0
++perf_event /sys/fs/cgroup/perf_event cgroup rw,nosuid,nodev,noexec,relatime,perf_event 0 0
++net_prio /sys/fs/cgroup/net_prio cgroup rw,nosuid,nodev,noexec,relatime,net_prio 0 0
++hugetlb /sys/fs/cgroup/hugetlb cgroup rw,nosuid,nodev,noexec,relatime,hugetlb 0 0
++pids /sys/fs/cgroup/pids cgroup rw,nosuid,nodev,noexec,relatime,pids 0 0
++rdma /sys/fs/cgroup/rdma cgroup rw,nosuid,nodev,noexec,relatime,rdma 0 0
++binfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc rw,nosuid,nodev,noexec,relatime 0 0
++hugetlbfs /hugepages2M hugetlbfs rw,relatime,mode=1777,pagesize=2M 0 0
++none /run/user/1000 tmpfs rw,relatime,mode=700,uid=1000 0 0
++host:/nfs /nfs nfs4 rw,relatime,vers=4.1,rsize=1048576,wsize=1048576,namlen=255,hard,proto=tcp6,timeo=600,retrans=2,sec=sys,clientaddr=::,local_lock=none,addr=:: 0 0
++dev /nfs/blah devtmpfs rw,nosuid,relatime,size=10240k,nr_inodes=4093060,mode=755 0 0
+diff --git a/tests/virfilemock.c b/tests/virfilemock.c
+new file mode 100644
+index 0000000000..822c757380
+--- /dev/null
++++ b/tests/virfilemock.c
+@@ -0,0 +1,154 @@
++/*
++ * Copyright (C) 2018 Red Hat, Inc.
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library.  If not, see
++ * <http://www.gnu.org/licenses/>.
++ *
++ * Author: Michal Privoznik <mprivozn@redhat.com>
++ */
++
++#include <config.h>
++
++#include <stdio.h>
++#include <mntent.h>
++#include <sys/vfs.h>
++#if HAVE_LINUX_MAGIC_H
++# include <linux/magic.h>
++#endif
++
++#include "virmock.h"
++
++#define VIR_FROM_THIS VIR_FROM_NONE
++
++static FILE *(*real_setmntent)(const char *filename, const char *type);
++static int (*real_statfs)(const char *path, struct statfs *buf);
++
++
++static void
++init_syms(void)
++{
++    if (real_setmntent)
++        return;
++
++    VIR_MOCK_REAL_INIT(setmntent);
++    VIR_MOCK_REAL_INIT(statfs);
++}
++
++
++FILE *
++setmntent(const char *filename, const char *type)
++{
++    const char *mtab;
++
++    init_syms();
++
++    if ((mtab = getenv("LIBVIRT_MTAB")))
++        filename = mtab;
++
++    return real_setmntent(filename, type);
++}
++
++
++#ifndef NFS_SUPER_MAGIC
++# define NFS_SUPER_MAGIC 0x6969
++#endif
++#ifndef OCFS2_SUPER_MAGIC
++# define OCFS2_SUPER_MAGIC 0x7461636f
++#endif
++#ifndef GFS2_MAGIC
++# define GFS2_MAGIC 0x01161970
++#endif
++#ifndef AFS_FS_MAGIC
++# define AFS_FS_MAGIC 0x6B414653
++#endif
++#ifndef SMB_SUPER_MAGIC
++# define SMB_SUPER_MAGIC 0x517B
++#endif
++#ifndef CIFS_SUPER_MAGIC
++# define CIFS_SUPER_MAGIC 0xFF534D42
++#endif
++#ifndef HUGETLBFS_MAGIC
++# define HUGETLBFS_MAGIC 0x958458f6
++#endif
++#ifndef FUSE_SUPER_MAGIC
++# define FUSE_SUPER_MAGIC 0x65735546
++#endif
++
++
++static int
++statfs_mock(const char *mtab,
++            const char *path,
++            struct statfs *buf)
++{
++    FILE *f;
++    struct mntent mb;
++    char mntbuf[1024];
++    int ret = -1;
++
++    if (!(f = real_setmntent(mtab, "r"))) {
++        fprintf(stderr, "Unable to open %s", mtab);
++        return -1;
++    }
++
++    while (getmntent_r(f, &mb, mntbuf, sizeof(mntbuf))) {
++        int ftype;
++
++        if (STRNEQ(mb.mnt_dir, path))
++            continue;
++
++        if (STREQ(mb.mnt_type, "nfs") ||
++            STREQ(mb.mnt_type, "nfs4")) {
++            ftype = NFS_SUPER_MAGIC;
++        } else if (STREQ(mb.mnt_type, "gfs2")||
++                   STREQ(mb.mnt_type, "gfs2meta")) {
++            ftype = GFS2_MAGIC;
++        } else if (STREQ(mb.mnt_type, "ocfs2")) {
++            ftype = OCFS2_SUPER_MAGIC;
++        } else if (STREQ(mb.mnt_type, "afs")) {
++            ftype = AFS_FS_MAGIC;
++        } else if (STREQ(mb.mnt_type, "smb3")) {
++            ftype = SMB_SUPER_MAGIC;
++        } else if (STREQ(mb.mnt_type, "cifs")) {
++            ftype = CIFS_SUPER_MAGIC;
++        } else if (STRPREFIX(mb.mnt_type, "fuse")) {
++            ftype = FUSE_SUPER_MAGIC;
++        } else {
++            /* Everything else is EXT4. We don't care really for other paths. */
++            ftype = EXT4_SUPER_MAGIC;
++        }
++
++        memset(buf, 0, sizeof(*buf));
++        /* We only care about f_type so far. */
++        buf->f_type = ftype;
++        ret = 0;
++        break;
++    }
++
++    endmntent(f);
++    return ret;
++}
++
++
++int
++statfs(const char *path, struct statfs *buf)
++{
++    const char *mtab;
++
++    init_syms();
++
++    if ((mtab = getenv("LIBVIRT_MTAB")))
++        return statfs_mock(mtab, path, buf);
++
++    return real_statfs(path, buf);
++}
+diff --git a/tests/virfiletest.c b/tests/virfiletest.c
+index 790911cacb..85f22063fe 100644
+--- a/tests/virfiletest.c
++++ b/tests/virfiletest.c
+@@ -31,6 +31,7 @@
+ # include <linux/falloc.h>
+ #endif
+ 
++#define VIR_FROM_THIS VIR_FROM_NONE
+ 
+ #if defined HAVE_MNTENT_H && defined HAVE_GETMNTENT_R
+ static int testFileCheckMounts(const char *prefix,
+@@ -310,6 +311,48 @@ testFileInData(const void *opaque)
+ }
+ 
+ 
++struct testFileIsSharedFSType {
++    const char *mtabFile;
++    const char *filename;
++    const bool expected;
++};
++
++static int
++testFileIsSharedFSType(const void *opaque ATTRIBUTE_UNUSED)
++{
++#ifndef __linux__
++    return EXIT_AM_SKIP;
++#else
++    const struct testFileIsSharedFSType *data = opaque;
++    char *mtabFile = NULL;
++    bool actual;
++    int ret = -1;
++
++    if (virAsprintf(&mtabFile, abs_srcdir "/virfiledata/%s", data->mtabFile) < 0)
++        return -1;
++
++    if (setenv("LIBVIRT_MTAB", mtabFile, 1) < 0) {
++        fprintf(stderr, "Unable to set env variable\n");
++        goto cleanup;
++    }
++
++    actual = virFileIsSharedFS(data->filename);
++
++    if (actual != data->expected) {
++        fprintf(stderr, "Unexpected FS type. Expected %d got %d\n",
++                data->expected, actual);
++        goto cleanup;
++    }
++
++    ret = 0;
++ cleanup:
++    VIR_FREE(mtabFile);
++    unsetenv("LIBVIRT_MTAB");
++    return ret;
++#endif
++}
++
++
+ static int
+ mymain(void)
+ {
+@@ -397,7 +440,24 @@ mymain(void)
+         DO_TEST_IN_DATA(true, 8, 16, 32, 64, 128, 256, 512);
+         DO_TEST_IN_DATA(false, 8, 16, 32, 64, 128, 256, 512);
+     }
++
++#define DO_TEST_FILE_IS_SHARED_FS_TYPE(mtab, file, exp) \
++    do { \
++        struct testFileIsSharedFSType data = { \
++            .mtabFile = mtab, .filename = file, .expected = exp \
++        }; \
++        if (virTestRun(virTestCounterNext(), testFileIsSharedFSType, &data) < 0) \
++            ret = -1; \
++    } while (0)
++
++    virTestCounterReset("testFileIsSharedFSType ");
++    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts1.txt", "/boot/vmlinuz", false);
++    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts2.txt", "/run/user/501/gvfs/some/file", false);
++    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/nfs/file", true);
++    /* TODO Detect bind mounts */
++    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/nfs/blah", true);
++
+     return ret != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+ }
+ 
+-VIR_TEST_MAIN(mymain)
++VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virfilemock.so")
+-- 
+2.19.1
+

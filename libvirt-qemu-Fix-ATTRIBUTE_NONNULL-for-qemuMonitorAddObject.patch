@@ -1,0 +1,41 @@
+From 055b060ce71a1e173606e015d219158c945f0295 Mon Sep 17 00:00:00 2001
+Message-Id: <055b060ce71a1e173606e015d219158c945f0295@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Fri, 13 Jul 2018 10:02:34 +0200
+Subject: [PATCH] qemu: Fix ATTRIBUTE_NONNULL for qemuMonitorAddObject
+
+Commit id fac0dacd was trying to make things more robust;
+however, the ATTRIBUTE_NONNULL(1) would be for the @mon,
+not the intended (2) and the @props argument as described
+in the commit message.
+
+Found by Coverity build.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 7406ab691ffe0fbe051f6ae57614737e193df6a5)
+
+The broken commit described in the original commit message was
+backported as 1d60f6832c8b14c9a
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1598015
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_monitor.h | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index e3eb14bf06..e6d235b5ba 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -824,7 +824,7 @@ int qemuMonitorCreateObjectProps(virJSONValuePtr *propsret,
+ int qemuMonitorAddObject(qemuMonitorPtr mon,
+                          virJSONValuePtr *props,
+                          char **alias)
+-    ATTRIBUTE_NONNULL(1);
++    ATTRIBUTE_NONNULL(2);
+ 
+ int qemuMonitorDelObject(qemuMonitorPtr mon,
+                          const char *objalias);
+-- 
+2.18.0
+

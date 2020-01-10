@@ -1,0 +1,106 @@
+From 037f329914960906828802047b6b338471dcba36 Mon Sep 17 00:00:00 2001
+Message-Id: <037f329914960906828802047b6b338471dcba36@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:19 +0200
+Subject: [PATCH] tests: introduce hugepages-nodeset
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This use-case was broken by commit
+<fa6bdf6afa878b8d7c5ed71664ee72be8967cdc5>.
+
+We allowed this configuration and it was working as expected therefore
+we can consider it as regression.  We should have never allowed such
+configuration so now the best solution is in case of non-numa guest
+silently ignore the 'nodeset' attribute if it's set to '0'.
+
+That will be fixed by following patches.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 154b08a3a7b1f16fefefcc106982a062c065eacd)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ tests/qemuxml2argvdata/hugepages-nodeset.xml  | 30 +++++++++++++++++++
+ tests/qemuxml2argvtest.c                      |  1 +
+ .../qemuxml2xmloutdata/hugepages-nodeset.xml  |  1 +
+ tests/qemuxml2xmltest.c                       |  1 +
+ 4 files changed, 33 insertions(+)
+ create mode 100644 tests/qemuxml2argvdata/hugepages-nodeset.xml
+ create mode 120000 tests/qemuxml2xmloutdata/hugepages-nodeset.xml
+
+diff --git a/tests/qemuxml2argvdata/hugepages-nodeset.xml b/tests/qemuxml2argvdata/hugepages-nodeset.xml
+new file mode 100644
+index 0000000000..4a85ddffad
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hugepages-nodeset.xml
+@@ -0,0 +1,30 @@
++<domain type='qemu'>
++  <name>SomeDummyHugepagesGuest</name>
++  <uuid>ef1bdff4-27f3-4e85-a807-5fb4d58463cc</uuid>
++  <memory unit='KiB'>1048576</memory>
++  <currentMemory unit='KiB'>1048576</currentMemory>
++  <memoryBacking>
++    <hugepages>
++      <page size='2048' unit='KiB' nodeset='0'/>
++    </hugepages>
++  </memoryBacking>
++  <vcpu placement='static'>2</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <controller type='usb' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <input type='mouse' bus='ps2'/>
++    <input type='keyboard' bus='ps2'/>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index f92c46cec5..bd5fdf9412 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -960,6 +960,7 @@ mymain(void)
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
+     DO_TEST("hugepages-default-1G-nodeset-2M", NONE);
++    DO_TEST_FAILURE("hugepages-nodeset", NONE);
+     DO_TEST_FAILURE("hugepages-nodeset-nonexist",
+                     QEMU_CAPS_DEVICE_PC_DIMM,
+                     QEMU_CAPS_OBJECT_MEMORY_FILE,
+diff --git a/tests/qemuxml2xmloutdata/hugepages-nodeset.xml b/tests/qemuxml2xmloutdata/hugepages-nodeset.xml
+new file mode 120000
+index 0000000000..b55838b780
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/hugepages-nodeset.xml
+@@ -0,0 +1 @@
++../qemuxml2argvdata/hugepages-nodeset.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 6ba8f97e20..acbe2f7133 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -337,6 +337,7 @@ mymain(void)
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
+     DO_TEST("hugepages-default-1G-nodeset-2M", NONE);
++    DO_TEST("hugepages-nodeset", NONE);
+     DO_TEST("hugepages-numa-default-2M", NONE);
+     DO_TEST("hugepages-numa-default-dimm", NONE);
+     DO_TEST("hugepages-numa-nodeset", NONE);
+-- 
+2.18.0
+

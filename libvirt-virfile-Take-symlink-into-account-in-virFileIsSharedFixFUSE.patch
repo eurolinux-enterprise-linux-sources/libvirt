@@ -1,0 +1,186 @@
+From 703d3a465850b768e627705a587cfd8095fe0be7 Mon Sep 17 00:00:00 2001
+Message-Id: <703d3a465850b768e627705a587cfd8095fe0be7@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 23 Oct 2018 11:40:58 +0100
+Subject: [PATCH] virfile: Take symlink into account in virFileIsSharedFixFUSE
+
+RHEL-7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1640465
+RHEL-7.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1641798
+
+Weirdly enough, there can be symlinks in the path we are trying
+to fix. If it is the case our clever algorithm that finds matches
+against mount table won't work. Canonicalize path at the
+beginning then.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit c0790e3a09f57da0bd25c7eac4a35ed6e7e9e858)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ cfg.mk              |  2 +-
+ src/util/virfile.c  | 15 +++++++++++++--
+ tests/virfilemock.c | 33 ++++++++++++++++++++++++++++++++-
+ tests/virfiletest.c |  1 +
+ 4 files changed, 47 insertions(+), 4 deletions(-)
+
+diff --git a/cfg.mk b/cfg.mk
+index 6bebd0ad9f..e3e94bf6f0 100644
+--- a/cfg.mk
++++ b/cfg.mk
+@@ -1216,7 +1216,7 @@ exclude_file_name_regexp--sc_prohibit_select = \
+ 	^cfg\.mk$$
+ 
+ exclude_file_name_regexp--sc_prohibit_canonicalize_file_name = \
+-  ^cfg\.mk$$
++  ^(cfg\.mk|tests/virfilemock\.c)$$
+ 
+ exclude_file_name_regexp--sc_prohibit_raw_allocation = \
+   ^(docs/hacking\.html\.in|src/util/viralloc\.[ch]|examples/.*|tests/(securityselinuxhelper|(vircgroup|nss)mock|commandhelper)\.c|tools/wireshark/src/packet-libvirt\.c)$$
+diff --git a/src/util/virfile.c b/src/util/virfile.c
+index e1dee7633a..716b55d770 100644
+--- a/src/util/virfile.c
++++ b/src/util/virfile.c
+@@ -3549,9 +3549,19 @@ virFileIsSharedFixFUSE(const char *path,
+     char mntbuf[1024];
+     char *mntDir = NULL;
+     char *mntType = NULL;
++    char *canonPath = NULL;
+     size_t maxMatching = 0;
+     int ret = -1;
+ 
++    if (!(canonPath = virFileCanonicalizePath(path))) {
++        virReportSystemError(errno,
++                             _("unable to canonicalize %s"),
++                             path);
++        return -1;
++    }
++
++    VIR_DEBUG("Path canonicalization: %s->%s", path, canonPath);
++
+     if (!(f = setmntent(PROC_MOUNTS, "r"))) {
+         virReportSystemError(errno,
+                              _("Unable to open %s"),
+@@ -3563,7 +3573,7 @@ virFileIsSharedFixFUSE(const char *path,
+         const char *p;
+         size_t len = strlen(mb.mnt_dir);
+ 
+-        if (!(p = STRSKIP(path, mb.mnt_dir)))
++        if (!(p = STRSKIP(canonPath, mb.mnt_dir)))
+             continue;
+ 
+         if (*(p - 1) != '/' && *p != '/' && *p != '\0')
+@@ -3581,12 +3591,13 @@ virFileIsSharedFixFUSE(const char *path,
+ 
+     if (STREQ_NULLABLE(mntType, "fuse.glusterfs")) {
+         VIR_DEBUG("Found gluster FUSE mountpoint=%s for path=%s. "
+-                  "Fixing shared FS type", mntDir, path);
++                  "Fixing shared FS type", mntDir, canonPath);
+         *f_type = GFS2_MAGIC;
+     }
+ 
+     ret = 0;
+  cleanup:
++    VIR_FREE(canonPath);
+     VIR_FREE(mntType);
+     VIR_FREE(mntDir);
+     endmntent(f);
+diff --git a/tests/virfilemock.c b/tests/virfilemock.c
+index 822c757380..ae5c8d025a 100644
+--- a/tests/virfilemock.c
++++ b/tests/virfilemock.c
+@@ -28,11 +28,14 @@
+ #endif
+ 
+ #include "virmock.h"
++#include "virstring.h"
++#include "viralloc.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_NONE
+ 
+ static FILE *(*real_setmntent)(const char *filename, const char *type);
+ static int (*real_statfs)(const char *path, struct statfs *buf);
++static char *(*real_canonicalize_file_name)(const char *path);
+ 
+ 
+ static void
+@@ -43,6 +46,7 @@ init_syms(void)
+ 
+     VIR_MOCK_REAL_INIT(setmntent);
+     VIR_MOCK_REAL_INIT(statfs);
++    VIR_MOCK_REAL_INIT(canonicalize_file_name);
+ }
+ 
+ 
+@@ -94,6 +98,7 @@ statfs_mock(const char *mtab,
+     FILE *f;
+     struct mntent mb;
+     char mntbuf[1024];
++    char *canonPath = NULL;
+     int ret = -1;
+ 
+     if (!(f = real_setmntent(mtab, "r"))) {
+@@ -101,10 +106,16 @@ statfs_mock(const char *mtab,
+         return -1;
+     }
+ 
++    /* We don't need to do this in callers because real statfs(2)
++     * does that for us. However, in mocked implementation we
++     * need to do this. */
++    if (!(canonPath = canonicalize_file_name(path)))
++        return -1;
++
+     while (getmntent_r(f, &mb, mntbuf, sizeof(mntbuf))) {
+         int ftype;
+ 
+-        if (STRNEQ(mb.mnt_dir, path))
++        if (STRNEQ(mb.mnt_dir, canonPath))
+             continue;
+ 
+         if (STREQ(mb.mnt_type, "nfs") ||
+@@ -136,6 +147,7 @@ statfs_mock(const char *mtab,
+     }
+ 
+     endmntent(f);
++    VIR_FREE(canonPath);
+     return ret;
+ }
+ 
+@@ -152,3 +164,22 @@ statfs(const char *path, struct statfs *buf)
+ 
+     return real_statfs(path, buf);
+ }
++
++
++char *
++canonicalize_file_name(const char *path)
++{
++    if (getenv("LIBVIRT_MTAB")) {
++        const char *p;
++        char *ret;
++
++        if ((p = STRSKIP(path, "/some/symlink")))
++            ignore_value(virAsprintfQuiet(&ret, "/gluster%s", p));
++        else
++            ignore_value(VIR_STRDUP_QUIET(ret, path));
++
++        return ret;
++    }
++
++    return real_canonicalize_file_name(path);
++}
+diff --git a/tests/virfiletest.c b/tests/virfiletest.c
+index be4dbf8910..a246d601ba 100644
+--- a/tests/virfiletest.c
++++ b/tests/virfiletest.c
+@@ -457,6 +457,7 @@ mymain(void)
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/nfs/blah", false);
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/gluster/file", true);
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/gluster/sshfs/file", false);
++    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/some/symlink/file", true);
+ 
+     return ret != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+ }
+-- 
+2.19.1
+

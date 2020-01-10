@@ -1,0 +1,83 @@
+From 53cf8a5c5e91132ac3d12bbe2e611594272bb30a Mon Sep 17 00:00:00 2001
+Message-Id: <53cf8a5c5e91132ac3d12bbe2e611594272bb30a@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 4 Mar 2019 16:18:42 +0100
+Subject: [PATCH] cpu_x86: Add x86ModelCopySignatures helper
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Introduce a helper for copying CPU signature between two CPU models.
+
+It's not very useful until the way we store signatures is changed in the
+next patch.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 2254c1cfb854dfc52f3b4bfdfca2bd995b0a163c)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+	src/cpu/cpu_x86.c
+            - other patches separating parts of x86ModelParse into
+              smaller functions were not backported due to conflicts
+              with older refactoring which is missing in RHEL-7
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_x86.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/src/cpu/cpu_x86.c b/src/cpu/cpu_x86.c
+index 668e8aa3f0..e54a3986a1 100644
+--- a/src/cpu/cpu_x86.c
++++ b/src/cpu/cpu_x86.c
+@@ -1013,6 +1013,16 @@ x86ModelFree(virCPUx86ModelPtr model)
+ }
+ 
+ 
++static int
++x86ModelCopySignatures(virCPUx86ModelPtr dst,
++                       virCPUx86ModelPtr src)
++{
++    dst->signature = src->signature;
++
++    return 0;
++}
++
++
+ static virCPUx86ModelPtr
+ x86ModelCopy(virCPUx86ModelPtr model)
+ {
+@@ -1020,13 +1030,13 @@ x86ModelCopy(virCPUx86ModelPtr model)
+ 
+     if (VIR_ALLOC(copy) < 0 ||
+         VIR_STRDUP(copy->name, model->name) < 0 ||
++        x86ModelCopySignatures(copy, model) < 0 ||
+         x86DataCopy(&copy->data, &model->data) < 0) {
+         x86ModelFree(copy);
+         return NULL;
+     }
+ 
+     copy->vendor = model->vendor;
+-    copy->signature = model->signature;
+ 
+     return copy;
+ }
+@@ -1260,8 +1270,8 @@ x86ModelParse(xmlXPathContextPtr ctxt,
+         VIR_FREE(name);
+ 
+         model->vendor = ancestor->vendor;
+-        model->signature = ancestor->signature;
+-        if (x86DataCopy(&model->data, &ancestor->data) < 0)
++        if (x86ModelCopySignatures(model, ancestor) < 0 ||
++            x86DataCopy(&model->data, &ancestor->data) < 0)
+             goto error;
+     }
+ 
+-- 
+2.21.0
+

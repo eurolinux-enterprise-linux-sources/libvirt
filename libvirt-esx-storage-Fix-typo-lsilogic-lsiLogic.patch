@@ -1,0 +1,42 @@
+From 193f57411bcc3b67a331763f28d20b93c08b5191 Mon Sep 17 00:00:00 2001
+Message-Id: <193f57411bcc3b67a331763f28d20b93c08b5191@dist-git>
+From: Marcos Paulo de Souza <marcos.souza.org@gmail.com>
+Date: Wed, 25 Jul 2018 13:33:50 +0200
+Subject: [PATCH] esx storage: Fix typo lsilogic -> lsiLogic
+
+Commit 77298458d027db4d3e082213355e2d792f65158d changed the esx storage
+adapter from busLogic to lsilogic, introducing a typo. Changing it back
+to lsiLogic (with capital L) solves the issue. With this change, libvirt can now
+create volumes in ESX again.
+
+Thanks to Jaroslav Suchanek who figured out what was the issue in the
+first place.
+
+Fixes: https://bugzilla.redhat.com/show_bug.cgi?id=1571759
+Signed-off-by: Marcos Paulo de Souza <marcos.souza.org@gmail.com>
+(cherry picked from commit a1450d774f9412b6589418bf8bcafd12690d098a)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ src/esx/esx_storage_backend_vmfs.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/esx/esx_storage_backend_vmfs.c b/src/esx/esx_storage_backend_vmfs.c
+index 630a6aa8c9..bb2de4b69f 100644
+--- a/src/esx/esx_storage_backend_vmfs.c
++++ b/src/esx/esx_storage_backend_vmfs.c
+@@ -967,9 +967,9 @@ esxStorageVolCreateXML(virStoragePoolPtr pool,
+         /*
+          * FIXME: The adapter type is a required parameter, but there is no
+          * way to let the user specify it in the volume XML config. Therefore,
+-         * default to 'lsilogic' here.
++         * default to 'lsiLogic' here.
+          */
+-        virtualDiskSpec->adapterType = (char *)"lsilogic";
++        virtualDiskSpec->adapterType = (char *)"lsiLogic";
+ 
+         virtualDiskSpec->capacityKb->value =
+           VIR_DIV_UP(def->target.capacity, 1024); /* Scale from byte to kilobyte */
+-- 
+2.18.0
+

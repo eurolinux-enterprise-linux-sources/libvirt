@@ -1,0 +1,50 @@
+From ae90fc830dc58f2802360ef3822e64b0a4294af1 Mon Sep 17 00:00:00 2001
+Message-Id: <ae90fc830dc58f2802360ef3822e64b0a4294af1@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 4 Sep 2018 10:38:49 +0200
+Subject: [PATCH] virDomainDetachDeviceFlags: Clarify update semantics
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RHEL-7.6: https://bugzilla.redhat.com/show_bug.cgi?id=1621910
+RHEL-8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1603133
+
+When users want to update a path to a CDROM they tend to
+construct a very minimal XML and feed the API with it. This is
+not a good practice as it breaks the assumptions the API is built
+on. Most notably, leaving an element out should be treated as a
+request for removal of the corresponding setting. Just like
+leaving out <bandwidth/> clears out any QoS previously set.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit 2864b4cd1ccda9c12f0c0ceb340836c42a2a0e52)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/libvirt-domain.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/libvirt-domain.c b/src/libvirt-domain.c
+index ab7266dc19..ad0ded9ee3 100644
+--- a/src/libvirt-domain.c
++++ b/src/libvirt-domain.c
+@@ -8315,6 +8315,14 @@ virDomainDetachDeviceFlags(virDomainPtr domain,
+  * media, altering the graphics configuration such as password,
+  * reconfiguring the NIC device backend connectivity, etc.
+  *
++ * The supplied XML description of the device should contain all
++ * the information that is found in the corresponding domain XML.
++ * Leaving out any piece of information may be treated as a
++ * request for its removal, which may be denied. For instance,
++ * when users want to change CDROM media only for live XML, they
++ * must provide live disk XML as found in the corresponding live
++ * domain XML with only the disk path changed.
++ *
+  * Returns 0 in case of success, -1 in case of failure.
+  */
+ int
+-- 
+2.18.0
+

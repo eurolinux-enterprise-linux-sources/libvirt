@@ -1,0 +1,223 @@
+From 7e67a192b18a3577baddc1c46d8e5428d30f89d3 Mon Sep 17 00:00:00 2001
+Message-Id: <7e67a192b18a3577baddc1c46d8e5428d30f89d3@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:03:57 +0200
+Subject: [PATCH] qemu: caps: Introduce a capability for egl-headless
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since QEMU 2.10, it's possible to use a new type of display -
+egl-headless which uses drm nodes to provide OpenGL support. This patch
+adds a capability for that. However, since QEMU doesn't provide a QMP
+command to probe it, we have to base the capability on specific QEMU
+version.
+
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit 7ab7d0ed49d8501198b33c655cc646667d333f8c)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_capabilities.c                       | 6 ++++++
+ src/qemu/qemu_capabilities.h                       | 1 +
+ tests/qemucapabilitiesdata/caps_2.10.0.aarch64.xml | 1 +
+ tests/qemucapabilitiesdata/caps_2.10.0.ppc64.xml   | 1 +
+ tests/qemucapabilitiesdata/caps_2.10.0.s390x.xml   | 1 +
+ tests/qemucapabilitiesdata/caps_2.10.0.x86_64.xml  | 1 +
+ tests/qemucapabilitiesdata/caps_2.11.0.s390x.xml   | 1 +
+ tests/qemucapabilitiesdata/caps_2.11.0.x86_64.xml  | 1 +
+ tests/qemucapabilitiesdata/caps_2.12.0.aarch64.xml | 1 +
+ tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml   | 1 +
+ tests/qemucapabilitiesdata/caps_2.12.0.s390x.xml   | 1 +
+ tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml  | 1 +
+ tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml    | 1 +
+ tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml   | 1 +
+ 14 files changed, 19 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 0f0020cf7d..05be8f1416 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -503,6 +503,7 @@ VIR_ENUM_IMPL(virQEMUCaps, QEMU_CAPS_LAST,
+               "machine.pseries.cap-hpt-max-page-size",
+               "machine.pseries.cap-htm",
+               "usb-storage.werror",
++              "egl-headless",
+     );
+ 
+ 
+@@ -4034,6 +4035,11 @@ virQEMUCapsInitQMPMonitor(virQEMUCapsPtr qemuCaps,
+         virQEMUCapsSet(qemuCaps, QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT);
+     }
+ 
++    /* '-display egl-headless' cmdline option is supported since QEMU 2.10, but
++     * there's no way to probe it */
++    if (qemuCaps->version >= 2010000)
++        virQEMUCapsSet(qemuCaps, QEMU_CAPS_EGL_HEADLESS);
++
+     /* no way to query for -numa dist */
+     if (qemuCaps->version >= 2010000)
+         virQEMUCapsSet(qemuCaps, QEMU_CAPS_NUMA_DIST);
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 1fa0ebfea3..55221e7e57 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -487,6 +487,7 @@ typedef enum { /* virQEMUCapsFlags grouping marker for syntax-check */
+     QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE, /* -machine pseries.cap-hpt-max-page-size */
+     QEMU_CAPS_MACHINE_PSERIES_CAP_HTM, /* -machine pseries.cap-htm */
+     QEMU_CAPS_USB_STORAGE_WERROR, /* -device usb-storage,werror=..,rerror=.. */
++    QEMU_CAPS_EGL_HEADLESS, /* -display egl-headless */
+ 
+     QEMU_CAPS_LAST /* this must always be the last item */
+ } virQEMUCapsFlags;
+diff --git a/tests/qemucapabilitiesdata/caps_2.10.0.aarch64.xml b/tests/qemucapabilitiesdata/caps_2.10.0.aarch64.xml
+index 169641063c..a70e050765 100644
+--- a/tests/qemucapabilitiesdata/caps_2.10.0.aarch64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.10.0.aarch64.xml
+@@ -159,6 +159,7 @@
+   <flag name='hda-output'/>
+   <flag name='blockdev-del'/>
+   <flag name='vhost-vsock'/>
++  <flag name='egl-headless'/>
+   <version>2010000</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>307647</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.10.0.ppc64.xml b/tests/qemucapabilitiesdata/caps_2.10.0.ppc64.xml
+index 92c095abd2..72709905d8 100644
+--- a/tests/qemucapabilitiesdata/caps_2.10.0.ppc64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.10.0.ppc64.xml
+@@ -158,6 +158,7 @@
+   <flag name='hda-output'/>
+   <flag name='blockdev-del'/>
+   <flag name='vhost-vsock'/>
++  <flag name='egl-headless'/>
+   <version>2010000</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>386992</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.10.0.s390x.xml b/tests/qemucapabilitiesdata/caps_2.10.0.s390x.xml
+index 5e22e21224..7347f5683f 100644
+--- a/tests/qemucapabilitiesdata/caps_2.10.0.s390x.xml
++++ b/tests/qemucapabilitiesdata/caps_2.10.0.s390x.xml
+@@ -119,6 +119,7 @@
+   <flag name='sdl-gl'/>
+   <flag name='blockdev-del'/>
+   <flag name='vhost-vsock'/>
++  <flag name='egl-headless'/>
+   <version>2010000</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>307899</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.10.0.x86_64.xml b/tests/qemucapabilitiesdata/caps_2.10.0.x86_64.xml
+index 10b066bff1..d69a148cd2 100644
+--- a/tests/qemucapabilitiesdata/caps_2.10.0.x86_64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.10.0.x86_64.xml
+@@ -203,6 +203,7 @@
+   <flag name='vmgenid'/>
+   <flag name='vhost-vsock'/>
+   <flag name='mch'/>
++  <flag name='egl-headless'/>
+   <version>2010000</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>367995</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.11.0.s390x.xml b/tests/qemucapabilitiesdata/caps_2.11.0.s390x.xml
+index 6ca2e57ef8..b359f9a049 100644
+--- a/tests/qemucapabilitiesdata/caps_2.11.0.s390x.xml
++++ b/tests/qemucapabilitiesdata/caps_2.11.0.s390x.xml
+@@ -126,6 +126,7 @@
+   <flag name='blockdev-del'/>
+   <flag name='vhost-vsock'/>
+   <flag name='tpm-emulator'/>
++  <flag name='egl-headless'/>
+   <version>2011000</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>346751</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.11.0.x86_64.xml b/tests/qemucapabilitiesdata/caps_2.11.0.x86_64.xml
+index c52e44a498..210f774c4e 100644
+--- a/tests/qemucapabilitiesdata/caps_2.11.0.x86_64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.11.0.x86_64.xml
+@@ -207,6 +207,7 @@
+   <flag name='tpm-emulator'/>
+   <flag name='mch'/>
+   <flag name='mch.extended-tseg-mbytes'/>
++  <flag name='egl-headless'/>
+   <version>2011000</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>371455</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.12.0.aarch64.xml b/tests/qemucapabilitiesdata/caps_2.12.0.aarch64.xml
+index ecc029f403..80e7afec04 100644
+--- a/tests/qemucapabilitiesdata/caps_2.12.0.aarch64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.12.0.aarch64.xml
+@@ -169,6 +169,7 @@
+   <flag name='vhost-vsock'/>
+   <flag name='chardev-fd-pass'/>
+   <flag name='tpm-emulator'/>
++  <flag name='egl-headless'/>
+   <version>2011090</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>347550</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml b/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml
+index 7139179304..c4b09c0003 100644
+--- a/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml
+@@ -167,6 +167,7 @@
+   <flag name='chardev-fd-pass'/>
+   <flag name='tpm-emulator'/>
+   <flag name='machine.pseries.cap-htm'/>
++  <flag name='egl-headless'/>
+   <version>2011090</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>428334</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.12.0.s390x.xml b/tests/qemucapabilitiesdata/caps_2.12.0.s390x.xml
+index 87d189e58d..1ff2fe45e1 100644
+--- a/tests/qemucapabilitiesdata/caps_2.12.0.s390x.xml
++++ b/tests/qemucapabilitiesdata/caps_2.12.0.s390x.xml
+@@ -133,6 +133,7 @@
+   <flag name='vhost-vsock'/>
+   <flag name='chardev-fd-pass'/>
+   <flag name='tpm-emulator'/>
++  <flag name='egl-headless'/>
+   <version>2012000</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>375999</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml b/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml
+index 9c1f6c327c..37d17786cf 100644
+--- a/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml
+@@ -211,6 +211,7 @@
+   <flag name='mch'/>
+   <flag name='mch.extended-tseg-mbytes'/>
+   <flag name='sev-guest'/>
++  <flag name='egl-headless'/>
+   <version>2011090</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>416196</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml b/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml
+index 33cd00e613..57bf5dba11 100644
+--- a/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml
++++ b/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml
+@@ -167,6 +167,7 @@
+   <flag name='tpm-emulator'/>
+   <flag name='machine.pseries.cap-hpt-max-page-size'/>
+   <flag name='machine.pseries.cap-htm'/>
++  <flag name='egl-headless'/>
+   <version>2012050</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>446771</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml b/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
+index cd036d9323..431910a9e3 100644
+--- a/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
++++ b/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
+@@ -214,6 +214,7 @@
+   <flag name='mch.extended-tseg-mbytes'/>
+   <flag name='sev-guest'/>
+   <flag name='usb-storage.werror'/>
++  <flag name='egl-headless'/>
+   <version>2012090</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>438109</microcodeVersion>
+-- 
+2.18.0
+

@@ -1,0 +1,79 @@
+From 4f042ede2b84b5f6bdf8a36e0768462816f2c9b1 Mon Sep 17 00:00:00 2001
+Message-Id: <4f042ede2b84b5f6bdf8a36e0768462816f2c9b1@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 26 Jul 2018 09:39:32 -0400
+Subject: [PATCH] nwfilter: Resolve SEGV for NWFilter Snoop processing
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1599973
+
+Commit id fca9afa08 changed the @req->ifname to use
+@req->binding->portdevname fillingin the @req->binding
+in a similar way that @req->ifname would have been
+filled in during virNWFilterDHCPSnoopReq processing.
+
+However, in doing so it did not take into account some
+code paths where the @req->binding should be checked
+instead of @req->binding->portdevname. These checks
+led to SEGVs in some cases during libvirtd reload
+processing in virNWFilterSnoopRemAllReqIter (for
+stop during nwfilterStateCleanup processing) and
+virNWFilterSnoopReqLeaseDel (for start during
+nwfilterStateInitialize processing).
+
+In particular, when reading the nwfilter.leases file
+a new @req is created, but the @req->binding is not
+filled in. That's left to virNWFilterDHCPSnoopReq
+processing which checks if the @req already exists
+in the @virNWFilterSnoopState.snoopReqs hash table
+after adding a virNWFilterSnoopState.ifnameToKey
+entry for the @req->binding->portdevname by a
+@ref->ikey value.
+
+NB: virNWFilterSnoopIPLeaseInstallRule and
+    virNWFilterDHCPSnoopThread do not need the
+    req->binding check since they can only be called
+    after the filter->binding is created/assigned.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 5229494b01acf97dbc6f3028e9718667e9e1426a)
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/nwfilter/nwfilter_dhcpsnoop.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/nwfilter/nwfilter_dhcpsnoop.c b/src/nwfilter/nwfilter_dhcpsnoop.c
+index 533c45f080..2ae134ed19 100644
+--- a/src/nwfilter/nwfilter_dhcpsnoop.c
++++ b/src/nwfilter/nwfilter_dhcpsnoop.c
+@@ -846,7 +846,7 @@ virNWFilterSnoopReqLeaseDel(virNWFilterSnoopReqPtr req,
+     int ret = 0;
+     virNWFilterSnoopIPLeasePtr ipl;
+     char *ipstr = NULL;
+-    int ipAddrLeft;
++    int ipAddrLeft = 0;
+ 
+     /* protect req->start, req->ifname and the lease */
+     virNWFilterSnoopReqLock(req);
+@@ -867,7 +867,8 @@ virNWFilterSnoopReqLeaseDel(virNWFilterSnoopReqPtr req,
+     if (update_leasefile)
+         virNWFilterSnoopLeaseFileSave(ipl);
+ 
+-    ipAddrLeft = virNWFilterIPAddrMapDelIPAddr(req->binding->portdevname, ipstr);
++    if (req->binding)
++        ipAddrLeft = virNWFilterIPAddrMapDelIPAddr(req->binding->portdevname, ipstr);
+ 
+     if (!req->threadkey || !instantiate)
+         goto skip_instantiate;
+@@ -2037,7 +2038,7 @@ virNWFilterSnoopRemAllReqIter(const void *payload,
+     /* protect req->binding->portdevname */
+     virNWFilterSnoopReqLock(req);
+ 
+-    if (req->binding->portdevname) {
++    if (req->binding && req->binding->portdevname) {
+         ignore_value(virHashRemoveEntry(virNWFilterSnoopState.ifnameToKey,
+                                         req->binding->portdevname));
+ 
+-- 
+2.18.0
+

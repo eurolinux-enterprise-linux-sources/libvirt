@@ -1,0 +1,71 @@
+From 5e8bad9479e999bf9dd704ec29f83427b260c587 Mon Sep 17 00:00:00 2001
+Message-Id: <5e8bad9479e999bf9dd704ec29f83427b260c587@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Tue, 12 Mar 2019 13:55:59 -0400
+Subject: [PATCH] storage: Fetch a unique key for vHBA/NPIV LUNs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1687715 (7.6.z)
+https://bugzilla.redhat.com/show_bug.cgi?id=1657468 (7.7.0)
+
+Commit be1bb6c95 changed the way volumes were stored from a forward
+linked list to a hash table. In doing so, it required that each vol
+object would have 3 unique values as keys into tables - key, name,
+and path. Due to how vHBA/NPIV LUNs are created/used this resulted
+in a failure to utilize all the LUN's found during processing.
+
+During virStorageBackendSCSINewLun processing fetch the key (or
+serial value) for NPIV LUN's using virStorageFileGetNPIVKey which
+will formulate a more unique key based on the serial value and
+the port for the LUN.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 850cfd75beb7872b20439eccda0bcf7b68cab525)
+Message-Id: <20190312175559.13583-5-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/storage/storage_util.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/src/storage/storage_util.c b/src/storage/storage_util.c
+index d1659c0c8d..19e6e0544b 100644
+--- a/src/storage/storage_util.c
++++ b/src/storage/storage_util.c
+@@ -3694,12 +3694,16 @@ virStorageBackendRefreshLocal(virStoragePoolObjPtr pool)
+ 
+ 
+ static char *
+-virStorageBackendSCSISerial(const char *dev)
++virStorageBackendSCSISerial(const char *dev,
++                            bool isNPIV)
+ {
+     int rc;
+     char *serial = NULL;
+ 
+-    rc = virStorageFileGetSCSIKey(dev, &serial, true);
++    if (isNPIV)
++        rc = virStorageFileGetNPIVKey(dev, &serial);
++    else
++        rc = virStorageFileGetSCSIKey(dev, &serial, true);
+     if (rc == 0 && serial)
+         return serial;
+ 
+@@ -3796,7 +3800,10 @@ virStorageBackendSCSINewLun(virStoragePoolObjPtr pool,
+                                                  VIR_STORAGE_VOL_READ_NOERROR)) < 0)
+         goto cleanup;
+ 
+-    if (!(vol->key = virStorageBackendSCSISerial(vol->target.path)))
++    vol->key = virStorageBackendSCSISerial(vol->target.path,
++                                           (def->source.adapter.type ==
++                                            VIR_STORAGE_ADAPTER_TYPE_FC_HOST));
++    if (!vol->key)
+         goto cleanup;
+ 
+     def->capacity += vol->target.capacity;
+-- 
+2.21.0
+

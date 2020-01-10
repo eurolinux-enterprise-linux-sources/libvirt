@@ -1,0 +1,143 @@
+From 03831cca9544d9b6489f09f0f87f94a2d676829c Mon Sep 17 00:00:00 2001
+Message-Id: <03831cca9544d9b6489f09f0f87f94a2d676829c@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Mon, 20 Aug 2018 17:18:52 +0200
+Subject: [PATCH] qemu: Fix probing of AMD SEV support
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+So the procedure to detect SEV support works like this:
+1) we detect that sev-guest is among the QOM types and set the cap flag
+2) we probe the monitor for SEV support
+    - this is tricky, because QEMU with compiled SEV support will always
+    report -object sev-guest and query-sev-capabilities command, that
+    however doesn't mean SEV is supported
+3) depending on what the monitor returned, we either keep or clear the
+capability flag for SEV
+
+Commit a349c6c21c6 added an explicit check for "GenericError" in the
+monitor reply to prevent libvirtd to spam logs about missing
+'query-sev-capabilities' command. At the same time though, it returned
+success in this case which means that we didn't clear the capability
+flag afterwards and happily formatted SEV into qemuCaps. Therefore,
+adjust all the relevant callers to handle -1 on errors, 0 on SEV being
+unsupported and 1 on SEV being supported.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Acked-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit 764491c9dddf063292adf1433769ccccb1a50db6)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1612009
+https://bugzilla.redhat.com/show_bug.cgi?id=1619150
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_capabilities.c                  | 15 ++++++++++----
+ src/qemu/qemu_monitor_json.c                  | 20 +++++++++++++++----
+ .../caps_3.0.0.x86_64.xml                     |  1 -
+ 3 files changed, 27 insertions(+), 9 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index d1e4fafe7d..470f25a5a6 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -2696,18 +2696,20 @@ virQEMUCapsProbeQMPGICCapabilities(virQEMUCapsPtr qemuCaps,
+ }
+ 
+ 
++/* Returns -1 on error, 0 if SEV is not supported, 1 if SEV is supported */
+ static int
+ virQEMUCapsProbeQMPSEVCapabilities(virQEMUCapsPtr qemuCaps,
+                                    qemuMonitorPtr mon)
+ {
++    int rc = -1;
+     virSEVCapability *caps = NULL;
+ 
+-    if (qemuMonitorGetSEVCapabilities(mon, &caps) < 0)
+-        return -1;
++    if ((rc = qemuMonitorGetSEVCapabilities(mon, &caps)) <= 0)
++        return rc;
+ 
+     virSEVCapabilitiesFree(qemuCaps->sevCapabilities);
+     qemuCaps->sevCapabilities = caps;
+-    return 0;
++    return rc;
+ }
+ 
+ 
+@@ -4120,7 +4122,12 @@ virQEMUCapsInitQMPMonitor(virQEMUCapsPtr qemuCaps,
+ 
+     /* Probe for SEV capabilities */
+     if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_SEV_GUEST)) {
+-        if (virQEMUCapsProbeQMPSEVCapabilities(qemuCaps, mon) < 0)
++        int rc = virQEMUCapsProbeQMPSEVCapabilities(qemuCaps, mon);
++
++        if (rc < 0)
++            goto cleanup;
++
++        if (rc == 0)
+             virQEMUCapsClear(qemuCaps, QEMU_CAPS_SEV_GUEST);
+     }
+ 
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index b226a47cc9..8970d95584 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -6562,6 +6562,20 @@ qemuMonitorJSONGetGICCapabilities(qemuMonitorPtr mon,
+ }
+ 
+ 
++/**
++ * qemuMonitorJSONGetSEVCapabilities:
++ * @mon: qemu monitor object
++ * @capabilities: pointer to pointer to a SEV capability structure to be filled
++ *
++ * This function queries and fills in AMD's SEV platform-specific data.
++ * Note that from QEMU's POV both -object sev-guest and query-sev-capabilities
++ * can be present even if SEV is not available, which basically leaves us with
++ * checking for JSON "GenericError" in order to differentiate between
++ * compiled-in support and actual SEV support on the platform.
++ *
++ * Returns -1 on error, 0 if SEV is not supported, and 1 if SEV is supported on
++ * the platform.
++ */
+ int
+ qemuMonitorJSONGetSEVCapabilities(qemuMonitorPtr mon,
+                                   virSEVCapability **capabilities)
+@@ -6583,8 +6597,7 @@ qemuMonitorJSONGetSEVCapabilities(qemuMonitorPtr mon,
+     if (qemuMonitorJSONCommand(mon, cmd, &reply) < 0)
+         goto cleanup;
+ 
+-    /* Both -object sev-guest and query-sev-capabilities can be present
+-     * even if SEV is not available */
++    /* QEMU has only compiled-in support of SEV */
+     if (qemuMonitorJSONHasError(reply, "GenericError")) {
+         ret = 0;
+         goto cleanup;
+@@ -6636,8 +6649,7 @@ qemuMonitorJSONGetSEVCapabilities(qemuMonitorPtr mon,
+     capability->cbitpos = cbitpos;
+     capability->reduced_phys_bits = reduced_phys_bits;
+     VIR_STEAL_PTR(*capabilities, capability);
+-    ret = 0;
+-
++    ret = 1;
+  cleanup:
+     virSEVCapabilitiesFree(capability);
+     virJSONValueFree(cmd);
+diff --git a/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml b/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
+index 4bc7cfeebc..8992d645e7 100644
+--- a/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
++++ b/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
+@@ -212,7 +212,6 @@
+   <flag name='tpm-emulator'/>
+   <flag name='mch'/>
+   <flag name='mch.extended-tseg-mbytes'/>
+-  <flag name='sev-guest'/>
+   <flag name='usb-storage.werror'/>
+   <flag name='egl-headless'/>
+   <flag name='vfio-pci.display'/>
+-- 
+2.18.0
+

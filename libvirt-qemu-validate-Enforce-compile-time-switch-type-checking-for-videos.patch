@@ -1,0 +1,59 @@
+From 3bb028d79a9069ebc76bb27fa640af06adad2be5 Mon Sep 17 00:00:00 2001
+Message-Id: <3bb028d79a9069ebc76bb27fa640af06adad2be5@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:03:53 +0200
+Subject: [PATCH] qemu: validate: Enforce compile time switch type checking for
+ videos
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+There wasn't an explicit type case to the video type enum in
+qemuDomainDeviceDefValidateVideo, _TYPE_GOP was also missing from the
+switch.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 767f9e1449b1a36111532847f0c62dc758263c42)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.h | 2 +-
+ src/qemu/qemu_domain.c | 3 ++-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 1fc1734bcc..0f10e242fd 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1453,7 +1453,7 @@ struct _virDomainVideoDriverDef {
+ };
+ 
+ struct _virDomainVideoDef {
+-    int type;
++    int type;   /* enum virDomainVideoType */
+     unsigned int ram;  /* kibibytes (multiples of 1024) */
+     unsigned int vram; /* kibibytes (multiples of 1024) */
+     unsigned int vram64; /* kibibytes (multiples of 1024) */
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index dec057e021..a42a6df91b 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -4470,10 +4470,11 @@ qemuDomainDeviceDefValidateHostdev(const virDomainHostdevDef *hostdev,
+ static int
+ qemuDomainDeviceDefValidateVideo(const virDomainVideoDef *video)
+ {
+-    switch (video->type) {
++    switch ((virDomainVideoType) video->type) {
+     case VIR_DOMAIN_VIDEO_TYPE_XEN:
+     case VIR_DOMAIN_VIDEO_TYPE_VBOX:
+     case VIR_DOMAIN_VIDEO_TYPE_PARALLELS:
++    case VIR_DOMAIN_VIDEO_TYPE_GOP:
+     case VIR_DOMAIN_VIDEO_TYPE_DEFAULT:
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("video type '%s' is not supported with QEMU"),
+-- 
+2.18.0
+

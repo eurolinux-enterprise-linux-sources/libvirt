@@ -1,0 +1,132 @@
+From 48289dddc0f4398036071c132f96644e3c3e03c4 Mon Sep 17 00:00:00 2001
+Message-Id: <48289dddc0f4398036071c132f96644e3c3e03c4@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 23 Apr 2019 10:06:17 +0200
+Subject: [PATCH] virnwfilterbindingobj: Introduce and use
+ virNWFilterBindingObjStealDef
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RHEL-7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1686927
+RHEL-7.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1702173
+
+When trying to create a nwfilter binding via
+nwfilterBindingCreateXML() we may encounter a crash. The sequence
+of functions called is as follows:
+
+1) nwfilterBindingCreateXML() parses the XML and calls
+virNWFilterBindingObjListAdd() which calls
+virNWFilterBindingObjListAddLocked()
+
+2) Here, @binding is not found because binding->remove is set.
+
+3) Therefore, controls continue with creating new @binding,
+setting its def to the one from 1) and adding it to the hash
+table.
+
+4) This fails, because the binding is still in the hash table
+(duplicate key is detected).
+
+5) The control jumps to 'error' label where
+virNWFilterBindingObjEndAPI() is called which frees the binding
+definition passed.
+
+6) Error is propagated to the caller, which calls
+virNWFilterBindingDefFree() over the definition again.
+
+The solution is to unset binding->def in case of failure so it's
+not freed in step 5).
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 8c08a99745ddac9f4055c008e82e68a27ed5093d)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <a5c2feed107e958bb6a84f7e993cc9feac58c4a2.1556006751.git.mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/virnwfilterbindingobj.c     | 10 ++++++++++
+ src/conf/virnwfilterbindingobj.h     |  3 +++
+ src/conf/virnwfilterbindingobjlist.c |  4 ++++
+ src/libvirt_private.syms             |  1 +
+ 4 files changed, 18 insertions(+)
+
+diff --git a/src/conf/virnwfilterbindingobj.c b/src/conf/virnwfilterbindingobj.c
+index d145fe3223..291ba9a5f8 100644
+--- a/src/conf/virnwfilterbindingobj.c
++++ b/src/conf/virnwfilterbindingobj.c
+@@ -88,6 +88,16 @@ virNWFilterBindingObjSetDef(virNWFilterBindingObjPtr obj,
+ }
+ 
+ 
++virNWFilterBindingDefPtr
++virNWFilterBindingObjStealDef(virNWFilterBindingObjPtr obj)
++{
++    virNWFilterBindingDefPtr def;
++
++    VIR_STEAL_PTR(def, obj->def);
++    return def;
++}
++
++
+ bool
+ virNWFilterBindingObjGetRemoving(virNWFilterBindingObjPtr obj)
+ {
+diff --git a/src/conf/virnwfilterbindingobj.h b/src/conf/virnwfilterbindingobj.h
+index 21ae85b064..e8f94aa1ef 100644
+--- a/src/conf/virnwfilterbindingobj.h
++++ b/src/conf/virnwfilterbindingobj.h
+@@ -38,6 +38,9 @@ void
+ virNWFilterBindingObjSetDef(virNWFilterBindingObjPtr obj,
+                             virNWFilterBindingDefPtr def);
+ 
++virNWFilterBindingDefPtr
++virNWFilterBindingObjStealDef(virNWFilterBindingObjPtr obj);
++
+ bool
+ virNWFilterBindingObjGetRemoving(virNWFilterBindingObjPtr obj);
+ 
+diff --git a/src/conf/virnwfilterbindingobjlist.c b/src/conf/virnwfilterbindingobjlist.c
+index 7ce59f7c6e..d0301e7e28 100644
+--- a/src/conf/virnwfilterbindingobjlist.c
++++ b/src/conf/virnwfilterbindingobjlist.c
+@@ -169,6 +169,7 @@ virNWFilterBindingObjListAddLocked(virNWFilterBindingObjListPtr bindings,
+                                    virNWFilterBindingDefPtr def)
+ {
+     virNWFilterBindingObjPtr binding;
++    bool stealDef = false;
+ 
+     /* See if a binding with matching portdev already exists */
+     if ((binding = virNWFilterBindingObjListFindByPortDevLocked(
+@@ -183,6 +184,7 @@ virNWFilterBindingObjListAddLocked(virNWFilterBindingObjListPtr bindings,
+         goto error;
+ 
+     virNWFilterBindingObjSetDef(binding, def);
++    stealDef = true;
+ 
+     if (virNWFilterBindingObjListAddObjLocked(bindings, binding) < 0)
+         goto error;
+@@ -190,6 +192,8 @@ virNWFilterBindingObjListAddLocked(virNWFilterBindingObjListPtr bindings,
+     return binding;
+ 
+  error:
++    if (stealDef)
++        virNWFilterBindingObjStealDef(binding);
+     virNWFilterBindingObjEndAPI(&binding);
+     return NULL;
+ }
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 636891eabd..3325b90535 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1065,6 +1065,7 @@ virNWFilterBindingObjParseFile;
+ virNWFilterBindingObjSave;
+ virNWFilterBindingObjSetDef;
+ virNWFilterBindingObjSetRemoving;
++virNWFilterBindingObjStealDef;
+ 
+ 
+ # conf/virnwfilterbindingobjlist.h
+-- 
+2.21.0
+

@@ -1,0 +1,40 @@
+From 7f5678ed68f81e6e4a308518aa985af2d3afee04 Mon Sep 17 00:00:00 2001
+Message-Id: <7f5678ed68f81e6e4a308518aa985af2d3afee04@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 4 Jul 2018 14:51:18 +0200
+Subject: [PATCH] src: Mention DEVICE_REMOVAL_FAILED event in
+ virDomainDetachDeviceAlias docs
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1598087
+
+We are mentioning the positive outcome of the function and not
+the case when live detaching a device is denied and event is
+issued.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 7152b12c45f69861f41f87916e4b950d2c1ff9fd)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt-domain.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/libvirt-domain.c b/src/libvirt-domain.c
+index c71f2e6877..ab7266dc19 100644
+--- a/src/libvirt-domain.c
++++ b/src/libvirt-domain.c
+@@ -8365,7 +8365,9 @@ virDomainUpdateDeviceFlags(virDomainPtr domain,
+  * asynchronous - it returns immediately after sending the detach
+  * request to the hypervisor. It's caller's responsibility to
+  * wait for VIR_DOMAIN_EVENT_ID_DEVICE_REMOVED event to signal
+- * actual device removal.
++ * actual device removal or for
++ * VIR_DOMAIN_EVENT_ID_DEVICE_REMOVAL_FAILED to signal rejected
++ * device removal.
+  *
+  * Returns 0 in case of success, -1 in case of failure.
+  */
+-- 
+2.18.0
+

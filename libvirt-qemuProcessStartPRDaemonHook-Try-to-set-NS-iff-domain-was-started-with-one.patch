@@ -1,0 +1,52 @@
+From 42cd53447f05f85976b42da5c0030be4a94fd72f Mon Sep 17 00:00:00 2001
+Message-Id: <42cd53447f05f85976b42da5c0030be4a94fd72f@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 11 Jul 2018 17:27:23 +0200
+Subject: [PATCH] qemuProcessStartPRDaemonHook: Try to set NS iff domain was
+ started with one
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1470007
+
+Users have possibility to disable qemu namespace feature (e.g.
+because they are running on *BSD which lacks Linux NS support).
+If that's the case we should not try to move qemu-pr-helper into
+the same namespace as qemu is in.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit dd1d58cabc850324bb9a7ed836985d34697aa7b2)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_process.c | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 40d35cbe6b..f200729cb1 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2522,12 +2522,14 @@ qemuProcessStartPRDaemonHook(void *opaque)
+     int *fds = NULL;
+     int ret = -1;
+ 
+-    if (virProcessGetNamespaces(vm->pid, &nfds, &fds) < 0)
+-        return ret;
++    if (qemuDomainNamespaceEnabled(vm, QEMU_DOMAIN_NS_MOUNT)) {
++        if (virProcessGetNamespaces(vm->pid, &nfds, &fds) < 0)
++            return ret;
+ 
+-    if (nfds > 0 &&
+-        virProcessSetNamespaces(nfds, fds) < 0)
+-        goto cleanup;
++        if (nfds > 0 &&
++            virProcessSetNamespaces(nfds, fds) < 0)
++            goto cleanup;
++    }
+ 
+     ret = 0;
+  cleanup:
+-- 
+2.18.0
+

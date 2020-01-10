@@ -1,0 +1,91 @@
+From 8877885f067aaa87b7ab42de914de5e50f4ef32d Mon Sep 17 00:00:00 2001
+Message-Id: <8877885f067aaa87b7ab42de914de5e50f4ef32d@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 4 Mar 2019 16:37:31 +0100
+Subject: [PATCH] cpu_x86: Log decoded CPU model and signatures
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The log message may be useful when debugging why a specific CPU model
+was selected for a given set of CPUID data.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 5ced12decea42f1d588f2cb28b10ca7a5772098e)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+	src/cpu/cpu_x86.c
+            - VIR_AUTOFREE is not in RHEL-7.6
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_x86.c | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/src/cpu/cpu_x86.c b/src/cpu/cpu_x86.c
+index 466c79031d..cf3d80eeb5 100644
+--- a/src/cpu/cpu_x86.c
++++ b/src/cpu/cpu_x86.c
+@@ -1821,6 +1821,26 @@ x86ModelHasSignature(virCPUx86ModelPtr model,
+ }
+ 
+ 
++static char *
++x86FormatSignatures(virCPUx86ModelPtr model)
++{
++    virBuffer buf = VIR_BUFFER_INITIALIZER;
++    size_t i;
++
++    for (i = 0; i < model->nsignatures; i++) {
++        virBufferAsprintf(&buf, "%06lx,",
++                          (unsigned long)model->signatures[i]);
++    }
++
++    virBufferTrim(&buf, ",", -1);
++
++    if (virBufferCheckError(&buf) < 0)
++        return NULL;
++
++    return virBufferContentAndReset(&buf);
++}
++
++
+ /*
+  * Checks whether a candidate model is a better fit for the CPU data than the
+  * current model.
+@@ -1944,6 +1964,7 @@ x86Decode(virCPUDefPtr cpu,
+     virCPUx86Data features = VIR_CPU_X86_DATA_INIT;
+     virCPUx86VendorPtr vendor;
+     virDomainCapsCPUModelPtr hvModel = NULL;
++    char *sigs = NULL;
+     uint32_t signature;
+     ssize_t i;
+     int rc;
+@@ -2036,6 +2057,11 @@ x86Decode(virCPUDefPtr cpu,
+     if (vendor && VIR_STRDUP(cpu->vendor, vendor->name) < 0)
+         goto cleanup;
+ 
++    sigs = x86FormatSignatures(model);
++
++    VIR_DEBUG("Using CPU model %s (signatures %s) for CPU with signature %06lx",
++              model->name, NULLSTR(sigs), (unsigned long)signature);
++
+     VIR_STEAL_PTR(cpu->model, cpuModel->model);
+     VIR_STEAL_PTR(cpu->features, cpuModel->features);
+     cpu->nfeatures = cpuModel->nfeatures;
+@@ -2050,6 +2076,7 @@ x86Decode(virCPUDefPtr cpu,
+     virCPUx86DataClear(&data);
+     virCPUx86DataClear(&copy);
+     virCPUx86DataClear(&features);
++    VIR_FREE(sigs);
+     return ret;
+ }
+ 
+-- 
+2.21.0
+

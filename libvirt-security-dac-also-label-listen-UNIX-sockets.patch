@@ -1,0 +1,65 @@
+From f019023539b64742e8f1ebc38ea26a204fa0a45c Mon Sep 17 00:00:00 2001
+Message-Id: <f019023539b64742e8f1ebc38ea26a204fa0a45c@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Tue, 2 Oct 2018 14:00:41 +0200
+Subject: [PATCH] security: dac: also label listen UNIX sockets
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We switched to opening mode='bind' sockets ourselves:
+commit 30fb2276d88b275dc2aad6ddd28c100d944b59a5
+    qemu: support passing pre-opened UNIX socket listen FD
+in v4.5.0-rc1~251
+
+Then fixed qemuBuildChrChardevStr to change libvirtd's label
+while creating the socket:
+commit b0c6300fc42bbc3e5eb0b236392f7344581c5810
+    qemu: ensure FDs passed to QEMU for chardevs have correct SELinux labels
+v4.5.0-rc1~52
+
+Also add labeling of these sockets to the DAC driver.
+Instead of duplicating the logic which decides whether libvirt should
+pre-create the socket, assume an existing path meaning that it was created
+by libvirt.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1633389
+
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit d6b8838dd83697f721fe0706068df765148154de)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+RHEL 8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1634775
+RHEL 7.6: https://bugzilla.redhat.com/show_bug.cgi?id=1635228
+
+Conflicts: src/security/security_dac.c
+    commit 3ac7793ad1ae0f4dc7b7ddbcfd182d5ff0b45538
+      security_dac: Pass virSecurityManagerPtr to virSecurityDACSetOwnership
+    is not backported
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/security/security_dac.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/security/security_dac.c b/src/security/security_dac.c
+index 4b623dcf39..74c70dd092 100644
+--- a/src/security/security_dac.c
++++ b/src/security/security_dac.c
+@@ -1248,7 +1248,12 @@ virSecurityDACSetChardevLabel(virSecurityManagerPtr mgr,
+         break;
+ 
+     case VIR_DOMAIN_CHR_TYPE_UNIX:
+-        if (!dev_source->data.nix.listen) {
++        if (!dev_source->data.nix.listen ||
++            (dev_source->data.nix.path &&
++             virFileExists(dev_source->data.nix.path))) {
++            /* Also label mode='bind' sockets if they exist,
++             * e.g. because they were created by libvirt
++             * and passed via FD */
+             if (virSecurityDACSetOwnership(priv, NULL,
+                                            dev_source->data.nix.path,
+                                            user, group) < 0)
+-- 
+2.19.0
+

@@ -1,0 +1,102 @@
+From 1802d115cf79cf7d122d0864ec4add10eafc294d Mon Sep 17 00:00:00 2001
+Message-Id: <1802d115cf79cf7d122d0864ec4add10eafc294d@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Tue, 3 Jul 2018 15:25:17 +0200
+Subject: [PATCH] qemu: Format the HTM pSeries feature
+
+This makes the feature fully operational.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1525599
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+
+(cherry picked from commit d4c11171076edfb2e603804e79edf7ccc3cce5dc)
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Acked-by: David Gibson <dgibson@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c                      | 20 ++++++++++++++++++++
+ src/qemu/qemu_domain.c                       | 14 +++++++++++++-
+ tests/qemuxml2argvdata/pseries-features.args |  2 +-
+ 3 files changed, 34 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index c1eefca639..4120e4f983 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -7327,6 +7327,26 @@ qemuBuildMachineCommandLine(virCommandPtr cmd,
+         }
+     }
+ 
++    if (def->features[VIR_DOMAIN_FEATURE_HTM] != VIR_TRISTATE_SWITCH_ABSENT) {
++        const char *str;
++
++        if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_MACHINE_PSERIES_CAP_HTM)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                           _("HTM configuration is not supported by this "
++                             "QEMU binary"));
++            goto cleanup;
++        }
++
++        str = virTristateSwitchTypeToString(def->features[VIR_DOMAIN_FEATURE_HTM]);
++        if (!str) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                           _("Invalid setting for HTM state"));
++            goto cleanup;
++        }
++
++        virBufferAsprintf(&buf, ",cap-htm=%s", str);
++    }
++
+     if (cpu && cpu->model &&
+         cpu->mode == VIR_CPU_MODE_HOST_MODEL &&
+         qemuDomainIsPSeries(def) &&
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 0eacad1e44..3f3bb94685 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -3852,6 +3852,19 @@ qemuDomainDefValidateFeatures(const virDomainDef *def,
+             }
+             break;
+ 
++        case VIR_DOMAIN_FEATURE_HTM:
++            if (def->features[i] != VIR_TRISTATE_SWITCH_ABSENT &&
++                !qemuDomainIsPSeries(def)) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                               _("The '%s' feature is not supported for "
++                                 "architecture '%s' or machine type '%s'"),
++                               featureName,
++                               virArchToString(def->os.arch),
++                               def->os.machine);
++                return -1;
++            }
++            break;
++
+         case VIR_DOMAIN_FEATURE_ACPI:
+         case VIR_DOMAIN_FEATURE_APIC:
+         case VIR_DOMAIN_FEATURE_PAE:
+@@ -3865,7 +3878,6 @@ qemuDomainDefValidateFeatures(const virDomainDef *def,
+         case VIR_DOMAIN_FEATURE_PMU:
+         case VIR_DOMAIN_FEATURE_VMPORT:
+         case VIR_DOMAIN_FEATURE_VMCOREINFO:
+-        case VIR_DOMAIN_FEATURE_HTM:
+         case VIR_DOMAIN_FEATURE_LAST:
+             break;
+         }
+diff --git a/tests/qemuxml2argvdata/pseries-features.args b/tests/qemuxml2argvdata/pseries-features.args
+index 12c14715c6..226d43df44 100644
+--- a/tests/qemuxml2argvdata/pseries-features.args
++++ b/tests/qemuxml2argvdata/pseries-features.args
+@@ -8,7 +8,7 @@ QEMU_AUDIO_DRV=none \
+ -name guest \
+ -S \
+ -machine pseries,accel=tcg,usb=off,dump-guest-core=off,resize-hpt=required,\
+-cap-hpt-max-page-size=1048576k \
++cap-hpt-max-page-size=1048576k,cap-htm=on \
+ -m 512 \
+ -smp 1,sockets=1,cores=1,threads=1 \
+ -uuid 1ccfd97d-5eb4-478a-bbe6-88d254c16db7 \
+-- 
+2.18.0
+

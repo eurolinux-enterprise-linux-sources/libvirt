@@ -1,0 +1,157 @@
+From abda9a653cdb9ae482b7122e091c73c2df18f9e2 Mon Sep 17 00:00:00 2001
+Message-Id: <abda9a653cdb9ae482b7122e091c73c2df18f9e2@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 25 Jul 2018 08:27:09 +0200
+Subject: [PATCH] qemu: Remove unused bypassSecurityDriver from qemuOpenFileAs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1589115
+
+This argument is not used anymore. The only function that is
+passing non-NULL (qemuDomainSaveMemory) does not actually care
+for the value (after 23087cfdb) and every other caller just
+passes NULL anyway.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 8677a476c7e5cbf7b344329d54d0b1a2d666ffc3)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_driver.c | 32 +++++++++-----------------------
+ 1 file changed, 9 insertions(+), 23 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 62deae4b98..efd0a05c90 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -152,7 +152,7 @@ static int qemuDomainManagedSaveLoad(virDomainObjPtr vm,
+ static int qemuOpenFileAs(uid_t fallback_uid, gid_t fallback_gid,
+                           bool dynamicOwnership,
+                           const char *path, int oflags,
+-                          bool *needUnlink, bool *bypassSecurityDriver);
++                          bool *needUnlink);
+ 
+ static int qemuGetDHCPInterfaces(virDomainPtr dom,
+                                  virDomainObjPtr vm,
+@@ -2984,9 +2984,6 @@ qemuCompressGetCommand(virQEMUSaveFormat compression)
+  * @path: path to file to open
+  * @oflags: flags for opening/creation of the file
+  * @needUnlink: set to true if file was created by this function
+- * @bypassSecurityDriver: optional pointer to a boolean that will be set to true
+- *                        if security driver operations are pointless (due to
+- *                        NFS mount)
+  *
+  * Internal function to properly create or open existing files, with
+  * ownership affected by qemu driver setup and domain DAC label.
+@@ -3001,8 +2998,7 @@ qemuOpenFile(virQEMUDriverPtr driver,
+              virDomainObjPtr vm,
+              const char *path,
+              int oflags,
+-             bool *needUnlink,
+-             bool *bypassSecurityDriver)
++             bool *needUnlink)
+ {
+     int ret = -1;
+     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
+@@ -3021,7 +3017,7 @@ qemuOpenFile(virQEMUDriverPtr driver,
+         goto cleanup;
+ 
+     ret = qemuOpenFileAs(user, group, dynamicOwnership,
+-                         path, oflags, needUnlink, bypassSecurityDriver);
++                         path, oflags, needUnlink);
+ 
+  cleanup:
+     return ret;
+@@ -3031,12 +3027,11 @@ static int
+ qemuOpenFileAs(uid_t fallback_uid, gid_t fallback_gid,
+                bool dynamicOwnership,
+                const char *path, int oflags,
+-               bool *needUnlink, bool *bypassSecurityDriver)
++               bool *needUnlink)
+ {
+     struct stat sb;
+     bool is_reg = true;
+     bool need_unlink = false;
+-    bool bypass_security = false;
+     unsigned int vfoflags = 0;
+     int fd = -1;
+     int path_shared = virFileIsSharedFS(path);
+@@ -3134,19 +3129,11 @@ qemuOpenFileAs(uid_t fallback_uid, gid_t fallback_gid,
+                                      path);
+                 goto cleanup;
+             }
+-
+-            /* Since we had to setuid to create the file, and the fstype
+-               is NFS, we assume it's a root-squashing NFS share, and that
+-               the security driver stuff would have failed anyway */
+-
+-            bypass_security = true;
+         }
+     }
+  cleanup:
+     if (needUnlink)
+         *needUnlink = need_unlink;
+-    if (bypassSecurityDriver)
+-        *bypassSecurityDriver = bypass_security;
+     return fd;
+ 
+  error:
+@@ -3198,7 +3185,6 @@ qemuDomainSaveMemory(virQEMUDriverPtr driver,
+                      unsigned int flags,
+                      qemuDomainAsyncJob asyncJob)
+ {
+-    bool bypassSecurityDriver = false;
+     bool needUnlink = false;
+     int ret = -1;
+     int fd = -1;
+@@ -3218,7 +3204,7 @@ qemuDomainSaveMemory(virQEMUDriverPtr driver,
+     }
+     fd = qemuOpenFile(driver, vm, path,
+                       O_WRONLY | O_TRUNC | O_CREAT | directFlag,
+-                      &needUnlink, &bypassSecurityDriver);
++                      &needUnlink);
+     if (fd < 0)
+         goto cleanup;
+ 
+@@ -3249,7 +3235,7 @@ qemuDomainSaveMemory(virQEMUDriverPtr driver,
+     if (qemuFileWrapperFDClose(vm, wrapperFd) < 0)
+         goto cleanup;
+ 
+-    if ((fd = qemuOpenFile(driver, vm, path, O_WRONLY, NULL, NULL)) < 0 ||
++    if ((fd = qemuOpenFile(driver, vm, path, O_WRONLY, NULL)) < 0 ||
+         virQEMUSaveDataFinish(data, &fd, path) < 0)
+         goto cleanup;
+ 
+@@ -3809,7 +3795,7 @@ doCoreDump(virQEMUDriverPtr driver,
+      * created.  */
+     if ((fd = qemuOpenFile(driver, vm, path,
+                            O_CREAT | O_TRUNC | O_WRONLY | directFlag,
+-                           NULL, NULL)) < 0)
++                           NULL)) < 0)
+         goto cleanup;
+ 
+     if (!(wrapperFd = virFileWrapperFdNew(&fd, path, flags)))
+@@ -6434,7 +6420,7 @@ qemuDomainSaveImageOpen(virQEMUDriverPtr driver,
+     if (!(caps = virQEMUDriverGetCapabilities(driver, false)))
+         goto error;
+ 
+-    if ((fd = qemuOpenFile(driver, NULL, path, oflags, NULL, NULL)) < 0)
++    if ((fd = qemuOpenFile(driver, NULL, path, oflags, NULL)) < 0)
+         goto error;
+     if (bypass_cache &&
+         !(*wrapperFd = virFileWrapperFdNew(&fd, path,
+@@ -11878,7 +11864,7 @@ qemuDomainStorageOpenStat(virQEMUDriverPtr driver,
+ {
+     if (virStorageSourceIsLocalStorage(src)) {
+         if ((*ret_fd = qemuOpenFile(driver, vm, src->path, O_RDONLY,
+-                                    NULL, NULL)) < 0)
++                                    NULL)) < 0)
+             return -1;
+ 
+         if (fstat(*ret_fd, ret_sb) < 0) {
+-- 
+2.18.0
+

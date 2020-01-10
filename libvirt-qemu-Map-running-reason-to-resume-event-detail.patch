@@ -1,0 +1,121 @@
+From 919834294448ac9d1569a1f2620ea01d79a86e96 Mon Sep 17 00:00:00 2001
+Message-Id: <919834294448ac9d1569a1f2620ea01d79a86e96@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 11 Sep 2018 15:13:08 +0200
+Subject: [PATCH] qemu: Map running reason to resume event detail
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Thanks to the previous commit the RESUME event handler knows what reason
+should be used when changing the domain state to VIR_DOMAIN_RUNNING, but
+the emitted VIR_DOMAIN_EVENT_RESUMED event still uses a generic
+VIR_DOMAIN_EVENT_RESUMED_UNPAUSED detail. Luckily, the event detail can
+be easily deduced from the running reason, which saves us from having to
+pass one more value to the handler.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 8ae9b49f5a4a02f57a1dfa20d4fe04c3d40a4665)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1634758
+https://bugzilla.redhat.com/show_bug.cgi?id=1634759
+
+Conflicts:
+	src/qemu/qemu_domain.c
+	src/qemu/qemu_domain.h
+            - nodenames code is not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_domain.c  | 29 +++++++++++++++++++++++++++++
+ src/qemu/qemu_domain.h  |  3 +++
+ src/qemu/qemu_process.c | 11 +++++++----
+ 3 files changed, 39 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 17be6e5537..d80f9b393e 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -13149,3 +13149,32 @@ qemuDomainGetManagedPRSocketPath(qemuDomainObjPrivatePtr priv)
+ 
+     return ret;
+ }
++
++
++virDomainEventResumedDetailType
++qemuDomainRunningReasonToResumeEvent(virDomainRunningReason reason)
++{
++    switch (reason) {
++    case VIR_DOMAIN_RUNNING_RESTORED:
++    case VIR_DOMAIN_RUNNING_FROM_SNAPSHOT:
++        return VIR_DOMAIN_EVENT_RESUMED_FROM_SNAPSHOT;
++
++    case VIR_DOMAIN_RUNNING_MIGRATED:
++    case VIR_DOMAIN_RUNNING_MIGRATION_CANCELED:
++        return VIR_DOMAIN_EVENT_RESUMED_MIGRATED;
++
++    case VIR_DOMAIN_RUNNING_POSTCOPY:
++        return VIR_DOMAIN_EVENT_RESUMED_POSTCOPY;
++
++    case VIR_DOMAIN_RUNNING_UNKNOWN:
++    case VIR_DOMAIN_RUNNING_SAVE_CANCELED:
++    case VIR_DOMAIN_RUNNING_BOOTED:
++    case VIR_DOMAIN_RUNNING_UNPAUSED:
++    case VIR_DOMAIN_RUNNING_WAKEUP:
++    case VIR_DOMAIN_RUNNING_CRASHED:
++    case VIR_DOMAIN_RUNNING_LAST:
++        break;
++    }
++
++    return VIR_DOMAIN_EVENT_RESUMED_UNPAUSED;
++}
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 6a96f27a5f..cc406e3ca0 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -1066,4 +1066,7 @@ qemuDomainDiskCachemodeFlags(int cachemode,
+ 
+ char * qemuDomainGetManagedPRSocketPath(qemuDomainObjPrivatePtr priv);
+ 
++virDomainEventResumedDetailType
++qemuDomainRunningReasonToResumeEvent(virDomainRunningReason reason);
++
+ #endif /* __QEMU_DOMAIN_H__ */
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 7325bc4c90..37568165b7 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -694,6 +694,7 @@ qemuProcessHandleResume(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
+     qemuDomainObjPrivatePtr priv;
+     virDomainRunningReason reason = VIR_DOMAIN_RUNNING_UNPAUSED;
++    virDomainEventResumedDetailType eventDetail;
+ 
+     virObjectLock(vm);
+ 
+@@ -709,14 +710,16 @@ qemuProcessHandleResume(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+             goto unlock;
+         }
+ 
++        eventDetail = qemuDomainRunningReasonToResumeEvent(reason);
+         VIR_DEBUG("Transitioned guest %s out of paused into resumed state, "
+-                  "reason '%s'",
+-                  vm->def->name, virDomainRunningReasonTypeToString(reason));
++                  "reason '%s', event detail %d",
++                  vm->def->name, virDomainRunningReasonTypeToString(reason),
++                  eventDetail);
+ 
+         virDomainObjSetState(vm, VIR_DOMAIN_RUNNING, reason);
+         event = virDomainEventLifecycleNewFromObj(vm,
+-                                         VIR_DOMAIN_EVENT_RESUMED,
+-                                         VIR_DOMAIN_EVENT_RESUMED_UNPAUSED);
++                                                  VIR_DOMAIN_EVENT_RESUMED,
++                                                  eventDetail);
+ 
+         if (virDomainSaveStatus(driver->xmlopt, cfg->stateDir, vm, driver->caps) < 0) {
+             VIR_WARN("Unable to save status on vm %s after state change",
+-- 
+2.19.1
+

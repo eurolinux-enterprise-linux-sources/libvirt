@@ -1,0 +1,80 @@
+From f3d851dfec29dabaf5c9ab9e889376bb6df2d93c Mon Sep 17 00:00:00 2001
+Message-Id: <f3d851dfec29dabaf5c9ab9e889376bb6df2d93c@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Tue, 3 Jul 2018 15:25:15 +0200
+Subject: [PATCH] qemu: Add capability for the HTM pSeries feature
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+
+(cherry picked from commit 755a5765accf8fe9b2b8ec3fb01c37ac91313c7c)
+https: //bugzilla.redhat.com/show_bug.cgi?id=1525599
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Acked-by: David Gibson <dgibson@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c                     | 2 ++
+ src/qemu/qemu_capabilities.h                     | 1 +
+ tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml | 1 +
+ tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml  | 1 +
+ 4 files changed, 5 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index fc1cf53066..883ca5dab7 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -501,6 +501,7 @@ VIR_ENUM_IMPL(virQEMUCaps, QEMU_CAPS_LAST,
+               /* 310 */
+               "sev-guest",
+               "machine.pseries.cap-hpt-max-page-size",
++              "machine.pseries.cap-htm",
+     );
+ 
+ 
+@@ -1432,6 +1433,7 @@ static struct virQEMUCapsStringFlags virQEMUCapsObjectPropsMemoryBackendFile[] =
+ 
+ static struct virQEMUCapsStringFlags virQEMUCapsObjectPropsSPAPRMachine[] = {
+     { "cap-hpt-max-page-size", QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE },
++    { "cap-htm", QEMU_CAPS_MACHINE_PSERIES_CAP_HTM },
+ };
+ 
+ static virQEMUCapsObjectTypeProps virQEMUCapsObjectProps[] = {
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index df9bf49abb..a048a1cf02 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -485,6 +485,7 @@ typedef enum { /* virQEMUCapsFlags grouping marker for syntax-check */
+     /* 310 */
+     QEMU_CAPS_SEV_GUEST, /* -object sev-guest,... */
+     QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE, /* -machine pseries.cap-hpt-max-page-size */
++    QEMU_CAPS_MACHINE_PSERIES_CAP_HTM, /* -machine pseries.cap-htm */
+ 
+     QEMU_CAPS_LAST /* this must always be the last item */
+ } virQEMUCapsFlags;
+diff --git a/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml b/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml
+index 2ee582f343..7139179304 100644
+--- a/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml
+@@ -166,6 +166,7 @@
+   <flag name='vhost-vsock'/>
+   <flag name='chardev-fd-pass'/>
+   <flag name='tpm-emulator'/>
++  <flag name='machine.pseries.cap-htm'/>
+   <version>2011090</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>428334</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml b/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml
+index 7e958b2efc..33cd00e613 100644
+--- a/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml
++++ b/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml
+@@ -166,6 +166,7 @@
+   <flag name='chardev-fd-pass'/>
+   <flag name='tpm-emulator'/>
+   <flag name='machine.pseries.cap-hpt-max-page-size'/>
++  <flag name='machine.pseries.cap-htm'/>
+   <version>2012050</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>446771</microcodeVersion>
+-- 
+2.18.0
+

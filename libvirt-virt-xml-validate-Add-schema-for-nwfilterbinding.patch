@@ -1,0 +1,53 @@
+From fb11f9d6a33f656481044a35c2fd76d479442593 Mon Sep 17 00:00:00 2001
+Message-Id: <fb11f9d6a33f656481044a35c2fd76d479442593@dist-git>
+From: Han Han <hhan@redhat.com>
+Date: Thu, 19 Jul 2018 16:23:39 -0400
+Subject: [PATCH] virt-xml-validate: Add schema for nwfilterbinding
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1600330
+
+Add nwfilterbinding schema in virt-xml-validate for autoprobing.
+Add document of nwfilterbinding schema in tools/virt-xml-validate.pod.
+
+Signed-off-by: Han Han <hhan@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit a47d053720f3b4965184bc9a5a87a86d301957ea)
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ tools/virt-xml-validate.in  | 3 +++
+ tools/virt-xml-validate.pod | 4 ++++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/tools/virt-xml-validate.in b/tools/virt-xml-validate.in
+index 81fde4d832..7513413189 100644
+--- a/tools/virt-xml-validate.in
++++ b/tools/virt-xml-validate.in
+@@ -77,6 +77,9 @@ if [ -z "$TYPE" ]; then
+      *device*)
+         TYPE="nodedev"
+         ;;
++     *filterbinding*)
++        TYPE="nwfilterbinding"
++        ;;
+      *filter*)
+         TYPE="nwfilter"
+         ;;
+diff --git a/tools/virt-xml-validate.pod b/tools/virt-xml-validate.pod
+index f8e67503fd..a51a57002a 100644
+--- a/tools/virt-xml-validate.pod
++++ b/tools/virt-xml-validate.pod
+@@ -52,6 +52,10 @@ The schema for the XML format used to declare driver capabilities
+ 
+ The schema for the XML format used by network traffic filters
+ 
++=item C<nwfilterbinding>
++
++The schema for XML format used by network filter bindings.
++
+ =item C<secret>
+ 
+ The schema for the XML format used by secrets descriptions
+-- 
+2.18.0
+

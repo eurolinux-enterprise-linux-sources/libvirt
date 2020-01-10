@@ -1,0 +1,76 @@
+From b7208e290e2312156f8efbbffad31316d73d8a42 Mon Sep 17 00:00:00 2001
+Message-Id: <b7208e290e2312156f8efbbffad31316d73d8a42@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 26 Feb 2019 12:06:05 +0100
+Subject: [PATCH] cpu_map: Add more signatures for Haswell CPU models
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit e58ca588cc0deee36c8ae44f2ad75bf9b1680fc5)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+	src/cpu_map/x86_Haswell-IBRS.xml
+	src/cpu_map/x86_Haswell-noTSX-IBRS.xml
+	src/cpu_map/x86_Haswell-noTSX.xml
+	src/cpu_map/x86_Haswell.xml
+            - cpu_map split not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 68cecf7ac0..7c6f70113e 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -1204,6 +1204,9 @@
+ 
+     <model name='Haswell-noTSX'>
+       <signature family='6' model='60'/> <!-- 0306c0 -->
++      <signature family='6' model='63'/> <!-- 0306f0 -->
++      <signature family='6' model='69'/> <!-- 040650 -->
++      <signature family='6' model='70'/> <!-- 040660 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1257,6 +1260,9 @@
+ 
+     <model name='Haswell-noTSX-IBRS'>
+       <signature family='6' model='60'/> <!-- 0306c0 -->
++      <signature family='6' model='63'/> <!-- 0306f0 -->
++      <signature family='6' model='69'/> <!-- 040650 -->
++      <signature family='6' model='70'/> <!-- 040660 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1311,6 +1317,9 @@
+ 
+     <model name='Haswell'>
+       <signature family='6' model='60'/> <!-- 0306c0 -->
++      <signature family='6' model='63'/> <!-- 0306f0 -->
++      <signature family='6' model='69'/> <!-- 040650 -->
++      <signature family='6' model='70'/> <!-- 040660 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1366,6 +1375,9 @@
+ 
+     <model name='Haswell-IBRS'>
+       <signature family='6' model='60'/> <!-- 0306c0 -->
++      <signature family='6' model='63'/> <!-- 0306f0 -->
++      <signature family='6' model='69'/> <!-- 040650 -->
++      <signature family='6' model='70'/> <!-- 040660 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+-- 
+2.21.0
+

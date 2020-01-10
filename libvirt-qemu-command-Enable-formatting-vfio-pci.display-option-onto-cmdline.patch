@@ -1,0 +1,479 @@
+From edc91b968fea48d5c7141c3fd21ba6a89b6c2369 Mon Sep 17 00:00:00 2001
+Message-Id: <edc91b968fea48d5c7141c3fd21ba6a89b6c2369@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:04:03 +0200
+Subject: [PATCH] qemu: command: Enable formatting vfio-pci.display option onto
+ cmdline
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since QEMU 2.12, QEMU understands a new vfio-pci device option 'display'
+which can be used to turn on display capabilities on vgpu-enabled
+mediated devices, IOW emulated GPU devices like QXL will no longer be
+needed with vgpu-enable mdevs.
+QEMU defaults to 'auto' for the 'display' attribute, which is not
+foolproof, so we need to play it safe here and default to display='off'
+if this attribute wasn't provided in the XML explicitly.
+
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit c0ca6dcf42549855b9ed75031f461a056ae1031c)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_command.c                       |  4 ++
+ .../hostdev-mdev-display-missing-graphics.xml | 35 ++++++++++++++++
+ ...play-spice-egl-headless.x86_64-latest.args | 37 +++++++++++++++++
+ ...ostdev-mdev-display-spice-egl-headless.xml | 40 ++++++++++++++++++
+ ...ev-display-spice-opengl.x86_64-latest.args | 36 ++++++++++++++++
+ .../hostdev-mdev-display-spice-opengl.xml     | 41 +++++++++++++++++++
+ ...isplay-vnc-egl-headless.x86_64-latest.args | 37 +++++++++++++++++
+ .../hostdev-mdev-display-vnc-egl-headless.xml | 40 ++++++++++++++++++
+ ...ostdev-mdev-display-vnc.x86_64-latest.args | 36 ++++++++++++++++
+ .../hostdev-mdev-display-vnc.xml              | 39 ++++++++++++++++++
+ tests/qemuxml2argvtest.c                      |  7 ++++
+ 11 files changed, 352 insertions(+)
+ create mode 100644 tests/qemuxml2argvdata/hostdev-mdev-display-missing-graphics.xml
+ create mode 100644 tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.x86_64-latest.args
+ create mode 100644 tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.xml
+ create mode 100644 tests/qemuxml2argvdata/hostdev-mdev-display-spice-opengl.x86_64-latest.args
+ create mode 100644 tests/qemuxml2argvdata/hostdev-mdev-display-spice-opengl.xml
+ create mode 100644 tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.x86_64-latest.args
+ create mode 100644 tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.xml
+ create mode 100644 tests/qemuxml2argvdata/hostdev-mdev-display-vnc.x86_64-latest.args
+ create mode 100644 tests/qemuxml2argvdata/hostdev-mdev-display-vnc.xml
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 8915040c6a..1fce45134f 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -5177,6 +5177,10 @@ qemuBuildHostdevMediatedDevStr(const virDomainDef *def,
+     virBufferAdd(&buf, dev_str, -1);
+     virBufferAsprintf(&buf, ",id=%s,sysfsdev=%s", dev->info->alias, mdevPath);
+ 
++    if (mdevsrc->display != VIR_TRISTATE_SWITCH_ABSENT)
++        virBufferAsprintf(&buf, ",display=%s",
++                          virTristateSwitchTypeToString(mdevsrc->display));
++
+     if (qemuBuildDeviceAddressStr(&buf, def, dev->info, qemuCaps) < 0)
+         goto cleanup;
+ 
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-missing-graphics.xml b/tests/qemuxml2argvdata/hostdev-mdev-display-missing-graphics.xml
+new file mode 100644
+index 0000000000..ea559a6444
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-missing-graphics.xml
+@@ -0,0 +1,35 @@
++<domain type='qemu'>
++  <name>QEMUGuest2</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <driver name='qemu' type='raw'/>
++      <source dev='/dev/HostVG/QEMUGuest2'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <controller type='ide' index='0'>
++    </controller>
++    <hostdev mode='subsystem' type='mdev' model='vfio-pci' display='on'>
++      <source>
++        <address uuid='53764d0e-85a0-42b4-af5c-2046b460b1dc'/>
++      </source>
++    </hostdev>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.x86_64-latest.args b/tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.x86_64-latest.args
+new file mode 100644
+index 0000000000..0ac90c81d2
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.x86_64-latest.args
+@@ -0,0 +1,37 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++QEMU_AUDIO_DRV=spice \
++/usr/bin/qemu-system-i686 \
++-name guest=QEMUGuest2,debug-threads=on \
++-S \
++-object secret,id=masterKey0,format=raw,\
++file=/tmp/lib/domain--1-QEMUGuest2/master-key.aes \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 214 \
++-realtime mlock=off \
++-smp 1,sockets=1,cores=1,threads=1 \
++-uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,fd=1729,server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot strict=on \
++-device piix3-usb-uhci,id=usb,bus=pci.0,addr=0x1.0x2 \
++-drive file=/dev/HostVG/QEMUGuest2,format=raw,if=none,id=drive-ide0-0-0 \
++-device ide-hd,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0,bootindex=1 \
++-spice port=0,seamless-migration=on \
++-display egl-headless \
++-device qxl-vga,id=video0,ram_size=67108864,vram_size=67108864,\
++vram64_size_mb=0,vgamem_mb=16,max_outputs=1,bus=pci.0,addr=0x2 \
++-device vfio-pci,id=hostdev0,\
++sysfsdev=/sys/bus/mdev/devices/53764d0e-85a0-42b4-af5c-2046b460b1dc,display=on,\
++bus=pci.0,addr=0x3 \
++-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,\
++resourcecontrol=deny \
++-msg timestamp=on
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.xml b/tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.xml
+new file mode 100644
+index 0000000000..c8f10c2f3a
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.xml
+@@ -0,0 +1,40 @@
++<domain type='qemu' id='1'>
++  <name>QEMUGuest2</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <driver name='qemu' type='raw'/>
++      <source dev='/dev/HostVG/QEMUGuest2'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <controller type='ide' index='0'>
++    </controller>
++    <graphics type='spice'/>
++    <graphics type='egl-headless'/>
++    <hostdev mode='subsystem' type='mdev' model='vfio-pci' display='on'>
++      <source>
++        <address uuid='53764d0e-85a0-42b4-af5c-2046b460b1dc'/>
++      </source>
++    </hostdev>
++    <video>
++      <model type='qxl' heads='1'/>
++    </video>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-spice-opengl.x86_64-latest.args b/tests/qemuxml2argvdata/hostdev-mdev-display-spice-opengl.x86_64-latest.args
+new file mode 100644
+index 0000000000..1fd9fdaa16
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-spice-opengl.x86_64-latest.args
+@@ -0,0 +1,36 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++QEMU_AUDIO_DRV=spice \
++/usr/bin/qemu-system-i686 \
++-name guest=QEMUGuest2,debug-threads=on \
++-S \
++-object secret,id=masterKey0,format=raw,\
++file=/tmp/lib/domain--1-QEMUGuest2/master-key.aes \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 214 \
++-realtime mlock=off \
++-smp 1,sockets=1,cores=1,threads=1 \
++-uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,fd=1729,server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot strict=on \
++-device piix3-usb-uhci,id=usb,bus=pci.0,addr=0x1.0x2 \
++-drive file=/dev/HostVG/QEMUGuest2,format=raw,if=none,id=drive-ide0-0-0 \
++-device ide-hd,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0,bootindex=1 \
++-spice port=0,gl=on,rendernode=/dev/dri/foo,seamless-migration=on \
++-device qxl-vga,id=video0,ram_size=67108864,vram_size=67108864,\
++vram64_size_mb=0,vgamem_mb=16,max_outputs=1,bus=pci.0,addr=0x2 \
++-device vfio-pci,id=hostdev0,\
++sysfsdev=/sys/bus/mdev/devices/53764d0e-85a0-42b4-af5c-2046b460b1dc,display=on,\
++bus=pci.0,addr=0x3 \
++-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,\
++resourcecontrol=deny \
++-msg timestamp=on
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-spice-opengl.xml b/tests/qemuxml2argvdata/hostdev-mdev-display-spice-opengl.xml
+new file mode 100644
+index 0000000000..18c9817608
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-spice-opengl.xml
+@@ -0,0 +1,41 @@
++<domain type='qemu' id='1'>
++  <name>QEMUGuest2</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <driver name='qemu' type='raw'/>
++      <source dev='/dev/HostVG/QEMUGuest2'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <controller type='ide' index='0'>
++    </controller>
++    <graphics type='spice'>
++      <gl enable='yes' rendernode='/dev/dri/foo'/>
++    </graphics>
++    <hostdev mode='subsystem' type='mdev' model='vfio-pci' display='on'>
++      <source>
++        <address uuid='53764d0e-85a0-42b4-af5c-2046b460b1dc'/>
++      </source>
++    </hostdev>
++    <video>
++      <model type='qxl' heads='1'/>
++    </video>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.x86_64-latest.args b/tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.x86_64-latest.args
+new file mode 100644
+index 0000000000..cdf545d0e0
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.x86_64-latest.args
+@@ -0,0 +1,37 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++QEMU_AUDIO_DRV=none \
++/usr/bin/qemu-system-i686 \
++-name guest=QEMUGuest2,debug-threads=on \
++-S \
++-object secret,id=masterKey0,format=raw,\
++file=/tmp/lib/domain--1-QEMUGuest2/master-key.aes \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 214 \
++-realtime mlock=off \
++-smp 1,sockets=1,cores=1,threads=1 \
++-uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,fd=1729,server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot strict=on \
++-device piix3-usb-uhci,id=usb,bus=pci.0,addr=0x1.0x2 \
++-drive file=/dev/HostVG/QEMUGuest2,format=raw,if=none,id=drive-ide0-0-0 \
++-device ide-hd,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0,bootindex=1 \
++-vnc 127.0.0.1:0 \
++-display egl-headless \
++-device qxl-vga,id=video0,ram_size=67108864,vram_size=67108864,\
++vram64_size_mb=0,vgamem_mb=16,max_outputs=1,bus=pci.0,addr=0x2 \
++-device vfio-pci,id=hostdev0,\
++sysfsdev=/sys/bus/mdev/devices/53764d0e-85a0-42b4-af5c-2046b460b1dc,display=on,\
++bus=pci.0,addr=0x3 \
++-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,\
++resourcecontrol=deny \
++-msg timestamp=on
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.xml b/tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.xml
+new file mode 100644
+index 0000000000..b3eaeeef13
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.xml
+@@ -0,0 +1,40 @@
++<domain type='qemu' id='1'>
++  <name>QEMUGuest2</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <driver name='qemu' type='raw'/>
++      <source dev='/dev/HostVG/QEMUGuest2'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <controller type='ide' index='0'>
++    </controller>
++    <graphics type='vnc'/>
++    <graphics type='egl-headless'/>
++    <hostdev mode='subsystem' type='mdev' model='vfio-pci' display='on'>
++      <source>
++        <address uuid='53764d0e-85a0-42b4-af5c-2046b460b1dc'/>
++      </source>
++    </hostdev>
++    <video>
++      <model type='qxl' heads='1'/>
++    </video>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-vnc.x86_64-latest.args b/tests/qemuxml2argvdata/hostdev-mdev-display-vnc.x86_64-latest.args
+new file mode 100644
+index 0000000000..19439afda9
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-vnc.x86_64-latest.args
+@@ -0,0 +1,36 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++QEMU_AUDIO_DRV=none \
++/usr/bin/qemu-system-i686 \
++-name guest=QEMUGuest2,debug-threads=on \
++-S \
++-object secret,id=masterKey0,format=raw,\
++file=/tmp/lib/domain--1-QEMUGuest2/master-key.aes \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 214 \
++-realtime mlock=off \
++-smp 1,sockets=1,cores=1,threads=1 \
++-uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,fd=1729,server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot strict=on \
++-device piix3-usb-uhci,id=usb,bus=pci.0,addr=0x1.0x2 \
++-drive file=/dev/HostVG/QEMUGuest2,format=raw,if=none,id=drive-ide0-0-0 \
++-device ide-hd,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0,bootindex=1 \
++-vnc 127.0.0.1:0 \
++-device qxl-vga,id=video0,ram_size=67108864,vram_size=67108864,\
++vram64_size_mb=0,vgamem_mb=16,max_outputs=1,bus=pci.0,addr=0x2 \
++-device vfio-pci,id=hostdev0,\
++sysfsdev=/sys/bus/mdev/devices/53764d0e-85a0-42b4-af5c-2046b460b1dc,display=on,\
++bus=pci.0,addr=0x3 \
++-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,\
++resourcecontrol=deny \
++-msg timestamp=on
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-vnc.xml b/tests/qemuxml2argvdata/hostdev-mdev-display-vnc.xml
+new file mode 100644
+index 0000000000..f5b3575c04
+--- /dev/null
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-vnc.xml
+@@ -0,0 +1,39 @@
++<domain type='qemu' id='1'>
++  <name>QEMUGuest2</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <driver name='qemu' type='raw'/>
++      <source dev='/dev/HostVG/QEMUGuest2'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <controller type='ide' index='0'>
++    </controller>
++    <graphics type='vnc'/>
++    <hostdev mode='subsystem' type='mdev' model='vfio-pci' display='on'>
++      <source>
++        <address uuid='53764d0e-85a0-42b4-af5c-2046b460b1dc'/>
++      </source>
++    </hostdev>
++    <video>
++      <model type='qxl' heads='1'/>
++    </video>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 848e40440a..9237a4fb89 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -1591,6 +1591,13 @@ mymain(void)
+             QEMU_CAPS_DEVICE_VFIO_PCI);
+     DO_TEST_PARSE_ERROR("hostdev-mdev-invalid-target-address",
+             QEMU_CAPS_DEVICE_VFIO_PCI);
++    DO_TEST_CAPS_LATEST("hostdev-mdev-display-spice-opengl");
++    DO_TEST_CAPS_LATEST("hostdev-mdev-display-spice-egl-headless");
++    DO_TEST_CAPS_LATEST("hostdev-mdev-display-vnc");
++    DO_TEST_CAPS_LATEST("hostdev-mdev-display-vnc-egl-headless");
++    DO_TEST_PARSE_ERROR("hostdev-mdev-display-missing-graphics",
++            QEMU_CAPS_DEVICE_VFIO_PCI,
++            QEMU_CAPS_VFIO_PCI_DISPLAY);
+     DO_TEST("pci-rom", NONE);
+     DO_TEST("pci-rom-disabled", NONE);
+     DO_TEST("pci-rom-disabled-invalid", NONE);
+-- 
+2.18.0
+

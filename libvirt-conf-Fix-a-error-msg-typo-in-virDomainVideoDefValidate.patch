@@ -1,0 +1,35 @@
+From d10524fd3934bf539b38599eb928b26089d17b52 Mon Sep 17 00:00:00 2001
+Message-Id: <d10524fd3934bf539b38599eb928b26089d17b52@dist-git>
+From: Han Han <hhan@redhat.com>
+Date: Tue, 31 Jul 2018 10:42:27 +0200
+Subject: [PATCH] conf: Fix a error msg typo in virDomainVideoDefValidate
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1607825
+
+Introduced by commit d48813e8.
+
+Signed-off-by: Han Han <hhan@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit d1c4480390da7243e37daee37f8a40cb439a6a7c)
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 23288aa01b..a05aad056d 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -5697,7 +5697,7 @@ virDomainVideoDefValidate(const virDomainVideoDef *video,
+         if (def->videos[i]->type == VIR_DOMAIN_VIDEO_TYPE_NONE &&
+             def->nvideos > 1) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+-                           _("a '%s' video type must be the only video device "
++                           _("a 'none' video type must be the only video device "
+                              "defined for the domain"));
+             return -1;
+         }
+-- 
+2.18.0
+

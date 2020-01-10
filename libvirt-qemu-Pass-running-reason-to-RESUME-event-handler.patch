@@ -1,0 +1,123 @@
+From 725d1095dfd473b2a0da59594276413ea6a7fa8b Mon Sep 17 00:00:00 2001
+Message-Id: <725d1095dfd473b2a0da59594276413ea6a7fa8b@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Mon, 10 Sep 2018 19:41:53 +0200
+Subject: [PATCH] qemu: Pass running reason to RESUME event handler
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Whenever we get the RESUME event from QEMU, we change the state of the
+affected domain to VIR_DOMAIN_RUNNING with VIR_DOMAIN_RUNNING_UNPAUSED
+reason. This is fine if the domain is resumed unexpectedly, but when we
+sent "cont" to QEMU we usually have a better reason for the state
+change. The better reason is used in qemuProcessStartCPUs which also
+sets the domain state to running if qemuMonitorStartCPUs reports
+success. Thus we may end up with two state updates in a row, but the
+final reason is correct.
+
+This patch is a preparation for dropping the state change done in
+qemuMonitorStartCPUs for which we need to pass the actual running reason
+to the RESUME event handler and use it there instead of
+VIR_DOMAIN_RUNNING_UNPAUSED.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 5dab984ed0cd0332e59d719420ab2f9d009b952f)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1634758
+https://bugzilla.redhat.com/show_bug.cgi?id=1634759
+
+Conflicts:
+	src/qemu/qemu_domain.h
+            - nodenames code is not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_domain.h  |  4 ++++
+ src/qemu/qemu_process.c | 23 +++++++++++++++++------
+ 2 files changed, 21 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index e748d78adb..6a96f27a5f 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -363,6 +363,10 @@ struct _qemuDomainObjPrivate {
+ 
+     /* true if qemu-pr-helper process is running for the domain */
+     bool prDaemonRunning;
++
++    /* qemuProcessStartCPUs stores the reason for starting vCPUs here for the
++     * RESUME event handler to use it */
++    virDomainRunningReason runningReason;
+ };
+ 
+ # define QEMU_DOMAIN_PRIVATE(vm) \
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 26979faa72..7325bc4c90 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -692,21 +692,28 @@ qemuProcessHandleResume(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+     virQEMUDriverPtr driver = opaque;
+     virObjectEventPtr event = NULL;
+     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
++    qemuDomainObjPrivatePtr priv;
++    virDomainRunningReason reason = VIR_DOMAIN_RUNNING_UNPAUSED;
+ 
+     virObjectLock(vm);
+-    if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_PAUSED) {
+-        qemuDomainObjPrivatePtr priv = vm->privateData;
+ 
++    priv = vm->privateData;
++    if (priv->runningReason != VIR_DOMAIN_RUNNING_UNKNOWN) {
++        reason = priv->runningReason;
++        priv->runningReason = VIR_DOMAIN_RUNNING_UNKNOWN;
++    }
++
++    if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_PAUSED) {
+         if (priv->gotShutdown) {
+             VIR_DEBUG("Ignoring RESUME event after SHUTDOWN");
+             goto unlock;
+         }
+ 
+-        VIR_DEBUG("Transitioned guest %s out of paused into resumed state",
+-                  vm->def->name);
++        VIR_DEBUG("Transitioned guest %s out of paused into resumed state, "
++                  "reason '%s'",
++                  vm->def->name, virDomainRunningReasonTypeToString(reason));
+ 
+-        virDomainObjSetState(vm, VIR_DOMAIN_RUNNING,
+-                                 VIR_DOMAIN_RUNNING_UNPAUSED);
++        virDomainObjSetState(vm, VIR_DOMAIN_RUNNING, reason);
+         event = virDomainEventLifecycleNewFromObj(vm,
+                                          VIR_DOMAIN_EVENT_RESUMED,
+                                          VIR_DOMAIN_EVENT_RESUMED_UNPAUSED);
+@@ -3051,6 +3058,8 @@ qemuProcessStartCPUs(virQEMUDriverPtr driver, virDomainObjPtr vm,
+     }
+     VIR_FREE(priv->lockState);
+ 
++    priv->runningReason = reason;
++
+     if (qemuDomainObjEnterMonitorAsync(driver, vm, asyncJob) < 0)
+         goto release;
+ 
+@@ -3068,6 +3077,7 @@ qemuProcessStartCPUs(virQEMUDriverPtr driver, virDomainObjPtr vm,
+     return ret;
+ 
+  release:
++    priv->runningReason = VIR_DOMAIN_RUNNING_UNKNOWN;
+     if (virDomainLockProcessPause(driver->lockManager, vm, &priv->lockState) < 0)
+         VIR_WARN("Unable to release lease on %s", vm->def->name);
+     VIR_DEBUG("Preserving lock state '%s'", NULLSTR(priv->lockState));
+@@ -5928,6 +5938,7 @@ qemuProcessPrepareDomain(virQEMUDriverPtr driver,
+     priv->monError = false;
+     priv->monStart = 0;
+     priv->gotShutdown = false;
++    priv->runningReason = VIR_DOMAIN_RUNNING_UNKNOWN;
+ 
+     VIR_DEBUG("Updating guest CPU definition");
+     if (qemuProcessUpdateGuestCPU(vm->def, priv->qemuCaps, caps, flags) < 0)
+-- 
+2.19.1
+

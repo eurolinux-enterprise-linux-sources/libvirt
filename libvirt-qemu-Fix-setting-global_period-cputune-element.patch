@@ -1,0 +1,40 @@
+From 7bbe8d3560b3a5f2ef2cf8c833926bcc013897b0 Mon Sep 17 00:00:00 2001
+Message-Id: <7bbe8d3560b3a5f2ef2cf8c833926bcc013897b0@dist-git>
+From: Katerina Koukiou <kkoukiou@redhat.com>
+Date: Mon, 16 Jul 2018 15:45:17 +0200
+Subject: [PATCH] qemu: Fix setting global_period cputune element
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When VIR_DOMAIN_SCHEDULER_GLOBAL_PERIOD is matched "cputune.global_period"
+should be updated and not "cputune.period".
+
+Signed-off-by: Katerina Koukiou <kkoukiou@redhat.com>
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1600427
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 74b5634b77b388a454303a2be0b4d704e261305f)
+Signed-off-by: Katerina Koukiou <kkoukiou@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_driver.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 4cb05bf81c..7094c80498 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -10568,7 +10568,7 @@ qemuDomainSetSchedulerParametersFlags(virDomainPtr dom,
+             }
+ 
+             if (persistentDef)
+-                persistentDefCopy->cputune.period = value_ul;
++                persistentDefCopy->cputune.global_period = value_ul;
+ 
+         } else if (STREQ(param->field, VIR_DOMAIN_SCHEDULER_GLOBAL_QUOTA)) {
+             SCHED_RANGE_CHECK(value_l, VIR_DOMAIN_SCHEDULER_GLOBAL_QUOTA,
+-- 
+2.18.0
+

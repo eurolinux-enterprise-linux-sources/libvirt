@@ -1,0 +1,95 @@
+From 5b47ca781fddf2704b55370acf7cc369ae049c64 Mon Sep 17 00:00:00 2001
+Message-Id: <5b47ca781fddf2704b55370acf7cc369ae049c64@dist-git>
+From: Marc Hartmayer <mhartmay@linux.ibm.com>
+Date: Wed, 10 Oct 2018 17:25:52 +0200
+Subject: [PATCH] virfile: fix cast-align error
+
+RHEL-7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1632711
+RHEL-8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1634782
+RHEL-7.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1635705
+
+On s390x the struct member f_type of statsfs is hard coded to 'unsigned
+int'. Change virFileIsSharedFixFUSE() to take a 'long long int' and use
+a temporary to avoid pointer-casting.
+
+This fixes the following error:
+../../src/util/virfile.c:3578:38: error: cast increases required alignment of target type [-Werror=cast-align]
+         virFileIsSharedFixFUSE(path, (long *) &sb.f_type);
+
+Signed-off-by: Marc Hartmayer <mhartmay@linux.ibm.com>
+Signed-off-by: Bjoern Walk <bwalk@linux.ibm.com>
+(cherry picked from commit 2b03534eeb2f3f41865538cd4c3e5d326260ad27)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virfile.c | 23 +++++++++++++----------
+ 1 file changed, 13 insertions(+), 10 deletions(-)
+
+diff --git a/src/util/virfile.c b/src/util/virfile.c
+index c87e26bf5b..46466ed136 100644
+--- a/src/util/virfile.c
++++ b/src/util/virfile.c
+@@ -3542,7 +3542,7 @@ int virFilePrintf(FILE *fp, const char *msg, ...)
+ 
+ static int
+ virFileIsSharedFixFUSE(const char *path,
+-                       long *f_type)
++                       long long *f_type)
+ {
+     char *dirpath = NULL;
+     const char **mounts = NULL;
+@@ -3612,6 +3612,7 @@ virFileIsSharedFSType(const char *path,
+     char *dirpath, *p;
+     struct statfs sb;
+     int statfs_ret;
++    long long f_type = 0;
+ 
+     if (VIR_STRDUP(dirpath, path) < 0)
+         return -1;
+@@ -3651,32 +3652,34 @@ virFileIsSharedFSType(const char *path,
+         return -1;
+     }
+ 
+-    if (sb.f_type == FUSE_SUPER_MAGIC) {
++    f_type = sb.f_type;
++
++    if (f_type == FUSE_SUPER_MAGIC) {
+         VIR_DEBUG("Found FUSE mount for path=%s. Trying to fix it", path);
+-        virFileIsSharedFixFUSE(path, (long *) &sb.f_type);
++        virFileIsSharedFixFUSE(path, &f_type);
+     }
+ 
+     VIR_DEBUG("Check if path %s with FS magic %lld is shared",
+-              path, (long long int)sb.f_type);
++              path, f_type);
+ 
+     if ((fstypes & VIR_FILE_SHFS_NFS) &&
+-        (sb.f_type == NFS_SUPER_MAGIC))
++        (f_type == NFS_SUPER_MAGIC))
+         return 1;
+ 
+     if ((fstypes & VIR_FILE_SHFS_GFS2) &&
+-        (sb.f_type == GFS2_MAGIC))
++        (f_type == GFS2_MAGIC))
+         return 1;
+     if ((fstypes & VIR_FILE_SHFS_OCFS) &&
+-        (sb.f_type == OCFS2_SUPER_MAGIC))
++        (f_type == OCFS2_SUPER_MAGIC))
+         return 1;
+     if ((fstypes & VIR_FILE_SHFS_AFS) &&
+-        (sb.f_type == AFS_FS_MAGIC))
++        (f_type == AFS_FS_MAGIC))
+         return 1;
+     if ((fstypes & VIR_FILE_SHFS_SMB) &&
+-        (sb.f_type == SMB_SUPER_MAGIC))
++        (f_type == SMB_SUPER_MAGIC))
+         return 1;
+     if ((fstypes & VIR_FILE_SHFS_CIFS) &&
+-        (sb.f_type == CIFS_SUPER_MAGIC))
++        (f_type == CIFS_SUPER_MAGIC))
+         return 1;
+ 
+     return 0;
+-- 
+2.19.1
+

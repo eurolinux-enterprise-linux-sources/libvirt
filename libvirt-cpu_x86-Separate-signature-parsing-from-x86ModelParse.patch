@@ -1,0 +1,112 @@
+From 054fbe2bdd426eb9f3346513ac7d39f0b843a04e Mon Sep 17 00:00:00 2001
+Message-Id: <054fbe2bdd426eb9f3346513ac7d39f0b843a04e@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 20 Mar 2019 14:55:20 +0100
+Subject: [PATCH] cpu_x86: Separate signature parsing from x86ModelParse
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The code is separated into a new x86ModelParseSignature function.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit fe78d2fda9f2dd67eb9daa98e48fbffa468d271e)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+	src/cpu/cpu_x86.c
+            - other patches separating parts of x86ModelParse into
+              smaller functions were not backported due to conflicts
+              with older refactoring which is missing in RHEL-7
+            - commit 118fcdd480ad38a3e8477f466f6a876dce7e9fa6 changing
+              goto labels from "cleanup" to "error" was not backported
+              because the goto statement is removed in this patch anyway
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_x86.c | 58 ++++++++++++++++++++++++++++-------------------
+ 1 file changed, 35 insertions(+), 23 deletions(-)
+
+diff --git a/src/cpu/cpu_x86.c b/src/cpu/cpu_x86.c
+index 809da94117..668e8aa3f0 100644
+--- a/src/cpu/cpu_x86.c
++++ b/src/cpu/cpu_x86.c
+@@ -1184,6 +1184,39 @@ x86ModelCompare(virCPUx86ModelPtr model1,
+ }
+ 
+ 
++static int
++x86ModelParseSignature(virCPUx86ModelPtr model,
++                       xmlXPathContextPtr ctxt)
++{
++
++    if (virXPathBoolean("boolean(./signature)", ctxt)) {
++        unsigned int sigFamily = 0;
++        unsigned int sigModel = 0;
++        int rc;
++
++        rc = virXPathUInt("string(./signature/@family)", ctxt, &sigFamily);
++        if (rc < 0 || sigFamily == 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("Invalid CPU signature family in model %s"),
++                           model->name);
++            return -1;
++        }
++
++        rc = virXPathUInt("string(./signature/@model)", ctxt, &sigModel);
++        if (rc < 0 || sigModel == 0) {
++            virReportError(VIR_ERR_INTERNAL_ERROR,
++                           _("Invalid CPU signature model in model %s"),
++                           model->name);
++            return -1;
++        }
++
++        model->signature = x86MakeSignature(sigFamily, sigModel, 0);
++    }
++
++    return 0;
++}
++
++
+ static virCPUx86ModelPtr
+ x86ModelParse(xmlXPathContextPtr ctxt,
+               virCPUx86MapPtr map)
+@@ -1232,29 +1265,8 @@ x86ModelParse(xmlXPathContextPtr ctxt,
+             goto error;
+     }
+ 
+-    if (virXPathBoolean("boolean(./signature)", ctxt)) {
+-        unsigned int sigFamily = 0;
+-        unsigned int sigModel = 0;
+-        int rc;
+-
+-        rc = virXPathUInt("string(./signature/@family)", ctxt, &sigFamily);
+-        if (rc < 0 || sigFamily == 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("Invalid CPU signature family in model %s"),
+-                           model->name);
+-            goto cleanup;
+-        }
+-
+-        rc = virXPathUInt("string(./signature/@model)", ctxt, &sigModel);
+-        if (rc < 0 || sigModel == 0) {
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           _("Invalid CPU signature model in model %s"),
+-                           model->name);
+-            goto cleanup;
+-        }
+-
+-        model->signature = x86MakeSignature(sigFamily, sigModel, 0);
+-    }
++    if (x86ModelParseSignature(model, ctxt) < 0)
++        goto error;
+ 
+     if (virXPathBoolean("boolean(./vendor)", ctxt)) {
+         vendor = virXPathString("string(./vendor/@name)", ctxt);
+-- 
+2.21.0
+

@@ -1,0 +1,39 @@
+From 5d0af6a468714e0db7b0f7350e3be07641929fd7 Mon Sep 17 00:00:00 2001
+Message-Id: <5d0af6a468714e0db7b0f7350e3be07641929fd7@dist-git>
+From: Han Han <hhan@redhat.com>
+Date: Fri, 13 Jul 2018 13:05:16 +0200
+Subject: [PATCH] virsh.pod: Fix a command name typo in
+ nwfilter-binding-undefine
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The true name of the command is nwfilter-binding-delete.
+
+Signed-off-by: Han Han <hhan@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit 955c4318bf7a74d717ce5ce8b3a9040ad657a94c)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1600329
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ tools/virsh.pod | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 003becb7c3..368ce89ed8 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -4827,7 +4827,7 @@ of the network filters directly.
+ Associate a network port with a network filter. The network filter backend
+ will immediately attempt to instantiate the filter rules on the port.
+ 
+-=item B<nwfilter-binding-undefine> I<port-name>
++=item B<nwfilter-binding-delete> I<port-name>
+ 
+ Disassociate a network port from a network filter. The network filter
+ backend will immediately tear down the filter rules that exist on the
+-- 
+2.18.0
+

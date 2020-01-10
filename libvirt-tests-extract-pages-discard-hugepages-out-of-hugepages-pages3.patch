@@ -1,0 +1,203 @@
+From 836a7bbfff3c9f8a1aafad455dade0f64b6fa57d Mon Sep 17 00:00:00 2001
+Message-Id: <836a7bbfff3c9f8a1aafad455dade0f64b6fa57d@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:11 +0200
+Subject: [PATCH] tests: extract pages-discard-hugepages out of
+ hugepages-pages3
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Similar thing happens as for pages-discard, it is not passed to QEMU.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 9a6674c0ff5c5857fcf9b8e5aded1f524cf75d44)
+
+Conflicts:
+    tests/qemuxml2argvdata/pages-discard-hugepages.args
+        - missing upstream commit <caccbba64a>
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ tests/qemuxml2argvdata/hugepages-pages3.args  |  3 +-
+ tests/qemuxml2argvdata/hugepages-pages3.xml   |  4 +--
+ .../pages-discard-hugepages.args              | 28 +++++++++++++++
+ .../pages-discard-hugepages.xml               | 34 +++++++++++++++++++
+ tests/qemuxml2argvtest.c                      |  7 ++--
+ tests/qemuxml2xmloutdata/hugepages-pages3.xml |  4 +--
+ .../pages-discard-hugepages.xml               |  1 +
+ tests/qemuxml2xmltest.c                       |  1 +
+ 8 files changed, 74 insertions(+), 8 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/pages-discard-hugepages.args
+ create mode 100644 tests/qemuxml2argvdata/pages-discard-hugepages.xml
+ create mode 120000 tests/qemuxml2xmloutdata/pages-discard-hugepages.xml
+
+diff --git a/tests/qemuxml2argvdata/hugepages-pages3.args b/tests/qemuxml2argvdata/hugepages-pages3.args
+index d55265cdd8..2fc701ca22 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages3.args
++++ b/tests/qemuxml2argvdata/hugepages-pages3.args
+@@ -13,8 +13,7 @@ QEMU_AUDIO_DRV=none \
+ -object memory-backend-ram,id=ram-node0,size=268435456 \
+ -numa node,nodeid=0,cpus=0,memdev=ram-node0 \
+ -object memory-backend-file,id=ram-node1,prealloc=yes,\
+-mem-path=/dev/hugepages1G/libvirt/qemu/-1-SomeDummyHugepagesGu,\
+-discard-data=yes,size=805306368 \
++mem-path=/dev/hugepages1G/libvirt/qemu/-1-SomeDummyHugepagesGu,size=805306368 \
+ -numa node,nodeid=1,cpus=1,memdev=ram-node1 \
+ -uuid ef1bdff4-27f3-4e85-a807-5fb4d58463cc \
+ -display none \
+diff --git a/tests/qemuxml2argvdata/hugepages-pages3.xml b/tests/qemuxml2argvdata/hugepages-pages3.xml
+index 147acc4c95..3d3b3f3cc3 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages3.xml
++++ b/tests/qemuxml2argvdata/hugepages-pages3.xml
+@@ -15,8 +15,8 @@
+   </os>
+   <cpu>
+     <numa>
+-      <cell id='0' cpus='0' memory='262144' unit='KiB' discard='no'/>
+-      <cell id='1' cpus='1' memory='786432' unit='KiB' discard='yes'/>
++      <cell id='0' cpus='0' memory='262144' unit='KiB'/>
++      <cell id='1' cpus='1' memory='786432' unit='KiB'/>
+     </numa>
+   </cpu>
+   <clock offset='utc'/>
+diff --git a/tests/qemuxml2argvdata/pages-discard-hugepages.args b/tests/qemuxml2argvdata/pages-discard-hugepages.args
+new file mode 100644
+index 0000000000..2dfacefe4a
+--- /dev/null
++++ b/tests/qemuxml2argvdata/pages-discard-hugepages.args
+@@ -0,0 +1,28 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++QEMU_AUDIO_DRV=none \
++/usr/bin/qemu-system-i686 \
++-name SomeDummyHugepagesGuest \
++-S \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 1024 \
++-smp 2,sockets=2,cores=1,threads=1 \
++-mem-prealloc \
++-mem-path /dev/hugepages2M/libvirt/qemu/-1-SomeDummyHugepagesGu \
++-numa node,nodeid=0,cpus=0,mem=256 \
++-numa node,nodeid=1,cpus=1,mem=768 \
++-uuid ef1bdff4-27f3-4e85-a807-5fb4d58463cc \
++-display none \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,\
++path=/tmp/lib/domain--1-SomeDummyHugepagesGu/monitor.sock,server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot c \
++-usb
+diff --git a/tests/qemuxml2argvdata/pages-discard-hugepages.xml b/tests/qemuxml2argvdata/pages-discard-hugepages.xml
+new file mode 100644
+index 0000000000..d1620d1946
+--- /dev/null
++++ b/tests/qemuxml2argvdata/pages-discard-hugepages.xml
+@@ -0,0 +1,34 @@
++<domain type='qemu'>
++  <name>SomeDummyHugepagesGuest</name>
++  <uuid>ef1bdff4-27f3-4e85-a807-5fb4d58463cc</uuid>
++  <memory unit='KiB'>1048576</memory>
++  <currentMemory unit='KiB'>1048576</currentMemory>
++  <memoryBacking>
++    <hugepages/>
++  </memoryBacking>
++  <vcpu placement='static'>2</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <cpu>
++    <numa>
++      <cell id='0' cpus='0' memory='262144' unit='KiB' discard='no'/>
++      <cell id='1' cpus='1' memory='786432' unit='KiB' discard='yes'/>
++    </numa>
++  </cpu>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <controller type='usb' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <input type='mouse' bus='ps2'/>
++    <input type='keyboard' bus='ps2'/>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 6a79918f67..a95d2c1915 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -948,6 +948,10 @@ mymain(void)
+     DO_TEST("pages-discard",
+             QEMU_CAPS_OBJECT_MEMORY_FILE,
+             QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
++    DO_TEST("pages-discard-hugepages",
++            QEMU_CAPS_OBJECT_MEMORY_RAM,
++            QEMU_CAPS_OBJECT_MEMORY_FILE,
++            QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-numa-default",
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+@@ -961,8 +965,7 @@ mymain(void)
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-pages3", QEMU_CAPS_OBJECT_MEMORY_RAM,
+-            QEMU_CAPS_OBJECT_MEMORY_FILE,
+-            QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
++            QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-shared",
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+diff --git a/tests/qemuxml2xmloutdata/hugepages-pages3.xml b/tests/qemuxml2xmloutdata/hugepages-pages3.xml
+index 90e6efa5ea..be21c3eddd 100644
+--- a/tests/qemuxml2xmloutdata/hugepages-pages3.xml
++++ b/tests/qemuxml2xmloutdata/hugepages-pages3.xml
+@@ -15,8 +15,8 @@
+   </os>
+   <cpu>
+     <numa>
+-      <cell id='0' cpus='0' memory='262144' unit='KiB' discard='no'/>
+-      <cell id='1' cpus='1' memory='786432' unit='KiB' discard='yes'/>
++      <cell id='0' cpus='0' memory='262144' unit='KiB'/>
++      <cell id='1' cpus='1' memory='786432' unit='KiB'/>
+     </numa>
+   </cpu>
+   <clock offset='utc'/>
+diff --git a/tests/qemuxml2xmloutdata/pages-discard-hugepages.xml b/tests/qemuxml2xmloutdata/pages-discard-hugepages.xml
+new file mode 120000
+index 0000000000..3d2f0682dc
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/pages-discard-hugepages.xml
+@@ -0,0 +1 @@
++../qemuxml2argvdata/pages-discard-hugepages.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index a4448ff168..83c0ffdfe2 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -331,6 +331,7 @@ mymain(void)
+     DO_TEST("pmu-feature-off", NONE);
+ 
+     DO_TEST("pages-discard", NONE);
++    DO_TEST("pages-discard-hugepages", NONE);
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-numa-default-2M", NONE);
+     DO_TEST("hugepages-numa-default-dimm", NONE);
+-- 
+2.18.0
+

@@ -1,0 +1,175 @@
+From 5f4b5ca1fe285fe7d920088b3cac57448777a7ec Mon Sep 17 00:00:00 2001
+Message-Id: <5f4b5ca1fe285fe7d920088b3cac57448777a7ec@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:04:01 +0200
+Subject: [PATCH] conf: Replace 'error' with 'cleanup' in
+ virDomainHostdevDefParseXMLSubsys
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The exit path is the same for both success and failure, so the label
+should be called cleanup.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit f1f6f4858260a77416ed5e0c86c4e0614aaf0a5e)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c | 38 +++++++++++++++++++-------------------
+ 1 file changed, 19 insertions(+), 19 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 08654ab41d..72086f9e86 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -7690,18 +7690,18 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                            _("unknown host device source address type '%s'"),
+                            type);
+-            goto error;
++            goto cleanup;
+         }
+     } else {
+         virReportError(VIR_ERR_XML_ERROR,
+                        "%s", _("missing source address type"));
+-        goto error;
++        goto cleanup;
+     }
+ 
+     if (!(sourcenode = virXPathNode("./source", ctxt))) {
+         virReportError(VIR_ERR_XML_ERROR, "%s",
+                        _("Missing <source> element in hostdev device"));
+-        goto error;
++        goto cleanup;
+     }
+ 
+     if (def->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB &&
+@@ -7709,20 +7709,20 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                        _("Setting startupPolicy is only allowed for USB"
+                          " devices"));
+-        goto error;
++        goto cleanup;
+     }
+ 
+     if (sgio) {
+         if (def->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI) {
+             virReportError(VIR_ERR_XML_ERROR, "%s",
+                            _("sgio is only supported for scsi host device"));
+-            goto error;
++            goto cleanup;
+         }
+ 
+         if ((scsisrc->sgio = virDomainDeviceSGIOTypeFromString(sgio)) <= 0) {
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                            _("unknown sgio mode '%s'"), sgio);
+-            goto error;
++            goto cleanup;
+         }
+     }
+ 
+@@ -7730,14 +7730,14 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
+         if (def->source.subsys.type != VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI) {
+             virReportError(VIR_ERR_XML_ERROR, "%s",
+                            _("rawio is only supported for scsi host device"));
+-            goto error;
++            goto cleanup;
+         }
+ 
+         if ((scsisrc->rawio = virTristateBoolTypeFromString(rawio)) <= 0) {
+             virReportError(VIR_ERR_XML_ERROR,
+                            _("unknown hostdev rawio setting '%s'"),
+                            rawio);
+-            goto error;
++            goto cleanup;
+         }
+     }
+ 
+@@ -7746,28 +7746,28 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
+             virReportError(VIR_ERR_XML_ERROR, "%s",
+                            _("'model' attribute in <hostdev> is only supported "
+                              "when type='mdev'"));
+-            goto error;
++            goto cleanup;
+         }
+     } else {
+         if (!model) {
+             virReportError(VIR_ERR_XML_ERROR, "%s",
+                            _("Missing 'model' attribute in mediated device's "
+                              "<hostdev> element"));
+-            goto error;
++            goto cleanup;
+         }
+ 
+         if ((mdevsrc->model = virMediatedDeviceModelTypeFromString(model)) < 0) {
+             virReportError(VIR_ERR_XML_ERROR,
+                            _("unknown hostdev model '%s'"),
+                            model);
+-            goto error;
++            goto cleanup;
+         }
+     }
+ 
+     switch (def->source.subsys.type) {
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_PCI:
+         if (virDomainHostdevSubsysPCIDefParseXML(sourcenode, def, flags) < 0)
+-            goto error;
++            goto cleanup;
+ 
+         backend = VIR_DOMAIN_HOSTDEV_PCI_BACKEND_DEFAULT;
+         if ((backendStr = virXPathString("string(./driver/@name)", ctxt)) &&
+@@ -7776,7 +7776,7 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
+             virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                            _("Unknown PCI device <driver name='%s'/> "
+                              "has been specified"), backendStr);
+-            goto error;
++            goto cleanup;
+         }
+         pcisrc->backend = backend;
+ 
+@@ -7784,32 +7784,32 @@ virDomainHostdevDefParseXMLSubsys(xmlNodePtr node,
+ 
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_USB:
+         if (virDomainHostdevSubsysUSBDefParseXML(sourcenode, def) < 0)
+-            goto error;
++            goto cleanup;
+         break;
+ 
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI:
+         if (virDomainHostdevSubsysSCSIDefParseXML(sourcenode, scsisrc, ctxt) < 0)
+-            goto error;
++            goto cleanup;
+         break;
+ 
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_SCSI_HOST:
+         if (virDomainHostdevSubsysSCSIVHostDefParseXML(sourcenode, def) < 0)
+-            goto error;
++            goto cleanup;
+         break;
+     case VIR_DOMAIN_HOSTDEV_SUBSYS_TYPE_MDEV:
+         if (virDomainHostdevSubsysMediatedDevDefParseXML(def, ctxt) < 0)
+-            goto error;
++            goto cleanup;
+         break;
+ 
+     default:
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                        _("address type='%s' not supported in hostdev interfaces"),
+                        virDomainHostdevSubsysTypeToString(def->source.subsys.type));
+-        goto error;
++        goto cleanup;
+     }
+ 
+     ret = 0;
+- error:
++ cleanup:
+     VIR_FREE(managed);
+     VIR_FREE(sgio);
+     VIR_FREE(rawio);
+-- 
+2.18.0
+

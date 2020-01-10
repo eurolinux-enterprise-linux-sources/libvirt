@@ -1,0 +1,68 @@
+From 7359db070b7a1379ea33e2754a00e56ca5e6b29f Mon Sep 17 00:00:00 2001
+Message-Id: <7359db070b7a1379ea33e2754a00e56ca5e6b29f@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Wed, 7 Nov 2018 14:34:52 +0100
+Subject: [PATCH] qemu: Don't ignore resume events
+
+Since commit v4.7.0-302-ge6d77a75c4 processing RESUME event is mandatory
+for updating domain state. But the event handler explicitly ignored this
+event in some cases. Thus the state would be wrong after a fake reboot
+or when a domain was rebooted after it crashed.
+
+BTW, the code to ignore RESUME event after SHUTDOWN didn't make sense
+even before making RESUME event mandatory. Most likely it was there as a
+result of careless copy&paste from qemuProcessHandleStop.
+
+The corresponding debug message was clarified since the original state
+does not have to be "paused" only and while we have a "resumed" event,
+the state is called "running".
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1612943
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit e47949357ba268e7e8c3adea7c262b84fa002302)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1634759
+https://bugzilla.redhat.com/show_bug.cgi?id=1634758
+https://bugzilla.redhat.com/show_bug.cgi?id=1643338
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/qemu/qemu_process.c | 12 +++---------
+ 1 file changed, 3 insertions(+), 9 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 2d51c0fa25..9b5cb93325 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -699,15 +699,10 @@ qemuProcessHandleResume(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+         priv->runningReason = VIR_DOMAIN_RUNNING_UNKNOWN;
+     }
+ 
+-    if (virDomainObjGetState(vm, NULL) == VIR_DOMAIN_PAUSED) {
+-        if (priv->gotShutdown) {
+-            VIR_DEBUG("Ignoring RESUME event after SHUTDOWN");
+-            goto unlock;
+-        }
+-
++    if (virDomainObjGetState(vm, NULL) != VIR_DOMAIN_RUNNING) {
+         eventDetail = qemuDomainRunningReasonToResumeEvent(reason);
+-        VIR_DEBUG("Transitioned guest %s out of paused into resumed state, "
+-                  "reason '%s', event detail %d",
++        VIR_DEBUG("Transitioned guest %s into running state, reason '%s', "
++                  "event detail %d",
+                   vm->def->name, virDomainRunningReasonTypeToString(reason),
+                   eventDetail);
+ 
+@@ -722,7 +717,6 @@ qemuProcessHandleResume(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+         }
+     }
+ 
+- unlock:
+     virObjectUnlock(vm);
+     virObjectEventStateQueue(driver->domainEventState, event);
+     virObjectUnref(cfg);
+-- 
+2.19.1
+

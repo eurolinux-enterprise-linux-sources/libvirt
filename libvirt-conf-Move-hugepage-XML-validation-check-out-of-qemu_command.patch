@@ -1,0 +1,247 @@
+From 6ed9653d9339dca71103c8d6c9f75749bdaf9a54 Mon Sep 17 00:00:00 2001
+Message-Id: <6ed9653d9339dca71103c8d6c9f75749bdaf9a54@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:20 +0200
+Subject: [PATCH] conf: Move hugepage XML validation check out of qemu_command
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We can safely validate the hugepage nodeset attribute at a define time.
+This validation is not done for already existing domains when the daemon
+is restarted.
+
+All the changes to the tests are necessary because we move the error
+from domain start into XML parse.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 5c93dfb46d9dff623707994f115b6bd7ca4f0682)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c                        | 32 +++++++++++++++++
+ src/qemu/qemu_command.c                       | 34 -------------------
+ .../seclabel-dynamic-none-relabel.xml         |  2 +-
+ tests/qemuxml2argvtest.c                      | 18 +++++-----
+ .../hugepages-default-1G-nodeset-2M.xml       |  1 -
+ .../qemuxml2xmloutdata/hugepages-nodeset.xml  |  1 -
+ .../hugepages-numa-nodeset-nonexist.xml       |  1 -
+ .../seclabel-dynamic-none-relabel.xml         |  2 +-
+ tests/qemuxml2xmltest.c                       |  3 --
+ 9 files changed, 43 insertions(+), 51 deletions(-)
+ delete mode 120000 tests/qemuxml2xmloutdata/hugepages-default-1G-nodeset-2M.xml
+ delete mode 120000 tests/qemuxml2xmloutdata/hugepages-nodeset.xml
+ delete mode 120000 tests/qemuxml2xmloutdata/hugepages-numa-nodeset-nonexist.xml
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index a05aad056d..280bbdf35c 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -6142,6 +6142,35 @@ virDomainDefLifecycleActionValidate(const virDomainDef *def)
+ }
+ 
+ 
++static int
++virDomainDefMemtuneValidate(const virDomainDef *def)
++{
++    const virDomainMemtune *mem = &(def->mem);
++    size_t i;
++    ssize_t pos = virDomainNumaGetNodeCount(def->numa) - 1;
++
++    for (i = 0; i < mem->nhugepages; i++) {
++        ssize_t nextBit;
++
++        if (!mem->hugepages[i].nodemask) {
++            /* This is the master hugepage to use. Skip it as it has no
++             * nodemask anyway. */
++            continue;
++        }
++
++        nextBit = virBitmapNextSetBit(mem->hugepages[i].nodemask, pos);
++        if (nextBit >= 0) {
++            virReportError(VIR_ERR_XML_DETAIL,
++                           _("hugepages: node %zd not found"),
++                           nextBit);
++            return -1;
++        }
++    }
++
++    return 0;
++}
++
++
+ static int
+ virDomainDefValidateInternal(const virDomainDef *def)
+ {
+@@ -6177,6 +6206,9 @@ virDomainDefValidateInternal(const virDomainDef *def)
+     if (virDomainDefLifecycleActionValidate(def) < 0)
+         return -1;
+ 
++    if (virDomainDefMemtuneValidate(def) < 0)
++        return -1;
++
+     return 0;
+ }
+ 
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 954265feb0..f2b64ed720 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -7482,16 +7482,6 @@ qemuBuildMemPathStr(virQEMUDriverConfigPtr cfg,
+     if (!def->mem.nhugepages)
+         return 0;
+ 
+-    if (def->mem.hugepages[0].nodemask) {
+-        ssize_t next_bit = virBitmapNextSetBit(def->mem.hugepages[0].nodemask, -1);
+-        if (next_bit >= 0) {
+-            virReportError(VIR_ERR_XML_DETAIL,
+-                           _("hugepages: node %zd not found"),
+-                           next_bit);
+-            return -1;
+-        }
+-    }
+-
+     /* There is one special case: if user specified "huge"
+      * pages of regular system pages size.
+      * And there is nothing to do in this case.
+@@ -7624,30 +7614,6 @@ qemuBuildNumaArgStr(virQEMUDriverConfigPtr cfg,
+     if (!virDomainNumatuneNodesetIsAvailable(def->numa, priv->autoNodeset))
+         goto cleanup;
+ 
+-    for (i = 0; i < def->mem.nhugepages; i++) {
+-        ssize_t next_bit, pos = 0;
+-
+-        if (!def->mem.hugepages[i].nodemask) {
+-            /* This is the master hugepage to use. Skip it as it has no
+-             * nodemask anyway. */
+-            continue;
+-        }
+-
+-        if (ncells) {
+-            /* Fortunately, we allow only guest NUMA nodes to be continuous
+-             * starting from zero. */
+-            pos = ncells - 1;
+-        }
+-
+-        next_bit = virBitmapNextSetBit(def->mem.hugepages[i].nodemask, pos);
+-        if (next_bit >= 0) {
+-            virReportError(VIR_ERR_XML_DETAIL,
+-                           _("hugepages: node %zd not found"),
+-                           next_bit);
+-            goto cleanup;
+-        }
+-    }
+-
+     if (VIR_ALLOC_N(nodeBackends, ncells) < 0)
+         goto cleanup;
+ 
+diff --git a/tests/qemuxml2argvdata/seclabel-dynamic-none-relabel.xml b/tests/qemuxml2argvdata/seclabel-dynamic-none-relabel.xml
+index 47f253b5f7..e954250009 100644
+--- a/tests/qemuxml2argvdata/seclabel-dynamic-none-relabel.xml
++++ b/tests/qemuxml2argvdata/seclabel-dynamic-none-relabel.xml
+@@ -5,7 +5,7 @@
+   <currentMemory unit='KiB'>262144</currentMemory>
+   <memoryBacking>
+     <hugepages>
+-      <page size='2048' unit='KiB' nodeset='0'/>
++      <page size='2048' unit='KiB'/>
+     </hugepages>
+   </memoryBacking>
+   <vcpu placement='static'>4</vcpu>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index bd5fdf9412..f82bca2637 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -959,12 +959,12 @@ mymain(void)
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
+-    DO_TEST("hugepages-default-1G-nodeset-2M", NONE);
+-    DO_TEST_FAILURE("hugepages-nodeset", NONE);
+-    DO_TEST_FAILURE("hugepages-nodeset-nonexist",
+-                    QEMU_CAPS_DEVICE_PC_DIMM,
+-                    QEMU_CAPS_OBJECT_MEMORY_FILE,
+-                    QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
++    DO_TEST_PARSE_ERROR("hugepages-default-1G-nodeset-2M", NONE);
++    DO_TEST_PARSE_ERROR("hugepages-nodeset", NONE);
++    DO_TEST_PARSE_ERROR("hugepages-nodeset-nonexist",
++                        QEMU_CAPS_DEVICE_PC_DIMM,
++                        QEMU_CAPS_OBJECT_MEMORY_FILE,
++                        QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
+     DO_TEST("hugepages-numa-default",
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-numa-default-2M",
+@@ -979,9 +979,9 @@ mymain(void)
+     DO_TEST("hugepages-numa-nodeset-part",
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+-    DO_TEST_FAILURE("hugepages-numa-nodeset-nonexist",
+-                    QEMU_CAPS_OBJECT_MEMORY_RAM,
+-                    QEMU_CAPS_OBJECT_MEMORY_FILE);
++    DO_TEST_PARSE_ERROR("hugepages-numa-nodeset-nonexist",
++                        QEMU_CAPS_OBJECT_MEMORY_RAM,
++                        QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-shared",
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+diff --git a/tests/qemuxml2xmloutdata/hugepages-default-1G-nodeset-2M.xml b/tests/qemuxml2xmloutdata/hugepages-default-1G-nodeset-2M.xml
+deleted file mode 120000
+index 3d8eb7616e..0000000000
+--- a/tests/qemuxml2xmloutdata/hugepages-default-1G-nodeset-2M.xml
++++ /dev/null
+@@ -1 +0,0 @@
+-../qemuxml2argvdata/hugepages-default-1G-nodeset-2M.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmloutdata/hugepages-nodeset.xml b/tests/qemuxml2xmloutdata/hugepages-nodeset.xml
+deleted file mode 120000
+index b55838b780..0000000000
+--- a/tests/qemuxml2xmloutdata/hugepages-nodeset.xml
++++ /dev/null
+@@ -1 +0,0 @@
+-../qemuxml2argvdata/hugepages-nodeset.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmloutdata/hugepages-numa-nodeset-nonexist.xml b/tests/qemuxml2xmloutdata/hugepages-numa-nodeset-nonexist.xml
+deleted file mode 120000
+index d490edca69..0000000000
+--- a/tests/qemuxml2xmloutdata/hugepages-numa-nodeset-nonexist.xml
++++ /dev/null
+@@ -1 +0,0 @@
+-../qemuxml2argvdata/hugepages-numa-nodeset-nonexist.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmloutdata/seclabel-dynamic-none-relabel.xml b/tests/qemuxml2xmloutdata/seclabel-dynamic-none-relabel.xml
+index 050967b4ee..bfa66b8deb 100644
+--- a/tests/qemuxml2xmloutdata/seclabel-dynamic-none-relabel.xml
++++ b/tests/qemuxml2xmloutdata/seclabel-dynamic-none-relabel.xml
+@@ -5,7 +5,7 @@
+   <currentMemory unit='KiB'>262144</currentMemory>
+   <memoryBacking>
+     <hugepages>
+-      <page size='2048' unit='KiB' nodeset='0'/>
++      <page size='2048' unit='KiB'/>
+     </hugepages>
+   </memoryBacking>
+   <vcpu placement='static'>4</vcpu>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index acbe2f7133..aa543e9e51 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -336,13 +336,10 @@ mymain(void)
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
+-    DO_TEST("hugepages-default-1G-nodeset-2M", NONE);
+-    DO_TEST("hugepages-nodeset", NONE);
+     DO_TEST("hugepages-numa-default-2M", NONE);
+     DO_TEST("hugepages-numa-default-dimm", NONE);
+     DO_TEST("hugepages-numa-nodeset", NONE);
+     DO_TEST("hugepages-numa-nodeset-part", NONE);
+-    DO_TEST("hugepages-numa-nodeset-nonexist", NONE);
+     DO_TEST("hugepages-shared", NONE);
+     DO_TEST("hugepages-memaccess", NONE);
+     DO_TEST("hugepages-memaccess2", NONE);
+-- 
+2.18.0
+

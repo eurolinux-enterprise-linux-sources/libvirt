@@ -1,0 +1,41 @@
+From 76c38a02c95057563349d6298aa70bde014b75c8 Mon Sep 17 00:00:00 2001
+Message-Id: <76c38a02c95057563349d6298aa70bde014b75c8@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 26 Feb 2019 10:45:56 +0100
+Subject: [PATCH] cpu_map: Add more signatures for Conroe CPU model
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit c1f6a3269c595e7d3d0c9cf31ef7e6cf88291056)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+	src/cpu_map/x86_Conroe.xml
+            - cpu_map split not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 381068674c..df2a56ce58 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -790,6 +790,7 @@
+     <!-- Intel CPU models -->
+     <model name='Conroe'>
+       <signature family='6' model='15'/> <!-- 0006f0 -->
++      <signature family='6' model='22'/> <!-- 010660 -->
+       <vendor name='Intel'/>
+       <feature name='apic'/>
+       <feature name='clflush'/>
+-- 
+2.21.0
+

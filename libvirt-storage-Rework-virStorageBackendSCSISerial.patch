@@ -1,0 +1,151 @@
+From 4b841d996f9e1181e6a0614eb0bc9a35d5f7c372 Mon Sep 17 00:00:00 2001
+Message-Id: <4b841d996f9e1181e6a0614eb0bc9a35d5f7c372@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Tue, 12 Mar 2019 13:55:57 -0400
+Subject: [PATCH] storage: Rework virStorageBackendSCSISerial
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1687715 (7.6.z)
+https://bugzilla.redhat.com/show_bug.cgi?id=1657468 (7.7.0)
+
+Alter the code to use the virStorageFileGetSCSIKey helper
+to fetch the unique key for the SCSI disk. Alter the logic
+to follow the former code which would return a duplicate
+of @dev when either the virCommandRun succeeded, but returned
+an empty string or when WITH_UDEV was not true.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 8bf89dc83729aaa0388f89e972a4847fd1e267c6)
+
+Managed conflict in src/locking/lock_driver_lockd.c as a result of
+commit e9e904b3b70533982954ab39ccb81122e8dad338 which changed from
+using "goto error" to using "goto cleanup" by using the error label.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Message-Id: <20190312175559.13583-3-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/locking/lock_driver_lockd.c |  2 +-
+ src/storage/storage_util.c      | 33 +++++++--------------------------
+ src/util/virstoragefile.c       | 10 +++++++---
+ src/util/virstoragefile.h       |  3 ++-
+ 4 files changed, 17 insertions(+), 31 deletions(-)
+
+diff --git a/src/locking/lock_driver_lockd.c b/src/locking/lock_driver_lockd.c
+index 957a963a7b..1b9341ceba 100644
+--- a/src/locking/lock_driver_lockd.c
++++ b/src/locking/lock_driver_lockd.c
+@@ -517,7 +517,7 @@ static int virLockManagerLockDaemonAddResource(virLockManagerPtr lock,
+         if (STRPREFIX(name, "/dev") &&
+             driver->scsiLockSpaceDir) {
+             VIR_DEBUG("Trying to find an SCSI ID for %s", name);
+-            if (virStorageFileGetSCSIKey(name, &newName) < 0)
++            if (virStorageFileGetSCSIKey(name, &newName, false) < 0)
+                 goto error;
+ 
+             if (newName) {
+diff --git a/src/storage/storage_util.c b/src/storage/storage_util.c
+index 5dc22d3182..d1659c0c8d 100644
+--- a/src/storage/storage_util.c
++++ b/src/storage/storage_util.c
+@@ -3696,36 +3696,17 @@ virStorageBackendRefreshLocal(virStoragePoolObjPtr pool)
+ static char *
+ virStorageBackendSCSISerial(const char *dev)
+ {
++    int rc;
+     char *serial = NULL;
+-#ifdef WITH_UDEV
+-    virCommandPtr cmd = virCommandNewArgList(
+-        "/lib/udev/scsi_id",
+-        "--replace-whitespace",
+-        "--whitelisted",
+-        "--device", dev,
+-        NULL
+-        );
+ 
+-    /* Run the program and capture its output */
+-    virCommandSetOutputBuffer(cmd, &serial);
+-    if (virCommandRun(cmd, NULL) < 0)
+-        goto cleanup;
+-#endif
++    rc = virStorageFileGetSCSIKey(dev, &serial, true);
++    if (rc == 0 && serial)
++        return serial;
+ 
+-    if (serial && STRNEQ(serial, "")) {
+-        char *nl = strchr(serial, '\n');
+-        if (nl)
+-            *nl = '\0';
+-    } else {
+-        VIR_FREE(serial);
+-        ignore_value(VIR_STRDUP(serial, dev));
+-    }
+-
+-#ifdef WITH_UDEV
+- cleanup:
+-    virCommandFree(cmd);
+-#endif
++    if (rc == -2)
++        return NULL;
+ 
++    ignore_value(VIR_STRDUP(serial, dev));
+     return serial;
+ }
+ 
+diff --git a/src/util/virstoragefile.c b/src/util/virstoragefile.c
+index ed7266619d..56d38b467e 100644
+--- a/src/util/virstoragefile.c
++++ b/src/util/virstoragefile.c
+@@ -1438,6 +1438,7 @@ int virStorageFileGetLVMKey(const char *path,
+ /* virStorageFileGetSCSIKey
+  * @path: Path to the SCSI device
+  * @key: Unique key to be returned
++ * @ignoreError: Used to not report ENOSYS
+  *
+  * Using a udev specific function, query the @path to get and return a
+  * unique @key for the caller to use.
+@@ -1450,7 +1451,8 @@ int virStorageFileGetLVMKey(const char *path,
+  */
+ int
+ virStorageFileGetSCSIKey(const char *path,
+-                         char **key)
++                         char **key,
++                         bool ignoreError ATTRIBUTE_UNUSED)
+ {
+     int status;
+     virCommandPtr cmd = virCommandNewArgList(
+@@ -1491,9 +1493,11 @@ virStorageFileGetSCSIKey(const char *path,
+ }
+ #else
+ int virStorageFileGetSCSIKey(const char *path,
+-                             char **key ATTRIBUTE_UNUSED)
++                             char **key ATTRIBUTE_UNUSED,
++                             bool ignoreError)
+ {
+-    virReportSystemError(ENOSYS, _("Unable to get SCSI key for %s"), path);
++    if (!ignoreError)
++        virReportSystemError(ENOSYS, _("Unable to get SCSI key for %s"), path);
+     return -1;
+ }
+ #endif
+diff --git a/src/util/virstoragefile.h b/src/util/virstoragefile.h
+index 991098e6c6..bbb0b8b3c1 100644
+--- a/src/util/virstoragefile.h
++++ b/src/util/virstoragefile.h
+@@ -384,7 +384,8 @@ bool virStorageIsRelative(const char *backing);
+ int virStorageFileGetLVMKey(const char *path,
+                             char **key);
+ int virStorageFileGetSCSIKey(const char *path,
+-                             char **key);
++                             char **key,
++                             bool ignoreError);
+ 
+ void virStorageAuthDefFree(virStorageAuthDefPtr def);
+ virStorageAuthDefPtr virStorageAuthDefCopy(const virStorageAuthDef *src);
+-- 
+2.21.0
+

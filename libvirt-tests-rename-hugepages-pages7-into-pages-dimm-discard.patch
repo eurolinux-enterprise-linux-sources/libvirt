@@ -1,0 +1,189 @@
+From bbfd839091e67153b9479e546914b819efed807a Mon Sep 17 00:00:00 2001
+Message-Id: <bbfd839091e67153b9479e546914b819efed807a@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:16 +0200
+Subject: [PATCH] tests: rename hugepages-pages7 into pages-dimm-discard
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Remove unnecessary XML elements as well.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 7e0ac26867da8b3b1464b7649a53fdd6dde8d9ab)
+
+Conflicts:
+    tests/qemuxml2argvdata/pages-dimm-discard.args
+        - missing upstream commit <caccbba64a>
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ ...ges-pages7.args => pages-dimm-discard.args} | 16 +++++-----------
+ ...pages-pages7.xml => pages-dimm-discard.xml} | 18 +-----------------
+ tests/qemuxml2argvtest.c                       |  7 ++++---
+ tests/qemuxml2xmloutdata/hugepages-pages7.xml  |  1 -
+ .../qemuxml2xmloutdata/pages-dimm-discard.xml  |  1 +
+ tests/qemuxml2xmltest.c                        |  2 +-
+ 6 files changed, 12 insertions(+), 33 deletions(-)
+ rename tests/qemuxml2argvdata/{hugepages-pages7.args => pages-dimm-discard.args} (65%)
+ rename tests/qemuxml2argvdata/{hugepages-pages7.xml => pages-dimm-discard.xml} (73%)
+ delete mode 120000 tests/qemuxml2xmloutdata/hugepages-pages7.xml
+ create mode 120000 tests/qemuxml2xmloutdata/pages-dimm-discard.xml
+
+diff --git a/tests/qemuxml2argvdata/hugepages-pages7.args b/tests/qemuxml2argvdata/pages-dimm-discard.args
+similarity index 65%
+rename from tests/qemuxml2argvdata/hugepages-pages7.args
+rename to tests/qemuxml2argvdata/pages-dimm-discard.args
+index 02a98026eb..97184e074a 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages7.args
++++ b/tests/qemuxml2argvdata/pages-dimm-discard.args
+@@ -10,16 +10,14 @@ QEMU_AUDIO_DRV=none \
+ -machine pc-i440fx-2.3,accel=tcg,usb=off,dump-guest-core=off \
+ -m size=1048576k,slots=16,maxmem=1099511627776k \
+ -smp 2,sockets=2,cores=1,threads=1 \
+--mem-prealloc \
+--mem-path /dev/hugepages2M/libvirt/qemu/-1-fedora \
+ -numa node,nodeid=0,cpus=0-1,mem=1024 \
+ -object memory-backend-file,id=memdimm0,prealloc=yes,\
+ mem-path=/dev/hugepages1G/libvirt/qemu/-1-fedora,size=1073741824,\
+ host-nodes=1-3,policy=bind \
+ -device pc-dimm,node=0,memdev=memdimm0,id=dimm0,slot=0 \
+--object memory-backend-file,id=memdimm1,prealloc=yes,\
+-mem-path=/dev/hugepages2M/libvirt/qemu/-1-fedora,discard-data=yes,share=no,\
+-size=536870912 \
++-object memory-backend-file,id=memdimm1,\
++mem-path=/var/lib/libvirt/qemu/ram/libvirt/qemu/-1-fedora/dimm1,\
++discard-data=yes,share=no,size=536870912 \
+ -device pc-dimm,node=0,memdev=memdimm1,id=dimm1,slot=1 \
+ -uuid 63840878-0deb-4095-97e6-fc444d9bc9fa \
+ -display none \
+@@ -30,10 +28,6 @@ server,nowait \
+ -mon chardev=charmonitor,id=monitor,mode=control \
+ -rtc base=utc \
+ -no-shutdown \
++-no-acpi \
+ -boot c \
+--usb \
+--drive file=/var/lib/libvirt/images/fedora.qcow2,format=qcow2,if=none,\
+-id=drive-virtio-disk0 \
+--device virtio-blk-pci,bus=pci.0,addr=0x7,drive=drive-virtio-disk0,\
+-id=virtio-disk0 \
+--device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3
++-usb
+diff --git a/tests/qemuxml2argvdata/hugepages-pages7.xml b/tests/qemuxml2argvdata/pages-dimm-discard.xml
+similarity index 73%
+rename from tests/qemuxml2argvdata/hugepages-pages7.xml
+rename to tests/qemuxml2argvdata/pages-dimm-discard.xml
+index 28c72f85a7..3d233687e1 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages7.xml
++++ b/tests/qemuxml2argvdata/pages-dimm-discard.xml
+@@ -4,19 +4,11 @@
+   <maxMemory slots='16' unit='KiB'>1099511627776</maxMemory>
+   <memory unit='KiB'>2621439</memory>
+   <currentMemory unit='KiB'>2621439</currentMemory>
+-  <memoryBacking>
+-    <hugepages/>
+-  </memoryBacking>
+   <vcpu placement='static'>2</vcpu>
+   <os>
+     <type arch='x86_64' machine='pc-i440fx-2.3'>hvm</type>
+     <boot dev='hd'/>
+   </os>
+-  <features>
+-    <acpi/>
+-    <apic/>
+-    <pae/>
+-  </features>
+   <cpu>
+     <numa>
+       <cell id='0' cpus='0-1' memory='1048576' unit='KiB'/>
+@@ -28,21 +20,13 @@
+   <on_crash>restart</on_crash>
+   <devices>
+     <emulator>/usr/bin/qemu-system-x86_64</emulator>
+-    <disk type='file' device='disk'>
+-      <driver name='qemu' type='qcow2'/>
+-      <source file='/var/lib/libvirt/images/fedora.qcow2'/>
+-      <target dev='vda' bus='virtio'/>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x07' function='0x0'/>
+-    </disk>
+     <controller type='usb' index='0'>
+       <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
+     </controller>
+     <controller type='pci' index='0' model='pci-root'/>
+     <input type='mouse' bus='ps2'/>
+     <input type='keyboard' bus='ps2'/>
+-    <memballoon model='virtio'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+-    </memballoon>
++    <memballoon model='none'/>
+     <memory model='dimm' discard='no'>
+       <source>
+         <nodemask>1-3</nodemask>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 1aab23408d..f8fbca1806 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -952,6 +952,10 @@ mymain(void)
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE,
+             QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
++    DO_TEST("pages-dimm-discard",
++            QEMU_CAPS_DEVICE_PC_DIMM,
++            QEMU_CAPS_OBJECT_MEMORY_FILE,
++            QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
+@@ -976,9 +980,6 @@ mymain(void)
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST_PARSE_ERROR("hugepages-memaccess-invalid", NONE);
+-    DO_TEST("hugepages-pages7",
+-            QEMU_CAPS_DEVICE_PC_DIMM, QEMU_CAPS_OBJECT_MEMORY_FILE,
+-            QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
+     DO_TEST_FAILURE("hugepages-pages8",
+                     QEMU_CAPS_DEVICE_PC_DIMM, QEMU_CAPS_OBJECT_MEMORY_FILE,
+                     QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
+diff --git a/tests/qemuxml2xmloutdata/hugepages-pages7.xml b/tests/qemuxml2xmloutdata/hugepages-pages7.xml
+deleted file mode 120000
+index b4ce4defda..0000000000
+--- a/tests/qemuxml2xmloutdata/hugepages-pages7.xml
++++ /dev/null
+@@ -1 +0,0 @@
+-../qemuxml2argvdata/hugepages-pages7.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmloutdata/pages-dimm-discard.xml b/tests/qemuxml2xmloutdata/pages-dimm-discard.xml
+new file mode 120000
+index 0000000000..05bbef8d65
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/pages-dimm-discard.xml
+@@ -0,0 +1 @@
++../qemuxml2argvdata/pages-dimm-discard.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index a3555b348e..6afc48f98e 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -332,6 +332,7 @@ mymain(void)
+ 
+     DO_TEST("pages-discard", NONE);
+     DO_TEST("pages-discard-hugepages", NONE);
++    DO_TEST("pages-dimm-discard", NONE);
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
+@@ -340,7 +341,6 @@ mymain(void)
+     DO_TEST("hugepages-numa-nodeset", NONE);
+     DO_TEST("hugepages-numa-nodeset-part", NONE);
+     DO_TEST("hugepages-numa-nodeset-nonexist", NONE);
+-    DO_TEST("hugepages-pages7", NONE);
+     DO_TEST("hugepages-shared", NONE);
+     DO_TEST("hugepages-memaccess", NONE);
+     DO_TEST("hugepages-memaccess2", NONE);
+-- 
+2.18.0
+

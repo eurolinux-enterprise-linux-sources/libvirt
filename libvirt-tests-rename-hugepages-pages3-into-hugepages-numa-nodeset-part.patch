@@ -1,0 +1,137 @@
+From 40df2bdc53e73e4cc293251138cdf339387bb527 Mon Sep 17 00:00:00 2001
+Message-Id: <40df2bdc53e73e4cc293251138cdf339387bb527@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:12 +0200
+Subject: [PATCH] tests: rename hugepages-pages3 into
+ hugepages-numa-nodeset-part
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Remove unnecessary XML elements as well.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 96937ccf265e1dc318bccbde042d0b95b2db30d3)
+
+Conflicts:
+    tests/qemuxml2argvdata/hugepages-numa-nodeset-part.args
+        - missing upstream commit <caccbba64a>
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ ...pages3.args => hugepages-numa-nodeset-part.args} |  5 +----
+ ...s-pages3.xml => hugepages-numa-nodeset-part.xml} |  8 +-------
+ tests/qemuxml2argvtest.c                            |  3 ++-
+ ...s-pages3.xml => hugepages-numa-nodeset-part.xml} | 13 +------------
+ tests/qemuxml2xmltest.c                             |  2 +-
+ 5 files changed, 6 insertions(+), 25 deletions(-)
+ rename tests/qemuxml2argvdata/{hugepages-pages3.args => hugepages-numa-nodeset-part.args} (80%)
+ rename tests/qemuxml2argvdata/{hugepages-pages3.xml => hugepages-numa-nodeset-part.xml} (77%)
+ rename tests/qemuxml2xmloutdata/{hugepages-pages3.xml => hugepages-numa-nodeset-part.xml} (67%)
+
+diff --git a/tests/qemuxml2argvdata/hugepages-pages3.args b/tests/qemuxml2argvdata/hugepages-numa-nodeset-part.args
+similarity index 80%
+rename from tests/qemuxml2argvdata/hugepages-pages3.args
+rename to tests/qemuxml2argvdata/hugepages-numa-nodeset-part.args
+index 2fc701ca22..9999071176 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages3.args
++++ b/tests/qemuxml2argvdata/hugepages-numa-nodeset-part.args
+@@ -26,7 +26,4 @@ path=/tmp/lib/domain--1-SomeDummyHugepagesGu/monitor.sock,server,nowait \
+ -no-shutdown \
+ -no-acpi \
+ -boot c \
+--usb \
+--drive file=/dev/HostVG/QEMUGuest1,format=raw,if=none,id=drive-ide0-0-0 \
+--device ide-drive,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0 \
+--device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3
++-usb
+diff --git a/tests/qemuxml2argvdata/hugepages-pages3.xml b/tests/qemuxml2argvdata/hugepages-numa-nodeset-part.xml
+similarity index 77%
+rename from tests/qemuxml2argvdata/hugepages-pages3.xml
+rename to tests/qemuxml2argvdata/hugepages-numa-nodeset-part.xml
+index 3d3b3f3cc3..b19bdedb36 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages3.xml
++++ b/tests/qemuxml2argvdata/hugepages-numa-nodeset-part.xml
+@@ -25,16 +25,10 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <emulator>/usr/bin/qemu-system-i686</emulator>
+-    <disk type='block' device='disk'>
+-      <source dev='/dev/HostVG/QEMUGuest1'/>
+-      <target dev='hda' bus='ide'/>
+-      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+-    </disk>
+     <controller type='usb' index='0'/>
+-    <controller type='ide' index='0'/>
+     <controller type='pci' index='0' model='pci-root'/>
+     <input type='mouse' bus='ps2'/>
+     <input type='keyboard' bus='ps2'/>
+-    <memballoon model='virtio'/>
++    <memballoon model='none'/>
+   </devices>
+ </domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index a95d2c1915..5a41bbe6e0 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -964,7 +964,8 @@ mymain(void)
+     DO_TEST("hugepages-numa-nodeset",
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+-    DO_TEST("hugepages-pages3", QEMU_CAPS_OBJECT_MEMORY_RAM,
++    DO_TEST("hugepages-numa-nodeset-part",
++            QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-shared",
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+diff --git a/tests/qemuxml2xmloutdata/hugepages-pages3.xml b/tests/qemuxml2xmloutdata/hugepages-numa-nodeset-part.xml
+similarity index 67%
+rename from tests/qemuxml2xmloutdata/hugepages-pages3.xml
+rename to tests/qemuxml2xmloutdata/hugepages-numa-nodeset-part.xml
+index be21c3eddd..1230edfd02 100644
+--- a/tests/qemuxml2xmloutdata/hugepages-pages3.xml
++++ b/tests/qemuxml2xmloutdata/hugepages-numa-nodeset-part.xml
+@@ -25,23 +25,12 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <emulator>/usr/bin/qemu-system-i686</emulator>
+-    <disk type='block' device='disk'>
+-      <driver name='qemu' type='raw'/>
+-      <source dev='/dev/HostVG/QEMUGuest1'/>
+-      <target dev='hda' bus='ide'/>
+-      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+-    </disk>
+     <controller type='usb' index='0'>
+       <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
+     </controller>
+-    <controller type='ide' index='0'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
+-    </controller>
+     <controller type='pci' index='0' model='pci-root'/>
+     <input type='mouse' bus='ps2'/>
+     <input type='keyboard' bus='ps2'/>
+-    <memballoon model='virtio'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+-    </memballoon>
++    <memballoon model='none'/>
+   </devices>
+ </domain>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 83c0ffdfe2..bb7b0ce481 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -336,7 +336,7 @@ mymain(void)
+     DO_TEST("hugepages-numa-default-2M", NONE);
+     DO_TEST("hugepages-numa-default-dimm", NONE);
+     DO_TEST("hugepages-numa-nodeset", NONE);
+-    DO_TEST("hugepages-pages3", NONE);
++    DO_TEST("hugepages-numa-nodeset-part", NONE);
+     DO_TEST("hugepages-pages4", NONE);
+     DO_TEST("hugepages-pages5", NONE);
+     DO_TEST("hugepages-pages6", NONE);
+-- 
+2.18.0
+

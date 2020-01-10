@@ -1,0 +1,45 @@
+From 80eaa9617c886a6955d4752d90c82b807b572dca Mon Sep 17 00:00:00 2001
+Message-Id: <80eaa9617c886a6955d4752d90c82b807b572dca@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 31 Jul 2018 10:38:54 +0200
+Subject: [PATCH] qemu: Exempt video model 'none' from getting a PCI address on
+ Q35
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Commit d48813e8 made sure we wouldn't get one for i440fx, but not for Q35
+machine type. If the primary video didn't get the assumed 0:0:1.0 PCI
+address, the evaluation then failed with: "Cannot automatically add a
+new PCI bus for a device with connect flags 00"
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1609087
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit e9024b0cec3a66ac11784034bb62abe8ec7b46a1)
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_domain_address.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_domain_address.c b/src/qemu/qemu_domain_address.c
+index e6996934b8..0cb5af4a87 100644
+--- a/src/qemu/qemu_domain_address.c
++++ b/src/qemu/qemu_domain_address.c
+@@ -1723,10 +1723,11 @@ qemuDomainValidateDevicePCISlotsQ35(virDomainDefPtr def,
+            goto cleanup;
+     }
+ 
+-    if (def->nvideos > 0) {
++    if (def->nvideos > 0 &&
++        def->videos[0]->type != VIR_DOMAIN_VIDEO_TYPE_NONE) {
+         /* NB: unlike the pc machinetypes, on q35 machinetypes the
+          * integrated devices are at slot 0x1f, so when qemu looks for
+-         * the first free lot for the first VGA, it will always be at
++         * the first free slot for the first VGA, it will always be at
+          * slot 1 (which was used up by the integrated PIIX3 devices
+          * on pc machinetypes).
+          */
+-- 
+2.18.0
+

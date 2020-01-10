@@ -1,0 +1,35 @@
+From 764ec16385379cf58dababfbfb29d9095b4a0513 Mon Sep 17 00:00:00 2001
+Message-Id: <764ec16385379cf58dababfbfb29d9095b4a0513@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 5 Jul 2018 09:35:01 +0200
+Subject: [PATCH] virsh.pod: Drop --persistent for detach-device-alias
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1598087
+
+The detach-device-alias never supported --persistent argument.
+Drop it from the man page.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 31afed468544ad631a7d033fd9cf225e2a1362ad)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tools/virsh.pod | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index dc100db9f3..003becb7c3 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -3197,7 +3197,7 @@ Note that older versions of virsh used I<--config> as an alias for
+ I<--persistent>.
+ 
+ =item B<detach-device-alias> I<domain> I<alias>
+-[[[I<--live>] [I<--config>] | [I<--current>]] | [I<--persistent>]]
++[[[I<--live>] [I<--config>] | [I<--current>]]]]
+ 
+ Detach a device with given I<alias> from the I<domain>.
+ 
+-- 
+2.18.0
+

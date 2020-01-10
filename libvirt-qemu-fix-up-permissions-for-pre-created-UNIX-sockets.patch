@@ -1,0 +1,50 @@
+From cebb6519a3a4b65bf89d7f5ea7bf390f2303f5ee Mon Sep 17 00:00:00 2001
+Message-Id: <cebb6519a3a4b65bf89d7f5ea7bf390f2303f5ee@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Wed, 3 Oct 2018 16:58:18 +0200
+Subject: [PATCH] qemu: fix up permissions for pre-created UNIX sockets
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+My commit d6b8838 fixed the uid:gid for the pre-created UNIX sockets
+but did not account for the different umask of libvirtd and QEMU.
+Since commit 0e1a1a8c we set umask to '0002' for the QEMU process.
+Manually tune-up the permissions to match what we would have gotten
+if QEMU had created the socket.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1633389
+
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 8ba65c4d95712b54362fd81c34bae99f51d45a0b)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+RHEL 7.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1635228
+RHEL 8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1634775
+
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/qemu/qemu_command.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index f2b64ed720..98b554627e 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4933,6 +4933,12 @@ qemuOpenChrChardevUNIXSocket(const virDomainChrSourceDef *dev)
+         goto error;
+     }
+ 
++    /* We run QEMU with umask 0002. Compensate for the umask
++     * libvirtd might be running under to get the same permission
++     * QEMU would have. */
++    if (virFileUpdatePerm(dev->data.nix.path, 0002, 0664) < 0)
++        goto error;
++
+     return fd;
+ 
+  error:
+-- 
+2.19.0
+

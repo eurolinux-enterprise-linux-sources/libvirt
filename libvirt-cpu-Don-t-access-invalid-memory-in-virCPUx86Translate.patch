@@ -1,0 +1,59 @@
+From b470757774a776e2bcbff50c7ae7f40323d10064 Mon Sep 17 00:00:00 2001
+Message-Id: <b470757774a776e2bcbff50c7ae7f40323d10064@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 7 Mar 2019 14:17:01 +0100
+Subject: [PATCH] cpu: Don't access invalid memory in virCPUx86Translate
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Problem is that if there are no signatures for a CPU, then we
+still allocate cpu->signatures (even though with size 0). Later,
+we access cpu->signatures[0] if cpu->signatures is not NULL.
+
+ Invalid read of size 4
+    at 0x5F439D7: virCPUx86Translate (cpu_x86.c:2930)
+    by 0x5F3C239: virCPUTranslate (cpu.c:927)
+    by 0x57CE7A1: qemuProcessUpdateGuestCPU (qemu_process.c:5870)
+    ...
+  Address 0xf752d40 is 0 bytes after a block of size 0 alloc'd
+    at 0x4C30EC6: calloc (vg_replace_malloc.c:711)
+    by 0x5DBDE4E: virAllocN (viralloc.c:190)
+    by 0x5F3E4FA: x86ModelCopySignatures (cpu_x86.c:990)
+    by 0x5F3E60F: x86ModelCopy (cpu_x86.c:1008)
+    by 0x5F3E7CB: x86ModelFromCPU (cpu_x86.c:1068)
+    by 0x5F4397E: virCPUx86Translate (cpu_x86.c:2922)
+    by 0x5F3C239: virCPUTranslate (cpu.c:927)
+    by 0x57CE7A1: qemuProcessUpdateGuestCPU (qemu_process.c:5870)
+    ...
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 62cb9c335c43a722e81ac0a1ed6e1111ba1d428b)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_x86.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/cpu/cpu_x86.c b/src/cpu/cpu_x86.c
+index f6844aaa0d..466c79031d 100644
+--- a/src/cpu/cpu_x86.c
++++ b/src/cpu/cpu_x86.c
+@@ -1021,6 +1021,9 @@ x86ModelCopySignatures(virCPUx86ModelPtr dst,
+ {
+     size_t i;
+ 
++    if (src->nsignatures == 0)
++        return 0;
++
+     if (VIR_ALLOC_N(dst->signatures, src->nsignatures) < 0)
+         return -1;
+ 
+-- 
+2.21.0
+

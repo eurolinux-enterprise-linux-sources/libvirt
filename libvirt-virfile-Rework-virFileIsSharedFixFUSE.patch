@@ -1,0 +1,151 @@
+From 872bff1f3e49219389ed57bc2fbff8614b5f9be9 Mon Sep 17 00:00:00 2001
+Message-Id: <872bff1f3e49219389ed57bc2fbff8614b5f9be9@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 10 Oct 2018 17:25:56 +0200
+Subject: [PATCH] virfile: Rework virFileIsSharedFixFUSE
+
+RHEL-7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1632711
+RHEL-8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1634782
+RHEL-7.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1635705
+
+There are couple of things wrong with the current implementation.
+The first one is that in the first loop the code tries to build a
+list of fuse.glusterfs mount points. Well, since the strings are
+allocated in a temporary buffer and are not duplicated this
+results in wrong decision made later in the code.
+
+The second problem is that the code does not take into account
+subtree mounts. For instance, if there's a fuse.gluster mounted
+at /some/path and another FS mounted at /some/path/subdir the
+code would not recognize this subdir mount.
+
+Reported-by: Han Han <hhan@redhat.com>
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 1dbf6222dd5e1fedcbe335fc0852ef66e7a92901)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/util/virfile.c            | 61 ++++++++++++++---------------------
+ tests/virfiledata/mounts3.txt |  2 ++
+ tests/virfiletest.c           |  2 ++
+ 3 files changed, 29 insertions(+), 36 deletions(-)
+
+diff --git a/src/util/virfile.c b/src/util/virfile.c
+index 05ecf7bf21..e1dee7633a 100644
+--- a/src/util/virfile.c
++++ b/src/util/virfile.c
+@@ -3544,18 +3544,14 @@ static int
+ virFileIsSharedFixFUSE(const char *path,
+                        long long *f_type)
+ {
+-    char *dirpath = NULL;
+-    const char **mounts = NULL;
+-    size_t nmounts = 0;
+-    char *p;
+     FILE *f = NULL;
+     struct mntent mb;
+     char mntbuf[1024];
++    char *mntDir = NULL;
++    char *mntType = NULL;
++    size_t maxMatching = 0;
+     int ret = -1;
+ 
+-    if (VIR_STRDUP(dirpath, path) < 0)
+-        return -1;
+-
+     if (!(f = setmntent(PROC_MOUNTS, "r"))) {
+         virReportSystemError(errno,
+                              _("Unable to open %s"),
+@@ -3564,43 +3560,36 @@ virFileIsSharedFixFUSE(const char *path,
+     }
+ 
+     while (getmntent_r(f, &mb, mntbuf, sizeof(mntbuf))) {
+-        if (STRNEQ("fuse.glusterfs", mb.mnt_type))
++        const char *p;
++        size_t len = strlen(mb.mnt_dir);
++
++        if (!(p = STRSKIP(path, mb.mnt_dir)))
+             continue;
+ 
+-        if (VIR_APPEND_ELEMENT_COPY(mounts, nmounts, mb.mnt_dir) < 0)
+-            goto cleanup;
++        if (*(p - 1) != '/' && *p != '/' && *p != '\0')
++            continue;
++
++        if (len > maxMatching) {
++            maxMatching = len;
++            VIR_FREE(mntType);
++            VIR_FREE(mntDir);
++            if (VIR_STRDUP(mntDir, mb.mnt_dir) < 0 ||
++                VIR_STRDUP(mntType, mb.mnt_type) < 0)
++                goto cleanup;
++        }
+     }
+ 
+-    /* Add NULL sentinel so that this is a virStringList */
+-    if (VIR_REALLOC_N(mounts, nmounts + 1) < 0)
+-        goto cleanup;
+-    mounts[nmounts] = NULL;
+-
+-    do {
+-        if ((p = strrchr(dirpath, '/')) == NULL) {
+-            virReportSystemError(EINVAL,
+-                                 _("Invalid relative path '%s'"), path);
+-            goto cleanup;
+-        }
+-
+-        if (p == dirpath)
+-            *(p+1) = '\0';
+-        else
+-            *p = '\0';
+-
+-        if (virStringListHasString(mounts, dirpath)) {
+-            VIR_DEBUG("Found gluster FUSE mountpoint=%s for path=%s. "
+-                      "Fixing shared FS type", dirpath, path);
+-            *f_type = GFS2_MAGIC;
+-            break;
+-        }
+-    } while (p != dirpath);
++    if (STREQ_NULLABLE(mntType, "fuse.glusterfs")) {
++        VIR_DEBUG("Found gluster FUSE mountpoint=%s for path=%s. "
++                  "Fixing shared FS type", mntDir, path);
++        *f_type = GFS2_MAGIC;
++    }
+ 
+     ret = 0;
+  cleanup:
++    VIR_FREE(mntType);
++    VIR_FREE(mntDir);
+     endmntent(f);
+-    VIR_FREE(mounts);
+-    VIR_FREE(dirpath);
+     return ret;
+ }
+ 
+diff --git a/tests/virfiledata/mounts3.txt b/tests/virfiledata/mounts3.txt
+index 226f67dc00..134c6e8f81 100644
+--- a/tests/virfiledata/mounts3.txt
++++ b/tests/virfiledata/mounts3.txt
+@@ -31,3 +31,5 @@ hugetlbfs /hugepages2M hugetlbfs rw,relatime,mode=1777,pagesize=2M 0 0
+ none /run/user/1000 tmpfs rw,relatime,mode=700,uid=1000 0 0
+ host:/nfs /nfs nfs4 rw,relatime,vers=4.1,rsize=1048576,wsize=1048576,namlen=255,hard,proto=tcp6,timeo=600,retrans=2,sec=sys,clientaddr=::,local_lock=none,addr=:: 0 0
+ dev /nfs/blah devtmpfs rw,nosuid,relatime,size=10240k,nr_inodes=4093060,mode=755 0 0
++host:/gv0 /gluster fuse.glusterfs rw 0 0
++root@host:/tmp/mkdir /gluster/sshfs fuse.sshfs rw 0 0
+diff --git a/tests/virfiletest.c b/tests/virfiletest.c
+index 80ea34bfa4..be4dbf8910 100644
+--- a/tests/virfiletest.c
++++ b/tests/virfiletest.c
+@@ -455,6 +455,8 @@ mymain(void)
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts2.txt", "/run/user/501/gvfs/some/file", false);
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/nfs/file", true);
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/nfs/blah", false);
++    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/gluster/file", true);
++    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/gluster/sshfs/file", false);
+ 
+     return ret != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+ }
+-- 
+2.19.1
+

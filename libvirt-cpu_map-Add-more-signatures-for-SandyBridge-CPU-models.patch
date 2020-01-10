@@ -1,0 +1,50 @@
+From 0b0c3aef9a537d9395d53806ac3695348a47dc09 Mon Sep 17 00:00:00 2001
+Message-Id: <0b0c3aef9a537d9395d53806ac3695348a47dc09@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 26 Feb 2019 20:26:35 +0100
+Subject: [PATCH] cpu_map: Add more signatures for SandyBridge CPU models
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 4a3c3682f3da4ae1e1036c67db7ddba3dcc66d68)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+	src/cpu_map/x86_SandyBridge-IBRS.xml
+	src/cpu_map/x86_SandyBridge.xml
+            - cpu_map split not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 1435a34bb9..8fe6d7d4f4 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -1014,6 +1014,7 @@
+ 
+     <model name='SandyBridge'>
+       <signature family='6' model='42'/> <!-- 0206a0 -->
++      <signature family='6' model='45'/> <!-- 0206d0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1057,6 +1058,7 @@
+ 
+     <model name='SandyBridge-IBRS'>
+       <signature family='6' model='42'/> <!-- 0206a0 -->
++      <signature family='6' model='45'/> <!-- 0206d0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+-- 
+2.21.0
+

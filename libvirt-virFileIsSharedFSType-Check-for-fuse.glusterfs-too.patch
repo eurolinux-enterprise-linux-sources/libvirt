@@ -1,0 +1,128 @@
+From 945cc03b42ec947876cda10dff1bf76a446abbf1 Mon Sep 17 00:00:00 2001
+Message-Id: <945cc03b42ec947876cda10dff1bf76a446abbf1@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 3 Oct 2018 17:04:13 +0200
+Subject: [PATCH] virFileIsSharedFSType: Check for fuse.glusterfs too
+
+RHEL-7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1632711
+RHEL-8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1634782
+RHEL-7.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1635705
+
+GlusterFS is typically safe when it comes to migration. It's a
+network FS after all. However, it can be mounted via FUSE driver
+they provide. If that is the case we fail to identify it and
+think migration is not safe and require VIR_MIGRATE_UNSAFE flag.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 478da65fb46c866973886848ae17f1e16199a77d)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/util/virfile.c | 77 ++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 75 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/virfile.c b/src/util/virfile.c
+index 378d03ecf0..c87e26bf5b 100644
+--- a/src/util/virfile.c
++++ b/src/util/virfile.c
+@@ -3534,6 +3534,76 @@ int virFilePrintf(FILE *fp, const char *msg, ...)
+ # ifndef HUGETLBFS_MAGIC
+ #  define HUGETLBFS_MAGIC 0x958458f6
+ # endif
++# ifndef FUSE_SUPER_MAGIC
++#  define FUSE_SUPER_MAGIC 0x65735546
++# endif
++
++# define PROC_MOUNTS "/proc/mounts"
++
++static int
++virFileIsSharedFixFUSE(const char *path,
++                       long *f_type)
++{
++    char *dirpath = NULL;
++    const char **mounts = NULL;
++    size_t nmounts = 0;
++    char *p;
++    FILE *f = NULL;
++    struct mntent mb;
++    char mntbuf[1024];
++    int ret = -1;
++
++    if (VIR_STRDUP(dirpath, path) < 0)
++        return -1;
++
++    if (!(f = setmntent(PROC_MOUNTS, "r"))) {
++        virReportSystemError(errno,
++                             _("Unable to open %s"),
++                             PROC_MOUNTS);
++        goto cleanup;
++    }
++
++    while (getmntent_r(f, &mb, mntbuf, sizeof(mntbuf))) {
++        if (STRNEQ("fuse.glusterfs", mb.mnt_type))
++            continue;
++
++        if (VIR_APPEND_ELEMENT_COPY(mounts, nmounts, mb.mnt_dir) < 0)
++            goto cleanup;
++    }
++
++    /* Add NULL sentinel so that this is a virStringList */
++    if (VIR_REALLOC_N(mounts, nmounts + 1) < 0)
++        goto cleanup;
++    mounts[nmounts] = NULL;
++
++    do {
++        if ((p = strrchr(dirpath, '/')) == NULL) {
++            virReportSystemError(EINVAL,
++                                 _("Invalid relative path '%s'"), path);
++            goto cleanup;
++        }
++
++        if (p == dirpath)
++            *(p+1) = '\0';
++        else
++            *p = '\0';
++
++        if (virStringListHasString(mounts, dirpath)) {
++            VIR_DEBUG("Found gluster FUSE mountpoint=%s for path=%s. "
++                      "Fixing shared FS type", dirpath, path);
++            *f_type = GFS2_MAGIC;
++            break;
++        }
++    } while (p != dirpath);
++
++    ret = 0;
++ cleanup:
++    endmntent(f);
++    VIR_FREE(mounts);
++    VIR_FREE(dirpath);
++    return ret;
++}
++
+ 
+ int
+ virFileIsSharedFSType(const char *path,
+@@ -3581,6 +3651,11 @@ virFileIsSharedFSType(const char *path,
+         return -1;
+     }
+ 
++    if (sb.f_type == FUSE_SUPER_MAGIC) {
++        VIR_DEBUG("Found FUSE mount for path=%s. Trying to fix it", path);
++        virFileIsSharedFixFUSE(path, (long *) &sb.f_type);
++    }
++
+     VIR_DEBUG("Check if path %s with FS magic %lld is shared",
+               path, (long long int)sb.f_type);
+ 
+@@ -3673,8 +3748,6 @@ virFileGetDefaultHugepageSize(unsigned long long *size)
+     return ret;
+ }
+ 
+-# define PROC_MOUNTS "/proc/mounts"
+-
+ int
+ virFileFindHugeTLBFS(virHugeTLBFSPtr *ret_fs,
+                      size_t *ret_nfs)
+-- 
+2.19.0
+

@@ -1,0 +1,89 @@
+From 0cfcffc74781daef4ca6c08d0db78df786b8c7f5 Mon Sep 17 00:00:00 2001
+Message-Id: <0cfcffc74781daef4ca6c08d0db78df786b8c7f5@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:03:52 +0200
+Subject: [PATCH] conf: Introduce virDomainDefPostParseVideo helper
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Move the video post parse bits into a separate helper as the logic is
+going to be extended in the future.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 75aa179ad68f5845955128b9f047a43c8e5c9066)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c | 45 ++++++++++++++++++++++++++++--------------
+ 1 file changed, 30 insertions(+), 15 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index d23b2861ef..db8e17dac4 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -5097,6 +5097,34 @@ virDomainDefBootOrderPostParse(virDomainDefPtr def)
+ }
+ 
+ 
++static int
++virDomainDefPostParseVideo(virDomainDefPtr def,
++                           void *opaque)
++{
++    if (def->nvideos == 0)
++        return 0;
++
++    virDomainDeviceDef device = {
++        .type = VIR_DOMAIN_DEVICE_VIDEO,
++        .data.video = def->videos[0],
++    };
++
++    /* Mark the first video as primary. If the user specified
++     * primary="yes", the parser already inserted the device at
++     * def->videos[0]
++     */
++    def->videos[0]->primary = true;
++
++    /* videos[0] might have been added in AddImplicitDevices, after we've
++     * done the per-device post-parse */
++    if (virDomainDefPostParseDeviceIterator(def, &device,
++                                            NULL, opaque) < 0)
++        return -1;
++
++    return 0;
++}
++
++
+ static int
+ virDomainDefPostParseCommon(virDomainDefPtr def,
+                             struct virDomainDefPostParseDeviceIteratorData *data)
+@@ -5133,21 +5161,8 @@ virDomainDefPostParseCommon(virDomainDefPtr def,
+     if (virDomainDefAddImplicitDevices(def) < 0)
+         return -1;
+ 
+-    if (def->nvideos != 0) {
+-        virDomainDeviceDef device = {
+-            .type = VIR_DOMAIN_DEVICE_VIDEO,
+-            .data.video = def->videos[0],
+-        };
+-
+-        /* Mark the first video as primary. If the user specified primary="yes",
+-         * the parser already inserted the device at def->videos[0] */
+-        def->videos[0]->primary = true;
+-
+-        /* videos[0] might have been added in AddImplicitDevices, after we've
+-         * done the per-device post-parse */
+-        if (virDomainDefPostParseDeviceIterator(def, &device, NULL, data) < 0)
+-            return -1;
+-    }
++    if (virDomainDefPostParseVideo(def, data) < 0)
++        return -1;
+ 
+     if (def->nserials != 0) {
+         virDomainDeviceDef device = {
+-- 
+2.18.0
+

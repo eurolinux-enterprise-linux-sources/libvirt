@@ -1,0 +1,55 @@
+From 311a7eaeef6f90ee1ce063b75673dddfbd392346 Mon Sep 17 00:00:00 2001
+Message-Id: <311a7eaeef6f90ee1ce063b75673dddfbd392346@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 4 Sep 2018 10:38:48 +0200
+Subject: [PATCH] virDomainDefCompatibleDevice: Relax alias change check
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RHEL-7.6: https://bugzilla.redhat.com/show_bug.cgi?id=1621910
+RHEL-8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1603133
+
+When introducing this check back in 4ad54a417a1 my mindset was
+that if an element is missing in update XML then user is
+requesting for removal of the corresponding setting. For
+instance, if <bandwidth/> is not present in update XML any QoS
+previously set on <interface/> is cleared out. Well this
+assumption is correct but only to some extent.
+
+Turns out, we have some users who when updating path to ISO
+image construct very minimalistic disk XML and pass it to device
+update API. Such XML is lacking a lot of information, and alias
+is one of them. This triggers error in
+virDomainDefCompatibleDevice() because we think that user is
+requesting to remove the alias. Well, they are not.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit b48d9e939bcf32a8d6e571313637e2eefe52e117)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 8a43e607e9..49b0a59918 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -28378,9 +28378,9 @@ virDomainDefCompatibleDevice(virDomainDefPtr def,
+ 
+     if (action == VIR_DOMAIN_DEVICE_ACTION_UPDATE &&
+         live &&
+-        ((!!data.newInfo != !!data.oldInfo) ||
+-         (data.newInfo && data.oldInfo &&
+-          STRNEQ_NULLABLE(data.newInfo->alias, data.oldInfo->alias)))) {
++        (data.newInfo && data.oldInfo &&
++         data.newInfo->alias && data.oldInfo->alias &&
++         STRNEQ(data.newInfo->alias, data.oldInfo->alias))) {
+         virReportError(VIR_ERR_OPERATION_DENIED, "%s",
+                        _("changing device alias is not allowed"));
+         return -1;
+-- 
+2.18.0
+

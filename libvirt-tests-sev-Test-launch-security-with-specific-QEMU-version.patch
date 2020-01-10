@@ -1,0 +1,101 @@
+From f10c3ad87c56db9f22cb8c1155d9355b48eebaf9 Mon Sep 17 00:00:00 2001
+Message-Id: <f10c3ad87c56db9f22cb8c1155d9355b48eebaf9@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Mon, 20 Aug 2018 17:18:51 +0200
+Subject: [PATCH] tests: sev: Test launch-security with specific QEMU version
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In order to test SEV we need real QEMU capabilities. Ideally, this would
+be tested with -latest capabilities, however, our capabilities are
+currently tied to Intel HW, even the 2.12.0 containing SEV were edited by
+hand, so we can only use that one for now, as splitting the capabilities
+according to the vendor is a refactor for another day. The need for real
+capabilities comes from the extended SEV platform data (PDH, cbitpos,
+etc.) we'll need to cache/parse.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Acked-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit 6c50cef8a3e4e3407fb42a713a353e42ae3f2bc6)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1612009
+https://bugzilla.redhat.com/show_bug.cgi?id=1619150
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+
+ Conflicts:
+	tests/qemuxml2argvdata/launch-security-sev.x86_64-2.12.0.args
+            - this wasn't a 100% clean file rename and git doesn't like
+            that
+
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ ...=> launch-security-sev.x86_64-2.12.0.args} | 19 ++++++++++++-------
+ tests/qemuxml2argvtest.c                      |  4 +---
+ 2 files changed, 13 insertions(+), 10 deletions(-)
+ rename tests/qemuxml2argvdata/{launch-security-sev.args => launch-security-sev.x86_64-2.12.0.args} (54%)
+
+diff --git a/tests/qemuxml2argvdata/launch-security-sev.args b/tests/qemuxml2argvdata/launch-security-sev.x86_64-2.12.0.args
+similarity index 54%
+rename from tests/qemuxml2argvdata/launch-security-sev.args
+rename to tests/qemuxml2argvdata/launch-security-sev.x86_64-2.12.0.args
+index db0be1a27d..6da068e1a5 100644
+--- a/tests/qemuxml2argvdata/launch-security-sev.args
++++ b/tests/qemuxml2argvdata/launch-security-sev.x86_64-2.12.0.args
+@@ -5,25 +5,30 @@ USER=test \
+ LOGNAME=test \
+ QEMU_AUDIO_DRV=none \
+ /usr/bin/qemu-system-x86_64 \
+--name QEMUGuest1 \
++-name guest=QEMUGuest1,debug-threads=on \
+ -S \
++-object secret,id=masterKey0,format=raw,\
++file=/tmp/lib/domain--1-QEMUGuest1/master-key.aes \
+ -machine pc-1.0,accel=kvm,usb=off,dump-guest-core=off,memory-encryption=sev0 \
+ -m 214 \
++-realtime mlock=off \
+ -smp 1,sockets=1,cores=1,threads=1 \
+ -uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
+ -display none \
+ -no-user-config \
+ -nodefaults \
+--chardev socket,id=charmonitor,path=/tmp/lib/domain--1-QEMUGuest1/monitor.sock,\
+-server,nowait \
++-chardev socket,id=charmonitor,fd=1729,server,nowait \
+ -mon chardev=charmonitor,id=monitor,mode=control \
+ -rtc base=utc \
+ -no-shutdown \
+ -no-acpi \
+--boot c \
+--usb \
++-boot strict=on \
++-device piix3-usb-uhci,id=usb,bus=pci.0,addr=0x1.0x2 \
+ -drive file=/dev/HostVG/QEMUGuest1,format=raw,if=none,id=drive-ide0-0-0 \
+--device ide-drive,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0 \
++-device ide-hd,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0,bootindex=1 \
+ -object sev-guest,id=sev0,cbitpos=47,reduced-phys-bits=1,policy=0x1,\
+ dh-cert-file=/tmp/lib/domain--1-QEMUGuest1/dh_cert.base64,\
+-session-file=/tmp/lib/domain--1-QEMUGuest1/session.base64
++session-file=/tmp/lib/domain--1-QEMUGuest1/session.base64 \
++-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,\
++resourcecontrol=deny \
++-msg timestamp=on
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index e6c0120670..02bb9889ee 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -2950,9 +2950,7 @@ mymain(void)
+     DO_TEST_CAPS_LATEST("vhost-vsock");
+     DO_TEST_CAPS_LATEST("vhost-vsock-auto");
+ 
+-    DO_TEST("launch-security-sev",
+-            QEMU_CAPS_KVM,
+-            QEMU_CAPS_SEV_GUEST);
++    DO_TEST_CAPS_VER("launch-security-sev", "2.12.0");
+ 
+     if (getenv("LIBVIRT_SKIP_CLEANUP") == NULL)
+         virFileDeleteTree(fakerootdir);
+-- 
+2.18.0
+

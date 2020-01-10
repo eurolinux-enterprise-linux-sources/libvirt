@@ -1,0 +1,84 @@
+From 7b7b901fc909cc0536b4ae846b1ef741a01700c3 Mon Sep 17 00:00:00 2001
+Message-Id: <7b7b901fc909cc0536b4ae846b1ef741a01700c3@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:03:51 +0200
+Subject: [PATCH] conf: Introduce virDomainVideoDefClear helper
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Future patches rely on the ability to reset the contents of the
+virDomainVideoDef structure rather than re-allocating it.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit f317b1e5c57291644c841cb620eda86dac8642a1)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c   | 14 +++++++++++++-
+ src/conf/domain_conf.h   |  1 +
+ src/libvirt_private.syms |  1 +
+ 3 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 70eb45f03a..d23b2861ef 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -2538,7 +2538,8 @@ virDomainVideoDefNew(void)
+ }
+ 
+ 
+-void virDomainVideoDefFree(virDomainVideoDefPtr def)
++void
++virDomainVideoDefClear(virDomainVideoDefPtr def)
+ {
+     if (!def)
+         return;
+@@ -2548,6 +2549,17 @@ void virDomainVideoDefFree(virDomainVideoDefPtr def)
+     VIR_FREE(def->accel);
+     VIR_FREE(def->virtio);
+     VIR_FREE(def->driver);
++
++    memset(def, 0, sizeof(*def));
++}
++
++
++void virDomainVideoDefFree(virDomainVideoDefPtr def)
++{
++    if (!def)
++        return;
++
++    virDomainVideoDefClear(def);
+     VIR_FREE(def);
+ }
+ 
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 41d27482fb..1fc1734bcc 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2884,6 +2884,7 @@ void virDomainNVRAMDefFree(virDomainNVRAMDefPtr def);
+ void virDomainWatchdogDefFree(virDomainWatchdogDefPtr def);
+ virDomainVideoDefPtr virDomainVideoDefNew(void);
+ void virDomainVideoDefFree(virDomainVideoDefPtr def);
++void virDomainVideoDefClear(virDomainVideoDefPtr def);
+ virDomainHostdevDefPtr virDomainHostdevDefNew(void);
+ void virDomainHostdevDefClear(virDomainHostdevDefPtr def);
+ void virDomainHostdevDefFree(virDomainHostdevDefPtr def);
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 5499a368c0..5bd08d3f67 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -567,6 +567,7 @@ virDomainTPMModelTypeToString;
+ virDomainUSBDeviceDefForeach;
+ virDomainVideoDefaultRAM;
+ virDomainVideoDefaultType;
++virDomainVideoDefClear;
+ virDomainVideoDefFree;
+ virDomainVideoDefNew;
+ virDomainVideoTypeFromString;
+-- 
+2.18.0
+

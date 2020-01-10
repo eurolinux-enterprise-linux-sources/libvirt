@@ -1,0 +1,238 @@
+From 05b6b6d0d034e0a2ecb9b826bf5052a3bada218d Mon Sep 17 00:00:00 2001
+Message-Id: <05b6b6d0d034e0a2ecb9b826bf5052a3bada218d@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Mon, 20 Aug 2018 17:18:53 +0200
+Subject: [PATCH] qemu: caps: Format SEV platform data into qemuCaps cache
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since we're not saving the platform-specific data into a cache, we're
+not going to populate the structure, which in turn will cause a crash
+upon calling virNodeGetSEVInfo because of a NULL pointer dereference.
+Ultimately, we should start caching this data along with host-specific
+capabilities like NUMA and SELinux stuff into a separate cache, but for
+the time being, this is a semi-proper fix for a potential crash.
+
+Backtrace (requires libvirtd restart to load qemu caps from cache):
+    #0 qemuGetSEVInfoToParams
+    #1 qemuNodeGetSEVInfo
+    #2 virNodeGetSEVInfo
+    #3 remoteDispatchNodeGetSevInfo
+    #4 remoteDispatchNodeGetSevInfoHelper
+    #5 virNetServerProgramDispatchCall
+    #6 virNetServerProgramDispatch
+    #7 virNetServerProcessMsg
+    #8 virNetServerHandleJob
+    #9 virThreadPoolWorker
+    #10 virThreadHelper
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1612009
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Acked-by: Peter Krempa <pkrempa@redhat.com>
+Tested-by: Brijesh Singh <brijesh.singh@amd.com>
+(cherry picked from commit 77f51ab52049734d80a8ccb79b80189c7fb95c41)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1612009
+https://bugzilla.redhat.com/show_bug.cgi?id=1619150
+
+Amend:
+    - fixed the VIR_AUTOPTR bits which downstream doesn't support
+    and wouldn't compile
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_capabilities.c                  | 109 ++++++++++++++++++
+ .../qemu_2.12.0.x86_64.xml                    |   5 +-
+ .../caps_2.12.0.x86_64.xml                    |   6 +
+ 3 files changed, 119 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 470f25a5a6..4f2051a2bb 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1573,6 +1573,30 @@ virQEMUCapsHostCPUDataClear(virQEMUCapsHostCPUDataPtr cpuData)
+ }
+ 
+ 
++static int
++virQEMUCapsSEVInfoCopy(virSEVCapabilityPtr *dst,
++                       virSEVCapabilityPtr src)
++{
++    int ret = -1;
++    virSEVCapabilityPtr tmp = NULL;
++
++    if (VIR_ALLOC(tmp) < 0 ||
++        VIR_STRDUP(tmp->pdh, src->pdh) < 0 ||
++        VIR_STRDUP(tmp->cert_chain, src->cert_chain) < 0)
++        goto cleanup;
++
++    tmp->cbitpos = src->cbitpos;
++    tmp->reduced_phys_bits = src->reduced_phys_bits;
++
++    VIR_STEAL_PTR(*dst, tmp);
++
++    ret = 0;
++ cleanup:
++    virSEVCapabilitiesFree(tmp);
++    return ret;
++}
++
++
+ virQEMUCapsPtr virQEMUCapsNewCopy(virQEMUCapsPtr qemuCaps)
+ {
+     virQEMUCapsPtr ret = virQEMUCapsNew();
+@@ -1635,6 +1659,11 @@ virQEMUCapsPtr virQEMUCapsNewCopy(virQEMUCapsPtr qemuCaps)
+     for (i = 0; i < qemuCaps->ngicCapabilities; i++)
+         ret->gicCapabilities[i] = qemuCaps->gicCapabilities[i];
+ 
++    if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_SEV_GUEST) &&
++        virQEMUCapsSEVInfoCopy(&ret->sevCapabilities,
++                               qemuCaps->sevCapabilities) < 0)
++        goto error;
++
+     return ret;
+ 
+  error:
+@@ -3273,6 +3302,62 @@ virQEMUCapsCachePrivFree(void *privData)
+ }
+ 
+ 
++static int
++virQEMUCapsParseSEVInfo(virQEMUCapsPtr qemuCaps, xmlXPathContextPtr ctxt)
++{
++    int ret = -1;
++    virSEVCapabilityPtr sev = NULL;
++
++    if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_SEV_GUEST))
++        return 0;
++
++    if (virXPathBoolean("boolean(./sev)", ctxt) == 0) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("missing SEV platform data in QEMU "
++                         "capabilities cache"));
++        return -1;
++    }
++
++    if (VIR_ALLOC(sev) < 0)
++        return -1;
++
++    if (virXPathUInt("string(./sev/cbitpos)", ctxt, &sev->cbitpos) < 0) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("missing or malformed SEV cbitpos information "
++                         "in QEMU capabilities cache"));
++        goto cleanup;
++    }
++
++    if (virXPathUInt("string(./sev/reducedPhysBits)", ctxt,
++                     &sev->reduced_phys_bits) < 0) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("missing or malformed SEV reducedPhysBits information "
++                         "in QEMU capabilities cache"));
++        goto cleanup;
++    }
++
++    if (!(sev->pdh = virXPathString("string(./sev/pdh)", ctxt)))  {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("missing SEV pdh information "
++                         "in QEMU capabilities cache"));
++        goto cleanup;
++    }
++
++    if (!(sev->cert_chain = virXPathString("string(./sev/certChain)", ctxt))) {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("missing SEV certChain information "
++                         "in QEMU capabilities cache"));
++        goto cleanup;
++    }
++
++    VIR_STEAL_PTR(qemuCaps->sevCapabilities, sev);
++    ret = 0;
++ cleanup:
++    virSEVCapabilitiesFree(sev);
++    return ret;
++}
++
++
+ /*
+  * Parsing a doc that looks like
+  *
+@@ -3521,6 +3606,9 @@ virQEMUCapsLoadCache(virArch hostArch,
+     }
+     VIR_FREE(nodes);
+ 
++    if (virQEMUCapsParseSEVInfo(qemuCaps, ctxt) < 0)
++        goto cleanup;
++
+     virQEMUCapsInitHostCPUModel(qemuCaps, hostArch, VIR_DOMAIN_VIRT_KVM);
+     virQEMUCapsInitHostCPUModel(qemuCaps, hostArch, VIR_DOMAIN_VIRT_QEMU);
+ 
+@@ -3638,6 +3726,24 @@ virQEMUCapsFormatCPUModels(virQEMUCapsPtr qemuCaps,
+ }
+ 
+ 
++static void
++virQEMUCapsFormatSEVInfo(virQEMUCapsPtr qemuCaps, virBufferPtr buf)
++{
++    virSEVCapabilityPtr sev = virQEMUCapsGetSEVCapabilities(qemuCaps);
++
++    virBufferAddLit(buf, "<sev>\n");
++    virBufferAdjustIndent(buf, 2);
++    virBufferAsprintf(buf, "<cbitpos>%u</cbitpos>\n", sev->cbitpos);
++    virBufferAsprintf(buf, "<reducedPhysBits>%u</reducedPhysBits>\n",
++                      sev->reduced_phys_bits);
++    virBufferEscapeString(buf, "<pdh>%s</pdh>\n", sev->pdh);
++    virBufferEscapeString(buf, "<certChain>%s</certChain>\n",
++                          sev->cert_chain);
++    virBufferAdjustIndent(buf, -2);
++    virBufferAddLit(buf, "</sev>\n");
++}
++
++
+ char *
+ virQEMUCapsFormatCache(virQEMUCapsPtr qemuCaps)
+ {
+@@ -3719,6 +3825,9 @@ virQEMUCapsFormatCache(virQEMUCapsPtr qemuCaps)
+                           emulated ? "yes" : "no");
+     }
+ 
++    if (qemuCaps->sevCapabilities)
++        virQEMUCapsFormatSEVInfo(qemuCaps, &buf);
++
+     virBufferAdjustIndent(&buf, -2);
+     virBufferAddLit(&buf, "</qemuCaps>\n");
+ 
+diff --git a/tests/domaincapsschemadata/qemu_2.12.0.x86_64.xml b/tests/domaincapsschemadata/qemu_2.12.0.x86_64.xml
+index 7a1be4c093..a8d6a4d629 100644
+--- a/tests/domaincapsschemadata/qemu_2.12.0.x86_64.xml
++++ b/tests/domaincapsschemadata/qemu_2.12.0.x86_64.xml
+@@ -142,6 +142,9 @@
+     <gic supported='no'/>
+     <vmcoreinfo supported='yes'/>
+     <genid supported='yes'/>
+-    <sev supported='no'/>
++    <sev supported='yes'>
++      <cbitpos>47</cbitpos>
++      <reducedPhysBits>1</reducedPhysBits>
++    </sev>
+   </features>
+ </domainCapabilities>
+diff --git a/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml b/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml
+index 78889facce..f0dc082640 100644
+--- a/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml
+@@ -1254,4 +1254,10 @@
+   <machine name='pc-0.11' hotplugCpus='yes' maxCpus='255'/>
+   <machine name='pc-0.12' hotplugCpus='yes' maxCpus='255'/>
+   <machine name='pc-0.10' hotplugCpus='yes' maxCpus='255'/>
++  <sev>
++    <cbitpos>47</cbitpos>
++    <reducedPhysBits>1</reducedPhysBits>
++    <pdh>AQAAAAAOAAAAQAAAAAOAAAAQAAAAAOAAAAQAAAAAOAAAAQAAAAAOAAAAQAAAAAOAAA</pdh>
++    <certChain>AQAAAAAOAAAAQAAAAAOAAAAQAAAAAOAAAAQAAAAAOAAAAQAAAAAOAAA</certChain>
++  </sev>
+ </qemuCaps>
+-- 
+2.18.0
+

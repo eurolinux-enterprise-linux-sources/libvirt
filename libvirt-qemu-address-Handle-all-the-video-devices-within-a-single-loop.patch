@@ -1,0 +1,52 @@
+From b4c94ce2fb7d67af315c79a0f3ede70c36e85c70 Mon Sep 17 00:00:00 2001
+Message-Id: <b4c94ce2fb7d67af315c79a0f3ede70c36e85c70@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:03:50 +0200
+Subject: [PATCH] qemu: address: Handle all the video devices within a single
+ loop
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since 133fb140 moved the validation of a video device into a separate
+function, the code handling PCI slot assignment for video devices has
+been the same for both the primary device and the secondary devices.
+Let's merge these and thus handle all the devices within the existing
+'for' loop.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 3e90bd67a215adcb997b8c2be5d1d6b83251409f)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_domain_address.c | 10 ++--------
+ 1 file changed, 2 insertions(+), 8 deletions(-)
+
+diff --git a/src/qemu/qemu_domain_address.c b/src/qemu/qemu_domain_address.c
+index e9f460d77a..ab2ac022f1 100644
+--- a/src/qemu/qemu_domain_address.c
++++ b/src/qemu/qemu_domain_address.c
+@@ -2103,15 +2103,9 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
+             goto error;
+     }
+ 
+-    /* Assign a PCI slot to the primary video card if there is not an
+-     * assigned address. */
+-    if (def->nvideos > 0 &&
+-        virDeviceInfoPCIAddressWanted(&def->videos[0]->info)) {
+-        if (qemuDomainPCIAddressReserveNextAddr(addrs, &def->videos[0]->info) < 0)
+-            goto error;
+-    }
++    /* Video devices */
++    for (i = 0; i < def->nvideos; i++) {
+ 
+-    for (i = 1; i < def->nvideos; i++) {
+         if (!virDeviceInfoPCIAddressWanted(&def->videos[i]->info))
+             continue;
+ 
+-- 
+2.18.0
+

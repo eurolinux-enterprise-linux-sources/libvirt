@@ -1,0 +1,142 @@
+From d86f12106d012206eebeef6a9713da3a53a00eec Mon Sep 17 00:00:00 2001
+Message-Id: <d86f12106d012206eebeef6a9713da3a53a00eec@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:03:59 +0200
+Subject: [PATCH] qemu: caps: Add vfio-pci.display capability
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+QEMU 2.12 introduced a new vfio-pci device option 'display=on/off/auto'.
+This patch introduces the necessary capability.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 11c7bdac6dbe8659c2f8bf7a35b97288b0acb207)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_capabilities.c                       | 4 ++++
+ src/qemu/qemu_capabilities.h                       | 3 +++
+ tests/qemucapabilitiesdata/caps_2.12.0.aarch64.xml | 1 +
+ tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml   | 1 +
+ tests/qemucapabilitiesdata/caps_2.12.0.s390x.xml   | 1 +
+ tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml  | 1 +
+ tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml    | 1 +
+ tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml   | 1 +
+ 8 files changed, 13 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 05be8f1416..d1e4fafe7d 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -504,6 +504,9 @@ VIR_ENUM_IMPL(virQEMUCaps, QEMU_CAPS_LAST,
+               "machine.pseries.cap-htm",
+               "usb-storage.werror",
+               "egl-headless",
++
++              /* 315 */
++              "vfio-pci.display",
+     );
+ 
+ 
+@@ -1198,6 +1201,7 @@ static struct virQEMUCapsStringFlags virQEMUCapsDevicePropsPCIAssign[] = {
+ 
+ static struct virQEMUCapsStringFlags virQEMUCapsDevicePropsVfioPCI[] = {
+     { "bootindex", QEMU_CAPS_VFIO_PCI_BOOTINDEX },
++    { "display", QEMU_CAPS_VFIO_PCI_DISPLAY },
+ };
+ 
+ static struct virQEMUCapsStringFlags virQEMUCapsDevicePropsSCSIDisk[] = {
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 55221e7e57..9e8ad5f5c3 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -489,6 +489,9 @@ typedef enum { /* virQEMUCapsFlags grouping marker for syntax-check */
+     QEMU_CAPS_USB_STORAGE_WERROR, /* -device usb-storage,werror=..,rerror=.. */
+     QEMU_CAPS_EGL_HEADLESS, /* -display egl-headless */
+ 
++    /* 315 */
++    QEMU_CAPS_VFIO_PCI_DISPLAY, /* -device vfio-pci.display */
++
+     QEMU_CAPS_LAST /* this must always be the last item */
+ } virQEMUCapsFlags;
+ 
+diff --git a/tests/qemucapabilitiesdata/caps_2.12.0.aarch64.xml b/tests/qemucapabilitiesdata/caps_2.12.0.aarch64.xml
+index 80e7afec04..0cc6327573 100644
+--- a/tests/qemucapabilitiesdata/caps_2.12.0.aarch64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.12.0.aarch64.xml
+@@ -170,6 +170,7 @@
+   <flag name='chardev-fd-pass'/>
+   <flag name='tpm-emulator'/>
+   <flag name='egl-headless'/>
++  <flag name='vfio-pci.display'/>
+   <version>2011090</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>347550</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml b/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml
+index c4b09c0003..a88da6193e 100644
+--- a/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.12.0.ppc64.xml
+@@ -168,6 +168,7 @@
+   <flag name='tpm-emulator'/>
+   <flag name='machine.pseries.cap-htm'/>
+   <flag name='egl-headless'/>
++  <flag name='vfio-pci.display'/>
+   <version>2011090</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>428334</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.12.0.s390x.xml b/tests/qemucapabilitiesdata/caps_2.12.0.s390x.xml
+index 1ff2fe45e1..7121da27a0 100644
+--- a/tests/qemucapabilitiesdata/caps_2.12.0.s390x.xml
++++ b/tests/qemucapabilitiesdata/caps_2.12.0.s390x.xml
+@@ -134,6 +134,7 @@
+   <flag name='chardev-fd-pass'/>
+   <flag name='tpm-emulator'/>
+   <flag name='egl-headless'/>
++  <flag name='vfio-pci.display'/>
+   <version>2012000</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>375999</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml b/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml
+index 37d17786cf..78889facce 100644
+--- a/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml
++++ b/tests/qemucapabilitiesdata/caps_2.12.0.x86_64.xml
+@@ -212,6 +212,7 @@
+   <flag name='mch.extended-tseg-mbytes'/>
+   <flag name='sev-guest'/>
+   <flag name='egl-headless'/>
++  <flag name='vfio-pci.display'/>
+   <version>2011090</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>416196</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml b/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml
+index 57bf5dba11..01bb968938 100644
+--- a/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml
++++ b/tests/qemucapabilitiesdata/caps_3.0.0.ppc64.xml
+@@ -168,6 +168,7 @@
+   <flag name='machine.pseries.cap-hpt-max-page-size'/>
+   <flag name='machine.pseries.cap-htm'/>
+   <flag name='egl-headless'/>
++  <flag name='vfio-pci.display'/>
+   <version>2012050</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>446771</microcodeVersion>
+diff --git a/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml b/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
+index 431910a9e3..4bc7cfeebc 100644
+--- a/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
++++ b/tests/qemucapabilitiesdata/caps_3.0.0.x86_64.xml
+@@ -215,6 +215,7 @@
+   <flag name='sev-guest'/>
+   <flag name='usb-storage.werror'/>
+   <flag name='egl-headless'/>
++  <flag name='vfio-pci.display'/>
+   <version>2012090</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>438109</microcodeVersion>
+-- 
+2.18.0
+

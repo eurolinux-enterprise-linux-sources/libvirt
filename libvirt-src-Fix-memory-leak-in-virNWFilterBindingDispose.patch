@@ -1,0 +1,69 @@
+From 4795f01de940dd85269c2d0f3327a8f6e8923eca Mon Sep 17 00:00:00 2001
+Message-Id: <4795f01de940dd85269c2d0f3327a8f6e8923eca@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Sat, 21 Jul 2018 09:34:12 -0400
+Subject: [PATCH] src: Fix memory leak in virNWFilterBindingDispose
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1603025
+
+Commit b57a9aec neglected to VIR_FREE(binding->filtername) as seen
+in the following valgrind report
+
+==6423== 17,328 bytes in 1,083 blocks are definitely lost in loss record 2,275 of 2,297
+==6423==    at 0x4C29BC3: malloc (vg_replace_malloc.c:299)
+==6423==    by 0x83B20C9: strdup (in /usr/lib64/libc-2.17.so)
+==6423==    by 0x533C144: virStrdup (virstring.c:977)
+==6423==    by 0x54BDD53: virGetNWFilterBinding (datatypes.c:865)
+==6423==    by 0x318D633C: nwfilterBindingCreateXML (nwfilter_driver.c:767)
+==6423==    by 0x54F3FC5: virNWFilterBindingCreateXML (libvirt-nwfilter.c:701)
+==6423==    by 0x539CE29: virDomainConfNWFilterInstantiate (domain_nwfilter.c:116)
+==6423==    by 0x31E516C2: qemuInterfaceBridgeConnect (qemu_interface.c:589)
+==6423==    by 0x31D98B56: qemuBuildInterfaceCommandLine (qemu_command.c:8418)
+==6423==    by 0x31D9F783: qemuBuildNetCommandLine (qemu_command.c:8673)
+==6423==    by 0x31D9F783: qemuBuildCommandLine (qemu_command.c:10354)
+==6423==    by 0x31DE355F: qemuProcessLaunch (qemu_process.c:6292)
+==6423==    by 0x31DE7881: qemuProcessStart (qemu_process.c:6686)
+
+and
+
+==6423== 17,328 bytes in 1,083 blocks are definitely lost in loss record 2,276 of 2,297
+==6423==    at 0x4C29BC3: malloc (vg_replace_malloc.c:299)
+==6423==    by 0x83B20C9: strdup (in /usr/lib64/libc-2.17.so)
+==6423==    by 0x533C144: virStrdup (virstring.c:977)
+==6423==    by 0x54BDD53: virGetNWFilterBinding (datatypes.c:865)
+==6423==    by 0x318D641F: nwfilterBindingLookupByPortDev (nwfilter_driver.c:678)
+==6423==    by 0x54F3B63: virNWFilterBindingLookupByPortDev (libvirt-nwfilter.c:593)
+==6423==    by 0x539CBC5: virDomainConfNWFilterTeardownImpl.isra.0 (domain_nwfilter.c:136)
+==6423==    by 0x539CFA5: virDomainConfVMNWFilterTeardown (domain_nwfilter.c:170)
+==6423==    by 0x31DE5651: qemuProcessStop (qemu_process.c:6912)
+==6423==    by 0x31E37974: qemuDomainDestroyFlags (qemu_driver.c:2229)
+==6423==    by 0x54C24BB: virDomainDestroy (libvirt-domain.c:475)
+==6423==    by 0x1589A2: remoteDispatchDomainDestroy (remote_daemon_dispatch_stubs.h:4827)
+==6423==    by 0x1589A2: remoteDispatchDomainDestroyHelper (remote_daemon_dispatch_stubs.h:4803)
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 329f2347d2215edb3925ec21c73bb52b7b5aa310)
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ src/datatypes.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/datatypes.c b/src/datatypes.c
+index 878a1c5b5f..caf035f178 100644
+--- a/src/datatypes.c
++++ b/src/datatypes.c
+@@ -893,6 +893,7 @@ virNWFilterBindingDispose(void *obj)
+     VIR_DEBUG("release binding %p %s", binding, binding->portdev);
+ 
+     VIR_FREE(binding->portdev);
++    VIR_FREE(binding->filtername);
+     virObjectUnref(binding->conn);
+ }
+ 
+-- 
+2.18.0
+

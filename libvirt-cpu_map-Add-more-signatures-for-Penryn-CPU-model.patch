@@ -1,0 +1,41 @@
+From 3c834c19e111e5df17ce7c4206d4c8213709e819 Mon Sep 17 00:00:00 2001
+Message-Id: <3c834c19e111e5df17ce7c4206d4c8213709e819@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 26 Feb 2019 12:59:50 +0100
+Subject: [PATCH] cpu_map: Add more signatures for Penryn CPU model
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 0a09e59457f843b53c2702d1936bca6513868320)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+	src/cpu_map/x86_Penryn.xml
+            - cpu_map split not backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index df2a56ce58..33994be6a4 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -823,6 +823,7 @@
+ 
+     <model name='Penryn'>
+       <signature family='6' model='23'/> <!-- 010670 -->
++      <signature family='6' model='29'/> <!-- 0106d0 -->
+       <vendor name='Intel'/>
+       <feature name='apic'/>
+       <feature name='clflush'/>
+-- 
+2.21.0
+

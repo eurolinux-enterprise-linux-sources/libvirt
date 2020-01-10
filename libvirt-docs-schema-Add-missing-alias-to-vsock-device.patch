@@ -1,0 +1,39 @@
+From b2f024a35876f242cfab304872f83ae069c45e2a Mon Sep 17 00:00:00 2001
+Message-Id: <b2f024a35876f242cfab304872f83ae069c45e2a@dist-git>
+From: Han Han <hhan@redhat.com>
+Date: Fri, 13 Jul 2018 13:08:27 +0200
+Subject: [PATCH] docs: schema: Add missing <alias> to vsock device
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1600345
+
+Signed-off-by: Han Han <hhan@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit c03d36b91d62890b376a2ff8f9d65fac069dce42)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1600345
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ docs/schemas/domaincommon.rng | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index bd687ce9d3..f24a56392a 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -4234,6 +4234,9 @@
+         <optional>
+           <ref name="address"/>
+         </optional>
++        <optional>
++          <ref name="alias"/>
++        </optional>
+       </interleave>
+     </element>
+   </define>
+-- 
+2.18.0
+

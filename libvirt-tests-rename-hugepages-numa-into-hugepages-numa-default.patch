@@ -1,0 +1,48 @@
+From baaf8300e3dced7e012576193324038e974f4863 Mon Sep 17 00:00:00 2001
+Message-Id: <baaf8300e3dced7e012576193324038e974f4863@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:06 +0200
+Subject: [PATCH] tests: rename hugepages-numa into hugepages-numa-default
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 8d89a5c89a765d826ffe39ea657208c91f3e315e)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ .../{hugepages-numa.args => hugepages-numa-default.args}        | 0
+ .../{hugepages-numa.xml => hugepages-numa-default.xml}          | 0
+ tests/qemuxml2argvtest.c                                        | 2 +-
+ 3 files changed, 1 insertion(+), 1 deletion(-)
+ rename tests/qemuxml2argvdata/{hugepages-numa.args => hugepages-numa-default.args} (100%)
+ rename tests/qemuxml2argvdata/{hugepages-numa.xml => hugepages-numa-default.xml} (100%)
+
+diff --git a/tests/qemuxml2argvdata/hugepages-numa.args b/tests/qemuxml2argvdata/hugepages-numa-default.args
+similarity index 100%
+rename from tests/qemuxml2argvdata/hugepages-numa.args
+rename to tests/qemuxml2argvdata/hugepages-numa-default.args
+diff --git a/tests/qemuxml2argvdata/hugepages-numa.xml b/tests/qemuxml2argvdata/hugepages-numa-default.xml
+similarity index 100%
+rename from tests/qemuxml2argvdata/hugepages-numa.xml
+rename to tests/qemuxml2argvdata/hugepages-numa-default.xml
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index a97b48525a..bf3fb156a2 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -946,7 +946,7 @@ mymain(void)
+     DO_TEST("pmu-feature-off", NONE);
+ 
+     DO_TEST("hugepages-default", NONE);
+-    DO_TEST("hugepages-numa",
++    DO_TEST("hugepages-numa-default",
+             QEMU_CAPS_PIIX_DISABLE_S3, QEMU_CAPS_PIIX_DISABLE_S4,
+             QEMU_CAPS_VIRTIO_SCSI,
+             QEMU_CAPS_ICH9_USB_EHCI1,
+-- 
+2.18.0
+

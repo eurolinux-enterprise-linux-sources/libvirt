@@ -1,0 +1,254 @@
+From a4fe8dfb0c2df61f1b903e8858cd6430954f30e2 Mon Sep 17 00:00:00 2001
+Message-Id: <a4fe8dfb0c2df61f1b903e8858cd6430954f30e2@dist-git>
+From: Jiri Denemark <Jiri.Denemark@gmail.com>
+Date: Wed, 20 Mar 2019 17:15:16 +0100
+Subject: [PATCH] cpu_map: Add more signatures for Broadwell CPU models
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This fixes several CPUs which were incorrectly detected as
+Skylake-Client.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 4ff74a806ad42820eef3877c8ec146770914d8df)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+	src/cpu_map/x86_Broadwell-IBRS.xml
+	src/cpu_map/x86_Broadwell-noTSX-IBRS.xml
+	src/cpu_map/x86_Broadwell-noTSX.xml
+	src/cpu_map/x86_Broadwell.xml
+            - cpu_map split not backported
+
+	tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-guest.xml
+            - context: intel-pt feature does not exist in RHEL-7.6
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml                                  | 12 ++++++++++++
+ .../x86_64-cpuid-Xeon-E5-2623-v4-guest.xml           | 11 +++++++----
+ .../x86_64-cpuid-Xeon-E5-2623-v4-json.xml            | 11 +++++++----
+ .../x86_64-cpuid-Xeon-E5-2630-v4-guest.xml           | 11 +++++++----
+ .../x86_64-cpuid-Xeon-E5-2630-v4-json.xml            | 11 +++++++----
+ .../x86_64-cpuid-Xeon-E5-2650-v4-guest.xml           | 11 +++++++----
+ .../x86_64-cpuid-Xeon-E5-2650-v4-json.xml            | 11 +++++++----
+ 7 files changed, 54 insertions(+), 24 deletions(-)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 7c6f70113e..095ea0a839 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -1434,6 +1434,9 @@
+ 
+     <model name='Broadwell-noTSX'>
+       <signature family='6' model='61'/> <!-- 0306d0 -->
++      <signature family='6' model='71'/> <!-- 040670 -->
++      <signature family='6' model='79'/> <!-- 0406f0 -->
++      <signature family='6' model='86'/> <!-- 050660 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='adx'/>
+@@ -1491,6 +1494,9 @@
+ 
+     <model name='Broadwell-noTSX-IBRS'>
+       <signature family='6' model='61'/> <!-- 0306d0 -->
++      <signature family='6' model='71'/> <!-- 040670 -->
++      <signature family='6' model='79'/> <!-- 0406f0 -->
++      <signature family='6' model='86'/> <!-- 050660 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='adx'/>
+@@ -1549,6 +1555,9 @@
+ 
+     <model name='Broadwell'>
+       <signature family='6' model='61'/> <!-- 0306d0 -->
++      <signature family='6' model='71'/> <!-- 040670 -->
++      <signature family='6' model='79'/> <!-- 0406f0 -->
++      <signature family='6' model='86'/> <!-- 050660 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='adx'/>
+@@ -1608,6 +1617,9 @@
+ 
+     <model name='Broadwell-IBRS'>
+       <signature family='6' model='61'/> <!-- 0306d0 -->
++      <signature family='6' model='71'/> <!-- 040670 -->
++      <signature family='6' model='79'/> <!-- 0406f0 -->
++      <signature family='6' model='86'/> <!-- 050660 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='adx'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-guest.xml
+index d4f303ecce..e2ad344497 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-guest.xml
+@@ -1,6 +1,7 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>Skylake-Client-IBRS</model>
++  <model fallback='forbid'>Broadwell-IBRS</model>
+   <vendor>Intel</vendor>
++  <feature policy='require' name='vme'/>
+   <feature policy='require' name='ds'/>
+   <feature policy='require' name='acpi'/>
+   <feature policy='require' name='ss'/>
+@@ -18,14 +19,16 @@
+   <feature policy='require' name='pdcm'/>
+   <feature policy='require' name='dca'/>
+   <feature policy='require' name='osxsave'/>
++  <feature policy='require' name='f16c'/>
++  <feature policy='require' name='rdrand'/>
++  <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='cmt'/>
+   <feature policy='require' name='stibp'/>
++  <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='mbm_total'/>
+   <feature policy='require' name='mbm_local'/>
+   <feature policy='require' name='pdpe1gb'/>
++  <feature policy='require' name='abm'/>
+   <feature policy='require' name='invtsc'/>
+-  <feature policy='disable' name='mpx'/>
+-  <feature policy='disable' name='xsavec'/>
+-  <feature policy='disable' name='xgetbv1'/>
+ </cpu>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-json.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-json.xml
+index 167a9028ab..de082dbd93 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-json.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-json.xml
+@@ -1,11 +1,14 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>Skylake-Client-IBRS</model>
++  <model fallback='forbid'>Broadwell-IBRS</model>
+   <vendor>Intel</vendor>
++  <feature policy='require' name='vme'/>
+   <feature policy='require' name='ss'/>
++  <feature policy='require' name='f16c'/>
++  <feature policy='require' name='rdrand'/>
+   <feature policy='require' name='hypervisor'/>
++  <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
++  <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='pdpe1gb'/>
+-  <feature policy='disable' name='mpx'/>
+-  <feature policy='disable' name='xsavec'/>
+-  <feature policy='disable' name='xgetbv1'/>
++  <feature policy='require' name='abm'/>
+ </cpu>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-guest.xml
+index 2fac54355c..c670b1f4df 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-guest.xml
+@@ -1,6 +1,7 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>Skylake-Client</model>
++  <model fallback='forbid'>Broadwell</model>
+   <vendor>Intel</vendor>
++  <feature policy='require' name='vme'/>
+   <feature policy='require' name='ds'/>
+   <feature policy='require' name='acpi'/>
+   <feature policy='require' name='ss'/>
+@@ -18,13 +19,15 @@
+   <feature policy='require' name='pdcm'/>
+   <feature policy='require' name='dca'/>
+   <feature policy='require' name='osxsave'/>
++  <feature policy='require' name='f16c'/>
++  <feature policy='require' name='rdrand'/>
++  <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='cmt'/>
++  <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='mbm_total'/>
+   <feature policy='require' name='mbm_local'/>
+   <feature policy='require' name='pdpe1gb'/>
++  <feature policy='require' name='abm'/>
+   <feature policy='require' name='invtsc'/>
+-  <feature policy='disable' name='mpx'/>
+-  <feature policy='disable' name='xsavec'/>
+-  <feature policy='disable' name='xgetbv1'/>
+ </cpu>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-json.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-json.xml
+index 5dfce947b2..5b8891093a 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-json.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-json.xml
+@@ -1,11 +1,14 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>Skylake-Client</model>
++  <model fallback='forbid'>Broadwell</model>
+   <vendor>Intel</vendor>
++  <feature policy='require' name='vme'/>
+   <feature policy='require' name='ss'/>
++  <feature policy='require' name='f16c'/>
++  <feature policy='require' name='rdrand'/>
+   <feature policy='require' name='hypervisor'/>
++  <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
++  <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='pdpe1gb'/>
+-  <feature policy='disable' name='mpx'/>
+-  <feature policy='disable' name='xsavec'/>
+-  <feature policy='disable' name='xgetbv1'/>
++  <feature policy='require' name='abm'/>
+ </cpu>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-guest.xml
+index 2fac54355c..c670b1f4df 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-guest.xml
+@@ -1,6 +1,7 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>Skylake-Client</model>
++  <model fallback='forbid'>Broadwell</model>
+   <vendor>Intel</vendor>
++  <feature policy='require' name='vme'/>
+   <feature policy='require' name='ds'/>
+   <feature policy='require' name='acpi'/>
+   <feature policy='require' name='ss'/>
+@@ -18,13 +19,15 @@
+   <feature policy='require' name='pdcm'/>
+   <feature policy='require' name='dca'/>
+   <feature policy='require' name='osxsave'/>
++  <feature policy='require' name='f16c'/>
++  <feature policy='require' name='rdrand'/>
++  <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='cmt'/>
++  <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='mbm_total'/>
+   <feature policy='require' name='mbm_local'/>
+   <feature policy='require' name='pdpe1gb'/>
++  <feature policy='require' name='abm'/>
+   <feature policy='require' name='invtsc'/>
+-  <feature policy='disable' name='mpx'/>
+-  <feature policy='disable' name='xsavec'/>
+-  <feature policy='disable' name='xgetbv1'/>
+ </cpu>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-json.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-json.xml
+index 5dfce947b2..5b8891093a 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-json.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-json.xml
+@@ -1,11 +1,14 @@
+ <cpu mode='custom' match='exact'>
+-  <model fallback='forbid'>Skylake-Client</model>
++  <model fallback='forbid'>Broadwell</model>
+   <vendor>Intel</vendor>
++  <feature policy='require' name='vme'/>
+   <feature policy='require' name='ss'/>
++  <feature policy='require' name='f16c'/>
++  <feature policy='require' name='rdrand'/>
+   <feature policy='require' name='hypervisor'/>
++  <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
++  <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='pdpe1gb'/>
+-  <feature policy='disable' name='mpx'/>
+-  <feature policy='disable' name='xsavec'/>
+-  <feature policy='disable' name='xgetbv1'/>
++  <feature policy='require' name='abm'/>
+ </cpu>
+-- 
+2.21.0
+

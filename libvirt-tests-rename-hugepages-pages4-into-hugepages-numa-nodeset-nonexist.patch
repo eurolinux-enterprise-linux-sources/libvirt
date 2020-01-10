@@ -1,0 +1,125 @@
+From 191c1124fbdd06f1b7a6f214ebdc927f17349892 Mon Sep 17 00:00:00 2001
+Message-Id: <191c1124fbdd06f1b7a6f214ebdc927f17349892@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:13 +0200
+Subject: [PATCH] tests: rename hugepages-pages4 into
+ hugepages-numa-nodeset-nonexist
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Remove unnecessary XML elements as well.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 5534edcb9e0cd462f2bae8acb92bd9b85aa874f0)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ ....xml => hugepages-numa-nodeset-nonexist.xml} | 17 +----------------
+ tests/qemuxml2argvtest.c                        |  5 +++--
+ .../hugepages-numa-nodeset-nonexist.xml         |  1 +
+ tests/qemuxml2xmloutdata/hugepages-pages4.xml   |  1 -
+ tests/qemuxml2xmltest.c                         |  2 +-
+ 5 files changed, 6 insertions(+), 20 deletions(-)
+ rename tests/qemuxml2argvdata/{hugepages-pages4.xml => hugepages-numa-nodeset-nonexist.xml} (66%)
+ create mode 120000 tests/qemuxml2xmloutdata/hugepages-numa-nodeset-nonexist.xml
+ delete mode 120000 tests/qemuxml2xmloutdata/hugepages-pages4.xml
+
+diff --git a/tests/qemuxml2argvdata/hugepages-pages4.xml b/tests/qemuxml2argvdata/hugepages-numa-nodeset-nonexist.xml
+similarity index 66%
+rename from tests/qemuxml2argvdata/hugepages-pages4.xml
+rename to tests/qemuxml2argvdata/hugepages-numa-nodeset-nonexist.xml
+index 9f79881a59..8211d72be9 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages4.xml
++++ b/tests/qemuxml2argvdata/hugepages-numa-nodeset-nonexist.xml
+@@ -10,10 +10,6 @@
+     </hugepages>
+   </memoryBacking>
+   <vcpu placement='static'>4</vcpu>
+-  <numatune>
+-    <memory mode='strict' nodeset='0-3'/>
+-    <memnode cellid='3' mode='strict' nodeset='3'/>
+-  </numatune>
+   <os>
+     <type arch='i686' machine='pc'>hvm</type>
+     <boot dev='hd'/>
+@@ -32,23 +28,12 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <emulator>/usr/bin/qemu-system-i686</emulator>
+-    <disk type='block' device='disk'>
+-      <driver name='qemu' type='raw'/>
+-      <source dev='/dev/HostVG/QEMUGuest1'/>
+-      <target dev='hda' bus='ide'/>
+-      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+-    </disk>
+     <controller type='usb' index='0'>
+       <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
+     </controller>
+-    <controller type='ide' index='0'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
+-    </controller>
+     <controller type='pci' index='0' model='pci-root'/>
+     <input type='mouse' bus='ps2'/>
+     <input type='keyboard' bus='ps2'/>
+-    <memballoon model='virtio'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+-    </memballoon>
++    <memballoon model='none'/>
+   </devices>
+ </domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 5a41bbe6e0..1b6e8ded43 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -967,12 +967,13 @@ mymain(void)
+     DO_TEST("hugepages-numa-nodeset-part",
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
++    DO_TEST_FAILURE("hugepages-numa-nodeset-nonexist",
++                    QEMU_CAPS_OBJECT_MEMORY_RAM,
++                    QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-shared",
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST_PARSE_ERROR("hugepages-memaccess-invalid", NONE);
+-    DO_TEST_FAILURE("hugepages-pages4",
+-            QEMU_CAPS_OBJECT_MEMORY_RAM, QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-pages5", NONE);
+     DO_TEST("hugepages-pages6", NONE);
+     DO_TEST("hugepages-pages7",
+diff --git a/tests/qemuxml2xmloutdata/hugepages-numa-nodeset-nonexist.xml b/tests/qemuxml2xmloutdata/hugepages-numa-nodeset-nonexist.xml
+new file mode 120000
+index 0000000000..d490edca69
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/hugepages-numa-nodeset-nonexist.xml
+@@ -0,0 +1 @@
++../qemuxml2argvdata/hugepages-numa-nodeset-nonexist.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmloutdata/hugepages-pages4.xml b/tests/qemuxml2xmloutdata/hugepages-pages4.xml
+deleted file mode 120000
+index 127e66e64f..0000000000
+--- a/tests/qemuxml2xmloutdata/hugepages-pages4.xml
++++ /dev/null
+@@ -1 +0,0 @@
+-../qemuxml2argvdata/hugepages-pages4.xml
+\ No newline at end of file
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index bb7b0ce481..9b3152821f 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -337,7 +337,7 @@ mymain(void)
+     DO_TEST("hugepages-numa-default-dimm", NONE);
+     DO_TEST("hugepages-numa-nodeset", NONE);
+     DO_TEST("hugepages-numa-nodeset-part", NONE);
+-    DO_TEST("hugepages-pages4", NONE);
++    DO_TEST("hugepages-numa-nodeset-nonexist", NONE);
+     DO_TEST("hugepages-pages5", NONE);
+     DO_TEST("hugepages-pages6", NONE);
+     DO_TEST("hugepages-pages7", NONE);
+-- 
+2.18.0
+

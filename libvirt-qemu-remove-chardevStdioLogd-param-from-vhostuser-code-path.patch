@@ -1,0 +1,98 @@
+From 8a029bcd0227b8c9829858254f9129a9406a167f Mon Sep 17 00:00:00 2001
+Message-Id: <8a029bcd0227b8c9829858254f9129a9406a167f@dist-git>
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Fri, 6 Jul 2018 15:46:59 +0100
+Subject: [PATCH] qemu: remove chardevStdioLogd param from vhostuser code path
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1597940
+
+The vhostuser network backend is only supported with the UNIX domain
+socket chardev backend, so passing around chardevStdioLogd is not
+required.
+
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 4c76266baca407ae4981a180aed45193e50a8ade)
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c | 20 +++++++-------------
+ 1 file changed, 7 insertions(+), 13 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 4120e4f983..41050bfea3 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -8223,8 +8223,7 @@ qemuBuildVhostuserCommandLine(virQEMUDriverPtr driver,
+                               virDomainDefPtr def,
+                               virDomainNetDefPtr net,
+                               virQEMUCapsPtr qemuCaps,
+-                              unsigned int bootindex,
+-                              bool chardevStdioLogd)
++                              unsigned int bootindex)
+ {
+     virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
+     char *chardev = NULL;
+@@ -8245,7 +8244,7 @@ qemuBuildVhostuserCommandLine(virQEMUDriverPtr driver,
+                                                cmd, cfg, def,
+                                                net->data.vhostuser,
+                                                net->info.alias, qemuCaps, false,
+-                                               chardevStdioLogd)))
++                                               false)))
+             goto cleanup;
+         break;
+ 
+@@ -8319,8 +8318,7 @@ qemuBuildInterfaceCommandLine(virQEMUDriverPtr driver,
+                               virNetDevVPortProfileOp vmop,
+                               bool standalone,
+                               size_t *nnicindexes,
+-                              int **nicindexes,
+-                              bool chardevStdioLogd)
++                              int **nicindexes)
+ {
+     int ret = -1;
+     char *nic = NULL, *host = NULL;
+@@ -8443,8 +8441,7 @@ qemuBuildInterfaceCommandLine(virQEMUDriverPtr driver,
+ 
+     case VIR_DOMAIN_NET_TYPE_VHOSTUSER:
+         ret = qemuBuildVhostuserCommandLine(driver, logManager, secManager, cmd, def,
+-                                            net, qemuCaps, bootindex,
+-                                            chardevStdioLogd);
++                                            net, qemuCaps, bootindex);
+         goto cleanup;
+         break;
+ 
+@@ -8628,8 +8625,7 @@ qemuBuildNetCommandLine(virQEMUDriverPtr driver,
+                         bool standalone,
+                         size_t *nnicindexes,
+                         int **nicindexes,
+-                        unsigned int *bootHostdevNet,
+-                        bool chardevStdioLogd)
++                        unsigned int *bootHostdevNet)
+ {
+     size_t i;
+     int last_good_net = -1;
+@@ -8656,8 +8652,7 @@ qemuBuildNetCommandLine(virQEMUDriverPtr driver,
+             if (qemuBuildInterfaceCommandLine(driver, logManager, secManager, cmd, def, net,
+                                               qemuCaps, bootNet, vmop,
+                                               standalone, nnicindexes,
+-                                              nicindexes,
+-                                              chardevStdioLogd) < 0)
++                                              nicindexes) < 0)
+                 goto error;
+ 
+             last_good_net = i;
+@@ -10318,8 +10313,7 @@ qemuBuildCommandLine(virQEMUDriverPtr driver,
+ 
+     if (qemuBuildNetCommandLine(driver, logManager, secManager, cmd, def,
+                                 qemuCaps, vmop, standalone,
+-                                nnicindexes, nicindexes, &bootHostdevNet,
+-                                chardevStdioLogd) < 0)
++                                nnicindexes, nicindexes, &bootHostdevNet) < 0)
+         goto error;
+ 
+     if (qemuBuildSmartcardCommandLine(logManager, secManager, cmd, cfg, def, qemuCaps,
+-- 
+2.18.0
+

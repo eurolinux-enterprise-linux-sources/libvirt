@@ -1,0 +1,301 @@
+From d0fff22c96e56f72e05009b038fc8a80ae35a6ff Mon Sep 17 00:00:00 2001
+Message-Id: <d0fff22c96e56f72e05009b038fc8a80ae35a6ff@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 26 Feb 2019 09:22:36 +0100
+Subject: [PATCH] cpu_map: Add hex representation of signatures
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The family/model numbers are nice for humans or for comparing with
+/proc/cpuinfo, but sometimes there's a need to see the CPUID
+representation of the signature. Let's add it into a comment for each
+signature in out cpu_map XMLs as the conversion is not exactly
+straightforward.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 61be05a00fd383f11070761fac5ae28272b784dd)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1558558
+https://bugzilla.redhat.com/show_bug.cgi?id=1687515
+
+Conflicts:
+        src/cpu/cpu_map.xml
+            - the cpu_map split was not backported to RHEL-7.6
+            - Icelake-Client and Icelake-Server models are missing
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml | 58 ++++++++++++++++++++++-----------------------
+ 1 file changed, 29 insertions(+), 29 deletions(-)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 9d53d4b43a..381068674c 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -789,7 +789,7 @@
+ 
+     <!-- Intel CPU models -->
+     <model name='Conroe'>
+-      <signature family='6' model='15'/>
++      <signature family='6' model='15'/> <!-- 0006f0 -->
+       <vendor name='Intel'/>
+       <feature name='apic'/>
+       <feature name='clflush'/>
+@@ -821,7 +821,7 @@
+     </model>
+ 
+     <model name='Penryn'>
+-      <signature family='6' model='23'/>
++      <signature family='6' model='23'/> <!-- 010670 -->
+       <vendor name='Intel'/>
+       <feature name='apic'/>
+       <feature name='clflush'/>
+@@ -855,7 +855,7 @@
+     </model>
+ 
+     <model name='Nehalem'>
+-      <signature family='6' model='26'/>
++      <signature family='6' model='26'/> <!-- 0106a0 -->
+       <vendor name='Intel'/>
+       <feature name='apic'/>
+       <feature name='clflush'/>
+@@ -891,7 +891,7 @@
+     </model>
+ 
+     <model name='Nehalem-IBRS'>
+-      <signature family='6' model='26'/>
++      <signature family='6' model='26'/> <!-- 0106a0 -->
+       <vendor name='Intel'/>
+       <feature name='apic'/>
+       <feature name='clflush'/>
+@@ -928,7 +928,7 @@
+     </model>
+ 
+     <model name='Westmere'>
+-      <signature family='6' model='44'/>
++      <signature family='6' model='44'/> <!-- 0206c0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -965,7 +965,7 @@
+     </model>
+ 
+     <model name='Westmere-IBRS'>
+-      <signature family='6' model='44'/>
++      <signature family='6' model='44'/> <!-- 0206c0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1003,7 +1003,7 @@
+     </model>
+ 
+     <model name='SandyBridge'>
+-      <signature family='6' model='42'/>
++      <signature family='6' model='42'/> <!-- 0206a0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1046,7 +1046,7 @@
+     </model>
+ 
+     <model name='SandyBridge-IBRS'>
+-      <signature family='6' model='42'/>
++      <signature family='6' model='42'/> <!-- 0206a0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1090,7 +1090,7 @@
+     </model>
+ 
+     <model name='IvyBridge'>
+-      <signature family='6' model='58'/>
++      <signature family='6' model='58'/> <!-- 0306a0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1139,7 +1139,7 @@
+     </model>
+ 
+     <model name='IvyBridge-IBRS'>
+-      <signature family='6' model='58'/>
++      <signature family='6' model='58'/> <!-- 0306a0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1189,7 +1189,7 @@
+     </model>
+ 
+     <model name='Haswell-noTSX'>
+-      <signature family='6' model='60'/>
++      <signature family='6' model='60'/> <!-- 0306c0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1242,7 +1242,7 @@
+     </model>
+ 
+     <model name='Haswell-noTSX-IBRS'>
+-      <signature family='6' model='60'/>
++      <signature family='6' model='60'/> <!-- 0306c0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1296,7 +1296,7 @@
+     </model>
+ 
+     <model name='Haswell'>
+-      <signature family='6' model='60'/>
++      <signature family='6' model='60'/> <!-- 0306c0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1351,7 +1351,7 @@
+     </model>
+ 
+     <model name='Haswell-IBRS'>
+-      <signature family='6' model='60'/>
++      <signature family='6' model='60'/> <!-- 0306c0 -->
+       <vendor name='Intel'/>
+       <feature name='aes'/>
+       <feature name='apic'/>
+@@ -1407,7 +1407,7 @@
+     </model>
+ 
+     <model name='Broadwell-noTSX'>
+-      <signature family='6' model='61'/>
++      <signature family='6' model='61'/> <!-- 0306d0 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='adx'/>
+@@ -1464,7 +1464,7 @@
+     </model>
+ 
+     <model name='Broadwell-noTSX-IBRS'>
+-      <signature family='6' model='61'/>
++      <signature family='6' model='61'/> <!-- 0306d0 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='adx'/>
+@@ -1522,7 +1522,7 @@
+     </model>
+ 
+     <model name='Broadwell'>
+-      <signature family='6' model='61'/>
++      <signature family='6' model='61'/> <!-- 0306d0 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='adx'/>
+@@ -1581,7 +1581,7 @@
+     </model>
+ 
+     <model name='Broadwell-IBRS'>
+-      <signature family='6' model='61'/>
++      <signature family='6' model='61'/> <!-- 0306d0 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='adx'/>
+@@ -1641,7 +1641,7 @@
+     </model>
+ 
+     <model name='Skylake-Client'>
+-      <signature family='6' model='94'/>
++      <signature family='6' model='94'/> <!-- 0506e0 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='abm'/>
+@@ -1709,7 +1709,7 @@
+     </model>
+ 
+     <model name='Skylake-Client-IBRS'>
+-      <signature family='6' model='94'/>
++      <signature family='6' model='94'/> <!-- 0506e0 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='abm'/>
+@@ -1778,7 +1778,7 @@
+     </model>
+ 
+     <model name='Skylake-Server'>
+-      <signature family='6' model='85'/>
++      <signature family='6' model='85'/> <!-- 050654 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='abm'/>
+@@ -1853,7 +1853,7 @@
+     </model>
+ 
+     <model name='Skylake-Server-IBRS'>
+-      <signature family='6' model='85'/>
++      <signature family='6' model='85'/> <!-- 050654 -->
+       <vendor name='Intel'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='abm'/>
+@@ -1992,7 +1992,7 @@
+     </model>
+ 
+     <model name='Opteron_G1'>
+-      <signature family='15' model='6'/>
++      <signature family='15' model='6'/> <!-- 100e60 -->
+       <vendor name='AMD'/>
+       <feature name='apic'/>
+       <feature name='clflush'/>
+@@ -2022,7 +2022,7 @@
+     </model>
+ 
+     <model name='Opteron_G2'>
+-      <signature family='15' model='6'/>
++      <signature family='15' model='6'/> <!-- 100e60 -->
+       <vendor name='AMD'/>
+       <feature name='apic'/>
+       <feature name='clflush'/>
+@@ -2056,7 +2056,7 @@
+     </model>
+ 
+     <model name='Opteron_G3'>
+-      <signature family='15' model='6'/>
++      <signature family='15' model='6'/> <!-- 100e60 -->
+       <vendor name='AMD'/>
+       <feature name='abm'/>
+       <feature name='apic'/>
+@@ -2095,7 +2095,7 @@
+     </model>
+ 
+     <model name='Opteron_G4'>
+-      <signature family='21' model='1'/>
++      <signature family='21' model='1'/> <!-- 600f10 -->
+       <vendor name='AMD'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='abm'/>
+@@ -2144,7 +2144,7 @@
+     </model>
+ 
+     <model name='Opteron_G5'>
+-      <signature family='21' model='2'/>
++      <signature family='21' model='2'/> <!-- 600f20 -->
+       <vendor name='AMD'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='abm'/>
+@@ -2196,7 +2196,7 @@
+     </model>
+ 
+     <model name='EPYC'>
+-      <signature family='23' model='1'/>
++      <signature family='23' model='1'/> <!-- 800f10 -->
+       <vendor name='AMD'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='abm'/>
+@@ -2267,7 +2267,7 @@
+     </model>
+ 
+     <model name='EPYC-IBPB'>
+-      <signature family='23' model='1'/>
++      <signature family='23' model='1'/> <!-- 800f10 -->
+       <vendor name='AMD'/>
+       <feature name='3dnowprefetch'/>
+       <feature name='abm'/>
+-- 
+2.21.0
+

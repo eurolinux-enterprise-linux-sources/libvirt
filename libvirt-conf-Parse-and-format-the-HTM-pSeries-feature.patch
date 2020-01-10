@@ -1,0 +1,194 @@
+From 5bb35bab69e911b2ce23067f1ba2fb6bc226bf9c Mon Sep 17 00:00:00 2001
+Message-Id: <5bb35bab69e911b2ce23067f1ba2fb6bc226bf9c@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Tue, 3 Jul 2018 15:25:16 +0200
+Subject: [PATCH] conf: Parse and format the HTM pSeries feature
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+
+(cherry picked from commit 9f3b9100f33036cb14296aa0a788788743b75a23)
+https: //bugzilla.redhat.com/show_bug.cgi?id=1525599
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Acked-by: David Gibson <dgibson@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in                     |  8 ++++++++
+ docs/schemas/domaincommon.rng                 |  5 +++++
+ src/conf/domain_conf.c                        | 19 +++++++++++++++++++
+ src/conf/domain_conf.h                        |  1 +
+ src/qemu/qemu_domain.c                        |  1 +
+ tests/qemuxml2argvdata/pseries-features.xml   |  1 +
+ tests/qemuxml2argvtest.c                      |  1 +
+ tests/qemuxml2xmloutdata/pseries-features.xml |  1 +
+ tests/qemuxml2xmltest.c                       |  1 +
+ 9 files changed, 38 insertions(+)
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 0d68596991..a3afe137bf 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -1929,6 +1929,7 @@
+   &lt;smm state='on'&gt;
+     &lt;tseg unit='MiB'&gt;48&lt;/tseg&gt;
+   &lt;/smm&gt;
++  &lt;htm state='on'/&gt;
+ &lt;/features&gt;
+ ...</pre>
+ 
+@@ -2162,6 +2163,13 @@
+       <dd>Enable QEMU vmcoreinfo device to let the guest kernel save debug
+           details. <span class="since">Since 4.4.0</span> (QEMU only)
+       </dd>
++      <dt><code>htm</code></dt>
++      <dd>Configure HTM (Hardware Transational Memory) availability for
++          pSeries guests. Possible values for the <code>state</code> attribute
++          are <code>on</code> and <code>off</code>. If the attribute is not
++          defined, the hypervisor default will be used.
++          <span class="since">Since 4.6.0</span> (QEMU/KVM only)
++      </dd>
+     </dl>
+ 
+     <h3><a id="elementsTime">Time keeping</a></h3>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index f46145cf9b..bd687ce9d3 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -4907,6 +4907,11 @@
+           <optional>
+             <ref name="vmcoreinfo"/>
+           </optional>
++          <optional>
++            <element name="htm">
++              <ref name="featurestate"/>
++            </element>
++          </optional>
+         </interleave>
+       </element>
+     </optional>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index b8b53450fa..f4e59f6c91 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -152,6 +152,7 @@ VIR_ENUM_IMPL(virDomainFeature, VIR_DOMAIN_FEATURE_LAST,
+               "ioapic",
+               "hpt",
+               "vmcoreinfo",
++              "htm",
+ );
+ 
+ VIR_ENUM_IMPL(virDomainCapabilitiesPolicy, VIR_DOMAIN_CAPABILITIES_POLICY_LAST,
+@@ -19827,6 +19828,22 @@ virDomainDefParseXML(xmlDocPtr xml,
+             }
+             break;
+ 
++        case VIR_DOMAIN_FEATURE_HTM:
++            if (!(tmp = virXMLPropString(nodes[i], "state"))) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                               _("missing state attribute '%s' of feature '%s'"),
++                               tmp, virDomainFeatureTypeToString(val));
++                goto error;
++            }
++            if ((def->features[val] = virTristateSwitchTypeFromString(tmp)) < 0) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                               _("unknown state attribute '%s' of feature '%s'"),
++                               tmp, virDomainFeatureTypeToString(val));
++                goto error;
++            }
++            VIR_FREE(tmp);
++            break;
++
+         /* coverity[dead_error_begin] */
+         case VIR_DOMAIN_FEATURE_LAST:
+             break;
+@@ -21961,6 +21978,7 @@ virDomainDefFeaturesCheckABIStability(virDomainDefPtr src,
+         case VIR_DOMAIN_FEATURE_VMPORT:
+         case VIR_DOMAIN_FEATURE_SMM:
+         case VIR_DOMAIN_FEATURE_VMCOREINFO:
++        case VIR_DOMAIN_FEATURE_HTM:
+             if (src->features[i] != dst->features[i]) {
+                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
+                                _("State of feature '%s' differs: "
+@@ -27626,6 +27644,7 @@ virDomainDefFormatInternal(virDomainDefPtr def,
+             case VIR_DOMAIN_FEATURE_PMU:
+             case VIR_DOMAIN_FEATURE_PVSPINLOCK:
+             case VIR_DOMAIN_FEATURE_VMPORT:
++            case VIR_DOMAIN_FEATURE_HTM:
+                 switch ((virTristateSwitch) def->features[i]) {
+                 case VIR_TRISTATE_SWITCH_LAST:
+                 case VIR_TRISTATE_SWITCH_ABSENT:
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 71437dc485..41d27482fb 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1771,6 +1771,7 @@ typedef enum {
+     VIR_DOMAIN_FEATURE_IOAPIC,
+     VIR_DOMAIN_FEATURE_HPT,
+     VIR_DOMAIN_FEATURE_VMCOREINFO,
++    VIR_DOMAIN_FEATURE_HTM,
+ 
+     VIR_DOMAIN_FEATURE_LAST
+ } virDomainFeature;
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 4c2a162b85..0eacad1e44 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -3865,6 +3865,7 @@ qemuDomainDefValidateFeatures(const virDomainDef *def,
+         case VIR_DOMAIN_FEATURE_PMU:
+         case VIR_DOMAIN_FEATURE_VMPORT:
+         case VIR_DOMAIN_FEATURE_VMCOREINFO:
++        case VIR_DOMAIN_FEATURE_HTM:
+         case VIR_DOMAIN_FEATURE_LAST:
+             break;
+         }
+diff --git a/tests/qemuxml2argvdata/pseries-features.xml b/tests/qemuxml2argvdata/pseries-features.xml
+index 30cee5b81c..5c842fe87b 100644
+--- a/tests/qemuxml2argvdata/pseries-features.xml
++++ b/tests/qemuxml2argvdata/pseries-features.xml
+@@ -10,6 +10,7 @@
+     <hpt resizing='required'>
+       <maxpagesize unit='GiB'>1</maxpagesize>
+     </hpt>
++    <htm state='on'/>
+   </features>
+   <devices>
+     <emulator>/usr/bin/qemu-system-ppc64</emulator>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index c279ac4975..d6911f9344 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -1850,6 +1850,7 @@ mymain(void)
+     DO_TEST("pseries-features",
+             QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+             QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE,
++            QEMU_CAPS_MACHINE_PSERIES_CAP_HTM,
+             QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT);
+     DO_TEST_FAILURE("pseries-features",
+                     QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE);
+diff --git a/tests/qemuxml2xmloutdata/pseries-features.xml b/tests/qemuxml2xmloutdata/pseries-features.xml
+index f36705f011..55a44c75a0 100644
+--- a/tests/qemuxml2xmloutdata/pseries-features.xml
++++ b/tests/qemuxml2xmloutdata/pseries-features.xml
+@@ -12,6 +12,7 @@
+     <hpt resizing='required'>
+       <maxpagesize unit='KiB'>1048576</maxpagesize>
+     </hpt>
++    <htm state='on'/>
+   </features>
+   <clock offset='utc'/>
+   <on_poweroff>destroy</on_poweroff>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index eac6d5b073..bbb995656e 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -620,6 +620,7 @@ mymain(void)
+     DO_TEST("pseries-features",
+             QEMU_CAPS_DEVICE_SPAPR_PCI_HOST_BRIDGE,
+             QEMU_CAPS_MACHINE_PSERIES_CAP_HPT_MAX_PAGE_SIZE,
++            QEMU_CAPS_MACHINE_PSERIES_CAP_HTM,
+             QEMU_CAPS_MACHINE_PSERIES_RESIZE_HPT);
+ 
+     DO_TEST("pseries-serial-native",
+-- 
+2.18.0
+

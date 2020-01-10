@@ -1,0 +1,52 @@
+From d39f6ba78035adbe3772603a1939af1e67464448 Mon Sep 17 00:00:00 2001
+Message-Id: <d39f6ba78035adbe3772603a1939af1e67464448@dist-git>
+From: Luyao Huang <lhuang@redhat.com>
+Date: Wed, 11 Jul 2018 17:29:48 +0200
+Subject: [PATCH] virDomainConfNWFilterInstantiate: initialize @xml to avoid
+ random crash
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1599545
+
+If the code jump to the cleanup before assigning value to @xml
+libvirtd may crash when it tries to free an uninitialized pointer.
+
+backtrace:
+
+0  0x00007ffff428d59c in free () from /lib64/libc.so.6
+1  0x00007ffff721314a in virFree (ptrptr=ptrptr@entry=0x7fffc67f1b00) at util/viralloc.c:582
+2  0x00007ffff7345ac4 in virDomainConfNWFilterInstantiate (vmname=<optimized out>,
+   vmuuid=vmuuid@entry=0x7fffc0181ca8 "߉\237\\۔H\262\206z\340\302f\265\233z", net=<optimized out>,
+   ignoreExists=ignoreExists@entry=true) at conf/domain_nwfilter.c:122
+3  0x00007fffca5a77f6 in qemuProcessFiltersInstantiate (ignoreExists=true, def=0x7fffc0181ca0) at qemu/qemu_process.c:3028
+4  qemuProcessReconnect (opaque=<optimized out>) at qemu/qemu_process.c:7653
+5  0x00007ffff72c4895 in virThreadHelper (data=<optimized out>) at util/virthread.c:206
+6  0x00007ffff45dcdd5 in start_thread () from /lib64/libpthread.so.0
+7  0x00007ffff4305ead in clone () from /lib64/libc.so.6
+
+Signed-off-by: Luyao Huang <lhuang@redhat.com>
+(cherry picked from commit d7557f5f6f51264c1b5623e97f7b4d5259d4d3b6)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_nwfilter.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_nwfilter.c b/src/conf/domain_nwfilter.c
+index 948b32481e..24b5f42ddd 100644
+--- a/src/conf/domain_nwfilter.c
++++ b/src/conf/domain_nwfilter.c
+@@ -90,7 +90,7 @@ virDomainConfNWFilterInstantiate(const char *vmname,
+     virConnectPtr conn = virGetConnectNWFilter();
+     virNWFilterBindingDefPtr def = NULL;
+     virNWFilterBindingPtr binding = NULL;
+-    char *xml;
++    char *xml = NULL;
+     int ret = -1;
+ 
+     VIR_DEBUG("vmname=%s portdev=%s filter=%s ignoreExists=%d",
+-- 
+2.18.0
+

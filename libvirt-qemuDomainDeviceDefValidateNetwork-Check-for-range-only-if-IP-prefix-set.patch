@@ -1,0 +1,41 @@
+From b8f548e00daaf08ce34c2b8578e5a2b032b082b7 Mon Sep 17 00:00:00 2001
+Message-Id: <b8f548e00daaf08ce34c2b8578e5a2b032b082b7@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Mon, 9 Jul 2018 12:07:39 +0200
+Subject: [PATCH] qemuDomainDeviceDefValidateNetwork: Check for range only if
+ IP prefix set
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1515533
+
+The @prefix attribute to <ip/> element for interface type user is
+optional. Therefore, if left out it has value of zero in which
+case we should not check whether it falls into <4, 27> range.
+Otherwise we fail parsing domain XML for no good reason.
+
+Broken by commit b62b8090b2ad4524a5bf9d40d0d1c17a9d57f5a0.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit a6fbbce73e2965edde45ece7c034e4b39bb8405d)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_domain.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index fa952f8306..f9bcf76f44 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -4386,7 +4386,8 @@ qemuDomainDeviceDefValidateNetwork(const virDomainNetDef *net)
+                 }
+                 hasIPv4 = true;
+ 
+-                if (ip->prefix < 4 || ip->prefix > 27) {
++                if (ip->prefix > 0 &&
++                    (ip->prefix < 4 || ip->prefix > 27)) {
+                     virReportError(VIR_ERR_XML_ERROR, "%s",
+                                    _("invalid prefix, must be in range of 4-27"));
+                     return -1;
+-- 
+2.18.0
+

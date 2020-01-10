@@ -1,0 +1,40 @@
+From 4fa90611d24e5899af1f1cbf4424fd0dced25d7b Mon Sep 17 00:00:00 2001
+Message-Id: <4fa90611d24e5899af1f1cbf4424fd0dced25d7b@dist-git>
+From: Katerina Koukiou <kkoukiou@redhat.com>
+Date: Mon, 16 Jul 2018 11:42:28 +0200
+Subject: [PATCH] qemu: hotplug: report error when changing rom enabled attr
+ for net iface
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1599513
+
+Signed-off-by: Katerina Koukiou <kkoukiou@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 611b038fb60e23eb574148192090f33bc7264be2)
+Signed-off-by: Katerina Koukiou <kkoukiou@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 3d0f1055d9..91a751a2fe 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -3222,6 +3222,11 @@ qemuDomainChangeNet(virQEMUDriverPtr driver,
+                        _("cannot modify network device boot index setting"));
+         goto cleanup;
+     }
++    if (olddev->info.romenabled != newdev->info.romenabled) {
++        virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
++                       _("cannot modify network device rom enabled setting"));
++        goto cleanup;
++    }
+     /* (end of device info checks) */
+ 
+     if (STRNEQ_NULLABLE(olddev->filter, newdev->filter) ||
+-- 
+2.18.0
+

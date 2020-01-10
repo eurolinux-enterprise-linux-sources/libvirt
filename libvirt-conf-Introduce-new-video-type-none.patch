@@ -1,0 +1,504 @@
+From 437293e3e1ac3fc43aca6d0ceb436f937a08d5e4 Mon Sep 17 00:00:00 2001
+Message-Id: <437293e3e1ac3fc43aca6d0ceb436f937a08d5e4@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Thu, 19 Jul 2018 15:04:05 +0200
+Subject: [PATCH] conf: Introduce new video type 'none'
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Historically, we've always enabled an emulated video device every time we
+see that graphics should be supported with a guest. With the appearance
+of mediated devices which can support QEMU's vfio-display capability,
+users might want to use such a device as the only video device.
+Therefore introduce a new, effectively a 'disable', type for video
+device.
+
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit d48813e81af798e3027edcc2f41be2630111ba65)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1475770
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ docs/formatdomain.html.in                     | 13 +++-
+ docs/schemas/domaincommon.rng                 |  1 +
+ src/conf/domain_conf.c                        | 61 +++++++++++++------
+ src/conf/domain_conf.h                        |  1 +
+ src/qemu/qemu_command.c                       | 12 +++-
+ src/qemu/qemu_domain.c                        |  2 +
+ src/qemu/qemu_domain_address.c                |  7 ++-
+ tests/domaincapsschemadata/full.xml           |  1 +
+ .../video-invalid-multiple-devices.xml        | 33 ++++++++++
+ tests/qemuxml2argvdata/video-none-device.args | 27 ++++++++
+ tests/qemuxml2argvdata/video-none-device.xml  | 39 ++++++++++++
+ tests/qemuxml2argvtest.c                      |  4 +-
+ .../qemuxml2xmloutdata/video-none-device.xml  | 42 +++++++++++++
+ tests/qemuxml2xmltest.c                       |  1 +
+ 14 files changed, 220 insertions(+), 24 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/video-invalid-multiple-devices.xml
+ create mode 100644 tests/qemuxml2argvdata/video-none-device.args
+ create mode 100644 tests/qemuxml2argvdata/video-none-device.xml
+ create mode 100644 tests/qemuxml2xmloutdata/video-none-device.xml
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 0e8f0a125f..42acf7a828 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -6666,9 +6666,18 @@ qemu-kvm -net nic,model=? /dev/null
+           The <code>model</code> element has a mandatory <code>type</code>
+           attribute which takes the value "vga", "cirrus", "vmvga", "xen",
+           "vbox", "qxl" (<span class="since">since 0.8.6</span>),
+-          "virtio" (<span class="since">since 1.3.0</span>)
+-          or "gop" (<span class="since">since 3.2.0</span>)
++          "virtio" (<span class="since">since 1.3.0</span>),
++          "gop" (<span class="since">since 3.2.0</span>), or
++          "none" (<span class="since">since 4.6.0</span>)
+           depending on the hypervisor features available.
++          The purpose of the type <code>none</code> is to instruct libvirt not
++          to add a default video device in the guest (see the paragraph above).
++          This legacy behaviour can be inconvenient in cases where GPU mediated
++          devices are meant to be the only rendering device within a guest and
++          so specifying another <code>video</code> device along with type
++          <code>none</code>.
++          Refer to <a id="elementsHostDev">Host device assignment</a> to see
++          how to add a mediated device into a guest.
+         </p>
+         <p>
+           You can provide the amount of video memory in kibibytes (blocks of
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index be8430ab22..ac04af51a1 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -3454,6 +3454,7 @@
+                 <value>vbox</value>
+                 <value>virtio</value>
+                 <value>gop</value>
++                <value>none</value>
+               </choice>
+             </attribute>
+             <group>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 830c298158..23288aa01b 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -590,7 +590,8 @@ VIR_ENUM_IMPL(virDomainVideo, VIR_DOMAIN_VIDEO_TYPE_LAST,
+               "qxl",
+               "parallels",
+               "virtio",
+-              "gop")
++              "gop",
++              "none")
+ 
+ VIR_ENUM_IMPL(virDomainVideoVGAConf, VIR_DOMAIN_VIDEO_VGACONF_LAST,
+               "io",
+@@ -5106,22 +5107,30 @@ virDomainDefPostParseVideo(virDomainDefPtr def,
+     if (def->nvideos == 0)
+         return 0;
+ 
+-    virDomainDeviceDef device = {
+-        .type = VIR_DOMAIN_DEVICE_VIDEO,
+-        .data.video = def->videos[0],
+-    };
++    if (def->videos[0]->type == VIR_DOMAIN_VIDEO_TYPE_NONE) {
++        /* we don't want to format any values we automatically fill in for
++         * videos into the XML, so clear them
++         */
++        virDomainVideoDefClear(def->videos[0]);
++        def->videos[0]->type = VIR_DOMAIN_VIDEO_TYPE_NONE;
++    } else {
++        virDomainDeviceDef device = {
++            .type = VIR_DOMAIN_DEVICE_VIDEO,
++            .data.video = def->videos[0],
++        };
+ 
+-    /* Mark the first video as primary. If the user specified
+-     * primary="yes", the parser already inserted the device at
+-     * def->videos[0]
+-     */
+-    def->videos[0]->primary = true;
++        /* Mark the first video as primary. If the user specified
++         * primary="yes", the parser already inserted the device at
++         * def->videos[0]
++         */
++        def->videos[0]->primary = true;
+ 
+-    /* videos[0] might have been added in AddImplicitDevices, after we've
+-     * done the per-device post-parse */
+-    if (virDomainDefPostParseDeviceIterator(def, &device,
+-                                            NULL, opaque) < 0)
+-        return -1;
++        /* videos[0] might have been added in AddImplicitDevices, after we've
++         * done the per-device post-parse */
++        if (virDomainDefPostParseDeviceIterator(def, &device,
++                                                NULL, opaque) < 0)
++            return -1;
++    }
+ 
+     return 0;
+ }
+@@ -5670,13 +5679,30 @@ virDomainHostdevDefValidate(const virDomainHostdevDef *hostdev)
+ 
+ 
+ static int
+-virDomainVideoDefValidate(const virDomainVideoDef *video)
++virDomainVideoDefValidate(const virDomainVideoDef *video,
++                          const virDomainDef *def)
+ {
++    size_t i;
++
+     if (video->type == VIR_DOMAIN_VIDEO_TYPE_DEFAULT) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                        _("missing video model and cannot determine default"));
+         return -1;
+     }
++
++    /* it doesn't make sense to pair video device type 'none' with any other
++     * types, there can be only a single video device in such case
++     */
++    for (i = 0; i < def->nvideos; i++) {
++        if (def->videos[i]->type == VIR_DOMAIN_VIDEO_TYPE_NONE &&
++            def->nvideos > 1) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                           _("a '%s' video type must be the only video device "
++                             "defined for the domain"));
++            return -1;
++        }
++    }
++
+     return 0;
+ }
+ 
+@@ -5738,7 +5764,7 @@ virDomainDeviceDefValidateInternal(const virDomainDeviceDef *dev,
+         return virDomainHostdevDefValidate(dev->data.hostdev);
+ 
+     case VIR_DOMAIN_DEVICE_VIDEO:
+-        return virDomainVideoDefValidate(dev->data.video);
++        return virDomainVideoDefValidate(dev->data.video, def);
+ 
+     case VIR_DOMAIN_DEVICE_MEMORY:
+         return virDomainMemoryDefValidate(dev->data.memory);
+@@ -15048,6 +15074,7 @@ virDomainVideoDefaultRAM(const virDomainDef *def,
+     case VIR_DOMAIN_VIDEO_TYPE_PARALLELS:
+     case VIR_DOMAIN_VIDEO_TYPE_VIRTIO:
+     case VIR_DOMAIN_VIDEO_TYPE_GOP:
++    case VIR_DOMAIN_VIDEO_TYPE_NONE:
+     case VIR_DOMAIN_VIDEO_TYPE_LAST:
+     default:
+         return 0;
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 8ca9558ceb..5e2f21dea3 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1424,6 +1424,7 @@ typedef enum {
+     VIR_DOMAIN_VIDEO_TYPE_PARALLELS, /* pseudo device for VNC in containers */
+     VIR_DOMAIN_VIDEO_TYPE_VIRTIO,
+     VIR_DOMAIN_VIDEO_TYPE_GOP,
++    VIR_DOMAIN_VIDEO_TYPE_NONE,
+ 
+     VIR_DOMAIN_VIDEO_TYPE_LAST
+ } virDomainVideoType;
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 1fce45134f..954265feb0 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -105,7 +105,8 @@ VIR_ENUM_IMPL(qemuVideo, VIR_DOMAIN_VIDEO_TYPE_LAST,
+               "qxl",
+               "", /* don't support parallels */
+               "", /* no need for virtio */
+-              "" /* don't support gop */);
++              "" /* don't support gop */,
++              "" /* 'none' doesn't make sense here */);
+ 
+ VIR_ENUM_DECL(qemuDeviceVideo)
+ 
+@@ -119,7 +120,8 @@ VIR_ENUM_IMPL(qemuDeviceVideo, VIR_DOMAIN_VIDEO_TYPE_LAST,
+               "qxl-vga",
+               "", /* don't support parallels */
+               "virtio-vga",
+-              "" /* don't support gop */);
++              "" /* don't support gop */,
++              "" /* 'none' doesn't make sense here */);
+ 
+ VIR_ENUM_DECL(qemuDeviceVideoSecondary)
+ 
+@@ -133,7 +135,8 @@ VIR_ENUM_IMPL(qemuDeviceVideoSecondary, VIR_DOMAIN_VIDEO_TYPE_LAST,
+               "qxl",
+               "", /* don't support parallels */
+               "virtio-gpu",
+-              "" /* don't support gop */);
++              "" /* don't support gop */,
++              "" /* 'none' doesn't make sense here */);
+ 
+ VIR_ENUM_DECL(qemuSoundCodec)
+ 
+@@ -4421,6 +4424,9 @@ qemuBuildVideoCommandLine(virCommandPtr cmd,
+         char *str = NULL;
+         virDomainVideoDefPtr video = def->videos[i];
+ 
++        if (video->type == VIR_DOMAIN_VIDEO_TYPE_NONE)
++            continue;
++
+         if (video->primary) {
+             if (virQEMUCapsGet(qemuCaps, QEMU_CAPS_DEVICE_VIDEO_PRIMARY)) {
+ 
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 5337f1ce55..508846116b 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -4528,6 +4528,8 @@ static int
+ qemuDomainDeviceDefValidateVideo(const virDomainVideoDef *video)
+ {
+     switch ((virDomainVideoType) video->type) {
++    case VIR_DOMAIN_VIDEO_TYPE_NONE:
++        return 0;
+     case VIR_DOMAIN_VIDEO_TYPE_XEN:
+     case VIR_DOMAIN_VIDEO_TYPE_VBOX:
+     case VIR_DOMAIN_VIDEO_TYPE_PARALLELS:
+diff --git a/src/qemu/qemu_domain_address.c b/src/qemu/qemu_domain_address.c
+index ab2ac022f1..e6996934b8 100644
+--- a/src/qemu/qemu_domain_address.c
++++ b/src/qemu/qemu_domain_address.c
+@@ -821,6 +821,7 @@ qemuDomainDeviceCalculatePCIConnectFlags(virDomainDeviceDefPtr dev,
+ 
+         case VIR_DOMAIN_VIDEO_TYPE_DEFAULT:
+         case VIR_DOMAIN_VIDEO_TYPE_GOP:
++        case VIR_DOMAIN_VIDEO_TYPE_NONE:
+         case VIR_DOMAIN_VIDEO_TYPE_LAST:
+             return 0;
+         }
+@@ -1532,7 +1533,8 @@ qemuDomainValidateDevicePCISlotsPIIX3(virDomainDefPtr def,
+             goto cleanup;
+     }
+ 
+-    if (def->nvideos > 0) {
++    if (def->nvideos > 0 &&
++        def->videos[0]->type != VIR_DOMAIN_VIDEO_TYPE_NONE) {
+         /* Because the PIIX3 integrated IDE/USB controllers are
+          * already at slot 1, when qemu looks for the first free slot
+          * to place the VGA controller (which is always the first
+@@ -1540,6 +1542,7 @@ qemuDomainValidateDevicePCISlotsPIIX3(virDomainDefPtr def,
+          * at slot 2.
+          */
+         virDomainVideoDefPtr primaryVideo = def->videos[0];
++
+         if (virDeviceInfoPCIAddressWanted(&primaryVideo->info)) {
+             memset(&tmp_addr, 0, sizeof(tmp_addr));
+             tmp_addr.slot = 2;
+@@ -2105,6 +2108,8 @@ qemuDomainAssignDevicePCISlots(virDomainDefPtr def,
+ 
+     /* Video devices */
+     for (i = 0; i < def->nvideos; i++) {
++        if (def->videos[i]->type == VIR_DOMAIN_VIDEO_TYPE_NONE)
++            continue;
+ 
+         if (!virDeviceInfoPCIAddressWanted(&def->videos[i]->info))
+             continue;
+diff --git a/tests/domaincapsschemadata/full.xml b/tests/domaincapsschemadata/full.xml
+index 154c4a6fe9..eafba1ae5b 100644
+--- a/tests/domaincapsschemadata/full.xml
++++ b/tests/domaincapsschemadata/full.xml
+@@ -74,6 +74,7 @@
+         <value>parallels</value>
+         <value>virtio</value>
+         <value>gop</value>
++        <value>none</value>
+       </enum>
+     </video>
+     <hostdev supported='yes'>
+diff --git a/tests/qemuxml2argvdata/video-invalid-multiple-devices.xml b/tests/qemuxml2argvdata/video-invalid-multiple-devices.xml
+new file mode 100644
+index 0000000000..3f105efaae
+--- /dev/null
++++ b/tests/qemuxml2argvdata/video-invalid-multiple-devices.xml
+@@ -0,0 +1,33 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static' cpuset='1-4,8-20,525'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='ide' index='0'/>
++    <controller type='pci' index='0' model='pci-root'/>
++    <video>
++      <model type='qxl'/>
++    </video>
++    <video>
++      <model type='none'/>
++    </video>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvdata/video-none-device.args b/tests/qemuxml2argvdata/video-none-device.args
+new file mode 100644
+index 0000000000..1b03c0cb97
+--- /dev/null
++++ b/tests/qemuxml2argvdata/video-none-device.args
+@@ -0,0 +1,27 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++QEMU_AUDIO_DRV=none \
++/usr/bin/qemu-system-i686 \
++-name QEMUGuest1 \
++-S \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 214 \
++-smp 1,sockets=1,cores=1,threads=1 \
++-uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,path=/tmp/lib/domain--1-QEMUGuest1/monitor.sock,\
++server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot c \
++-usb \
++-drive file=/dev/HostVG/QEMUGuest1,format=raw,if=none,id=drive-ide0-0-0 \
++-device ide-drive,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0 \
++-vnc 127.0.0.1:0 \
++-device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3
+diff --git a/tests/qemuxml2argvdata/video-none-device.xml b/tests/qemuxml2argvdata/video-none-device.xml
+new file mode 100644
+index 0000000000..4b591562b7
+--- /dev/null
++++ b/tests/qemuxml2argvdata/video-none-device.xml
+@@ -0,0 +1,39 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='ide' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <input type='mouse' bus='ps2'/>
++    <input type='keyboard' bus='ps2'/>
++    <graphics type='vnc'/>
++    <video>
++      <model type='none'/>
++    </video>
++    <memballoon model='virtio'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
++    </memballoon>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 9237a4fb89..3cff4ffb5e 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -1998,7 +1998,9 @@ mymain(void)
+             QEMU_CAPS_DEVICE_VIRTIO_VGA,
+             QEMU_CAPS_DEVICE_VIDEO_PRIMARY,
+             QEMU_CAPS_VIRTIO_GPU_MAX_OUTPUTS);
+-    DO_TEST_PARSE_ERROR("video-invalid", NONE);
++    DO_TEST("video-none-device",
++            QEMU_CAPS_VNC);
++    DO_TEST_PARSE_ERROR("video-invalid-multiple-devices", NONE);
+ 
+     DO_TEST("virtio-rng-default",
+             QEMU_CAPS_DEVICE_VIRTIO_RNG,
+diff --git a/tests/qemuxml2xmloutdata/video-none-device.xml b/tests/qemuxml2xmloutdata/video-none-device.xml
+new file mode 100644
+index 0000000000..6e76b394fe
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/video-none-device.xml
+@@ -0,0 +1,42 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <driver name='qemu' type='raw'/>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='ide' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <input type='mouse' bus='ps2'/>
++    <input type='keyboard' bus='ps2'/>
++    <graphics type='vnc' port='-1' autoport='yes'>
++      <listen type='address'/>
++    </graphics>
++    <video>
++      <model type='none'/>
++    </video>
++    <memballoon model='virtio'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
++    </memballoon>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index e418e67f6c..e35644d479 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -1145,6 +1145,7 @@ mymain(void)
+             QEMU_CAPS_VIRTIO_GPU_MAX_OUTPUTS,
+             QEMU_CAPS_VNC,
+             QEMU_CAPS_DEVICE_VIRTIO_GPU_CCW);
++    DO_TEST("video-none-device", NONE);
+ 
+     DO_TEST("intel-iommu",
+             QEMU_CAPS_DEVICE_INTEL_IOMMU);
+-- 
+2.18.0
+

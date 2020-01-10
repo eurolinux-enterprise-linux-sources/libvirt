@@ -1,0 +1,42 @@
+From 62d0406b726b0d62cb136924e7dce2a2fd364ec6 Mon Sep 17 00:00:00 2001
+Message-Id: <62d0406b726b0d62cb136924e7dce2a2fd364ec6@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Tue, 3 Jul 2018 16:48:38 +0200
+Subject: [PATCH] qemu: hotplug: Don't access srcPriv when it's not allocated
+
+The private data of a virStorageSource which is backing an iSCSI hostdev
+may be NULL if no authentication is present. The code handling the
+hotplug would attempt to extract the authentication info stored in
+'secinfo' without checking if it is allocated which resulted in a crash.
+
+Here we opt the easy way to check if srcPriv is not NULL so that we
+don't duplicate all the logic which selects whether the disk source has
+a secret.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1597550
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 33a475056fdd76c030528982e422bae79c0a0e4a)
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index fcd8eb0ffa..075f2fb72e 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -2240,7 +2240,8 @@ qemuDomainAttachHostSCSIDevice(virQEMUDriverPtr driver,
+     if (scsisrc->protocol == VIR_DOMAIN_HOSTDEV_SCSI_PROTOCOL_TYPE_ISCSI) {
+         qemuDomainStorageSourcePrivatePtr srcPriv =
+             QEMU_DOMAIN_STORAGE_SOURCE_PRIVATE(scsisrc->u.iscsi.src);
+-        secinfo = srcPriv->secinfo;
++        if (srcPriv)
++            secinfo = srcPriv->secinfo;
+     }
+ 
+     if (secinfo && secinfo->type == VIR_DOMAIN_SECRET_INFO_TYPE_AES) {
+-- 
+2.18.0
+

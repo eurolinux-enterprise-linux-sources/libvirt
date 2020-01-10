@@ -1,0 +1,48 @@
+From 51be47223840c917b0a98782c214d6b8e031b658 Mon Sep 17 00:00:00 2001
+Message-Id: <51be47223840c917b0a98782c214d6b8e031b658@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 2 Aug 2018 16:56:02 +0200
+Subject: [PATCH] qemu_migration: Avoid writing to freed memory
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When a domain is killed on the source host while it is being migrated
+and libvirtd is waiting for the migration to finish (waiting for the
+domain condition in qemuMigrationSrcWaitForCompletion), the run-time
+state including priv->job.current may already be freed once
+virDomainObjWait returns with -1. Thus the priv->job.current pointer
+cached in jobInfo is no longer valid and setting jobInfo->status may
+crash the daemon.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1593137
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit dddcb601ebf97ef222a03bb27b2357e831e8a0cc)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1615854
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/qemu/qemu_migration.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_migration.c b/src/qemu/qemu_migration.c
+index 435cd174af..825a9d399b 100644
+--- a/src/qemu/qemu_migration.c
++++ b/src/qemu/qemu_migration.c
+@@ -1584,7 +1584,8 @@ qemuMigrationSrcWaitForCompletion(virQEMUDriverPtr driver,
+ 
+         if (events) {
+             if (virDomainObjWait(vm) < 0) {
+-                jobInfo->status = QEMU_DOMAIN_JOB_STATUS_FAILED;
++                if (virDomainObjIsActive(vm))
++                    jobInfo->status = QEMU_DOMAIN_JOB_STATUS_FAILED;
+                 return -2;
+             }
+         } else {
+-- 
+2.18.0
+

@@ -1,0 +1,73 @@
+From 8c7d0ccfbf1213a2986e8290b90f1b860fd5c3ce Mon Sep 17 00:00:00 2001
+Message-Id: <8c7d0ccfbf1213a2986e8290b90f1b860fd5c3ce@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Tue, 12 Mar 2019 13:55:56 -0400
+Subject: [PATCH] util: Modify virStorageFileGetSCSIKey return
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1687715 (7.6.z)
+https://bugzilla.redhat.com/show_bug.cgi?id=1657468 (7.7.0)
+
+Alter the "real" code to return -2 on virCommandRun failure.
+Alter the comments and function header to describe the function
+and its returns.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 9b86bbccb371026d0ce7ab9a2ce685b1fae8a717)
+
+Managed conflict from commit 34e9c29357ef5c293c8f998ef6911756cbb8b405
+which changed the indention for the virCommandPtr cmd to keep spacing
+defined in the next-7.6 tree.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Message-Id: <20190312175559.13583-2-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virstoragefile.c | 20 +++++++++++++++++---
+ 1 file changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/src/util/virstoragefile.c b/src/util/virstoragefile.c
+index 0b15219c3e..ed7266619d 100644
+--- a/src/util/virstoragefile.c
++++ b/src/util/virstoragefile.c
+@@ -1435,8 +1435,22 @@ int virStorageFileGetLVMKey(const char *path,
+ #endif
+ 
+ #ifdef WITH_UDEV
+-int virStorageFileGetSCSIKey(const char *path,
+-                             char **key)
++/* virStorageFileGetSCSIKey
++ * @path: Path to the SCSI device
++ * @key: Unique key to be returned
++ *
++ * Using a udev specific function, query the @path to get and return a
++ * unique @key for the caller to use.
++ *
++ * Returns:
++ *     0 On success, with the @key filled in or @key=NULL if the
++ *       returned string was empty.
++ *    -1 When WITH_UDEV is undefined and a system error is reported
++ *    -2 When WITH_UDEV is defined, but calling virCommandRun fails
++ */
++int
++virStorageFileGetSCSIKey(const char *path,
++                         char **key)
+ {
+     int status;
+     virCommandPtr cmd = virCommandNewArgList(
+@@ -1446,7 +1460,7 @@ int virStorageFileGetSCSIKey(const char *path,
+         "--device", path,
+         NULL
+         );
+-    int ret = -1;
++    int ret = -2;
+ 
+     *key = NULL;
+ 
+-- 
+2.21.0
+

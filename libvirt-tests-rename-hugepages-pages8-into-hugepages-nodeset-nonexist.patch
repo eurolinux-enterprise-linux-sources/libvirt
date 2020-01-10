@@ -1,0 +1,85 @@
+From 172c5b605b5f0cc5145a44e3aa7603482a2e3817 Mon Sep 17 00:00:00 2001
+Message-Id: <172c5b605b5f0cc5145a44e3aa7603482a2e3817@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 13 Aug 2018 18:16:17 +0200
+Subject: [PATCH] tests: rename hugepages-pages8 into
+ hugepages-nodeset-nonexist
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Remove unnecessary XML elements as well.
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit 67cffcbbdb4a7dcdc10681695e00615ffae8e726)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1591235
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ ...es-pages8.xml => hugepages-nodeset-nonexist.xml} | 13 +------------
+ tests/qemuxml2argvtest.c                            |  7 ++++---
+ 2 files changed, 5 insertions(+), 15 deletions(-)
+ rename tests/qemuxml2argvdata/{hugepages-pages8.xml => hugepages-nodeset-nonexist.xml} (64%)
+
+diff --git a/tests/qemuxml2argvdata/hugepages-pages8.xml b/tests/qemuxml2argvdata/hugepages-nodeset-nonexist.xml
+similarity index 64%
+rename from tests/qemuxml2argvdata/hugepages-pages8.xml
+rename to tests/qemuxml2argvdata/hugepages-nodeset-nonexist.xml
+index 4cf4c1a8ad..477d3f1f2b 100644
+--- a/tests/qemuxml2argvdata/hugepages-pages8.xml
++++ b/tests/qemuxml2argvdata/hugepages-nodeset-nonexist.xml
+@@ -19,23 +19,12 @@
+   <on_crash>destroy</on_crash>
+   <devices>
+     <emulator>/usr/bin/qemu-system-i686</emulator>
+-    <disk type='block' device='disk'>
+-      <driver name='qemu' type='raw'/>
+-      <source dev='/dev/HostVG/QEMUGuest1'/>
+-      <target dev='hda' bus='ide'/>
+-      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+-    </disk>
+     <controller type='usb' index='0'>
+       <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
+     </controller>
+-    <controller type='ide' index='0'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
+-    </controller>
+     <controller type='pci' index='0' model='pci-root'/>
+     <input type='mouse' bus='ps2'/>
+     <input type='keyboard' bus='ps2'/>
+-    <memballoon model='virtio'>
+-      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
+-    </memballoon>
++    <memballoon model='none'/>
+   </devices>
+ </domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index f8fbca1806..d4251eff3e 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -959,6 +959,10 @@ mymain(void)
+     DO_TEST("hugepages-default", NONE);
+     DO_TEST("hugepages-default-2M", NONE);
+     DO_TEST("hugepages-default-system-size", NONE);
++    DO_TEST_FAILURE("hugepages-nodeset-nonexist",
++                    QEMU_CAPS_DEVICE_PC_DIMM,
++                    QEMU_CAPS_OBJECT_MEMORY_FILE,
++                    QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
+     DO_TEST("hugepages-numa-default",
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST("hugepages-numa-default-2M",
+@@ -980,9 +984,6 @@ mymain(void)
+             QEMU_CAPS_OBJECT_MEMORY_RAM,
+             QEMU_CAPS_OBJECT_MEMORY_FILE);
+     DO_TEST_PARSE_ERROR("hugepages-memaccess-invalid", NONE);
+-    DO_TEST_FAILURE("hugepages-pages8",
+-                    QEMU_CAPS_DEVICE_PC_DIMM, QEMU_CAPS_OBJECT_MEMORY_FILE,
+-                    QEMU_CAPS_OBJECT_MEMORY_FILE_DISCARD);
+     DO_TEST("hugepages-memaccess", QEMU_CAPS_OBJECT_MEMORY_FILE,
+             QEMU_CAPS_OBJECT_MEMORY_RAM, QEMU_CAPS_DEVICE_PC_DIMM,
+             QEMU_CAPS_NUMA);
+-- 
+2.18.0
+

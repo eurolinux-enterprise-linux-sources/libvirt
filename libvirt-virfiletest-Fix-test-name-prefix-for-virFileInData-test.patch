@@ -1,0 +1,37 @@
+From afbd3adabf31cbf870c7a3787af6466cfe9cb0d1 Mon Sep 17 00:00:00 2001
+Message-Id: <afbd3adabf31cbf870c7a3787af6466cfe9cb0d1@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 10 Oct 2018 17:25:53 +0200
+Subject: [PATCH] virfiletest: Fix test name prefix for virFileInData test
+
+RHEL-7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1632711
+RHEL-8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1634782
+RHEL-7.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1635705
+
+Because of lacking virTestCounterReset() call, the old test cases
+name was preserved.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 6814ac678e07ea3f2f8351eb75c82af9ad9d727f)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tests/virfiletest.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tests/virfiletest.c b/tests/virfiletest.c
+index a15495e9e8..790911cacb 100644
+--- a/tests/virfiletest.c
++++ b/tests/virfiletest.c
+@@ -389,6 +389,7 @@ mymain(void)
+     } while (0)
+ 
+     if (holesSupported()) {
++        virTestCounterReset("testFileInData ");
+         DO_TEST_IN_DATA(true, 4, 4, 4);
+         DO_TEST_IN_DATA(false, 4, 4, 4);
+         DO_TEST_IN_DATA(true, 8, 8, 8);
+-- 
+2.19.1
+

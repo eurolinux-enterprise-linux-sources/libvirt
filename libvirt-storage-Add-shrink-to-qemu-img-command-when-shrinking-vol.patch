@@ -1,0 +1,47 @@
+From 4c301176e317d6809a8a39ab0ad971f5d2e1ff65 Mon Sep 17 00:00:00 2001
+Message-Id: <4c301176e317d6809a8a39ab0ad971f5d2e1ff65@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Mon, 27 Aug 2018 08:23:52 -0400
+Subject: [PATCH] storage: Add --shrink to qemu-img command when shrinking vol
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1613746
+
+When shrinking the capacity of a qcow2 or luks volume using
+the qemu-img program, the --shrink qualifier must be added.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit b04d1b6a35f9fb826f7bb83fdac364a127ec75ca)
+https: //bugzilla.redhat.com/show_bug.cgi?id=1622534
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/storage/storage_util.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/storage/storage_util.c b/src/storage/storage_util.c
+index a701a75702..5dc22d3182 100644
+--- a/src/storage/storage_util.c
++++ b/src/storage/storage_util.c
+@@ -2287,12 +2287,12 @@ storageBackendResizeQemuImg(virStoragePoolObjPtr pool,
+      * a multiple of 512 */
+     capacity = VIR_ROUND_UP(capacity, 512);
+ 
+-    cmd = virCommandNew(img_tool);
++    cmd = virCommandNewArgList(img_tool, "resize", NULL);
++    if (capacity < vol->target.capacity)
++        virCommandAddArg(cmd, "--shrink");
+     if (!vol->target.encryption) {
+-        virCommandAddArgList(cmd, "resize", vol->target.path, NULL);
++        virCommandAddArg(cmd, vol->target.path);
+     } else {
+-        virCommandAddArg(cmd, "resize");
+-
+         if (storageBackendCreateQemuImgSecretObject(cmd, secretPath,
+                                                     secretAlias) < 0)
+             goto cleanup;
+-- 
+2.18.0
+

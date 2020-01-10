@@ -1,0 +1,80 @@
+From 93033dbc3db732627db049e6d491c58e1efa5547 Mon Sep 17 00:00:00 2001
+Message-Id: <93033dbc3db732627db049e6d491c58e1efa5547@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 11 Jul 2018 17:27:25 +0200
+Subject: [PATCH] virStoragePRDefFormat: Suppress path formatting for
+ migratable XML
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1470007
+
+If there are managed reservations for a disk source, the path to
+the pr-helper socket is generated automatically by libvirt when
+needed and points somewhere under priv->libDir. Therefore it is
+very unlikely that the path will work even on migration
+destination (the libDir is derived from domain short name and its
+ID).
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 0da435118cb2abe5b747818fc209c7a647590687)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c    | 3 ++-
+ src/util/virstoragefile.c | 6 ++++--
+ src/util/virstoragefile.h | 3 ++-
+ 3 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index f4e59f6c91..70eb45f03a 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -23548,7 +23548,8 @@ virDomainStorageSourceFormat(virBufferPtr attrBuf,
+         return -1;
+ 
+     if (src->pr)
+-        virStoragePRDefFormat(childBuf, src->pr);
++        virStoragePRDefFormat(childBuf, src->pr,
++                              flags & VIR_DOMAIN_DEF_FORMAT_MIGRATABLE);
+ 
+     return 0;
+ }
+diff --git a/src/util/virstoragefile.c b/src/util/virstoragefile.c
+index 6ede542df6..58f67278da 100644
+--- a/src/util/virstoragefile.c
++++ b/src/util/virstoragefile.c
+@@ -1982,11 +1982,13 @@ virStoragePRDefParseXML(xmlXPathContextPtr ctxt)
+ 
+ void
+ virStoragePRDefFormat(virBufferPtr buf,
+-                      virStoragePRDefPtr prd)
++                      virStoragePRDefPtr prd,
++                      bool migratable)
+ {
+     virBufferAsprintf(buf, "<reservations managed='%s'",
+                       virTristateBoolTypeToString(prd->managed));
+-    if (prd->path) {
++    if (prd->path &&
++        (prd->managed == VIR_TRISTATE_BOOL_NO || !migratable)) {
+         virBufferAddLit(buf, ">\n");
+         virBufferAdjustIndent(buf, 2);
+         virBufferAddLit(buf, "<source type='unix'");
+diff --git a/src/util/virstoragefile.h b/src/util/virstoragefile.h
+index 592e19bd7f..991098e6c6 100644
+--- a/src/util/virstoragefile.h
++++ b/src/util/virstoragefile.h
+@@ -395,7 +395,8 @@ void virStorageAuthDefFormat(virBufferPtr buf, virStorageAuthDefPtr authdef);
+ void virStoragePRDefFree(virStoragePRDefPtr prd);
+ virStoragePRDefPtr virStoragePRDefParseXML(xmlXPathContextPtr ctxt);
+ void virStoragePRDefFormat(virBufferPtr buf,
+-                           virStoragePRDefPtr prd);
++                           virStoragePRDefPtr prd,
++                           bool migratable);
+ bool virStoragePRDefIsEqual(virStoragePRDefPtr a,
+                             virStoragePRDefPtr b);
+ bool virStoragePRDefIsManaged(virStoragePRDefPtr prd);
+-- 
+2.18.0
+

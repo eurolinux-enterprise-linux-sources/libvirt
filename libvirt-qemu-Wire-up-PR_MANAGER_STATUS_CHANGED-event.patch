@@ -1,0 +1,275 @@
+From 4332debbdbe28cf3194bb782c543710aa14097f3 Mon Sep 17 00:00:00 2001
+Message-Id: <4332debbdbe28cf3194bb782c543710aa14097f3@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 11 Jul 2018 17:27:26 +0200
+Subject: [PATCH] qemu: Wire up PR_MANAGER_STATUS_CHANGED event
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1470007
+
+This event is emitted on the monitor if one of pr-managers lost
+connection to its pr-helper process. What libvirt needs to do is
+restart the pr-helper process iff it corresponds to managed
+pr-manager.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 6fbda83330293ed8bec1ea9e3ba7273c4ee2b9e2)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_domain.c       |  1 +
+ src/qemu/qemu_domain.h       |  1 +
+ src/qemu/qemu_driver.c       | 17 +++++++++++
+ src/qemu/qemu_monitor.c      | 15 ++++++++++
+ src/qemu/qemu_monitor.h      | 11 ++++++++
+ src/qemu/qemu_monitor_json.c | 23 +++++++++++++++
+ src/qemu/qemu_process.c      | 55 ++++++++++++++++++++++++++++++++++++
+ 7 files changed, 123 insertions(+)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index cfecbaca74..dec057e021 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -12979,6 +12979,7 @@ qemuProcessEventFree(struct qemuProcessEvent *event)
+     case QEMU_PROCESS_EVENT_MONITOR_EOF:
+         VIR_FREE(event->data);
+         break;
++    case QEMU_PROCESS_EVENT_PR_DISCONNECT:
+     case QEMU_PROCESS_EVENT_LAST:
+         break;
+     }
+diff --git a/src/qemu/qemu_domain.h b/src/qemu/qemu_domain.h
+index 30d186a921..e748d78adb 100644
+--- a/src/qemu/qemu_domain.h
++++ b/src/qemu/qemu_domain.h
+@@ -477,6 +477,7 @@ typedef enum {
+     QEMU_PROCESS_EVENT_SERIAL_CHANGED,
+     QEMU_PROCESS_EVENT_BLOCK_JOB,
+     QEMU_PROCESS_EVENT_MONITOR_EOF,
++    QEMU_PROCESS_EVENT_PR_DISCONNECT,
+ 
+     QEMU_PROCESS_EVENT_LAST
+ } qemuProcessEventType;
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 00952a55e7..4cb05bf81c 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -4790,6 +4790,20 @@ processMonitorEOFEvent(virQEMUDriverPtr driver,
+ }
+ 
+ 
++static void
++processPRDisconnectEvent(virDomainObjPtr vm)
++{
++    qemuDomainObjPrivatePtr priv = vm->privateData;
++
++    if (!virDomainObjIsActive(vm))
++        return;
++
++    if (!priv->prDaemonRunning &&
++        virDomainDefHasManagedPR(vm->def))
++        qemuProcessStartManagedPRDaemon(vm);
++}
++
++
+ static void qemuProcessEventHandler(void *data, void *opaque)
+ {
+     struct qemuProcessEvent *processEvent = data;
+@@ -4827,6 +4841,9 @@ static void qemuProcessEventHandler(void *data, void *opaque)
+     case QEMU_PROCESS_EVENT_MONITOR_EOF:
+         processMonitorEOFEvent(driver, vm);
+         break;
++    case QEMU_PROCESS_EVENT_PR_DISCONNECT:
++        processPRDisconnectEvent(vm);
++        break;
+     case QEMU_PROCESS_EVENT_LAST:
+         break;
+     }
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 8d1c358f67..0de2b91cee 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -1669,6 +1669,21 @@ qemuMonitorEmitDumpCompleted(qemuMonitorPtr mon,
+ }
+ 
+ 
++int
++qemuMonitorEmitPRManagerStatusChanged(qemuMonitorPtr mon,
++                                      const char *prManager,
++                                      bool connected)
++{
++    int ret = -1;
++    VIR_DEBUG("mon=%p, prManager='%s', connected=%d", mon, prManager, connected);
++
++    QEMU_MONITOR_CALLBACK(mon, ret, domainPRManagerStatusChanged,
++                          mon->vm, prManager, connected);
++
++    return ret;
++}
++
++
+ int
+ qemuMonitorSetCapabilities(qemuMonitorPtr mon)
+ {
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 7bfd4b23a2..22bc1468e7 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -273,6 +273,12 @@ typedef int (*qemuMonitorDomainDumpCompletedCallback)(qemuMonitorPtr mon,
+                                                       const char *error,
+                                                       void *opaque);
+ 
++typedef int (*qemuMonitorDomainPRManagerStatusChangedCallback)(qemuMonitorPtr mon,
++                                                               virDomainObjPtr vm,
++                                                               const char *prManager,
++                                                               bool connected,
++                                                               void *opaque);
++
+ typedef struct _qemuMonitorCallbacks qemuMonitorCallbacks;
+ typedef qemuMonitorCallbacks *qemuMonitorCallbacksPtr;
+ struct _qemuMonitorCallbacks {
+@@ -305,6 +311,7 @@ struct _qemuMonitorCallbacks {
+     qemuMonitorDomainAcpiOstInfoCallback domainAcpiOstInfo;
+     qemuMonitorDomainBlockThresholdCallback domainBlockThreshold;
+     qemuMonitorDomainDumpCompletedCallback domainDumpCompleted;
++    qemuMonitorDomainPRManagerStatusChangedCallback domainPRManagerStatusChanged;
+ };
+ 
+ char *qemuMonitorEscapeArg(const char *in);
+@@ -433,6 +440,10 @@ int qemuMonitorEmitDumpCompleted(qemuMonitorPtr mon,
+                                  qemuMonitorDumpStatsPtr stats,
+                                  const char *error);
+ 
++int qemuMonitorEmitPRManagerStatusChanged(qemuMonitorPtr mon,
++                                          const char *prManager,
++                                          bool connected);
++
+ int qemuMonitorStartCPUs(qemuMonitorPtr mon);
+ int qemuMonitorStopCPUs(qemuMonitorPtr mon);
+ 
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 1bc5b662ae..0c172b6e3c 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -91,6 +91,7 @@ static void qemuMonitorJSONHandleMigrationPass(qemuMonitorPtr mon, virJSONValueP
+ static void qemuMonitorJSONHandleAcpiOstInfo(qemuMonitorPtr mon, virJSONValuePtr data);
+ static void qemuMonitorJSONHandleBlockThreshold(qemuMonitorPtr mon, virJSONValuePtr data);
+ static void qemuMonitorJSONHandleDumpCompleted(qemuMonitorPtr mon, virJSONValuePtr data);
++static void qemuMonitorJSONHandlePRManagerStatusChanged(qemuMonitorPtr mon, virJSONValuePtr data);
+ 
+ typedef struct {
+     const char *type;
+@@ -113,6 +114,7 @@ static qemuEventHandler eventHandlers[] = {
+     { "MIGRATION_PASS", qemuMonitorJSONHandleMigrationPass, },
+     { "NIC_RX_FILTER_CHANGED", qemuMonitorJSONHandleNicRxFilterChanged, },
+     { "POWERDOWN", qemuMonitorJSONHandlePowerdown, },
++    { "PR_MANAGER_STATUS_CHANGED", qemuMonitorJSONHandlePRManagerStatusChanged, },
+     { "RESET", qemuMonitorJSONHandleReset, },
+     { "RESUME", qemuMonitorJSONHandleResume, },
+     { "RTC_CHANGE", qemuMonitorJSONHandleRTCChange, },
+@@ -1303,6 +1305,27 @@ qemuMonitorJSONHandleDumpCompleted(qemuMonitorPtr mon,
+ }
+ 
+ 
++static void qemuMonitorJSONHandlePRManagerStatusChanged(qemuMonitorPtr mon,
++                                                        virJSONValuePtr data)
++{
++    const char *name;
++    bool connected;
++
++    if (!(name = virJSONValueObjectGetString(data, "id"))) {
++        VIR_WARN("missing pr-manager alias in PR_MANAGER_STATUS_CHANGED event");
++        return;
++    }
++
++    if (virJSONValueObjectGetBoolean(data, "connected", &connected) < 0) {
++        VIR_WARN("missing connected state for %s "
++                 "in PR_MANAGER_STATUS_CHANGED event", name);
++        return;
++    }
++
++    qemuMonitorEmitPRManagerStatusChanged(mon, name, connected);
++}
++
++
+ int
+ qemuMonitorJSONHumanCommandWithFd(qemuMonitorPtr mon,
+                                   const char *cmd_str,
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index f200729cb1..fbc8529f3b 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -1615,6 +1615,60 @@ qemuProcessHandleDumpCompleted(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
+ }
+ 
+ 
++static int
++qemuProcessHandlePRManagerStatusChanged(qemuMonitorPtr mon ATTRIBUTE_UNUSED,
++                                        virDomainObjPtr vm,
++                                        const char *prManager,
++                                        bool connected,
++                                        void *opaque)
++{
++    virQEMUDriverPtr driver = opaque;
++    qemuDomainObjPrivatePtr priv;
++    struct qemuProcessEvent *processEvent = NULL;
++    const char *managedAlias = qemuDomainGetManagedPRAlias();
++    int ret = -1;
++
++    virObjectLock(vm);
++
++    VIR_DEBUG("pr-manager %s status changed for domain %p %s connected=%d",
++              prManager, vm, vm->def->name, connected);
++
++    if (connected) {
++        /* Connect events are boring. */
++        ret = 0;
++        goto cleanup;
++    }
++    /* Disconnect events are more interesting. */
++
++    if (STRNEQ(prManager, managedAlias)) {
++        VIR_DEBUG("pr-manager %s not managed, ignoring event",
++                  prManager);
++        ret = 0;
++        goto cleanup;
++    }
++
++    priv = vm->privateData;
++    priv->prDaemonRunning = false;
++
++    if (VIR_ALLOC(processEvent) < 0)
++        goto cleanup;
++
++    processEvent->eventType = QEMU_PROCESS_EVENT_PR_DISCONNECT;
++    processEvent->vm = virObjectRef(vm);
++
++    if (virThreadPoolSendJob(driver->workerPool, 0, processEvent) < 0) {
++        qemuProcessEventFree(processEvent);
++        virObjectUnref(vm);
++        goto cleanup;
++    }
++
++    ret = 0;
++ cleanup:
++    virObjectUnlock(vm);
++    return ret;
++}
++
++
+ static qemuMonitorCallbacks monitorCallbacks = {
+     .eofNotify = qemuProcessHandleMonitorEOF,
+     .errorNotify = qemuProcessHandleMonitorError,
+@@ -1643,6 +1697,7 @@ static qemuMonitorCallbacks monitorCallbacks = {
+     .domainAcpiOstInfo = qemuProcessHandleAcpiOstInfo,
+     .domainBlockThreshold = qemuProcessHandleBlockThreshold,
+     .domainDumpCompleted = qemuProcessHandleDumpCompleted,
++    .domainPRManagerStatusChanged = qemuProcessHandlePRManagerStatusChanged,
+ };
+ 
+ static void
+-- 
+2.18.0
+

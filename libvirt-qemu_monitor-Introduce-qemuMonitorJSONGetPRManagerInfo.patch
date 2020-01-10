@@ -1,0 +1,180 @@
+From 48e3c20199cb08263597329629e446dd01573a5a Mon Sep 17 00:00:00 2001
+Message-Id: <48e3c20199cb08263597329629e446dd01573a5a@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 11 Jul 2018 17:27:27 +0200
+Subject: [PATCH] qemu_monitor: Introduce qemuMonitorJSONGetPRManagerInfo
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1470007
+
+This function fetches status of all pr-managers. So far, qemu
+reports only a single attribute "connected" but that fits our
+needs.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 5f085862e87668e77333cc369bf66ff3b6c19ae8)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_monitor.c      | 25 ++++++++++++
+ src/qemu/qemu_monitor.h      |  9 ++++
+ src/qemu/qemu_monitor_json.c | 79 ++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_monitor_json.h |  4 ++
+ 4 files changed, 117 insertions(+)
+
+diff --git a/src/qemu/qemu_monitor.c b/src/qemu/qemu_monitor.c
+index 0de2b91cee..39c3032286 100644
+--- a/src/qemu/qemu_monitor.c
++++ b/src/qemu/qemu_monitor.c
+@@ -4363,3 +4363,28 @@ qemuMonitorGetSEVMeasurement(qemuMonitorPtr mon)
+ 
+     return qemuMonitorJSONGetSEVMeasurement(mon);
+ }
++
++
++int
++qemuMonitorGetPRManagerInfo(qemuMonitorPtr mon,
++                            virHashTablePtr *retinfo)
++{
++    int ret = -1;
++    virHashTablePtr info = NULL;
++
++    *retinfo = NULL;
++
++    QEMU_CHECK_MONITOR(mon);
++
++    if (!(info = virHashCreate(10, virHashValueFree)))
++        goto cleanup;
++
++    if (qemuMonitorJSONGetPRManagerInfo(mon, info) < 0)
++        goto cleanup;
++
++    VIR_STEAL_PTR(*retinfo, info);
++    ret = 0;
++ cleanup:
++    virHashFree(info);
++    return ret;
++}
+diff --git a/src/qemu/qemu_monitor.h b/src/qemu/qemu_monitor.h
+index 22bc1468e7..e3eb14bf06 100644
+--- a/src/qemu/qemu_monitor.h
++++ b/src/qemu/qemu_monitor.h
+@@ -1160,4 +1160,13 @@ int qemuMonitorBlockdevDel(qemuMonitorPtr mon,
+ char *
+ qemuMonitorGetSEVMeasurement(qemuMonitorPtr mon);
+ 
++typedef struct _qemuMonitorPRManagerInfo qemuMonitorPRManagerInfo;
++typedef qemuMonitorPRManagerInfo *qemuMonitorPRManagerInfoPtr;
++struct _qemuMonitorPRManagerInfo {
++    bool connected;
++};
++
++int qemuMonitorGetPRManagerInfo(qemuMonitorPtr mon,
++                                virHashTablePtr *retinfo);
++
+ #endif /* QEMU_MONITOR_H */
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 0c172b6e3c..b226a47cc9 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -8202,3 +8202,82 @@ qemuMonitorJSONGetSEVMeasurement(qemuMonitorPtr mon)
+     virJSONValueFree(reply);
+     return measurement;
+ }
++
++
++/*
++ * Example return data
++ *
++ * "return": [
++ *   { "connected": true, "id": "pr-helper0" }
++ *  ]
++ */
++static int
++qemuMonitorJSONExtractPRManagerInfo(virJSONValuePtr reply,
++                                    virHashTablePtr info)
++{
++    qemuMonitorPRManagerInfoPtr entry = NULL;
++    virJSONValuePtr data;
++    int ret = -1;
++    size_t i;
++
++    data = virJSONValueObjectGetArray(reply, "return");
++
++    for (i = 0; i < virJSONValueArraySize(data); i++) {
++        virJSONValuePtr prManager = virJSONValueArrayGet(data, i);
++        const char *alias;
++
++        if (!(alias = virJSONValueObjectGetString(prManager, "id")))
++            goto malformed;
++
++        if (VIR_ALLOC(entry) < 0)
++            goto cleanup;
++
++        if (virJSONValueObjectGetBoolean(prManager,
++                                         "connected",
++                                         &entry->connected) < 0) {
++            goto malformed;
++        }
++
++        if (virHashAddEntry(info, alias, entry) < 0)
++            goto cleanup;
++
++        entry = NULL;
++    }
++
++    ret = 0;
++ cleanup:
++    VIR_FREE(entry);
++    return ret;
++
++ malformed:
++    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                   _("malformed prManager reply"));
++    goto cleanup;
++}
++
++
++int
++qemuMonitorJSONGetPRManagerInfo(qemuMonitorPtr mon,
++                                virHashTablePtr info)
++{
++    int ret = -1;
++    virJSONValuePtr cmd;
++    virJSONValuePtr reply = NULL;
++
++    if (!(cmd = qemuMonitorJSONMakeCommand("query-pr-managers",
++                                           NULL)))
++        return -1;
++
++    if (qemuMonitorJSONCommand(mon, cmd, &reply) < 0)
++        goto cleanup;
++
++    if (qemuMonitorJSONCheckReply(cmd, reply, VIR_JSON_TYPE_ARRAY) < 0)
++        goto cleanup;
++
++    ret = qemuMonitorJSONExtractPRManagerInfo(reply, info);
++ cleanup:
++    virJSONValueFree(cmd);
++    virJSONValueFree(reply);
++    return ret;
++
++}
+diff --git a/src/qemu/qemu_monitor_json.h b/src/qemu/qemu_monitor_json.h
+index 9c8fab7cc0..74af53fe20 100644
+--- a/src/qemu/qemu_monitor_json.h
++++ b/src/qemu/qemu_monitor_json.h
+@@ -560,4 +560,8 @@ int qemuMonitorJSONBlockdevDel(qemuMonitorPtr mon,
+                                const char *nodename)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+ 
++int qemuMonitorJSONGetPRManagerInfo(qemuMonitorPtr mon,
++                                    virHashTablePtr info)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
++
+ #endif /* QEMU_MONITOR_JSON_H */
+-- 
+2.18.0
+
