@@ -1,0 +1,46 @@
+From 47ef8016cca25db8da44b13df031afba739be066 Mon Sep 17 00:00:00 2001
+Message-Id: <47ef8016cca25db8da44b13df031afba739be066@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 3 Apr 2019 12:38:58 +0200
+Subject: [PATCH] src: Document autostart for session demon
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1501450
+
+The autostart under session daemon might not behave as you'd
+expect it to behave. This patch is inspired by latest
+libvirt-users discussion:
+
+https://www.redhat.com/archives/libvirt-users/2018-December/msg00047.html
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 61b4e8aaf1bce07f282c152de556c3d6aa8d65be)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <44fd61a0ba2340e2c3802e42e6fbae08e6750a1d.1554287931.git.mprivozn@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/libvirt-domain.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/libvirt-domain.c b/src/libvirt-domain.c
+index ad0ded9ee3..5f7f0bfeba 100644
+--- a/src/libvirt-domain.c
++++ b/src/libvirt-domain.c
+@@ -6690,6 +6690,11 @@ virDomainCreateWithFiles(virDomainPtr domain, unsigned int nfiles,
+  * configured to be automatically started when the host
+  * machine boots.
+  *
++ * Please note that this might result in unexpected behaviour if
++ * used for some session URIs. Since the session daemon is started
++ * with --timeout it comes and goes and as it does so it
++ * autostarts domains which might have been shut off recently.
++ *
+  * Returns -1 in case of error, 0 in case of success
+  */
+ int
+-- 
+2.21.0
+

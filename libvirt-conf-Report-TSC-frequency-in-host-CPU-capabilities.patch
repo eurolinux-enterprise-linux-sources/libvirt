@@ -1,0 +1,149 @@
+From 5b07ca7c378a5e62fec0ed4808e8905fe447e85e Mon Sep 17 00:00:00 2001
+Message-Id: <5b07ca7c378a5e62fec0ed4808e8905fe447e85e@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 4 Jun 2019 13:04:30 +0200
+Subject: [PATCH] conf: Report TSC frequency in host CPU capabilities
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This patch adds a new
+
+    <counter name='tsc' frequency='N' scaling='on|off'/>
+
+element into the host CPU capabilities XML.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit c277b9ad5c740bb4c4b915754ae74621f93f9d37)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1641702
+
+Conflicts:
+	src/conf/cpu_conf.h
+            - virenum.h doesn't exist downstream
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <c0a6203e4a667c31668e0df508b08b515177276f.1559646067.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/cpu_conf.c | 48 +++++++++++++++++++++++++++++++++++++++++++++
+ src/conf/cpu_conf.h |  2 ++
+ 2 files changed, 50 insertions(+)
+
+diff --git a/src/conf/cpu_conf.c b/src/conf/cpu_conf.c
+index 43a3ab5dcd..d0ad265fbe 100644
+--- a/src/conf/cpu_conf.c
++++ b/src/conf/cpu_conf.c
+@@ -102,6 +102,7 @@ virCPUDefFree(virCPUDefPtr def)
+ 
+     virCPUDefFreeModel(def);
+     VIR_FREE(def->cache);
++    VIR_FREE(def->tsc);
+     VIR_FREE(def);
+ }
+ 
+@@ -223,6 +224,13 @@ virCPUDefCopyWithoutModel(const virCPUDef *cpu)
+         *copy->cache = *cpu->cache;
+     }
+ 
++    if (cpu->tsc) {
++        if (VIR_ALLOC(copy->tsc) < 0)
++            goto error;
++
++        *copy->tsc = *cpu->tsc;
++    }
++
+     return copy;
+ 
+  error:
+@@ -276,6 +284,8 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
+     char *cpuMode;
+     char *fallback = NULL;
+     char *vendor_id = NULL;
++    char *tscScaling = NULL;
++    virHostCPUTscInfoPtr tsc = NULL;
+     int ret = -1;
+ 
+     *cpu = NULL;
+@@ -392,6 +402,32 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
+                            _("invalid microcode version"));
+             goto cleanup;
+         }
++
++        if (virXPathBoolean("boolean(./counter[@name='tsc'])", ctxt) > 0) {
++            if (VIR_ALLOC(tsc) < 0)
++                goto cleanup;
++
++            if (virXPathULongLong("./counter[@name='tsc']/@frequency", ctxt,
++                                  &tsc->frequency) < 0) {
++                virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                               _("Invalid TSC frequency"));
++                goto cleanup;
++            }
++
++            tscScaling = virXPathString("string(./counter[@name='tsc']/@scaling)",
++                                        ctxt);
++            if (tscScaling) {
++                int scaling = virTristateBoolTypeFromString(tscScaling);
++                if (scaling < 0) {
++                    virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                                   _("Invalid TSC scaling attribute"));
++                    goto cleanup;
++                }
++                tsc->scaling = scaling;
++            }
++
++            VIR_STEAL_PTR(def->tsc, tsc);
++        }
+     }
+ 
+     if (!(def->model = virXPathString("string(./model[1])", ctxt)) &&
+@@ -577,6 +613,8 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
+     VIR_FREE(fallback);
+     VIR_FREE(vendor_id);
+     VIR_FREE(nodes);
++    VIR_FREE(tscScaling);
++    VIR_FREE(tsc);
+     virCPUDefFree(def);
+     return ret;
+ }
+@@ -734,6 +772,16 @@ virCPUDefFormatBuf(virBufferPtr buf,
+         virBufferAsprintf(buf, "<microcode version='%u'/>\n",
+                           def->microcodeVersion);
+ 
++    if (def->type == VIR_CPU_TYPE_HOST && def->tsc) {
++        virBufferAddLit(buf, "<counter name='tsc'");
++        virBufferAsprintf(buf, " frequency='%llu'", def->tsc->frequency);
++        if (def->tsc->scaling) {
++            virBufferAsprintf(buf, " scaling='%s'",
++                              virTristateBoolTypeToString(def->tsc->scaling));
++        }
++        virBufferAddLit(buf, "/>\n");
++    }
++
+     if (def->sockets && def->cores && def->threads) {
+         virBufferAddLit(buf, "<topology");
+         virBufferAsprintf(buf, " sockets='%u'", def->sockets);
+diff --git a/src/conf/cpu_conf.h b/src/conf/cpu_conf.h
+index 9f2e7ee264..5bda4d6961 100644
+--- a/src/conf/cpu_conf.h
++++ b/src/conf/cpu_conf.h
+@@ -30,6 +30,7 @@
+ # include "virbitmap.h"
+ # include "virarch.h"
+ # include "numa_conf.h"
++# include "virhostcpu.h"
+ 
+ # define VIR_CPU_VENDOR_ID_LENGTH 12
+ 
+@@ -141,6 +142,7 @@ struct _virCPUDef {
+     size_t nfeatures_max;
+     virCPUFeatureDefPtr features;
+     virCPUCacheDefPtr cache;
++    virHostCPUTscInfoPtr tsc;
+ };
+ 
+ 
+-- 
+2.21.0
+

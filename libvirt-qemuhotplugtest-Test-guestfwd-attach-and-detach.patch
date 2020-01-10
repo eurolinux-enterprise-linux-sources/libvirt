@@ -1,0 +1,117 @@
+From 2d5ad41293c4b5d5e2dbffc61ba6d922648a3206 Mon Sep 17 00:00:00 2001
+Message-Id: <2d5ad41293c4b5d5e2dbffc61ba6d922648a3206@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:20 -0400
+Subject: [PATCH] qemuhotplugtest: Test guestfwd attach and detach
+
+Previous two commits demonstrate a hole in our test scenario.
+Fix that.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 17ddfd420a0dbcdd3f76fbecf7428acb301db188)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-9-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ tests/qemuhotplugtest.c                       |  6 ++
+ .../qemuhotplug-guestfwd.xml                  |  4 ++
+ .../qemuhotplug-base-live+guestfwd.xml        | 55 +++++++++++++++++++
+ 3 files changed, 65 insertions(+)
+ create mode 100644 tests/qemuhotplugtestdevices/qemuhotplug-guestfwd.xml
+ create mode 100644 tests/qemuhotplugtestdomains/qemuhotplug-base-live+guestfwd.xml
+
+diff --git a/tests/qemuhotplugtest.c b/tests/qemuhotplugtest.c
+index cddedf768e..afaf706d27 100644
+--- a/tests/qemuhotplugtest.c
++++ b/tests/qemuhotplugtest.c
+@@ -925,6 +925,12 @@ mymain(void)
+     DO_TEST_DETACH("base-live", "watchdog-user-alias-full", false, false,
+                    "device_del", QMP_OK);
+ 
++    DO_TEST_ATTACH("base-live", "guestfwd", false, true,
++                   "chardev-add", QMP_OK,
++                   "netdev_add", QMP_OK);
++    DO_TEST_DETACH("base-live", "guestfwd", false, false,
++                   "netdev_del", QMP_OK);
++
+ #define DO_TEST_CPU_GROUP(prefix, vcpus, modernhp, expectfail) \
+     do { \
+         cpudata.test = prefix; \
+diff --git a/tests/qemuhotplugtestdevices/qemuhotplug-guestfwd.xml b/tests/qemuhotplugtestdevices/qemuhotplug-guestfwd.xml
+new file mode 100644
+index 0000000000..c67dbdb8df
+--- /dev/null
++++ b/tests/qemuhotplugtestdevices/qemuhotplug-guestfwd.xml
+@@ -0,0 +1,4 @@
++<channel type='unix'>
++  <source mode='bind' path='/tmp/guestfwd'/>
++  <target type='guestfwd' address='10.0.2.1' port='4600'/>
++</channel>
+diff --git a/tests/qemuhotplugtestdomains/qemuhotplug-base-live+guestfwd.xml b/tests/qemuhotplugtestdomains/qemuhotplug-base-live+guestfwd.xml
+new file mode 100644
+index 0000000000..8d7294123b
+--- /dev/null
++++ b/tests/qemuhotplugtestdomains/qemuhotplug-base-live+guestfwd.xml
+@@ -0,0 +1,55 @@
++<domain type='kvm' id='7'>
++  <name>hotplug</name>
++  <uuid>d091ea82-29e6-2e34-3005-f02617b36e87</uuid>
++  <memory unit='KiB'>4194304</memory>
++  <currentMemory unit='KiB'>4194304</currentMemory>
++  <vcpu placement='static'>4</vcpu>
++  <os>
++    <type arch='x86_64' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <features>
++    <acpi/>
++    <apic/>
++    <pae/>
++  </features>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>restart</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-x86_64</emulator>
++    <controller type='usb' index='0'>
++      <alias name='usb'/>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='ide' index='0'>
++      <alias name='ide'/>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
++    </controller>
++    <controller type='scsi' index='0' model='virtio-scsi'>
++      <alias name='scsi0'/>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x03' function='0x0'/>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'>
++      <alias name='pci'/>
++    </controller>
++    <controller type='virtio-serial' index='0'>
++      <alias name='virtio-serial0'/>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x04' function='0x0'/>
++    </controller>
++    <channel type='unix'>
++      <source mode='bind' path='/tmp/guestfwd'/>
++      <target type='guestfwd' address='10.0.2.1' port='4600'/>
++      <alias name='channel0'/>
++    </channel>
++    <input type='mouse' bus='ps2'>
++      <alias name='input0'/>
++    </input>
++    <input type='keyboard' bus='ps2'>
++      <alias name='input1'/>
++    </input>
++    <memballoon model='none'/>
++  </devices>
++  <seclabel type='none' model='none'/>
++</domain>
+-- 
+2.21.0
+

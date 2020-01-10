@@ -1,0 +1,273 @@
+From eb7ef8053311d82d43912a5cc1e82d0266bb29de Mon Sep 17 00:00:00 2001
+Message-Id: <eb7ef8053311d82d43912a5cc1e82d0266bb29de@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 18 Apr 2019 18:58:57 +0200
+Subject: [PATCH] qemu: Rework setting process affinity
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RHEL-7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1695434
+RHEL-8.0.1: https://bugzilla.redhat.com/show_bug.cgi?id=1503284
+
+The way we currently start qemu from CPU affinity POV is as
+follows:
+
+  1) the child process is set affinity to all online CPUs (unless
+  some vcpu pinning was given in the domain XML)
+
+  2) Once qemu is running, cpuset cgroup is configured taking
+  memory pinning into account
+
+Problem is that we let qemu allocate its memory just anywhere in
+1) and then rely in 2) to be able to move the memory to
+configured NUMA nodes. This might not be always possible (e.g.
+qemu might lock some parts of its memory) and is very suboptimal
+(copying large memory between NUMA nodes takes significant amount
+of time).
+
+The solution is to set affinity to one of (in priority order):
+  - The CPUs associated with NUMA memory affinity mask
+  - The CPUs associated with emulator pinning
+  - All online host CPUs
+
+Later (once QEMU has allocated its memory) we then change this
+again to (again in priority order):
+  - The CPUs associated with emulator pinning
+  - The CPUs returned by numad
+  - The CPUs associated with vCPU pinning
+  - All online host CPUs
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit f136b83139c63f20de0df3285d9e82df2fb97bfc)
+
+I had to explicitly free bitmaps, because there is no VIR_AUTOPTR
+just yet.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <a6edd347c999f999a49d1a878c74c690eb2ab619.1555606711.git.mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c | 130 +++++++++++++++++++---------------------
+ 1 file changed, 63 insertions(+), 67 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 6945d76b18..7d04a6e226 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2335,6 +2335,21 @@ qemuProcessDetectIOThreadPIDs(virQEMUDriverPtr driver,
+ }
+ 
+ 
++static int
++qemuProcessGetAllCpuAffinity(virBitmapPtr *cpumapRet)
++{
++    *cpumapRet = NULL;
++
++    if (!virHostCPUHasBitmap())
++        return 0;
++
++    if (!(*cpumapRet = virHostCPUGetOnlineBitmap()))
++        return -1;
++
++    return 0;
++}
++
++
+ /*
+  * To be run between fork/exec of QEMU only
+  */
+@@ -2342,9 +2357,9 @@ static int
+ qemuProcessInitCpuAffinity(virDomainObjPtr vm)
+ {
+     int ret = -1;
+-    virBitmapPtr cpumap = NULL;
+     virBitmapPtr cpumapToSet = NULL;
+     virBitmapPtr hostcpumap = NULL;
++    virDomainNumatuneMemMode mem_mode;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+ 
+     if (!vm->pid) {
+@@ -2353,58 +2368,39 @@ qemuProcessInitCpuAffinity(virDomainObjPtr vm)
+         return -1;
+     }
+ 
+-    if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO) {
+-        VIR_DEBUG("Set CPU affinity with advisory nodeset from numad");
+-        cpumapToSet = priv->autoCpuset;
++    /* Here is the deal, we can't set cpuset.mems before qemu is
++     * started as it clashes with KVM allocation. Therefore, we
++     * used to let qemu allocate its memory anywhere as we would
++     * then move the memory to desired NUMA node via CGroups.
++     * However, that might not be always possible because qemu
++     * might lock some parts of its memory (e.g. due to VFIO).
++     * Even if it possible, memory has to be copied between NUMA
++     * nodes which is suboptimal.
++     * Solution is to set affinity that matches the best what we
++     * would have set in CGroups and then fix it later, once qemu
++     * is already running. */
++    if (virDomainNumaGetNodeCount(vm->def->numa) <= 1 &&
++        virDomainNumatuneGetMode(vm->def->numa, -1, &mem_mode) == 0 &&
++        mem_mode == VIR_DOMAIN_NUMATUNE_MEM_STRICT) {
++        if (virDomainNumatuneMaybeGetNodeset(vm->def->numa,
++                                             priv->autoNodeset,
++                                             &cpumapToSet,
++                                             -1) < 0)
++            goto cleanup;
++    } else if (vm->def->cputune.emulatorpin) {
++        cpumapToSet = vm->def->cputune.emulatorpin;
+     } else {
+-        VIR_DEBUG("Set CPU affinity with specified cpuset");
+-        if (vm->def->cpumask) {
+-            cpumapToSet = vm->def->cpumask;
+-        } else {
+-            /* You may think this is redundant, but we can't assume libvirtd
+-             * itself is running on all pCPUs, so we need to explicitly set
+-             * the spawned QEMU instance to all pCPUs if no map is given in
+-             * its config file */
+-            int hostcpus;
+-
+-            if (virHostCPUHasBitmap()) {
+-                hostcpumap = virHostCPUGetOnlineBitmap();
+-                cpumap = virProcessGetAffinity(vm->pid);
+-            }
+-
+-            if (hostcpumap && cpumap && virBitmapEqual(hostcpumap, cpumap)) {
+-                /* we're using all available CPUs, no reason to set
+-                 * mask. If libvirtd is running without explicit
+-                 * affinity, we can use hotplugged CPUs for this VM */
+-                ret = 0;
+-                goto cleanup;
+-            } else {
+-                /* setaffinity fails if you set bits for CPUs which
+-                 * aren't present, so we have to limit ourselves */
+-                if ((hostcpus = virHostCPUGetCount()) < 0)
+-                    goto cleanup;
+-
+-                if (hostcpus > QEMUD_CPUMASK_LEN)
+-                    hostcpus = QEMUD_CPUMASK_LEN;
+-
+-                virBitmapFree(cpumap);
+-                if (!(cpumap = virBitmapNew(hostcpus)))
+-                    goto cleanup;
+-
+-                virBitmapSetAll(cpumap);
+-
+-                cpumapToSet = cpumap;
+-            }
+-        }
++        if (qemuProcessGetAllCpuAffinity(&hostcpumap) < 0)
++            goto cleanup;
++        cpumapToSet = hostcpumap;
+     }
+ 
+-    if (virProcessSetAffinity(vm->pid, cpumapToSet) < 0)
++    if (cpumapToSet &&
++        virProcessSetAffinity(vm->pid, cpumapToSet) < 0)
+         goto cleanup;
+ 
+     ret = 0;
+-
+  cleanup:
+-    virBitmapFree(cpumap);
+     virBitmapFree(hostcpumap);
+     return ret;
+ }
+@@ -2478,7 +2474,8 @@ qemuProcessSetupPid(virDomainObjPtr vm,
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     virDomainNumatuneMemMode mem_mode;
+     virCgroupPtr cgroup = NULL;
+-    virBitmapPtr use_cpumask;
++    virBitmapPtr use_cpumask = NULL;
++    virBitmapPtr hostcpumap = NULL;
+     char *mem_mask = NULL;
+     int ret = -1;
+ 
+@@ -2490,12 +2487,21 @@ qemuProcessSetupPid(virDomainObjPtr vm,
+     }
+ 
+     /* Infer which cpumask shall be used. */
+-    if (cpumask)
++    if (cpumask) {
+         use_cpumask = cpumask;
+-    else if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO)
++    } else if (vm->def->placement_mode == VIR_DOMAIN_CPU_PLACEMENT_MODE_AUTO) {
+         use_cpumask = priv->autoCpuset;
+-    else
++    } else if (vm->def->cpumask) {
+         use_cpumask = vm->def->cpumask;
++    } else {
++        /* You may think this is redundant, but we can't assume libvirtd
++         * itself is running on all pCPUs, so we need to explicitly set
++         * the spawned QEMU instance to all pCPUs if no map is given in
++         * its config file */
++        if (qemuProcessGetAllCpuAffinity(&hostcpumap) < 0)
++            goto cleanup;
++        use_cpumask = hostcpumap;
++    }
+ 
+     /*
+      * If CPU cgroup controller is not initialized here, then we need
+@@ -2520,13 +2526,7 @@ qemuProcessSetupPid(virDomainObjPtr vm,
+                 qemuSetupCgroupCpusetCpus(cgroup, use_cpumask) < 0)
+                 goto cleanup;
+ 
+-            /*
+-             * Don't setup cpuset.mems for the emulator, they need to
+-             * be set up after initialization in order for kvm
+-             * allocations to succeed.
+-             */
+-            if (nameval != VIR_CGROUP_THREAD_EMULATOR &&
+-                mem_mask && virCgroupSetCpusetMems(cgroup, mem_mask) < 0)
++            if (mem_mask && virCgroupSetCpusetMems(cgroup, mem_mask) < 0)
+                 goto cleanup;
+ 
+         }
+@@ -2553,6 +2553,7 @@ qemuProcessSetupPid(virDomainObjPtr vm,
+     ret = 0;
+  cleanup:
+     VIR_FREE(mem_mask);
++    virBitmapFree(hostcpumap);
+     if (cgroup) {
+         if (ret < 0)
+             virCgroupRemove(cgroup);
+@@ -6428,12 +6429,7 @@ qemuProcessLaunch(virConnectPtr conn,
+ 
+     /* This must be done after cgroup placement to avoid resetting CPU
+      * affinity */
+-    if (!vm->def->cputune.emulatorpin &&
+-        qemuProcessInitCpuAffinity(vm) < 0)
+-        goto cleanup;
+-
+-    VIR_DEBUG("Setting emulator tuning/settings");
+-    if (qemuProcessSetupEmulator(vm) < 0)
++    if (qemuProcessInitCpuAffinity(vm) < 0)
+         goto cleanup;
+ 
+     VIR_DEBUG("Setting cgroup for external devices (if required)");
+@@ -6502,10 +6498,6 @@ qemuProcessLaunch(virConnectPtr conn,
+     if (qemuProcessUpdateAndVerifyCPU(driver, vm, asyncJob) < 0)
+         goto cleanup;
+ 
+-    VIR_DEBUG("Setting up post-init cgroup restrictions");
+-    if (qemuSetupCpusetMems(vm) < 0)
+-        goto cleanup;
+-
+     VIR_DEBUG("setting up hotpluggable cpus");
+     if (qemuDomainHasHotpluggableStartupVcpus(vm->def)) {
+         if (qemuDomainRefreshVcpuInfo(driver, vm, asyncJob, false) < 0)
+@@ -6531,6 +6523,10 @@ qemuProcessLaunch(virConnectPtr conn,
+     if (qemuProcessDetectIOThreadPIDs(driver, vm, asyncJob) < 0)
+         goto cleanup;
+ 
++    VIR_DEBUG("Setting emulator tuning/settings");
++    if (qemuProcessSetupEmulator(vm) < 0)
++        goto cleanup;
++
+     VIR_DEBUG("Setting global CPU cgroup (if required)");
+     if (qemuSetupGlobalCpuCgroup(vm) < 0)
+         goto cleanup;
+-- 
+2.21.0
+

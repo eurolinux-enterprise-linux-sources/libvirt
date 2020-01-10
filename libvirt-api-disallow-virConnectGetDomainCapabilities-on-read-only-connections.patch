@@ -1,5 +1,5 @@
-From 804925f7bdd8cb7e80a0a76ea3323c55d89193ba Mon Sep 17 00:00:00 2001
-Message-Id: <804925f7bdd8cb7e80a0a76ea3323c55d89193ba@dist-git>
+From fae17c4141d504073e9cb16b49d2af9e73272ac2 Mon Sep 17 00:00:00 2001
+Message-Id: <fae17c4141d504073e9cb16b49d2af9e73272ac2@dist-git>
 From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
 Date: Tue, 18 Jun 2019 13:30:01 +0200
 Subject: [PATCH] api: disallow virConnectGetDomainCapabilities on read-only
@@ -22,10 +22,10 @@ Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
  1 file changed, 1 insertion(+)
 
 diff --git a/src/libvirt-domain.c b/src/libvirt-domain.c
-index 3855dfe0dd..a1c913bd86 100644
+index b936dd8eb7..ab2c44cfe1 100644
 --- a/src/libvirt-domain.c
 +++ b/src/libvirt-domain.c
-@@ -11279,6 +11279,7 @@ virConnectGetDomainCapabilities(virConnectPtr conn,
+@@ -11287,6 +11287,7 @@ virConnectGetDomainCapabilities(virConnectPtr conn,
      virResetLastError();
  
      virCheckConnectReturn(conn, NULL);

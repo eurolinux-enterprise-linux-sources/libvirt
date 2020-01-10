@@ -1,5 +1,5 @@
-From 054fbe2bdd426eb9f3346513ac7d39f0b843a04e Mon Sep 17 00:00:00 2001
-Message-Id: <054fbe2bdd426eb9f3346513ac7d39f0b843a04e@dist-git>
+From 223e57b0ed8b285bc38d51252dc3ded63f8f3e11 Mon Sep 17 00:00:00 2001
+Message-Id: <223e57b0ed8b285bc38d51252dc3ded63f8f3e11@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Wed, 20 Mar 2019 14:55:20 +0100
 Subject: [PATCH] cpu_x86: Separate signature parsing from x86ModelParse

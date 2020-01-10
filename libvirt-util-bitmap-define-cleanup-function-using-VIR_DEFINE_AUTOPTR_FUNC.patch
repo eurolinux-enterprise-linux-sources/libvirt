@@ -1,0 +1,69 @@
+From 1e01bd7d0102dac3c2a69c95f39de80080973206 Mon Sep 17 00:00:00 2001
+Message-Id: <1e01bd7d0102dac3c2a69c95f39de80080973206@dist-git>
+From: Sukrit Bhatnagar <skrtbhtngr@gmail.com>
+Date: Tue, 4 Jun 2019 16:22:03 +0200
+Subject: [PATCH] util: bitmap: define cleanup function using
+ VIR_DEFINE_AUTOPTR_FUNC
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Using the new VIR_DEFINE_AUTOPTR_FUNC macro defined in
+src/util/viralloc.h, define a new wrapper around an existing
+cleanup function which will be called when a variable declared
+with VIR_AUTOPTR macro goes out of scope. Also, drop the redundant
+viralloc.h include, since that has moved from the source module into the
+header.
+
+When a variable of type virBitmapPtr is declared using
+VIR_AUTOPTR, the function virBitmapFree will be run
+automatically on it when it goes out of scope.
+
+Signed-off-by: Sukrit Bhatnagar <skrtbhtngr@gmail.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit a3c915e662f8c25cac683e20bbc419b497555e13)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1703661
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190604142207.2036-3-abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virbitmap.c | 1 -
+ src/util/virbitmap.h | 3 +++
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/util/virbitmap.c b/src/util/virbitmap.c
+index 0bc0d068bb..d6715025d4 100644
+--- a/src/util/virbitmap.c
++++ b/src/util/virbitmap.c
+@@ -31,7 +31,6 @@
+ #include <sys/types.h>
+ 
+ #include "virbitmap.h"
+-#include "viralloc.h"
+ #include "virbuffer.h"
+ #include "c-ctype.h"
+ #include "count-one-bits.h"
+diff --git a/src/util/virbitmap.h b/src/util/virbitmap.h
+index 2464814055..312e7e2933 100644
+--- a/src/util/virbitmap.h
++++ b/src/util/virbitmap.h
+@@ -25,6 +25,7 @@
+ # define __BITMAP_H__
+ 
+ # include "internal.h"
++# include "viralloc.h"
+ 
+ # include <sys/types.h>
+ 
+@@ -155,4 +156,6 @@ void virBitmapSubtract(virBitmapPtr a, virBitmapPtr b)
+ 
+ void virBitmapShrink(virBitmapPtr map, size_t b);
+ 
++VIR_DEFINE_AUTOPTR_FUNC(virBitmap, virBitmapFree)
++
+ #endif
+-- 
+2.21.0
+

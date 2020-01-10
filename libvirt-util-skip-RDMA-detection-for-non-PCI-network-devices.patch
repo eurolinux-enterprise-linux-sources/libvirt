@@ -1,0 +1,49 @@
+From 9510cef89c3fb7fed5319f50e213ca9db4990897 Mon Sep 17 00:00:00 2001
+Message-Id: <9510cef89c3fb7fed5319f50e213ca9db4990897@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Wed, 3 Apr 2019 17:26:21 +0200
+Subject: [PATCH] util: skip RDMA detection for non-PCI network devices
+
+Only PCI devices have '/sys/class/net/<ifname>/device/resource' so we
+need to skip this check for all other network devices.
+
+Without this patch and RDMA enabled libvirt will not detect any network
+device that doesn't have the path above which includes 'lo', 'virbr',
+'tun', etc.
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1639258
+
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit f38ef0fac0582ac0cbb749af9d3f8ba515a6084a)
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <d9ab043c567252fda1f5749234ee44a17ff3f99b.1554305151.git.phrdina@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ src/util/virnetdev.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/util/virnetdev.c b/src/util/virnetdev.c
+index bc1e70f0a8..7396a719a8 100644
+--- a/src/util/virnetdev.c
++++ b/src/util/virnetdev.c
+@@ -3016,8 +3016,14 @@ virNetDevRDMAFeature(const char *ifname,
+ 
+     if (virAsprintf(&eth_devpath, SYSFS_NET_DIR "%s/device/resource", ifname) < 0)
+         goto cleanup;
+-    if (!virFileExists(eth_devpath))
++
++    /* If /sys/class/net/<ifname>/device/resource doesn't exist it is not a PCI
++     * device and therefore it will not have RDMA. */
++    if (!virFileExists(eth_devpath)) {
++        ret = 0;
+         goto cleanup;
++    }
++
+     if (virFileReadAll(eth_devpath, RESOURCE_FILE_LEN, &eth_res_buf) < 0)
+         goto cleanup;
+ 
+-- 
+2.21.0
+

@@ -1,0 +1,61 @@
+From f77f23ddd733b005b989afbe6d28a6a7fdb88197 Mon Sep 17 00:00:00 2001
+Message-Id: <f77f23ddd733b005b989afbe6d28a6a7fdb88197@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:27 -0400
+Subject: [PATCH] qemu: hotplug: Use typecasted enum in
+ qemuDomainDetachDeviceDiskLive
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Use the correct type in switch and populate the missing cases.
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit afa15d78cba36e2c6c6d6ddc5c5258b7add405ba)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-16-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 8047ac773f..b7db65964e 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4820,7 +4820,7 @@ qemuDomainDetachDeviceDiskLive(virQEMUDriverPtr driver,
+     }
+     disk = vm->def->disks[idx];
+ 
+-    switch (disk->device) {
++    switch ((virDomainDiskDevice) disk->device) {
+     case VIR_DOMAIN_DISK_DEVICE_DISK:
+     case VIR_DOMAIN_DISK_DEVICE_LUN:
+         if (disk->bus == VIR_DOMAIN_DISK_BUS_VIRTIO)
+@@ -4832,11 +4832,18 @@ qemuDomainDetachDeviceDiskLive(virQEMUDriverPtr driver,
+             virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                            _("This type of disk cannot be hot unplugged"));
+         break;
+-    default:
++
++    case VIR_DOMAIN_DISK_DEVICE_CDROM:
++    case VIR_DOMAIN_DISK_DEVICE_FLOPPY:
+         virReportError(VIR_ERR_OPERATION_UNSUPPORTED,
+                        _("disk device type '%s' cannot be detached"),
+                        virDomainDiskDeviceTypeToString(disk->device));
+         break;
++
++    case VIR_DOMAIN_DISK_DEVICE_LAST:
++    default:
++        virReportEnumRangeError(virDomainDiskDevice, disk->device);
++        break;
+     }
+ 
+     return -1;
+-- 
+2.21.0
+

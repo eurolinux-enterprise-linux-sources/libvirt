@@ -1,0 +1,136 @@
+From 995cc8106fcc01dfae64113fd62cb37ab36895d4 Mon Sep 17 00:00:00 2001
+Message-Id: <995cc8106fcc01dfae64113fd62cb37ab36895d4@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 07:35:46 -0400
+Subject: [PATCH] storage: Allow for inputvol to have any format for encryption
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1613737
+
+Commit 39cef12a9 altered/fixed the inputvol processing to create
+a multistep process when using an inputvol to create an encrypted
+output volume; however, it unnecessarily assumed/restricted the
+inputvol to be of 'raw' format only.
+
+Modify the processing code to allow the inputvol format to be checked
+and used in order to create the encrypted volume.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 80414718587ab8dd97025ec9145f30fa1a3654ed)
+Message-Id: <20190403113547.29231-3-jferlan@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/storage/storage_util.c                    | 14 ++++++++++++-
+ .../luks-convert-qcow2.argv                   |  9 ++++++++
+ tests/storagevolxml2argvtest.c                |  4 ++++
+ tests/storagevolxml2xmlin/vol-file-qcow2.xml  | 21 +++++++++++++++++++
+ 4 files changed, 47 insertions(+), 1 deletion(-)
+ create mode 100644 tests/storagevolxml2argvdata/luks-convert-qcow2.argv
+ create mode 100644 tests/storagevolxml2xmlin/vol-file-qcow2.xml
+
+diff --git a/src/storage/storage_util.c b/src/storage/storage_util.c
+index 54e778490d..ed0179d78e 100644
+--- a/src/storage/storage_util.c
++++ b/src/storage/storage_util.c
+@@ -692,6 +692,7 @@ storagePloopResize(virStorageVolDefPtr vol,
+ struct _virStorageBackendQemuImgInfo {
+     int format;
+     const char *type;
++    const char *inputType;
+     const char *path;
+     unsigned long long size_arg;
+     unsigned long long allocation;
+@@ -1014,6 +1015,15 @@ virStorageBackendCreateQemuImgSetInfo(virStoragePoolObjPtr pool,
+         return -1;
+     }
+ 
++    if (inputvol &&
++        !(info->inputType =
++          virStorageFileFormatTypeToString(inputvol->target.format))) {
++        virReportError(VIR_ERR_INTERNAL_ERROR,
++                       _("unknown inputvol storage vol type %d"),
++                       inputvol->target.format);
++        return -1;
++    }
++
+     if (info->preallocate && info->format != VIR_STORAGE_FILE_QCOW2) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                        _("metadata preallocation only available with qcow2"));
+@@ -1073,6 +1083,7 @@ virStorageBackendCreateQemuImgCmdFromVol(virStoragePoolObjPtr pool,
+     struct _virStorageBackendQemuImgInfo info = {
+         .format = vol->target.format,
+         .type = NULL,
++        .inputType = NULL,
+         .path = vol->target.path,
+         .allocation = vol->target.allocation,
+         .encryption = !!vol->target.encryption,
+@@ -1145,7 +1156,8 @@ virStorageBackendCreateQemuImgCmdFromVol(virStoragePoolObjPtr pool,
+             virCommandAddArgFormat(cmd, "%lluK", info.size_arg);
+     } else {
+         /* source */
+-        virCommandAddArgFormat(cmd, "driver=raw,file.filename=%s",
++        virCommandAddArgFormat(cmd, "driver=%s,file.filename=%s",
++                               info.inputType ? info.inputType : "raw",
+                                info.inputPath);
+ 
+         /* dest */
+diff --git a/tests/storagevolxml2argvdata/luks-convert-qcow2.argv b/tests/storagevolxml2argvdata/luks-convert-qcow2.argv
+new file mode 100644
+index 0000000000..9124f5f27c
+--- /dev/null
++++ b/tests/storagevolxml2argvdata/luks-convert-qcow2.argv
+@@ -0,0 +1,9 @@
++qemu-img create -f luks \
++--object secret,id=OtherDemo.img_encrypt0,file=/path/to/secretFile \
++-o key-secret=OtherDemo.img_encrypt0 \
++/var/lib/libvirt/images/OtherDemo.img 5242880K
++qemu-img convert --image-opts -n --target-image-opts \
++--object secret,id=OtherDemo.img_encrypt0,file=/path/to/secretFile \
++driver=qcow2,file.filename=/var/lib/libvirt/images/sparse-qcow2.img \
++driver=luks,file.filename=/var/lib/libvirt/images/OtherDemo.img,\
++key-secret=OtherDemo.img_encrypt0
+diff --git a/tests/storagevolxml2argvtest.c b/tests/storagevolxml2argvtest.c
+index b795f83aee..6a9a080dd1 100644
+--- a/tests/storagevolxml2argvtest.c
++++ b/tests/storagevolxml2argvtest.c
+@@ -284,6 +284,10 @@ mymain(void)
+             "pool-dir", "vol-file",
+             "luks-convert", 0);
+ 
++    DO_TEST("pool-dir", "vol-luks-convert",
++            "pool-dir", "vol-file-qcow2",
++            "luks-convert-qcow2", 0);
++
+     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+ 
+diff --git a/tests/storagevolxml2xmlin/vol-file-qcow2.xml b/tests/storagevolxml2xmlin/vol-file-qcow2.xml
+new file mode 100644
+index 0000000000..025e7e0239
+--- /dev/null
++++ b/tests/storagevolxml2xmlin/vol-file-qcow2.xml
+@@ -0,0 +1,21 @@
++<volume>
++  <name>sparse-qcow2.img</name>
++  <source/>
++  <capacity unit="TiB">1</capacity>
++  <allocation unit="bytes">0</allocation>
++  <target>
++    <path>/var/lib/libvirt/images/sparse-qcow2.img</path>
++    <format type="qcow2"/>
++    <permissions>
++      <mode>0</mode>
++      <owner>0744</owner>
++      <group>0</group>
++      <label>virt_image_t</label>
++    </permissions>
++    <timestamps>
++      <atime>1341933637.273190990</atime>
++      <mtime>1341930622.047245868</mtime>
++      <ctime>1341930622.047245868</ctime>
++    </timestamps>
++  </target>
++</volume>
+-- 
+2.21.0
+

@@ -1,15 +1,14 @@
-From 48289dddc0f4398036071c132f96644e3c3e03c4 Mon Sep 17 00:00:00 2001
-Message-Id: <48289dddc0f4398036071c132f96644e3c3e03c4@dist-git>
+From 4f488215c980c7473171c5d64dee61c12e95c6d8 Mon Sep 17 00:00:00 2001
+Message-Id: <4f488215c980c7473171c5d64dee61c12e95c6d8@dist-git>
 From: Michal Privoznik <mprivozn@redhat.com>
-Date: Tue, 23 Apr 2019 10:06:17 +0200
+Date: Wed, 3 Apr 2019 15:33:55 +0200
 Subject: [PATCH] virnwfilterbindingobj: Introduce and use
  virNWFilterBindingObjStealDef
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-RHEL-7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1686927
-RHEL-7.6.z: https://bugzilla.redhat.com/show_bug.cgi?id=1702173
+https://bugzilla.redhat.com/show_bug.cgi?id=1686927
 
 When trying to create a nwfilter binding via
 nwfilterBindingCreateXML() we may encounter a crash. The sequence
@@ -42,8 +41,8 @@ Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
 Reviewed-by: Ján Tomko <jtomko@redhat.com>
 (cherry picked from commit 8c08a99745ddac9f4055c008e82e68a27ed5093d)
 Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
-Message-Id: <a5c2feed107e958bb6a84f7e993cc9feac58c4a2.1556006751.git.mprivozn@redhat.com>
-Reviewed-by: Ján Tomko <jtomko@redhat.com>
+Message-Id: <cbad9c57e17d79202e33234148c29c38d20635e7.1554298431.git.mprivozn@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
 ---
  src/conf/virnwfilterbindingobj.c     | 10 ++++++++++
  src/conf/virnwfilterbindingobj.h     |  3 +++

@@ -1,5 +1,5 @@
-From 53cf8a5c5e91132ac3d12bbe2e611594272bb30a Mon Sep 17 00:00:00 2001
-Message-Id: <53cf8a5c5e91132ac3d12bbe2e611594272bb30a@dist-git>
+From 9c6ce78ae4da48e98abfcc50b8d5056d54503c14 Mon Sep 17 00:00:00 2001
+Message-Id: <9c6ce78ae4da48e98abfcc50b8d5056d54503c14@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Mon, 4 Mar 2019 16:18:42 +0100
 Subject: [PATCH] cpu_x86: Add x86ModelCopySignatures helper

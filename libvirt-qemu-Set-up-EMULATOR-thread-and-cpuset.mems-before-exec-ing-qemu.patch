@@ -1,0 +1,69 @@
+From b733703cfcc4b4e8966051ba20bed301645331d0 Mon Sep 17 00:00:00 2001
+Message-Id: <b733703cfcc4b4e8966051ba20bed301645331d0@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 18 Apr 2019 18:58:58 +0200
+Subject: [PATCH] qemu: Set up EMULATOR thread and cpuset.mems before
+ exec()-ing qemu
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1695434
+
+It's funny how this went unnoticed for such a long time. Long
+story short, if a domain is configured with
+VIR_DOMAIN_NUMATUNE_MEM_STRICT libvirt doesn't really honour
+that. This is because of 7e72ac787848 after which libvirt allowed
+qemu to allocate memory just anywhere and only after that it used
+some magic involving cpuset.memory_migrate and cpuset.mems to
+move the memory to desired NUMA nodes. This was done in order to
+work around some KVM bug where KVM would fail if there wasn't a
+DMA zone available on the NUMA node. Well, while the work around
+might stopped libvirt tickling the KVM bug it also caused a bug
+on libvirt side: if there is not enough memory on configured NUMA
+node(s) then any attempt to start a domain must fail. Because of
+the way we play with guest memory domains can start just happily.
+
+The solution is to move the child we've just forked into emulator
+cgroup, set up cpuset.mems and exec() qemu only after that.
+
+This basically reverts 7e72ac787848b7434c9 which was a workaround
+for kernel bug. This bug was apparently fixed because I've tested
+this successfully with recent kernel.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit 0eaa4716e1b8f6eb59d77049aed3735c3b5fbdd6)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <efd9d64c94a027281c244c05f69cc9f4c31ed83b.1555606711.git.mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 7d04a6e226..208c64381c 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -6432,6 +6432,10 @@ qemuProcessLaunch(virConnectPtr conn,
+     if (qemuProcessInitCpuAffinity(vm) < 0)
+         goto cleanup;
+ 
++    VIR_DEBUG("Setting emulator tuning/settings");
++    if (qemuProcessSetupEmulator(vm) < 0)
++        goto cleanup;
++
+     VIR_DEBUG("Setting cgroup for external devices (if required)");
+     if (qemuSetupCgroupForExtDevices(vm, driver) < 0)
+         goto cleanup;
+@@ -6523,10 +6527,6 @@ qemuProcessLaunch(virConnectPtr conn,
+     if (qemuProcessDetectIOThreadPIDs(driver, vm, asyncJob) < 0)
+         goto cleanup;
+ 
+-    VIR_DEBUG("Setting emulator tuning/settings");
+-    if (qemuProcessSetupEmulator(vm) < 0)
+-        goto cleanup;
+-
+     VIR_DEBUG("Setting global CPU cgroup (if required)");
+     if (qemuSetupGlobalCpuCgroup(vm) < 0)
+         goto cleanup;
+-- 
+2.21.0
+

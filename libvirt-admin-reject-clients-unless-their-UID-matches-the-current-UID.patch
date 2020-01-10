@@ -1,5 +1,5 @@
-From dba153a54183187d16cb983d269516930c555ad8 Mon Sep 17 00:00:00 2001
-Message-Id: <dba153a54183187d16cb983d269516930c555ad8@dist-git>
+From 0abfa9e0b0b396420a165ac90e69952b23b5ca3e Mon Sep 17 00:00:00 2001
+Message-Id: <0abfa9e0b0b396420a165ac90e69952b23b5ca3e@dist-git>
 From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
 Date: Wed, 15 May 2019 21:40:56 +0100
 Subject: [PATCH] admin: reject clients unless their UID matches the current
@@ -16,7 +16,7 @@ Fixes CVE-2019-10132
 
 Reviewed-by: Ján Tomko <jtomko@redhat.com>
 Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
-(cherry picked from a private commit)
+(cherry picked from commit 96f41cd765c9e525fe28ee5abbfbf4a79b3720c7)
 Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
 Message-Id: <20190515204058.28077-2-berrange@redhat.com>
 ---

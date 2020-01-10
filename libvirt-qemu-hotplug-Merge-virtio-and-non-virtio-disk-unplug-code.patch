@@ -1,0 +1,108 @@
+From a0b96a992d89ee5243ad56974979a0ccc0df788a Mon Sep 17 00:00:00 2001
+Message-Id: <a0b96a992d89ee5243ad56974979a0ccc0df788a@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:29 -0400
+Subject: [PATCH] qemu: hotplug: Merge virtio and non-virtio disk unplug code
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The functions do basically exactly the same thing modulo few checks.
+In case of virtio disks we check that the device is not multifunction as
+that can't be unplugged at once. In case of USB and SCSI disks we
+checked that no active block job is running.
+
+The check for running blockjobs should have also been done for virtio
+disks. By moving the multifunction check into the common function we fix
+this case and also simplify the code.
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 0b7d544c8842841b27de0d88234148794ce4545e)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-18-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 49 ++++++++---------------------------------
+ 1 file changed, 9 insertions(+), 40 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 5e8583ae8b..ffb2e258b5 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4721,43 +4721,6 @@ qemuDomainSignalDeviceRemoval(virDomainObjPtr vm,
+ }
+ 
+ 
+-static int
+-qemuDomainDetachVirtioDiskDevice(virQEMUDriverPtr driver,
+-                                 virDomainObjPtr vm,
+-                                 virDomainDiskDefPtr detach,
+-                                 bool async)
+-{
+-    int ret = -1;
+-
+-    if (qemuIsMultiFunctionDevice(vm->def, &detach->info)) {
+-        virReportError(VIR_ERR_OPERATION_FAILED,
+-                       _("cannot hot unplug multifunction PCI device: %s"),
+-                       detach->dst);
+-        goto cleanup;
+-    }
+-
+-    if (!async)
+-        qemuDomainMarkDeviceForRemoval(vm, &detach->info);
+-
+-    if (qemuDomainDeleteDevice(vm, detach->info.alias) < 0) {
+-        if (virDomainObjIsActive(vm))
+-            virDomainAuditDisk(vm, detach->src, NULL, "detach", false);
+-        goto cleanup;
+-    }
+-
+-    if (async) {
+-        ret = 0;
+-    } else {
+-        if ((ret = qemuDomainWaitForDeviceRemoval(vm)) == 1)
+-            ret = qemuDomainRemoveDiskDevice(driver, vm, detach);
+-    }
+-
+- cleanup:
+-    if (!async)
+-        qemuDomainResetDeviceRemoval(vm);
+-    return ret;
+-}
+-
+ static int
+ qemuDomainDetachDiskDevice(virQEMUDriverPtr driver,
+                            virDomainObjPtr vm,
+@@ -4767,7 +4730,15 @@ qemuDomainDetachDiskDevice(virQEMUDriverPtr driver,
+     int ret = -1;
+ 
+     if (qemuDomainDiskBlockJobIsActive(detach))
+-        goto cleanup;
++        return -1;
++
++    if (detach->bus == VIR_DOMAIN_DISK_BUS_VIRTIO &&
++        qemuIsMultiFunctionDevice(vm->def, &detach->info)) {
++        virReportError(VIR_ERR_OPERATION_FAILED,
++                       _("cannot hot unplug multifunction PCI device: %s"),
++                       detach->dst);
++        return -1;
++    }
+ 
+     if (!async)
+         qemuDomainMarkDeviceForRemoval(vm, &detach->info);
+@@ -4826,8 +4797,6 @@ qemuDomainDetachDeviceDiskLive(virQEMUDriverPtr driver,
+ 
+         switch ((virDomainDiskBus) disk->bus) {
+         case VIR_DOMAIN_DISK_BUS_VIRTIO:
+-            return qemuDomainDetachVirtioDiskDevice(driver, vm, disk, async);
+-
+         case VIR_DOMAIN_DISK_BUS_USB:
+         case VIR_DOMAIN_DISK_BUS_SCSI:
+             return qemuDomainDetachDiskDevice(driver, vm, disk, async);
+-- 
+2.21.0
+

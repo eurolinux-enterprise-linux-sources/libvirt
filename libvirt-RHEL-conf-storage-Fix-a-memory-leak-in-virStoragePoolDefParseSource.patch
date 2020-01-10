@@ -1,0 +1,41 @@
+From b5f39d1ad467ab712d41f693f998c6a9e3046b4f Mon Sep 17 00:00:00 2001
+Message-Id: <b5f39d1ad467ab712d41f693f998c6a9e3046b4f@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Wed, 10 Apr 2019 10:25:01 +0200
+Subject: [PATCH] RHEL: conf: storage: Fix a memory leak in
+ virStoragePoolDefParseSource
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1584663
+
+RHEL-only
+
+Commit acf8c561 backported an upstream memory leak in @ver variable that
+was later fixed upstream by using AUTOFREE which is not available
+downstream, so we need a downstream fix. The issue was reported by
+coverity.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <b6665d1280309b887aa237c71cba7b66cbe593f2.1554884692.git.eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/storage_conf.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/conf/storage_conf.c b/src/conf/storage_conf.c
+index 5a124a0a2f..e171425239 100644
+--- a/src/conf/storage_conf.c
++++ b/src/conf/storage_conf.c
+@@ -566,6 +566,7 @@ virStoragePoolDefParseSource(xmlXPathContextPtr ctxt,
+  cleanup:
+     ctxt->node = relnode;
+ 
++    VIR_FREE(ver);
+     VIR_FREE(port);
+     VIR_FREE(nodeset);
+     virStorageAuthDefFree(authdef);
+-- 
+2.21.0
+

@@ -1,5 +1,5 @@
-From 4b841d996f9e1181e6a0614eb0bc9a35d5f7c372 Mon Sep 17 00:00:00 2001
-Message-Id: <4b841d996f9e1181e6a0614eb0bc9a35d5f7c372@dist-git>
+From 5d93906d3a51691be4c0d3cf29d4650f090cc0e1 Mon Sep 17 00:00:00 2001
+Message-Id: <5d93906d3a51691be4c0d3cf29d4650f090cc0e1@dist-git>
 From: John Ferlan <jferlan@redhat.com>
 Date: Tue, 12 Mar 2019 13:55:57 -0400
 Subject: [PATCH] storage: Rework virStorageBackendSCSISerial

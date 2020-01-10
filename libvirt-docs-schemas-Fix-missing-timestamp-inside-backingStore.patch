@@ -1,0 +1,37 @@
+From 192e29d8c8cb8a43b5aecdca21ddac0dc32189a8 Mon Sep 17 00:00:00 2001
+Message-Id: <192e29d8c8cb8a43b5aecdca21ddac0dc32189a8@dist-git>
+From: Julio Faracco <jcfaracco@gmail.com>
+Date: Wed, 3 Apr 2019 13:44:41 +0200
+Subject: [PATCH] docs: schemas: Fix missing timestamp inside backingStore
+
+All backingStore XML definitions have a XML tag with the timestamp. This
+timestamp is not defined insinde RNG volume storage schema and it is
+causing some problems to validate and check volume XMLs.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1594266
+
+Signed-off-by: Julio Faracco <jcfaracco@gmail.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit 0376939dd03f490ff54398d569ec17b0a1150b49)
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <19f5f223eefe47bb095f487d527c23724d789ae2.1554291860.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/schemas/storagevol.rng | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/docs/schemas/storagevol.rng b/docs/schemas/storagevol.rng
+index 96d6b3e6d0..32aaa2784d 100644
+--- a/docs/schemas/storagevol.rng
++++ b/docs/schemas/storagevol.rng
+@@ -139,6 +139,7 @@
+         </element>
+         <ref name='format'/>
+         <ref name='permissions'/>
++        <ref name='timestamps'/>
+       </interleave>
+     </element>
+   </define>
+-- 
+2.21.0
+

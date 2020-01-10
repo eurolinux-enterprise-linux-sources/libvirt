@@ -1,7 +1,7 @@
-From 1054c2ab4381145ddc9e937a40c109980f15cf69 Mon Sep 17 00:00:00 2001
-Message-Id: <1054c2ab4381145ddc9e937a40c109980f15cf69@dist-git>
+From 0f34aa83adc7e87ff0189ae6af1c8acbc3589812 Mon Sep 17 00:00:00 2001
+Message-Id: <0f34aa83adc7e87ff0189ae6af1c8acbc3589812@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
-Date: Fri, 5 Apr 2019 11:33:32 +0200
+Date: Tue, 9 Apr 2019 09:38:41 +0200
 Subject: [PATCH] cpu_x86: Do not cache microcode version
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -18,9 +18,11 @@ Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
 Reviewed-by: Ján Tomko <jtomko@redhat.com>
 (cherry picked from commit be46f613261d3b655a1f15afd635087e68a9c39b)
 
-CVE-2018-12126, CVE-2018-12127, CVE-2018-12130
+https://bugzilla.redhat.com/show_bug.cgi?id=1576369
 
 Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <9fc5ee158cea54ec90a235071a7adb3bcda48689.1554795362.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
 ---
  src/cpu/cpu_x86.c | 5 +----
  1 file changed, 1 insertion(+), 4 deletions(-)

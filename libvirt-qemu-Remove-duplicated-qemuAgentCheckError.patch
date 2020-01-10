@@ -1,0 +1,50 @@
+From 02683e9bc2ec38c7b7fb2ec2bba789701c514ddc Mon Sep 17 00:00:00 2001
+Message-Id: <02683e9bc2ec38c7b7fb2ec2bba789701c514ddc@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Thu, 10 Jan 2019 12:49:10 +0100
+Subject: [PATCH] qemu: Remove duplicated qemuAgentCheckError
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Commit 5b3492fadb moved qemuAgentCheckError calls into
+qemuAgentCommand for various reasons; however, subsequent
+commit 0977b8aa0 adding a new command made call again
+So let's just remove the duplicitous call from
+qemuAgentGetInterfaces.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 9ed175fbc2deecfdaeabca7bc77c7e7ae33a3377)
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+
+7.7: https://bugzilla.redhat.com/show_bug.cgi?id=1663051
+8.0: https://bugzilla.redhat.com/show_bug.cgi?id=1665000
+CVE-2019-3840
+Message-Id: <14650d570abb94757791fcdb50b65d65bb8d5601.1547120910.git.jtomko@redhat.com>
+
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_agent.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_agent.c b/src/qemu/qemu_agent.c
+index 10c6ef09fa..986e37b07d 100644
+--- a/src/qemu/qemu_agent.c
++++ b/src/qemu/qemu_agent.c
+@@ -1987,10 +1987,9 @@ qemuAgentGetInterfaces(qemuAgentPtr mon,
+     if (!(cmd = qemuAgentMakeCommand("guest-network-get-interfaces", NULL)))
+         goto cleanup;
+ 
+-    if (qemuAgentCommand(mon, cmd, &reply, false, VIR_DOMAIN_QEMU_AGENT_COMMAND_BLOCK) < 0 ||
+-        qemuAgentCheckError(cmd, reply) < 0) {
++    if (qemuAgentCommand(mon, cmd, &reply, false,
++                         VIR_DOMAIN_QEMU_AGENT_COMMAND_BLOCK) < 0)
+         goto cleanup;
+-    }
+ 
+     if (!(ret_array = virJSONValueObjectGet(reply, "return"))) {
+         virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+-- 
+2.21.0
+

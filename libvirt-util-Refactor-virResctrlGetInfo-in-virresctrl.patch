@@ -1,0 +1,92 @@
+From dc61761ead7f2a196b97a36a51076a953461838f Mon Sep 17 00:00:00 2001
+Message-Id: <dc61761ead7f2a196b97a36a51076a953461838f@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:45 +0200
+Subject: [PATCH] util: Refactor virResctrlGetInfo in virresctrl
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Separate resctrl common information parts from CAT specific parts,
+so that common information parts can be reused among different
+resource allocation technologies.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 3a1356d461d6ad6ac2a0371827ceaba7de5f12c5)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <04b97c88620bd7f690d697932b2ff88af1f8e325.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virresctrl.c | 32 +++++++++++++++++++++++---------
+ 1 file changed, 23 insertions(+), 9 deletions(-)
+
+diff --git a/src/util/virresctrl.c b/src/util/virresctrl.c
+index 6d69c8d4e2..313f964f21 100644
+--- a/src/util/virresctrl.c
++++ b/src/util/virresctrl.c
+@@ -318,9 +318,9 @@ virResctrlUnlock(int fd)
+ 
+ /* virResctrlInfo-related definitions */
+ static int
+-virResctrlGetInfo(virResctrlInfoPtr resctrl)
++virResctrlGetCacheInfo(virResctrlInfoPtr resctrl,
++                       DIR *dirp)
+ {
+-    DIR *dirp = NULL;
+     char *endptr = NULL;
+     char *tmp_str = NULL;
+     int ret = -1;
+@@ -332,12 +332,6 @@ virResctrlGetInfo(virResctrlInfoPtr resctrl)
+     virResctrlInfoPerLevelPtr i_level = NULL;
+     virResctrlInfoPerTypePtr i_type = NULL;
+ 
+-    rv = virDirOpenIfExists(&dirp, SYSFS_RESCTRL_PATH "/info");
+-    if (rv <= 0) {
+-        ret = rv;
+-        goto cleanup;
+-    }
+-
+     while ((rv = virDirRead(dirp, &ent, SYSFS_RESCTRL_PATH "/info")) > 0) {
+         VIR_DEBUG("Parsing info type '%s'", ent->d_name);
+         if (ent->d_name[0] != 'L')
+@@ -443,12 +437,32 @@ virResctrlGetInfo(virResctrlInfoPtr resctrl)
+ 
+     ret = 0;
+  cleanup:
+-    VIR_DIR_CLOSE(dirp);
+     VIR_FREE(i_type);
+     return ret;
+ }
+ 
+ 
++static int
++virResctrlGetInfo(virResctrlInfoPtr resctrl)
++{
++    DIR *dirp = NULL;
++    int ret = -1;
++
++    ret = virDirOpenIfExists(&dirp, SYSFS_RESCTRL_PATH "/info");
++    if (ret <= 0)
++        goto cleanup;
++
++    ret = virResctrlGetCacheInfo(resctrl, dirp);
++    if (ret < 0)
++        goto cleanup;
++
++    ret = 0;
++ cleanup:
++    VIR_DIR_CLOSE(dirp);
++    return ret;
++}
++
++
+ virResctrlInfoPtr
+ virResctrlInfoNew(void)
+ {
+-- 
+2.21.0
+

@@ -1,0 +1,49 @@
+From 299fe2bb28582a9e26453355909ee5132c374936 Mon Sep 17 00:00:00 2001
+Message-Id: <299fe2bb28582a9e26453355909ee5132c374936@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 2 May 2019 13:23:35 -0400
+Subject: [PATCH] util: suppress unimportant ovs-vsctl errors when getting
+ interface stats
+
+commit edaf13565 modified the stats retrieval for OVS interfaces to
+not fail when one of the fields was unrecognized by the ovs-vsctl
+command, but ovs-vsctl was still returning an error, and libvirt was
+cluttering the logs with these inconsequential error messages.
+
+This patch modifies the GET_STAT macro to add "--if-exists" to the
+ovs-vsctl command, which causes it to return an empty string (and exit
+with success) if the requested statistic isn't in its database, thus
+eliminating the ugly error messages from the log.
+
+Resolves: https://bugzilla.redhat.com/1683175
+
+Signed-off-by: Laine Stump <laine@laine.org>
+(cherry picked from commit 3f7cba3f5ea1731b9028b89b671cbd7e7d5e0421)
+Signed-off-by: Laine Stump <laine@redhat.com>
+Message-Id: <20190502172335.6691-1-laine@redhat.com>
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ src/util/virnetdevopenvswitch.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/util/virnetdevopenvswitch.c b/src/util/virnetdevopenvswitch.c
+index f86f698430..f36916a300 100644
+--- a/src/util/virnetdevopenvswitch.c
++++ b/src/util/virnetdevopenvswitch.c
+@@ -363,10 +363,10 @@ virNetDevOpenvswitchInterfaceStats(const char *ifname,
+         virCommandFree(cmd); \
+         cmd = virCommandNew(OVSVSCTL); \
+         virNetDevOpenvswitchAddTimeout(cmd); \
+-        virCommandAddArgList(cmd, "get", "Interface", ifname, \
+-                             "statistics:" name, NULL); \
++        virCommandAddArgList(cmd, "--if-exists", "get", "Interface", \
++                             ifname, "statistics:" name, NULL); \
+         virCommandSetOutputBuffer(cmd, &output); \
+-        if (virCommandRun(cmd, NULL) < 0) { \
++        if (virCommandRun(cmd, NULL) < 0 || !output || !*output || *output == '\n') { \
+             stats->member = -1; \
+         } else { \
+             if (virStrToLong_ll(output, &tmp, 10, &stats->member) < 0 || \
+-- 
+2.21.0
+

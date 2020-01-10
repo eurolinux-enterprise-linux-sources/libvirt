@@ -1,5 +1,5 @@
-From babe3d8cfbf85c23a71cb167008065bc63cc2fb0 Mon Sep 17 00:00:00 2001
-Message-Id: <babe3d8cfbf85c23a71cb167008065bc63cc2fb0@dist-git>
+From 2a740435a960bd08acb0352b70d7e1a85fac7286 Mon Sep 17 00:00:00 2001
+Message-Id: <2a740435a960bd08acb0352b70d7e1a85fac7286@dist-git>
 From: Michal Privoznik <mprivozn@redhat.com>
 Date: Mon, 4 Feb 2019 10:37:50 +0100
 Subject: [PATCH] virfile: Detect ceph as shared FS
@@ -133,5 +133,5 @@ index a246d601ba..972c07fdc5 100644
      return ret != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
  }
 -- 
-2.20.1
+2.21.0
 

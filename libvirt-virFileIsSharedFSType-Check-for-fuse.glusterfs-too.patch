@@ -124,5 +124,5 @@ index 378d03ecf0..c87e26bf5b 100644
  virFileFindHugeTLBFS(virHugeTLBFSPtr *ret_fs,
                       size_t *ret_nfs)
 -- 
-2.19.0
+2.21.0
 

@@ -1,7 +1,7 @@
-From abfcb113bd1200dc91e8d6e3bcbd2084d458f554 Mon Sep 17 00:00:00 2001
-Message-Id: <abfcb113bd1200dc91e8d6e3bcbd2084d458f554@dist-git>
+From e5c98595ed558673ecd179b5c6204d981a6cdd2b Mon Sep 17 00:00:00 2001
+Message-Id: <e5c98595ed558673ecd179b5c6204d981a6cdd2b@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
-Date: Fri, 12 Apr 2019 21:21:05 +0200
+Date: Mon, 15 Apr 2019 15:49:01 +0200
 Subject: [PATCH] qemu: Don't cache microcode version
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -20,7 +20,7 @@ Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
 Reviewed-by: Ján Tomko <jtomko@redhat.com>
 (cherry picked from commit 673c62a3b7855a0685d8f116e227c402720b9ee9)
 
-CVE-2018-12126, CVE-2018-12127, CVE-2018-12130
+https://bugzilla.redhat.com/show_bug.cgi?id=1576369
 
 Conflicts:
 	src/qemu/qemu_capabilities.c
@@ -28,6 +28,8 @@ Conflicts:
               7948ad4129a and 1a3de67001c) are missing
 
 Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <d277660601022095d263f57bf5349cd535ee4c9f.1555334286.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
 ---
  src/qemu/qemu_capabilities.c | 12 ++++++++----
  src/qemu/qemu_capabilities.h |  3 +--
@@ -36,10 +38,10 @@ Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
  4 files changed, 11 insertions(+), 15 deletions(-)
 
 diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
-index 4f2051a2bb..96aa1b15e4 100644
+index 8819452ff6..a27ea85824 100644
 --- a/src/qemu/qemu_capabilities.c
 +++ b/src/qemu/qemu_capabilities.c
-@@ -4625,7 +4625,7 @@ virQEMUCapsNewData(const char *binary,
+@@ -4614,7 +4614,7 @@ virQEMUCapsNewData(const char *binary,
                                             priv->libDir,
                                             priv->runUid,
                                             priv->runGid,
@@ -48,7 +50,7 @@ index 4f2051a2bb..96aa1b15e4 100644
                                             priv->kernelVersion);
  }
  
-@@ -4708,8 +4708,7 @@ virFileCachePtr
+@@ -4697,8 +4697,7 @@ virFileCachePtr
  virQEMUCapsCacheNew(const char *libDir,
                      const char *cacheDir,
                      uid_t runUid,
@@ -58,7 +60,7 @@ index 4f2051a2bb..96aa1b15e4 100644
  {
      char *capsCacheDir = NULL;
      virFileCachePtr cache = NULL;
-@@ -4733,7 +4732,6 @@ virQEMUCapsCacheNew(const char *libDir,
+@@ -4722,7 +4721,6 @@ virQEMUCapsCacheNew(const char *libDir,
  
      priv->runUid = runUid;
      priv->runGid = runGid;
@@ -66,7 +68,7 @@ index 4f2051a2bb..96aa1b15e4 100644
  
      if (uname(&uts) == 0 &&
          virAsprintf(&priv->kernelVersion, "%s %s", uts.release, uts.version) < 0)
-@@ -4754,8 +4752,11 @@ virQEMUCapsPtr
+@@ -4743,8 +4741,11 @@ virQEMUCapsPtr
  virQEMUCapsCacheLookup(virFileCachePtr cache,
                         const char *binary)
  {
@@ -78,7 +80,7 @@ index 4f2051a2bb..96aa1b15e4 100644
      ret = virFileCacheLookup(cache, binary);
  
      VIR_DEBUG("Returning caps %p for %s", ret, binary);
-@@ -4801,10 +4802,13 @@ virQEMUCapsPtr
+@@ -4790,10 +4791,13 @@ virQEMUCapsPtr
  virQEMUCapsCacheLookupByArch(virFileCachePtr cache,
                               virArch arch)
  {
@@ -93,7 +95,7 @@ index 4f2051a2bb..96aa1b15e4 100644
      if (!ret) {
          /* If the first attempt at finding capabilities has failed, try
 diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
-index 9e8ad5f5c3..7a91b7da62 100644
+index 6acd9fe825..25ad4218e0 100644
 --- a/src/qemu/qemu_capabilities.h
 +++ b/src/qemu/qemu_capabilities.h
 @@ -572,8 +572,7 @@ void virQEMUCapsFilterByMachineType(virQEMUCapsPtr qemuCaps,
@@ -107,7 +109,7 @@ index 9e8ad5f5c3..7a91b7da62 100644
                                        const char *binary);
  virQEMUCapsPtr virQEMUCapsCacheLookupCopy(virFileCachePtr cache,
 diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
-index 295613ba3c..21d836a540 100644
+index e11f57a56a..3b3281c13f 100644
 --- a/src/qemu/qemu_driver.c
 +++ b/src/qemu/qemu_driver.c
 @@ -592,8 +592,6 @@ qemuStateInitialize(bool privileged,

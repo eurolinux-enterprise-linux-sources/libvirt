@@ -1,0 +1,85 @@
+From 6d4f6fa057a8c8801530c97c4f78fa477ece6f4a Mon Sep 17 00:00:00 2001
+Message-Id: <6d4f6fa057a8c8801530c97c4f78fa477ece6f4a@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 4 Apr 2019 11:50:35 +0200
+Subject: [PATCH] virsh: Require explicit --domain for domxml-to-native
+
+The domxml-to-native virsh command accepts either --xml or --domain
+option followed by a file or domain name respectively. The --domain
+option is documented as required, which means an argument with no option
+is treated as --xml. Commit v4.3.0-127-gd86531daf2 broke this by making
+--domain optional and thus an argument with no option was treated as
+--domain.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1633077
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit b7ccd0757de73344a4b973ede946dad40de846c7)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <5531d22f2eb774ff080d333975557f6aa03e4b9d.1554371431.git.jdenemar@redhat.com>
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ tools/virsh-domain.c | 6 +++---
+ tools/virsh.h        | 8 +++++---
+ 2 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/tools/virsh-domain.c b/tools/virsh-domain.c
+index 6aa79f11b9..db4834dd1f 100644
+--- a/tools/virsh-domain.c
++++ b/tools/virsh-domain.c
+@@ -9387,7 +9387,7 @@ static const vshCmdInfo info_qemu_monitor_event[] = {
+ 
+ static const vshCmdOptDef opts_qemu_monitor_event[] = {
+     VIRSH_COMMON_OPT_DOMAIN_OT_STRING(N_("filter by domain name, id or uuid"),
+-                                      0),
++                                      0, 0),
+     {.name = "event",
+      .type = VSH_OT_STRING,
+      .help = N_("filter by event name")
+@@ -9940,7 +9940,7 @@ static const vshCmdOptDef opts_domxmltonative[] = {
+      .flags = VSH_OFLAG_REQ,
+      .help = N_("target config data type format")
+     },
+-    VIRSH_COMMON_OPT_DOMAIN_OT_STRING_FULL(0),
++    VIRSH_COMMON_OPT_DOMAIN_OT_STRING_FULL(VSH_OFLAG_REQ_OPT, 0),
+     {.name = "xml",
+      .type = VSH_OT_STRING,
+      .help = N_("xml data file to export from")
+@@ -13189,7 +13189,7 @@ static const vshCmdInfo info_event[] = {
+ 
+ static const vshCmdOptDef opts_event[] = {
+     VIRSH_COMMON_OPT_DOMAIN_OT_STRING(N_("filter by domain name, id or uuid"),
+-                                      0),
++                                      0, 0),
+     {.name = "event",
+      .type = VSH_OT_STRING,
+      .completer = virshDomainEventNameCompleter,
+diff --git a/tools/virsh.h b/tools/virsh.h
+index e164aabcee..b0a3cdbb97 100644
+--- a/tools/virsh.h
++++ b/tools/virsh.h
+@@ -110,16 +110,18 @@
+      .help = _helpstr \
+     }
+ 
+-# define VIRSH_COMMON_OPT_DOMAIN_OT_STRING(_helpstr, cflags) \
++# define VIRSH_COMMON_OPT_DOMAIN_OT_STRING(_helpstr, oflags, cflags) \
+     {.name = "domain", \
+      .type = VSH_OT_STRING, \
++     .flags = oflags, \
+      .help = _helpstr, \
+      .completer = virshDomainNameCompleter, \
+      .completer_flags = cflags, \
+     }
+ 
+-# define VIRSH_COMMON_OPT_DOMAIN_OT_STRING_FULL(cflags) \
+-    VIRSH_COMMON_OPT_DOMAIN_OT_STRING(N_("domain name, id or uuid"), cflags)
++# define VIRSH_COMMON_OPT_DOMAIN_OT_STRING_FULL(oflags, cflags) \
++    VIRSH_COMMON_OPT_DOMAIN_OT_STRING(N_("domain name, id or uuid"), \
++                                      oflags, cflags)
+ 
+ # define VIRSH_COMMON_OPT_DOMAIN_OT_ARGV(_helpstr, cflags) \
+     {.name = "domain", \
+-- 
+2.21.0
+

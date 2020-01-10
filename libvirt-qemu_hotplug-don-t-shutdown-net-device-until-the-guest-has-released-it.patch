@@ -1,0 +1,110 @@
+From 7f3efe3ed7d9f6e83323f62ffd020d9762c2fef0 Mon Sep 17 00:00:00 2001
+Message-Id: <7f3efe3ed7d9f6e83323f62ffd020d9762c2fef0@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 11 Apr 2019 15:14:52 -0400
+Subject: [PATCH] qemu_hotplug: don't shutdown net device until the guest has
+ released it
+
+For [some unknown reason, possibly/probably pure chance], Net devices
+have been taken offline and their bandwidth tc rules cleared as the
+very first operation when detaching the device. This is contrary to
+every other type of device, where all hostside teardown is delayed
+until we receive the DEVICE_DELETED event back from qemu, indicating
+that the guest has finished with the device.
+
+This patch delays these two operations until receipt of
+DEVICE_DELETED, which removes an ugly wart from
+qemuDomainDetachDeviceLive(), and also seems to be a more correct
+sequence of events.
+
+Signed-off-by: Laine Stump <laine@laine.org>
+ACKed-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit 34086fc59e7c59148409d6780176e84d0f1dbfb4)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-41-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 50 +++++++++--------------------------------
+ 1 file changed, 11 insertions(+), 39 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 27d09d173b..ff88a827dd 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4287,6 +4287,17 @@ qemuDomainRemoveNetDevice(virQEMUDriverPtr driver,
+         !(charDevAlias = qemuAliasChardevFromDevAlias(net->info.alias)))
+         goto cleanup;
+ 
++    if (virDomainNetGetActualBandwidth(net) &&
++        virNetDevSupportBandwidth(virDomainNetGetActualType(net)) &&
++        virNetDevBandwidthClear(net->ifname) < 0)
++        VIR_WARN("cannot clear bandwidth setting for device : %s",
++                 net->ifname);
++
++    /* deactivate the tap/macvtap device on the host, which could also
++     * affect the parent device (e.g. macvtap passthrough mode sets
++     * the parent device offline)
++     */
++    ignore_value(qemuInterfaceStopDevice(net));
+ 
+     qemuDomainObjEnterMonitor(driver, vm);
+     if (qemuMonitorRemoveNetdev(priv->mon, hostnet_name) < 0) {
+@@ -5249,34 +5260,6 @@ qemuDomainDetachPrepNet(virDomainObjPtr vm,
+ }
+ 
+ 
+-static void
+-qemuDomainDetachShutdownNet(virDomainNetDefPtr net)
+-{
+-/*
+- * These operations are in a separate function from
+- * qemuDomainDetachPrepNet() because they can't be done until after
+- * we've validated that this device really can be removed - in
+- * particular we need to check for multifunction PCI devices and
+- * presence of a device alias, which isn't done until *after* the
+- * return from qemuDomainDetachPrepNet(). Since we've already passed
+- * the "point of no return", we ignore any errors, and trudge ahead
+- * with shutting down and detaching the device even if there is an
+- * error in one of these functions.
+- */
+-    if (virDomainNetGetActualBandwidth(net) &&
+-        virNetDevSupportBandwidth(virDomainNetGetActualType(net)) &&
+-        virNetDevBandwidthClear(net->ifname) < 0)
+-        VIR_WARN("cannot clear bandwidth setting for device : %s",
+-                 net->ifname);
+-
+-    /* deactivate the tap/macvtap device on the host, which could also
+-     * affect the parent device (e.g. macvtap passthrough mode sets
+-     * the parent device offline)
+-     */
+-    ignore_value(qemuInterfaceStopDevice(net));
+-}
+-
+-
+ static int
+ qemuDomainDetachDeviceChr(virQEMUDriverPtr driver,
+                           virDomainObjPtr vm,
+@@ -5607,17 +5590,6 @@ qemuDomainDetachDeviceLive(virDomainObjPtr vm,
+         return -1;
+     }
+ 
+-
+-    /*
+-     * Do any device-specific shutdown that should be
+-     * done after all validation checks, but before issuing the qemu
+-     * command to delete the device. For now, the only type of device
+-     * that has such shutdown needs is the net device.
+-     */
+-    if (detach.type == VIR_DOMAIN_DEVICE_NET)
+-        qemuDomainDetachShutdownNet(detach.data.net);
+-
+-
+     /*
+      * Issue the qemu monitor command to delete the device (based on
+      * its alias), and optionally wait a short time in case the
+-- 
+2.21.0
+

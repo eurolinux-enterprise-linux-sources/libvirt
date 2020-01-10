@@ -1,0 +1,46 @@
+From cc4e45e8bcb2d141bbf2ddc14e0fef8c234662df Mon Sep 17 00:00:00 2001
+Message-Id: <cc4e45e8bcb2d141bbf2ddc14e0fef8c234662df@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Fri, 5 Apr 2019 10:57:43 +0200
+Subject: [PATCH] qemu: Don't check for /dev/kvm presence
+
+The file being present doesn't necessarily mean anything these
+days, as it's created independently of whether the kvm module
+has been loaded[1]; moreover, we're already gathering all the
+information we need through QMP, so poking the filesystem at
+all is entirely unnecessary.
+
+[1] https://github.com/systemd/systemd/commit/d35d6249d5a7ed3228
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 2f8b91ee74ff617aba322d034119427cad977af9)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628469
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190405085744.8179-7-abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 6386f206b8..8819452ff6 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -832,9 +832,8 @@ virQEMUCapsInitGuestFromBinary(virCapsPtr caps,
+     if (!binary)
+         return 0;
+ 
+-    if (virFileExists("/dev/kvm") &&
+-        (virQEMUCapsGet(qemubinCaps, QEMU_CAPS_KVM) ||
+-         kvmbin))
++    if (virQEMUCapsGet(qemubinCaps, QEMU_CAPS_KVM) ||
++        kvmbin)
+         haskvm = true;
+ 
+     if (virQEMUCapsGetMachineTypesCaps(qemubinCaps, &nmachines, &machines) < 0)
+-- 
+2.21.0
+

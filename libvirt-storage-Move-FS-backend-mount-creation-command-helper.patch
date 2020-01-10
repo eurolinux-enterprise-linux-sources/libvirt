@@ -1,0 +1,164 @@
+From 648ffa72001e1bb6d26a71f4a0be38042bab9242 Mon Sep 17 00:00:00 2001
+Message-Id: <648ffa72001e1bb6d26a71f4a0be38042bab9242@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 09:12:14 -0400
+Subject: [PATCH] storage: Move FS backend mount creation command helper
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1584663
+
+Move virStorageBackendFileSystemMountCmd to storage_util so that
+it can be used by the test harness.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 728b9ed61abe3fea101dd4dddddeb9a530babc6a)
+Message-Id: <20190403131219.16385-3-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/storage/storage_backend_fs.c | 52 --------------------------------
+ src/storage/storage_util.c       | 52 ++++++++++++++++++++++++++++++++
+ src/storage/storage_util.h       |  4 +++
+ 3 files changed, 56 insertions(+), 52 deletions(-)
+
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index 4015271419..4acdb43e0d 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -334,58 +334,6 @@ virStorageBackendFileSystemIsMounted(virStoragePoolObjPtr pool)
+ }
+ 
+ 
+-static virCommandPtr
+-virStorageBackendFileSystemMountCmd(virStoragePoolDefPtr def,
+-                                    const char *src)
+-{
+-    /* 'mount -t auto' doesn't seem to auto determine nfs (or cifs),
+-     *  while plain 'mount' does. We have to craft separate argvs to
+-     *  accommodate this */
+-    bool netauto = (def->type == VIR_STORAGE_POOL_NETFS &&
+-                    def->source.format == VIR_STORAGE_POOL_NETFS_AUTO);
+-    bool glusterfs = (def->type == VIR_STORAGE_POOL_NETFS &&
+-                      def->source.format == VIR_STORAGE_POOL_NETFS_GLUSTERFS);
+-    bool cifsfs = (def->type == VIR_STORAGE_POOL_NETFS &&
+-                   def->source.format == VIR_STORAGE_POOL_NETFS_CIFS);
+-    virCommandPtr cmd = NULL;
+-
+-    if (netauto)
+-        cmd = virCommandNewArgList(MOUNT,
+-                                   src,
+-                                   def->target.path,
+-                                   NULL);
+-    else if (glusterfs)
+-        cmd = virCommandNewArgList(MOUNT,
+-                                   "-t",
+-                                   virStoragePoolFormatFileSystemNetTypeToString(def->source.format),
+-                                   src,
+-                                   "-o",
+-                                   "direct-io-mode=1",
+-                                   def->target.path,
+-                                   NULL);
+-    else if (cifsfs)
+-        cmd = virCommandNewArgList(MOUNT,
+-                                   "-t",
+-                                   virStoragePoolFormatFileSystemNetTypeToString(def->source.format),
+-                                   src,
+-                                   def->target.path,
+-                                   "-o",
+-                                   "guest",
+-                                   NULL);
+-    else
+-        cmd = virCommandNewArgList(MOUNT,
+-                                   "-t",
+-                                   (def->type == VIR_STORAGE_POOL_FS ?
+-                                    virStoragePoolFormatFileSystemTypeToString(def->source.format) :
+-                                    virStoragePoolFormatFileSystemNetTypeToString(def->source.format)),
+-                                   src,
+-                                   def->target.path,
+-                                   NULL);
+-
+-    return cmd;
+-}
+-
+-
+ /**
+  * @pool storage pool to mount
+  *
+diff --git a/src/storage/storage_util.c b/src/storage/storage_util.c
+index 637b90fac1..327b500b6b 100644
+--- a/src/storage/storage_util.c
++++ b/src/storage/storage_util.c
+@@ -4210,3 +4210,55 @@ virStorageBackendZeroPartitionTable(const char *path,
+     return storageBackendVolWipeLocalFile(path, VIR_STORAGE_VOL_WIPE_ALG_ZERO,
+                                           size, true);
+ }
++
++
++virCommandPtr
++virStorageBackendFileSystemMountCmd(virStoragePoolDefPtr def,
++                                    const char *src)
++{
++    /* 'mount -t auto' doesn't seem to auto determine nfs (or cifs),
++     *  while plain 'mount' does. We have to craft separate argvs to
++     *  accommodate this */
++    bool netauto = (def->type == VIR_STORAGE_POOL_NETFS &&
++                    def->source.format == VIR_STORAGE_POOL_NETFS_AUTO);
++    bool glusterfs = (def->type == VIR_STORAGE_POOL_NETFS &&
++                      def->source.format == VIR_STORAGE_POOL_NETFS_GLUSTERFS);
++    bool cifsfs = (def->type == VIR_STORAGE_POOL_NETFS &&
++                   def->source.format == VIR_STORAGE_POOL_NETFS_CIFS);
++    virCommandPtr cmd = NULL;
++
++    if (netauto)
++        cmd = virCommandNewArgList(MOUNT,
++                                   src,
++                                   def->target.path,
++                                   NULL);
++    else if (glusterfs)
++        cmd = virCommandNewArgList(MOUNT,
++                                   "-t",
++                                   virStoragePoolFormatFileSystemNetTypeToString(def->source.format),
++                                   src,
++                                   "-o",
++                                   "direct-io-mode=1",
++                                   def->target.path,
++                                   NULL);
++    else if (cifsfs)
++        cmd = virCommandNewArgList(MOUNT,
++                                   "-t",
++                                   virStoragePoolFormatFileSystemNetTypeToString(def->source.format),
++                                   src,
++                                   def->target.path,
++                                   "-o",
++                                   "guest",
++                                   NULL);
++    else
++        cmd = virCommandNewArgList(MOUNT,
++                                   "-t",
++                                   (def->type == VIR_STORAGE_POOL_FS ?
++                                    virStoragePoolFormatFileSystemTypeToString(def->source.format) :
++                                    virStoragePoolFormatFileSystemNetTypeToString(def->source.format)),
++                                   src,
++                                   def->target.path,
++                                   NULL);
++
++    return cmd;
++}
+diff --git a/src/storage/storage_util.h b/src/storage/storage_util.h
+index 58b991c772..5b0baf56c4 100644
+--- a/src/storage/storage_util.h
++++ b/src/storage/storage_util.h
+@@ -177,4 +177,8 @@ int
+ virStorageBackendZeroPartitionTable(const char *path,
+                                     unsigned long long size);
+ 
++virCommandPtr
++virStorageBackendFileSystemMountCmd(virStoragePoolDefPtr def,
++                                    const char *src);
++
+ #endif /* __VIR_STORAGE_UTIL_H__ */
+-- 
+2.21.0
+

@@ -1,0 +1,37 @@
+From 9ebcf7ce815178f32496e996d6fba45cdcfe4f06 Mon Sep 17 00:00:00 2001
+Message-Id: <9ebcf7ce815178f32496e996d6fba45cdcfe4f06@dist-git>
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:23 -0400
+Subject: [PATCH] qemu: fix device name passed to error report
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit fe2bd0210e80c94513291c7db927697bf5e7841b)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-12-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 36840f977e..b5ccaf4021 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -5415,7 +5415,7 @@ qemuDomainDetachNetDevice(virQEMUDriverPtr driver,
+     if (qemuIsMultiFunctionDevice(vm->def, &detach->info)) {
+         virReportError(VIR_ERR_OPERATION_FAILED,
+                        _("cannot hot unplug multifunction PCI device: %s"),
+-                       dev->data.disk->dst);
++                       detach->ifname);
+         goto cleanup;
+     }
+ 
+-- 
+2.21.0
+

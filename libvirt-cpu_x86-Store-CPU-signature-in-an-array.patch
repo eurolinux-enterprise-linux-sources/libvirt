@@ -1,5 +1,5 @@
-From 892d1dd5115d91c9ca527a5be954087f390b6159 Mon Sep 17 00:00:00 2001
-Message-Id: <892d1dd5115d91c9ca527a5be954087f390b6159@dist-git>
+From b4bc2a799e6e305dc0595a29aae68a39a5983dee Mon Sep 17 00:00:00 2001
+Message-Id: <b4bc2a799e6e305dc0595a29aae68a39a5983dee@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Mon, 4 Mar 2019 16:36:33 +0100
 Subject: [PATCH] cpu_x86: Store CPU signature in an array

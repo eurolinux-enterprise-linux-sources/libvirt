@@ -1,0 +1,60 @@
+From 0d92907e2924ee8e0ee6577368e71375637f38c1 Mon Sep 17 00:00:00 2001
+Message-Id: <0d92907e2924ee8e0ee6577368e71375637f38c1@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Tue, 4 Jun 2019 13:24:13 +0200
+Subject: [PATCH] util: Propagate numad failures correctly
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Right now, if numad fails, we raise an error but return an
+empty string to the caller instead of a NULL pointer, which
+means processing will continue and the user will see
+
+  # virsh start guest
+  error: Failed to start domain guest
+  error: invalid argument: Failed to parse bitmap ''
+
+instead of a more reasonable
+
+  # virsh start guest
+  error: Failed to start domain guest
+  error: operation failed: Failed to query numad for the advisory nodeset
+
+Make sure the user gets a better error message.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1716387
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Daniel Henrique Barboza <danielhb413@gmail.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit b34fb1fb6f99628932ad68db1ce4985a06def17f)
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190604112413.361-2-abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virnuma.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/virnuma.c b/src/util/virnuma.c
+index 784db0a7ce..fd15714553 100644
+--- a/src/util/virnuma.c
++++ b/src/util/virnuma.c
+@@ -66,10 +66,12 @@ virNumaGetAutoPlacementAdvice(unsigned short vcpus,
+ 
+     virCommandSetOutputBuffer(cmd, &output);
+ 
+-    if (virCommandRun(cmd, NULL) < 0)
+-        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++    if (virCommandRun(cmd, NULL) < 0) {
++        virReportError(VIR_ERR_OPERATION_FAILED, "%s",
+                        _("Failed to query numad for the "
+                          "advisory nodeset"));
++        VIR_FREE(output);
++    }
+ 
+     virCommandFree(cmd);
+     return output;
+-- 
+2.21.0
+

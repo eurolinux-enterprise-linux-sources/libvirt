@@ -1,5 +1,5 @@
-From b470757774a776e2bcbff50c7ae7f40323d10064 Mon Sep 17 00:00:00 2001
-Message-Id: <b470757774a776e2bcbff50c7ae7f40323d10064@dist-git>
+From bcaa73c80a8634c7db6e7b3a90f2f56b0817bfc5 Mon Sep 17 00:00:00 2001
+Message-Id: <bcaa73c80a8634c7db6e7b3a90f2f56b0817bfc5@dist-git>
 From: Michal Privoznik <mprivozn@redhat.com>
 Date: Thu, 7 Mar 2019 14:17:01 +0100
 Subject: [PATCH] cpu: Don't access invalid memory in virCPUx86Translate

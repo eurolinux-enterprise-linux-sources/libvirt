@@ -1,5 +1,5 @@
-From 8760102a2e73747c6ae570c699c3da6752c9efb7 Mon Sep 17 00:00:00 2001
-Message-Id: <8760102a2e73747c6ae570c699c3da6752c9efb7@dist-git>
+From 4a84b7c166cd4a807d39663d3cb879e599c5b349 Mon Sep 17 00:00:00 2001
+Message-Id: <4a84b7c166cd4a807d39663d3cb879e599c5b349@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Tue, 26 Feb 2019 21:02:49 +0100
 Subject: [PATCH] cpu_map: Add more signatures for Skylake-Client CPU models

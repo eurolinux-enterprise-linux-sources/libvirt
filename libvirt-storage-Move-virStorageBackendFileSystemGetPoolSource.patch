@@ -1,0 +1,129 @@
+From 7dcfd278c8139fe25f3cb5a2efd5c440ad8d2321 Mon Sep 17 00:00:00 2001
+Message-Id: <7dcfd278c8139fe25f3cb5a2efd5c440ad8d2321@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 09:12:15 -0400
+Subject: [PATCH] storage: Move virStorageBackendFileSystemGetPoolSource
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1584663
+
+Move into storage_util for reuse by test harness
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 1f6ca26d72c17d51fd713c72eeac5c1900153bc0)
+Message-Id: <20190403131219.16385-4-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/storage/storage_backend_fs.c | 33 --------------------------------
+ src/storage/storage_util.c       | 33 ++++++++++++++++++++++++++++++++
+ src/storage/storage_util.h       |  3 +++
+ 3 files changed, 36 insertions(+), 33 deletions(-)
+
+diff --git a/src/storage/storage_backend_fs.c b/src/storage/storage_backend_fs.c
+index 4acdb43e0d..7bb61aa4ae 100644
+--- a/src/storage/storage_backend_fs.c
++++ b/src/storage/storage_backend_fs.c
+@@ -248,39 +248,6 @@ virStorageBackendFileSystemIsValid(virStoragePoolObjPtr pool)
+ }
+ 
+ 
+-/**
+- * virStorageBackendFileSystemGetPoolSource
+- * @pool: storage pool object pointer
+- *
+- * Allocate/return a string representing the FS storage pool source.
+- * It is up to the caller to VIR_FREE the allocated string
+- */
+-static char *
+-virStorageBackendFileSystemGetPoolSource(virStoragePoolObjPtr pool)
+-{
+-    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
+-    char *src = NULL;
+-
+-    if (def->type == VIR_STORAGE_POOL_NETFS) {
+-        if (def->source.format == VIR_STORAGE_POOL_NETFS_CIFS) {
+-            if (virAsprintf(&src, "//%s/%s",
+-                            def->source.hosts[0].name,
+-                            def->source.dir) < 0)
+-                return NULL;
+-        } else {
+-            if (virAsprintf(&src, "%s:%s",
+-                            def->source.hosts[0].name,
+-                            def->source.dir) < 0)
+-                return NULL;
+-        }
+-    } else {
+-        if (VIR_STRDUP(src, def->source.devices[0].path) < 0)
+-            return NULL;
+-    }
+-    return src;
+-}
+-
+-
+ /**
+  * @pool storage pool to check for status
+  *
+diff --git a/src/storage/storage_util.c b/src/storage/storage_util.c
+index 327b500b6b..ccbc2c925c 100644
+--- a/src/storage/storage_util.c
++++ b/src/storage/storage_util.c
+@@ -4212,6 +4212,39 @@ virStorageBackendZeroPartitionTable(const char *path,
+ }
+ 
+ 
++/**
++ * virStorageBackendFileSystemGetPoolSource
++ * @pool: storage pool object pointer
++ *
++ * Allocate/return a string representing the FS storage pool source.
++ * It is up to the caller to VIR_FREE the allocated string
++ */
++char *
++virStorageBackendFileSystemGetPoolSource(virStoragePoolObjPtr pool)
++{
++    virStoragePoolDefPtr def = virStoragePoolObjGetDef(pool);
++    char *src = NULL;
++
++    if (def->type == VIR_STORAGE_POOL_NETFS) {
++        if (def->source.format == VIR_STORAGE_POOL_NETFS_CIFS) {
++            if (virAsprintf(&src, "//%s/%s",
++                            def->source.hosts[0].name,
++                            def->source.dir) < 0)
++                return NULL;
++        } else {
++            if (virAsprintf(&src, "%s:%s",
++                            def->source.hosts[0].name,
++                            def->source.dir) < 0)
++                return NULL;
++        }
++    } else {
++        if (VIR_STRDUP(src, def->source.devices[0].path) < 0)
++            return NULL;
++    }
++    return src;
++}
++
++
+ virCommandPtr
+ virStorageBackendFileSystemMountCmd(virStoragePoolDefPtr def,
+                                     const char *src)
+diff --git a/src/storage/storage_util.h b/src/storage/storage_util.h
+index 5b0baf56c4..28b3e0b9c9 100644
+--- a/src/storage/storage_util.h
++++ b/src/storage/storage_util.h
+@@ -177,6 +177,9 @@ int
+ virStorageBackendZeroPartitionTable(const char *path,
+                                     unsigned long long size);
+ 
++char *
++virStorageBackendFileSystemGetPoolSource(virStoragePoolObjPtr pool);
++
+ virCommandPtr
+ virStorageBackendFileSystemMountCmd(virStoragePoolDefPtr def,
+                                     const char *src);
+-- 
+2.21.0
+

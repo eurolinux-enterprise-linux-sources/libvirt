@@ -1,5 +1,5 @@
-From ac2924813141609b07860a0df5c6bd56eddf0b3e Mon Sep 17 00:00:00 2001
-Message-Id: <ac2924813141609b07860a0df5c6bd56eddf0b3e@dist-git>
+From 26527762b782dbac88abea82d570bc89fcd9af40 Mon Sep 17 00:00:00 2001
+Message-Id: <26527762b782dbac88abea82d570bc89fcd9af40@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Fri, 22 Feb 2019 17:20:59 +0100
 Subject: [PATCH] cpu_x86: Allow multiple signatures for a CPU model

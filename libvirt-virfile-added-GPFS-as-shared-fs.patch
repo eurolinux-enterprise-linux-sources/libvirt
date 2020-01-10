@@ -1,7 +1,7 @@
-From e1d05dd50a1147b967afb89c57e77df9b5b5fc2d Mon Sep 17 00:00:00 2001
-Message-Id: <e1d05dd50a1147b967afb89c57e77df9b5b5fc2d@dist-git>
+From 92bca785f753f6bc80e2ebe612363a351f56e3d9 Mon Sep 17 00:00:00 2001
+Message-Id: <92bca785f753f6bc80e2ebe612363a351f56e3d9@dist-git>
 From: Diego Michelotto <diego.michelotto@cnaf.infn.it>
-Date: Tue, 4 Jun 2019 12:12:26 +0200
+Date: Tue, 21 May 2019 16:35:08 +0200
 Subject: [PATCH] virfile: added GPFS as shared fs
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -18,9 +18,8 @@ BUG: https://bugzilla.redhat.com/show_bug.cgi?id=1679528
 Signed-off-by: Diego Michelotto <diego.michelotto@cnaf.infn.it>
 Signed-off-by: Peter Krempa <pkrempa@redhat.com>
 (cherry picked from commit d163b940a73a0d6b8277a4bccef2b60936933cf0)
-
-https: //bugzilla.redhat.com/show_bug.cgi?id=1715867
-Message-Id: <fa948f8d8b0b236ca7a5207f6d52c13274fe9058.1559642578.git.pkrempa@redhat.com>
+https: //bugzilla.redhat.com/show_bug.cgi?id=1710728 [rhel-7.7]
+Message-Id: <635dc075347096db1132d6d519aa8a5b1baca6aa.1558449212.git.pkrempa@redhat.com>
 Reviewed-by: Ján Tomko <jtomko@redhat.com>
 ---
  src/util/virfile.c            | 9 ++++++++-

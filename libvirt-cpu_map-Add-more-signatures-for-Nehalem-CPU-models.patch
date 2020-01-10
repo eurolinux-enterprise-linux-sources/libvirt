@@ -1,5 +1,5 @@
-From a520258a7d3d6bf144b2fac4717bccee91d5d0ca Mon Sep 17 00:00:00 2001
-Message-Id: <a520258a7d3d6bf144b2fac4717bccee91d5d0ca@dist-git>
+From 4fa3e47f1e63a9e29f9df466b73e1d332c98ef5e Mon Sep 17 00:00:00 2001
+Message-Id: <4fa3e47f1e63a9e29f9df466b73e1d332c98ef5e@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Tue, 26 Feb 2019 12:59:37 +0100
 Subject: [PATCH] cpu_map: Add more signatures for Nehalem CPU models

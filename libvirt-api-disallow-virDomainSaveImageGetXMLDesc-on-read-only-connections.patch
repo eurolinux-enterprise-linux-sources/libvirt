@@ -1,5 +1,5 @@
-From 799c1b70cdcfffd313315e9ab31d96bbb836aed6 Mon Sep 17 00:00:00 2001
-Message-Id: <799c1b70cdcfffd313315e9ab31d96bbb836aed6@dist-git>
+From 2e532b74b3100a06e0f1ba21f657883fe5aafcc5 Mon Sep 17 00:00:00 2001
+Message-Id: <2e532b74b3100a06e0f1ba21f657883fe5aafcc5@dist-git>
 From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
 Date: Tue, 18 Jun 2019 13:29:59 +0200
 Subject: [PATCH] api: disallow virDomainSaveImageGetXMLDesc on read-only
@@ -38,7 +38,7 @@ Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
  3 files changed, 4 insertions(+), 12 deletions(-)
 
 diff --git a/src/libvirt-domain.c b/src/libvirt-domain.c
-index ad0ded9ee3..0ba85b9360 100644
+index 568023176b..697326ae9a 100644
 --- a/src/libvirt-domain.c
 +++ b/src/libvirt-domain.c
 @@ -1073,9 +1073,7 @@ virDomainRestoreFlags(virConnectPtr conn, const char *from, const char *dxml,
@@ -67,7 +67,7 @@ index ad0ded9ee3..0ba85b9360 100644
      if (conn->driver->domainSaveImageGetXMLDesc) {
          char *ret;
 diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
-index 21d836a540..fcccdb57c3 100644
+index 704ba24215..25818f5d8c 100644
 --- a/src/qemu/qemu_driver.c
 +++ b/src/qemu/qemu_driver.c
 @@ -6784,7 +6784,7 @@ qemuDomainSaveImageGetXMLDesc(virConnectPtr conn, const char *path,

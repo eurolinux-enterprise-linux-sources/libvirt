@@ -1,0 +1,49 @@
+From 7a8c614b37e0d7e1b2eac08a72f46ef715b72c5a Mon Sep 17 00:00:00 2001
+Message-Id: <7a8c614b37e0d7e1b2eac08a72f46ef715b72c5a@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:59 +0200
+Subject: [PATCH] conf: Add return value check to virResctrlAllocForeachCache
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add return value check to virResctrlAllocForeachCache in
+virDomainCachetuneDefFormat. The virResctrlAllocForeachCache does have
+return value, so need check return value to make sure function executed
+without error.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 8d6f508e64728f9aaa5a624462ac0da325854cad)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <bfb8991c4b538b9ef5a2742370ab5f826a75fac2.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 2f56c077a9..74781fe596 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -27258,10 +27258,10 @@ virDomainCachetuneDefFormat(virBufferPtr buf,
+     int ret = -1;
+ 
+     virBufferSetChildIndent(&childrenBuf, buf);
+-    virResctrlAllocForeachCache(resctrl->alloc,
+-                                virDomainCachetuneDefFormatHelper,
+-                                &childrenBuf);
+-
++    if (virResctrlAllocForeachCache(resctrl->alloc,
++                                    virDomainCachetuneDefFormatHelper,
++                                    &childrenBuf) < 0)
++        goto cleanup;
+ 
+     if (virBufferCheckError(&childrenBuf) < 0)
+         goto cleanup;
+-- 
+2.21.0
+

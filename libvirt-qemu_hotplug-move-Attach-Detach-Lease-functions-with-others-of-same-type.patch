@@ -1,0 +1,150 @@
+From e40f255c06b69af3bc9df5d0e6cbd0eb253e0650 Mon Sep 17 00:00:00 2001
+Message-Id: <e40f255c06b69af3bc9df5d0e6cbd0eb253e0650@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 11 Apr 2019 15:14:39 -0400
+Subject: [PATCH] qemu_hotplug: move (Attach|Detach)Lease functions with others
+ of same type
+
+The Attach and Detach Lease functions were together in the middle of
+the Detach functions. Put them at the end of their respective
+sections, since they behave differently from the other attach/detach
+functions (DetachLease doesn't use qemuDomainDeleteDevice(), and is
+always synchronous).
+
+Signed-off-by: Laine Stump <laine@laine.org>
+ACKed-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit 015e71c54ddf8d133905a85514239b21bc7e552e)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-28-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 96 +++++++++++++++++++++--------------------
+ 1 file changed, 50 insertions(+), 46 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 77237a895e..d55a68e4ad 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -2980,6 +2980,32 @@ qemuDomainAttachVsockDevice(virQEMUDriverPtr driver,
+ }
+ 
+ 
++int
++qemuDomainAttachLease(virQEMUDriverPtr driver,
++                      virDomainObjPtr vm,
++                      virDomainLeaseDefPtr lease)
++{
++    int ret = -1;
++    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
++
++    if (virDomainLeaseInsertPreAlloc(vm->def) < 0)
++        goto cleanup;
++
++    if (virDomainLockLeaseAttach(driver->lockManager, cfg->uri,
++                                 vm, lease) < 0) {
++        virDomainLeaseInsertPreAlloced(vm->def, NULL);
++        goto cleanup;
++    }
++
++    virDomainLeaseInsertPreAlloced(vm->def, lease);
++    ret = 0;
++
++ cleanup:
++    virObjectUnref(cfg);
++    return ret;
++}
++
++
+ static int
+ qemuDomainChangeNetBridge(virDomainObjPtr vm,
+                           virDomainNetDefPtr olddev,
+@@ -5350,52 +5376,6 @@ qemuDomainDetachNetDevice(virQEMUDriverPtr driver,
+ }
+ 
+ 
+-int qemuDomainAttachLease(virQEMUDriverPtr driver,
+-                          virDomainObjPtr vm,
+-                          virDomainLeaseDefPtr lease)
+-{
+-    int ret = -1;
+-    virQEMUDriverConfigPtr cfg = virQEMUDriverGetConfig(driver);
+-
+-    if (virDomainLeaseInsertPreAlloc(vm->def) < 0)
+-        goto cleanup;
+-
+-    if (virDomainLockLeaseAttach(driver->lockManager, cfg->uri,
+-                                 vm, lease) < 0) {
+-        virDomainLeaseInsertPreAlloced(vm->def, NULL);
+-        goto cleanup;
+-    }
+-
+-    virDomainLeaseInsertPreAlloced(vm->def, lease);
+-    ret = 0;
+-
+- cleanup:
+-    virObjectUnref(cfg);
+-    return ret;
+-}
+-
+-int qemuDomainDetachLease(virQEMUDriverPtr driver,
+-                          virDomainObjPtr vm,
+-                          virDomainLeaseDefPtr lease)
+-{
+-    virDomainLeaseDefPtr det_lease;
+-    int idx;
+-
+-    if ((idx = virDomainLeaseIndex(vm->def, lease)) < 0) {
+-        virReportError(VIR_ERR_INVALID_ARG,
+-                       _("Lease %s in lockspace %s does not exist"),
+-                       lease->key, NULLSTR(lease->lockspace));
+-        return -1;
+-    }
+-
+-    if (virDomainLockLeaseDetach(driver->lockManager, vm, lease) < 0)
+-        return -1;
+-
+-    det_lease = virDomainLeaseRemoveAt(vm->def, idx);
+-    virDomainLeaseDefFree(det_lease);
+-    return 0;
+-}
+-
+ int qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
+                               virDomainObjPtr vm,
+                               virDomainChrDefPtr chr,
+@@ -5634,6 +5614,30 @@ qemuDomainDetachVsockDevice(virDomainObjPtr vm,
+ }
+ 
+ 
++int
++qemuDomainDetachLease(virQEMUDriverPtr driver,
++                      virDomainObjPtr vm,
++                      virDomainLeaseDefPtr lease)
++{
++    virDomainLeaseDefPtr det_lease;
++    int idx;
++
++    if ((idx = virDomainLeaseIndex(vm->def, lease)) < 0) {
++        virReportError(VIR_ERR_INVALID_ARG,
++                       _("Lease %s in lockspace %s does not exist"),
++                       lease->key, NULLSTR(lease->lockspace));
++        return -1;
++    }
++
++    if (virDomainLockLeaseDetach(driver->lockManager, vm, lease) < 0)
++        return -1;
++
++    det_lease = virDomainLeaseRemoveAt(vm->def, idx);
++    virDomainLeaseDefFree(det_lease);
++    return 0;
++}
++
++
+ static int
+ qemuDomainRemoveVcpu(virQEMUDriverPtr driver,
+                      virDomainObjPtr vm,
+-- 
+2.21.0
+

@@ -1,5 +1,5 @@
-From 8c7d0ccfbf1213a2986e8290b90f1b860fd5c3ce Mon Sep 17 00:00:00 2001
-Message-Id: <8c7d0ccfbf1213a2986e8290b90f1b860fd5c3ce@dist-git>
+From 9f4490dfb43f8b1a28adfb2675b5e278605bcbf6 Mon Sep 17 00:00:00 2001
+Message-Id: <9f4490dfb43f8b1a28adfb2675b5e278605bcbf6@dist-git>
 From: John Ferlan <jferlan@redhat.com>
 Date: Tue, 12 Mar 2019 13:55:56 -0400
 Subject: [PATCH] util: Modify virStorageFileGetSCSIKey return

@@ -1,5 +1,5 @@
-From 6c7f91a602ba245f5a73f5788160e89eb82da23d Mon Sep 17 00:00:00 2001
-Message-Id: <6c7f91a602ba245f5a73f5788160e89eb82da23d@dist-git>
+From 087d0010521efd3ca021fd4156ef02fc2431e062 Mon Sep 17 00:00:00 2001
+Message-Id: <087d0010521efd3ca021fd4156ef02fc2431e062@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Tue, 26 Feb 2019 21:22:25 +0100
 Subject: [PATCH] cputest: Add data for Intel(R) Xeon(R) CPU E7540

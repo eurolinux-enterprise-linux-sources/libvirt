@@ -1,0 +1,57 @@
+From 804b6a228fc35d8debb2cfef413c69d10fd57f31 Mon Sep 17 00:00:00 2001
+Message-Id: <804b6a228fc35d8debb2cfef413c69d10fd57f31@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:36 +0200
+Subject: [PATCH] domain: conf: graphics: Fix picking DRI renderer
+ automatically for SPICE
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Commit 255e0732 introduced a few graphics-related helpers. The problem
+is that virDomainGraphicsNeedsAutoRenderNode returns true if it gets
+NULL as a response from virDomainGraphicsNeedsAutoRenderNode. That's
+okay for egl-headless because that one always needs a DRM render node,
+the same is not true for SPICE though, and unless the XML specifies
+<gl enable='yes'> for SPICE, there's no need for any renderer.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 1215195fd882efac47c07c16bfff0ad9a33c45a3)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <5c8d0a9c4926354df65414bb6b12bff5bcb823f2.1554791287.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 1aef0c76f8..aaf6a6bab1 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -30770,8 +30770,7 @@ virDomainGraphicsGetRenderNode(const virDomainGraphicsDef *graphics)
+ 
+     switch (graphics->type) {
+     case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
+-        if (graphics->data.spice.gl == VIR_TRISTATE_BOOL_YES)
+-            ret = graphics->data.spice.rendernode;
++        ret = graphics->data.spice.rendernode;
+         break;
+     case VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS:
+         ret = graphics->data.egl_headless.rendernode;
+@@ -30794,6 +30793,10 @@ virDomainGraphicsNeedsAutoRenderNode(const virDomainGraphicsDef *graphics)
+     if (!virDomainGraphicsSupportsRenderNode(graphics))
+         return false;
+ 
++    if (graphics->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE &&
++        graphics->data.spice.gl != VIR_TRISTATE_BOOL_YES)
++        return false;
++
+     if (virDomainGraphicsGetRenderNode(graphics))
+         return false;
+ 
+-- 
+2.21.0
+

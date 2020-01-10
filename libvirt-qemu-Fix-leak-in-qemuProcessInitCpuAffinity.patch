@@ -1,0 +1,84 @@
+From c34dd2135b250a3681c36eead2e85630ad2e13a2 Mon Sep 17 00:00:00 2001
+Message-Id: <c34dd2135b250a3681c36eead2e85630ad2e13a2@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Tue, 4 Jun 2019 16:22:07 +0200
+Subject: [PATCH] qemu: Fix leak in qemuProcessInitCpuAffinity()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In two out of three scenarios we are cleaning up properly after
+ourselves, but commit 5f2212c062c7 has changed the remaining one
+in a way that caused it to start leaking cpumapToSet.
+
+Refactor the logic so that cpumapToSet is always a freshly
+allocated bitmap that gets cleaned up automatically thanks to
+VIR_AUTOPTR(); this also allows us to remove the hostcpumap
+variable.
+
+Reported-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 2f2254c7f4e5bff52ea62a77831230bebc076bab)
+
+Conflicts:
+
+  * src/qemu/qemu_process.c:
+    - When upstream commit f136b83139c6 was backported to RHEL
+      7.7 as downstream commit eb7ef8053311, the cleanup path in
+      qemuProcessInitCpuAffinity() had to be modified to account
+      for the lack of VIR_AUTO*() in libvirt 4.5.0; since I'm
+      dragging in the memory management macros as part of this
+      series, however, I took the opportunity to update the
+      cleanup path again: it now matches upstream.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1703661
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190604142207.2036-7-abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_process.c | 12 +++++-------
+ 1 file changed, 5 insertions(+), 7 deletions(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 4c28f250f6..f77c2ad275 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2357,8 +2357,7 @@ static int
+ qemuProcessInitCpuAffinity(virDomainObjPtr vm)
+ {
+     int ret = -1;
+-    virBitmapPtr cpumapToSet = NULL;
+-    virBitmapPtr hostcpumap = NULL;
++    VIR_AUTOPTR(virBitmap) cpumapToSet = NULL;
+     virDomainNumatuneMemMode mem_mode;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+ 
+@@ -2393,11 +2392,11 @@ qemuProcessInitCpuAffinity(virDomainObjPtr vm)
+         if (virNumaNodesetToCPUset(nodeset, &cpumapToSet) < 0)
+             goto cleanup;
+     } else if (vm->def->cputune.emulatorpin) {
+-        cpumapToSet = vm->def->cputune.emulatorpin;
+-    } else {
+-        if (qemuProcessGetAllCpuAffinity(&hostcpumap) < 0)
++        if (virBitmapCopy(cpumapToSet, vm->def->cputune.emulatorpin) < 0)
++            goto cleanup;
++    } else {
++        if (qemuProcessGetAllCpuAffinity(&cpumapToSet) < 0)
+             goto cleanup;
+-        cpumapToSet = hostcpumap;
+     }
+ 
+     if (cpumapToSet &&
+@@ -2406,7 +2405,6 @@ qemuProcessInitCpuAffinity(virDomainObjPtr vm)
+ 
+     ret = 0;
+  cleanup:
+-    virBitmapFree(hostcpumap);
+     return ret;
+ }
+ 
+-- 
+2.21.0
+

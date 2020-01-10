@@ -1,0 +1,46 @@
+From 1172018ff6df4618a02fd05a46d33dbdb06131bf Mon Sep 17 00:00:00 2001
+Message-Id: <1172018ff6df4618a02fd05a46d33dbdb06131bf@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Fri, 5 Apr 2019 10:57:41 +0200
+Subject: [PATCH] qemu: Avoid probing non-native binaries all the time
+
+A side effect of recent changes is that we would always try
+to regenerate the capabilities cache for non-native QEMU
+binaries based on /dev/kvm availability, which is of course
+complete nonsense. Make sure that doesn't happen.
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 55e5eb94788be06dd366de4987523bbc731672db)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628469
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190405085744.8179-5-abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index c31c991a6f..ca044564e5 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -3906,6 +3906,14 @@ virQEMUCapsIsValid(void *data,
+         return false;
+     }
+ 
++    if (!virQEMUCapsGuestIsNative(priv->hostArch, qemuCaps->arch)) {
++        VIR_DEBUG("Guest arch (%s) is not native to host arch (%s), "
++                  "skipping KVM-related checks",
++                  virArchToString(qemuCaps->arch),
++                  virArchToString(priv->hostArch));
++        return true;
++    }
++
+     kvmUsable = virFileAccessibleAs("/dev/kvm", R_OK | W_OK,
+                                     priv->runUid, priv->runGid) == 0;
+ 
+-- 
+2.21.0
+

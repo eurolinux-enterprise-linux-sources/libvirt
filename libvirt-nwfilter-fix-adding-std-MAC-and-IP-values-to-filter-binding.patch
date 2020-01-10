@@ -1,0 +1,164 @@
+From f6e6fee82c36159f5f4b52c3926c95b1f6e40e5d Mon Sep 17 00:00:00 2001
+Message-Id: <f6e6fee82c36159f5f4b52c3926c95b1f6e40e5d@dist-git>
+From: Nikolay Shirokovskiy <nshirokovskiy@virtuozzo.com>
+Date: Tue, 30 Apr 2019 18:00:59 +0100
+Subject: [PATCH] nwfilter: fix adding std MAC and IP values to filter binding
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Commit d1a7c08eb changed filter instantiation code to ignore MAC and IP
+variables explicitly specified for filter binding. It just replaces
+explicit values with values associated with the binding. Before the
+commit virNWFilterCreateVarsFrom was used so that explicit value
+take precedence. Let's bring old behavior back.
+
+This is useful. For example if domain has two interfaces it makes
+sense to list both mac adresses in MAC var of every interface
+filterref. So that if guest make a bond of these interfaces
+and start sending frames with one of the mac adresses from
+both interfaces we can pass outgress traffic from both
+interfaces too.
+
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+Signed-off-by: Nikolay Shirokovskiy <nshirokovskiy@virtuozzo.com>
+(cherry picked from commit 01e11ebcb6e8f24662b7c67b70134c192785691c)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1691358
+
+Message-Id: <20190430170059.25891-1-berrange@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/nwfilter/nwfilter_gentech_driver.c | 92 +++++++++-----------------
+ 1 file changed, 32 insertions(+), 60 deletions(-)
+
+diff --git a/src/nwfilter/nwfilter_gentech_driver.c b/src/nwfilter/nwfilter_gentech_driver.c
+index e5dea91f83..ece5d28f41 100644
+--- a/src/nwfilter/nwfilter_gentech_driver.c
++++ b/src/nwfilter/nwfilter_gentech_driver.c
+@@ -128,60 +128,6 @@ virNWFilterRuleInstFree(virNWFilterRuleInstPtr inst)
+ }
+ 
+ 
+-/**
+- * virNWFilterVarHashmapAddStdValues:
+- * @tables: pointer to hash tabel to add values to
+- * @macaddr: The string of the MAC address to add to the hash table,
+- *    may be NULL
+- * @ipaddr: The string of the IP address to add to the hash table;
+- *    may be NULL
+- *
+- * Returns 0 in case of success, -1 in case an error happened with
+- * error having been reported.
+- *
+- * Adds a couple of standard keys (MAC, IP) to the hash table.
+- */
+-static int
+-virNWFilterVarHashmapAddStdValues(virHashTablePtr table,
+-                                  const char *macaddr,
+-                                  const virNWFilterVarValue *ipaddr)
+-{
+-    virNWFilterVarValue *val;
+-
+-    if (macaddr) {
+-        val = virNWFilterVarValueCreateSimpleCopyValue(macaddr);
+-        if (!val)
+-            return -1;
+-
+-        if (virHashUpdateEntry(table,
+-                               NWFILTER_STD_VAR_MAC,
+-                               val) < 0) {
+-            virNWFilterVarValueFree(val);
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           "%s", _("Could not add variable 'MAC' to hashmap"));
+-            return -1;
+-        }
+-    }
+-
+-    if (ipaddr) {
+-        val = virNWFilterVarValueCopy(ipaddr);
+-        if (!val)
+-            return -1;
+-
+-        if (virHashUpdateEntry(table,
+-                               NWFILTER_STD_VAR_IP,
+-                               val) < 0) {
+-            virNWFilterVarValueFree(val);
+-            virReportError(VIR_ERR_INTERNAL_ERROR,
+-                           "%s", _("Could not add variable 'IP' to hashmap"));
+-            return -1;
+-        }
+-    }
+-
+-    return 0;
+-}
+-
+-
+ /**
+  * Convert a virHashTable into a string of comma-separated
+  * variable names.
+@@ -707,6 +653,28 @@ virNWFilterDoInstantiate(virNWFilterTechDriverPtr techdriver,
+ }
+ 
+ 
++static int
++virNWFilterVarHashmapAddStdValue(virHashTablePtr table,
++                                 const char *var,
++                                 const char *value)
++{
++    virNWFilterVarValue *val;
++
++    if (virHashLookup(table, var))
++        return 0;
++
++    if (!(val = virNWFilterVarValueCreateSimpleCopyValue(value)))
++        return -1;
++
++    if (virHashAddEntry(table, var, val) < 0) {
++        virNWFilterVarValueFree(val);
++        return -1;
++    }
++
++    return 0;
++}
++
++
+ /*
+  * Call this function while holding the NWFilter filter update lock
+  */
+@@ -719,7 +687,7 @@ virNWFilterInstantiateFilterUpdate(virNWFilterDriverStatePtr driver,
+                                    bool forceWithPendingReq,
+                                    bool *foundNewFilter)
+ {
+-    int rc;
++    int rc = -1;
+     const char *drvname = EBIPTABLES_DRIVER_ID;
+     virNWFilterTechDriverPtr techdriver;
+     virNWFilterObjPtr obj;
+@@ -745,14 +713,18 @@ virNWFilterInstantiateFilterUpdate(virNWFilterDriverStatePtr driver,
+         return -1;
+ 
+     virMacAddrFormat(&binding->mac, vmmacaddr);
++    if (virNWFilterVarHashmapAddStdValue(binding->filterparams,
++                                         NWFILTER_STD_VAR_MAC,
++                                         vmmacaddr) < 0)
++        goto err_exit;
+ 
+     ipaddr = virNWFilterIPAddrMapGetIPAddr(binding->portdevname);
+-
+-    if (virNWFilterVarHashmapAddStdValues(binding->filterparams,
+-                                          vmmacaddr, ipaddr) < 0) {
+-        rc = -1;
++    if (ipaddr &&
++        virNWFilterVarHashmapAddStdValue(binding->filterparams,
++                                         NWFILTER_STD_VAR_IP,
++                                         virNWFilterVarValueGetSimple(ipaddr)) < 0)
+         goto err_exit;
+-    }
++
+ 
+     filter = virNWFilterObjGetDef(obj);
+ 
+-- 
+2.21.0
+

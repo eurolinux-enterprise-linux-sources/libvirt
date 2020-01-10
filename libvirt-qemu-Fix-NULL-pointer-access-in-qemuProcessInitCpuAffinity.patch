@@ -1,0 +1,47 @@
+From 2ebba4a1ef6914c2b030b52c67c56d7aca49290f Mon Sep 17 00:00:00 2001
+Message-Id: <2ebba4a1ef6914c2b030b52c67c56d7aca49290f@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Fri, 7 Jun 2019 11:59:09 +0200
+Subject: [PATCH] qemu: Fix NULL pointer access in qemuProcessInitCpuAffinity()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Commit 2f2254c7f4e5 attempted to fix a memory leak by ensuring
+cpumapToSet is always a freshly allocated bitmap, but regrettably
+introduced a NULL pointer access while doing so, because it called
+virBitmapCopy() without allocating the destination bitmap first.
+
+Solve the issue by using virBitmapNewCopy() instead.
+
+Reported-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit a84922c09e9e1a0ca4f8fb1e8b4b1c7b55bd79e9)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1718172
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190607095909.5538-3-abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_process.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index f68a345c54..9e6e6528e2 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2391,7 +2391,7 @@ qemuProcessInitCpuAffinity(virDomainObjPtr vm)
+         if (virNumaNodesetToCPUset(nodeset, &cpumapToSet) < 0)
+             return -1;
+     } else if (vm->def->cputune.emulatorpin) {
+-        if (virBitmapCopy(cpumapToSet, vm->def->cputune.emulatorpin) < 0)
++        if (!(cpumapToSet = virBitmapNewCopy(vm->def->cputune.emulatorpin)))
+             return -1;
+     } else {
+         if (qemuProcessGetAllCpuAffinity(&cpumapToSet) < 0)
+-- 
+2.21.0
+

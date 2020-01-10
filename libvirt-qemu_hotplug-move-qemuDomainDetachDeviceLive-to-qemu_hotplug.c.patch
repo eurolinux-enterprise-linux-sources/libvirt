@@ -1,0 +1,263 @@
+From 5d41ed96da86e3557eef2573d6973f56d43a8574 Mon Sep 17 00:00:00 2001
+Message-Id: <5d41ed96da86e3557eef2573d6973f56d43a8574@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 11 Apr 2019 15:14:40 -0400
+Subject: [PATCH] qemu_hotplug: move qemuDomainDetachDeviceLive() to
+ qemu_hotplug.c
+
+This function is going to take on some of the functionality of its
+subordinate functions, which all live in qemu_hotplug.c.
+
+qemuDomainDetachDeviceControllerLive() is only called from
+qemuDomainDetachDeviceLive() (and will soon be merged into
+qemuDomainDetachControllerDevice(), which is in qemu_hotplug.c), so
+it is also moved.
+
+Signed-off-by: Laine Stump <laine@laine.org>
+ACKed-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit 6a9c3fbade1d5479f4893a0f31293f13ad8bf229)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-29-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_driver.c  | 95 ----------------------------------------
+ src/qemu/qemu_hotplug.c | 97 +++++++++++++++++++++++++++++++++++++++++
+ src/qemu/qemu_hotplug.h |  5 +++
+ 3 files changed, 102 insertions(+), 95 deletions(-)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 6ab1aa28c5..4cdc68a83a 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -7736,101 +7736,6 @@ qemuDomainAttachDeviceLive(virDomainObjPtr vm,
+     return ret;
+ }
+ 
+-static int
+-qemuDomainDetachDeviceControllerLive(virQEMUDriverPtr driver,
+-                                     virDomainObjPtr vm,
+-                                     virDomainDeviceDefPtr dev,
+-                                     bool async)
+-{
+-    virDomainControllerDefPtr cont = dev->data.controller;
+-    int ret = -1;
+-
+-    switch (cont->type) {
+-    case VIR_DOMAIN_CONTROLLER_TYPE_SCSI:
+-        ret = qemuDomainDetachControllerDevice(driver, vm, dev, async);
+-        break;
+-    default :
+-        virReportError(VIR_ERR_OPERATION_UNSUPPORTED,
+-                       _("'%s' controller cannot be hot unplugged."),
+-                       virDomainControllerTypeToString(cont->type));
+-    }
+-    return ret;
+-}
+-
+-static int
+-qemuDomainDetachDeviceLive(virDomainObjPtr vm,
+-                           virDomainDeviceDefPtr dev,
+-                           virQEMUDriverPtr driver,
+-                           bool async)
+-{
+-    int ret = -1;
+-
+-    switch ((virDomainDeviceType)dev->type) {
+-    case VIR_DOMAIN_DEVICE_DISK:
+-        ret = qemuDomainDetachDeviceDiskLive(driver, vm, dev, async);
+-        break;
+-    case VIR_DOMAIN_DEVICE_CONTROLLER:
+-        ret = qemuDomainDetachDeviceControllerLive(driver, vm, dev, async);
+-        break;
+-    case VIR_DOMAIN_DEVICE_LEASE:
+-        ret = qemuDomainDetachLease(driver, vm, dev->data.lease);
+-        break;
+-    case VIR_DOMAIN_DEVICE_NET:
+-        ret = qemuDomainDetachNetDevice(driver, vm, dev, async);
+-        break;
+-    case VIR_DOMAIN_DEVICE_HOSTDEV:
+-        ret = qemuDomainDetachHostDevice(driver, vm, dev, async);
+-        break;
+-    case VIR_DOMAIN_DEVICE_CHR:
+-        ret = qemuDomainDetachChrDevice(driver, vm, dev->data.chr, async);
+-        break;
+-    case VIR_DOMAIN_DEVICE_RNG:
+-        ret = qemuDomainDetachRNGDevice(driver, vm, dev->data.rng, async);
+-        break;
+-    case VIR_DOMAIN_DEVICE_MEMORY:
+-        ret = qemuDomainDetachMemoryDevice(driver, vm, dev->data.memory, async);
+-        break;
+-    case VIR_DOMAIN_DEVICE_SHMEM:
+-        ret = qemuDomainDetachShmemDevice(driver, vm, dev->data.shmem, async);
+-        break;
+-    case VIR_DOMAIN_DEVICE_WATCHDOG:
+-        ret = qemuDomainDetachWatchdog(driver, vm, dev->data.watchdog, async);
+-        break;
+-    case VIR_DOMAIN_DEVICE_INPUT:
+-        ret = qemuDomainDetachInputDevice(vm, dev->data.input, async);
+-        break;
+-    case VIR_DOMAIN_DEVICE_REDIRDEV:
+-        ret = qemuDomainDetachRedirdevDevice(driver, vm, dev->data.redirdev, async);
+-        break;
+-
+-    case VIR_DOMAIN_DEVICE_VSOCK:
+-        ret = qemuDomainDetachVsockDevice(vm, dev->data.vsock, async);
+-        break;
+-
+-    case VIR_DOMAIN_DEVICE_FS:
+-    case VIR_DOMAIN_DEVICE_SOUND:
+-    case VIR_DOMAIN_DEVICE_VIDEO:
+-    case VIR_DOMAIN_DEVICE_GRAPHICS:
+-    case VIR_DOMAIN_DEVICE_HUB:
+-    case VIR_DOMAIN_DEVICE_SMARTCARD:
+-    case VIR_DOMAIN_DEVICE_MEMBALLOON:
+-    case VIR_DOMAIN_DEVICE_NVRAM:
+-    case VIR_DOMAIN_DEVICE_NONE:
+-    case VIR_DOMAIN_DEVICE_TPM:
+-    case VIR_DOMAIN_DEVICE_PANIC:
+-    case VIR_DOMAIN_DEVICE_IOMMU:
+-    case VIR_DOMAIN_DEVICE_LAST:
+-        virReportError(VIR_ERR_OPERATION_UNSUPPORTED,
+-                       _("live detach of device '%s' is not supported"),
+-                       virDomainDeviceTypeToString(dev->type));
+-        break;
+-    }
+-
+-    if (ret == 0)
+-        ret = qemuDomainUpdateDeviceList(driver, vm, QEMU_ASYNC_JOB_NONE);
+-
+-    return ret;
+-}
+ 
+ static int
+ qemuDomainChangeDiskLive(virDomainObjPtr vm,
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index d55a68e4ad..930f8d3358 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -5638,6 +5638,103 @@ qemuDomainDetachLease(virQEMUDriverPtr driver,
+ }
+ 
+ 
++static int
++qemuDomainDetachDeviceControllerLive(virQEMUDriverPtr driver,
++                                     virDomainObjPtr vm,
++                                     virDomainDeviceDefPtr dev,
++                                     bool async)
++{
++    virDomainControllerDefPtr cont = dev->data.controller;
++    int ret = -1;
++
++    switch (cont->type) {
++    case VIR_DOMAIN_CONTROLLER_TYPE_SCSI:
++        ret = qemuDomainDetachControllerDevice(driver, vm, dev, async);
++        break;
++    default :
++        virReportError(VIR_ERR_OPERATION_UNSUPPORTED,
++                       _("'%s' controller cannot be hot unplugged."),
++                       virDomainControllerTypeToString(cont->type));
++    }
++    return ret;
++}
++
++int
++qemuDomainDetachDeviceLive(virDomainObjPtr vm,
++                           virDomainDeviceDefPtr dev,
++                           virQEMUDriverPtr driver,
++                           bool async)
++{
++    int ret = -1;
++
++    switch ((virDomainDeviceType)dev->type) {
++    case VIR_DOMAIN_DEVICE_DISK:
++        ret = qemuDomainDetachDeviceDiskLive(driver, vm, dev, async);
++        break;
++    case VIR_DOMAIN_DEVICE_CONTROLLER:
++        ret = qemuDomainDetachDeviceControllerLive(driver, vm, dev, async);
++        break;
++    case VIR_DOMAIN_DEVICE_LEASE:
++        ret = qemuDomainDetachLease(driver, vm, dev->data.lease);
++        break;
++    case VIR_DOMAIN_DEVICE_NET:
++        ret = qemuDomainDetachNetDevice(driver, vm, dev, async);
++        break;
++    case VIR_DOMAIN_DEVICE_HOSTDEV:
++        ret = qemuDomainDetachHostDevice(driver, vm, dev, async);
++        break;
++    case VIR_DOMAIN_DEVICE_CHR:
++        ret = qemuDomainDetachChrDevice(driver, vm, dev->data.chr, async);
++        break;
++    case VIR_DOMAIN_DEVICE_RNG:
++        ret = qemuDomainDetachRNGDevice(driver, vm, dev->data.rng, async);
++        break;
++    case VIR_DOMAIN_DEVICE_MEMORY:
++        ret = qemuDomainDetachMemoryDevice(driver, vm, dev->data.memory, async);
++        break;
++    case VIR_DOMAIN_DEVICE_SHMEM:
++        ret = qemuDomainDetachShmemDevice(driver, vm, dev->data.shmem, async);
++        break;
++    case VIR_DOMAIN_DEVICE_WATCHDOG:
++        ret = qemuDomainDetachWatchdog(driver, vm, dev->data.watchdog, async);
++        break;
++    case VIR_DOMAIN_DEVICE_INPUT:
++        ret = qemuDomainDetachInputDevice(vm, dev->data.input, async);
++        break;
++    case VIR_DOMAIN_DEVICE_REDIRDEV:
++        ret = qemuDomainDetachRedirdevDevice(driver, vm, dev->data.redirdev, async);
++        break;
++
++    case VIR_DOMAIN_DEVICE_VSOCK:
++        ret = qemuDomainDetachVsockDevice(vm, dev->data.vsock, async);
++        break;
++
++    case VIR_DOMAIN_DEVICE_FS:
++    case VIR_DOMAIN_DEVICE_SOUND:
++    case VIR_DOMAIN_DEVICE_VIDEO:
++    case VIR_DOMAIN_DEVICE_GRAPHICS:
++    case VIR_DOMAIN_DEVICE_HUB:
++    case VIR_DOMAIN_DEVICE_SMARTCARD:
++    case VIR_DOMAIN_DEVICE_MEMBALLOON:
++    case VIR_DOMAIN_DEVICE_NVRAM:
++    case VIR_DOMAIN_DEVICE_NONE:
++    case VIR_DOMAIN_DEVICE_TPM:
++    case VIR_DOMAIN_DEVICE_PANIC:
++    case VIR_DOMAIN_DEVICE_IOMMU:
++    case VIR_DOMAIN_DEVICE_LAST:
++        virReportError(VIR_ERR_OPERATION_UNSUPPORTED,
++                       _("live detach of device '%s' is not supported"),
++                       virDomainDeviceTypeToString(dev->type));
++        break;
++    }
++
++    if (ret == 0)
++        ret = qemuDomainUpdateDeviceList(driver, vm, QEMU_ASYNC_JOB_NONE);
++
++    return ret;
++}
++
++
+ static int
+ qemuDomainRemoveVcpu(virQEMUDriverPtr driver,
+                      virDomainObjPtr vm,
+diff --git a/src/qemu/qemu_hotplug.h b/src/qemu/qemu_hotplug.h
+index 0297e42a98..30b6fcc074 100644
+--- a/src/qemu/qemu_hotplug.h
++++ b/src/qemu/qemu_hotplug.h
+@@ -160,6 +160,11 @@ int qemuDomainDetachRNGDevice(virQEMUDriverPtr driver,
+                               virDomainRNGDefPtr rng,
+                               bool async);
+ 
++int qemuDomainDetachDeviceLive(virDomainObjPtr vm,
++                               virDomainDeviceDefPtr dev,
++                               virQEMUDriverPtr driver,
++                               bool async);
++
+ void qemuDomainRemoveVcpuAlias(virQEMUDriverPtr driver,
+                                virDomainObjPtr vm,
+                                const char *alias);
+-- 
+2.21.0
+

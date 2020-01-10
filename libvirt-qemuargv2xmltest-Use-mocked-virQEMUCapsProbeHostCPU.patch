@@ -1,0 +1,57 @@
+From ba181c8056ee3e31fccf1d4d0e5d5e2c8cf44385 Mon Sep 17 00:00:00 2001
+Message-Id: <ba181c8056ee3e31fccf1d4d0e5d5e2c8cf44385@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 4 Jun 2019 13:04:28 +0200
+Subject: [PATCH] qemuargv2xmltest: Use mocked virQEMUCapsProbeHostCPU
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The qemuTestParseCapabilitiesArch call would eventually lead to the host
+CPU being probed via virCPUGetHost. Let's divert this to a mocked
+version already used by the qemuxml2argvtest.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 02c1d3a6e1d24a777254f4dceeaf54942db7f871)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1641702
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <8f9d0381acd27b583cb3dc0f6294d4c8c5bdfce6.1559646067.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ tests/Makefile.am        | 3 ++-
+ tests/qemuargv2xmltest.c | 3 ++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index 4d0b4f9509..f871a8a102 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -592,7 +592,8 @@ qemuxml2xmltest_LDADD = $(qemu_LDADDS) $(LDADDS)
+ qemuargv2xmltest_SOURCES = \
+ 	qemuargv2xmltest.c testutilsqemu.c testutilsqemu.h \
+ 	testutils.c testutils.h
+-qemuargv2xmltest_LDADD = $(qemu_LDADDS) $(LDADDS)
++qemuargv2xmltest_LDADD = libqemutestdriver.la \
++	$(LDADDS)
+ 
+ qemumonitorjsontest_SOURCES = \
+ 	qemumonitorjsontest.c \
+diff --git a/tests/qemuargv2xmltest.c b/tests/qemuargv2xmltest.c
+index cb010268c4..62e2013f79 100644
+--- a/tests/qemuargv2xmltest.c
++++ b/tests/qemuargv2xmltest.c
+@@ -298,7 +298,8 @@ mymain(void)
+     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+ 
+-VIR_TEST_MAIN(mymain)
++VIR_TEST_MAIN_PRELOAD(mymain,
++                      abs_builddir "/.libs/qemucpumock.so")
+ 
+ #else
+ 
+-- 
+2.21.0
+

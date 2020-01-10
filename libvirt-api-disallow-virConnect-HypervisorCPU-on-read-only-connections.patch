@@ -1,5 +1,5 @@
-From 66884f16592038ec091d4bb2ab1d492062a71c74 Mon Sep 17 00:00:00 2001
-Message-Id: <66884f16592038ec091d4bb2ab1d492062a71c74@dist-git>
+From f97144b76b3452e69c14834d1ecc69dbf802ac12 Mon Sep 17 00:00:00 2001
+Message-Id: <f97144b76b3452e69c14834d1ecc69dbf802ac12@dist-git>
 From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
 Date: Tue, 18 Jun 2019 13:30:02 +0200
 Subject: [PATCH] api: disallow virConnect*HypervisorCPU on read-only

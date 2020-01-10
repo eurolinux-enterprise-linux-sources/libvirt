@@ -1,0 +1,213 @@
+From acf8c5619852146eed84123c7f432db925781511 Mon Sep 17 00:00:00 2001
+Message-Id: <acf8c5619852146eed84123c7f432db925781511@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 10:58:19 -0400
+Subject: [PATCH] conf: Add optional NFS Source Pool <protocol ver='n'/> option
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1584663
+
+Add an optional way to define which NFS Server version will be
+used to content the target NFS server.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 801f8cfb37f12007878df53332fdc03245a9d40d)
+Message-Id: <20190403145819.4656-1-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ docs/formatstorage.html.in                    | 16 ++++++++++++++
+ docs/schemas/storagepool.rng                  |  7 ++++++
+ src/conf/storage_conf.c                       | 22 +++++++++++++++++++
+ src/conf/storage_conf.h                       |  3 +++
+ .../pool-netfs-protocol-ver.xml               | 21 ++++++++++++++++++
+ .../pool-netfs-protocol-ver.xml               | 21 ++++++++++++++++++
+ tests/storagepoolxml2xmltest.c                |  1 +
+ 7 files changed, 91 insertions(+)
+ create mode 100644 tests/storagepoolxml2xmlin/pool-netfs-protocol-ver.xml
+ create mode 100644 tests/storagepoolxml2xmlout/pool-netfs-protocol-ver.xml
+
+diff --git a/docs/formatstorage.html.in b/docs/formatstorage.html.in
+index b6bf3edbd2..b1b76a1dda 100644
+--- a/docs/formatstorage.html.in
++++ b/docs/formatstorage.html.in
+@@ -121,6 +121,16 @@
+ &lt;/source&gt;
+ ...</pre>
+ 
++    <pre>
++...
++  &lt;source&gt;
++    &lt;host name='localhost'/&gt;
++    &lt;dir path='/var/lib/libvirt/images'/&gt;
++    &lt;format type='nfs'/&gt;
++    &lt;protocol ver='3'/&gt;
++  &lt;/source&gt;
++...</pre>
++
+     <dl>
+       <dt><code>device</code></dt>
+       <dd>Provides the source for pools backed by physical devices
+@@ -386,6 +396,12 @@
+         LVM metadata type. All drivers are required to have a default
+         value for this, so it is optional. <span class="since">Since 0.4.1</span></dd>
+ 
++      <dt><code>protocol</code></dt>
++      <dd>For a <code>netfs</code> Storage Pool provide a mechanism to
++        define which NFS protocol version number will be used to contact
++        the server's NFS service. The attribute <code>ver</code> accepts
++        an unsigned integer as the version number to use.
++        <span class="since">Since 5.1.0</span></dd>
+       <dt><code>vendor</code></dt>
+       <dd>Provides optional information about the vendor of the
+         storage device. This contains a single
+diff --git a/docs/schemas/storagepool.rng b/docs/schemas/storagepool.rng
+index 52b2044bef..0cb8beb926 100644
+--- a/docs/schemas/storagepool.rng
++++ b/docs/schemas/storagepool.rng
+@@ -520,6 +520,13 @@
+             <ref name='sourceinfohost'/>
+             <ref name='sourceinfodir'/>
+             <ref name='sourcefmtnetfs'/>
++            <optional>
++              <element name='protocol'>
++                <attribute name='ver'>
++                  <ref name='unsignedInt'/>
++                </attribute>
++              </element>
++            </optional>
+             <optional>
+               <ref name='sourceinfovendor'/>
+             </optional>
+diff --git a/src/conf/storage_conf.c b/src/conf/storage_conf.c
+index 5036ab9ef8..5a124a0a2f 100644
+--- a/src/conf/storage_conf.c
++++ b/src/conf/storage_conf.c
+@@ -415,6 +415,7 @@ virStoragePoolDefParseSource(xmlXPathContextPtr ctxt,
+     virStorageAuthDefPtr authdef = NULL;
+     char *name = NULL;
+     char *port = NULL;
++    char *ver = NULL;
+     int n;
+ 
+     relnode = ctxt->node;
+@@ -540,6 +541,24 @@ virStoragePoolDefParseSource(xmlXPathContextPtr ctxt,
+         authdef = NULL;
+     }
+ 
++    /* Option protocol version string (NFSvN) */
++    if ((ver = virXPathString("string(./protocol/@ver)", ctxt))) {
++        if ((source->format != VIR_STORAGE_POOL_NETFS_NFS) &&
++            (source->format != VIR_STORAGE_POOL_NETFS_AUTO)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                           _("storage pool protocol ver unsupported for "
++                             "pool type '%s'"),
++                           virStoragePoolFormatFileSystemNetTypeToString(source->format));
++            goto cleanup;
++        }
++        if (virStrToLong_uip(ver, NULL, 0, &source->protocolVer) < 0) {
++            virReportError(VIR_ERR_XML_ERROR,
++                           _("storage pool protocol ver '%s' is malformaed"),
++                           ver);
++            goto cleanup;
++        }
++    }
++
+     source->vendor = virXPathString("string(./vendor/@name)", ctxt);
+     source->product = virXPathString("string(./product/@name)", ctxt);
+ 
+@@ -956,6 +975,9 @@ virStoragePoolSourceFormat(virBufferPtr buf,
+     if (src->auth)
+         virStorageAuthDefFormat(buf, src->auth);
+ 
++    if (src->protocolVer)
++        virBufferAsprintf(buf, "<protocol ver='%u'/>\n", src->protocolVer);
++
+     virBufferEscapeString(buf, "<vendor name='%s'/>\n", src->vendor);
+     virBufferEscapeString(buf, "<product name='%s'/>\n", src->product);
+ 
+diff --git a/src/conf/storage_conf.h b/src/conf/storage_conf.h
+index 15dfd8becf..3b637e2258 100644
+--- a/src/conf/storage_conf.h
++++ b/src/conf/storage_conf.h
+@@ -203,6 +203,9 @@ struct _virStoragePoolSource {
+      * or lvm version, etc.
+      */
+     int format;
++
++    /* Protocol version value for netfs */
++    unsigned int protocolVer;
+ };
+ 
+ typedef struct _virStoragePoolTarget virStoragePoolTarget;
+diff --git a/tests/storagepoolxml2xmlin/pool-netfs-protocol-ver.xml b/tests/storagepoolxml2xmlin/pool-netfs-protocol-ver.xml
+new file mode 100644
+index 0000000000..40f3f94e41
+--- /dev/null
++++ b/tests/storagepoolxml2xmlin/pool-netfs-protocol-ver.xml
+@@ -0,0 +1,21 @@
++<pool type='netfs'>
++  <name>nfsimages</name>
++  <uuid>7641d5a8-af11-f730-a34e-0a7dfcede71f</uuid>
++  <capacity>0</capacity>
++  <allocation>0</allocation>
++  <available>0</available>
++  <source>
++    <host name='localhost'/>
++    <dir path='/var/lib/libvirt/images'/>
++    <format type='nfs'/>
++    <protocol ver='3'/>
++  </source>
++  <target>
++    <path>/mnt</path>
++    <permissions>
++      <mode>0700</mode>
++      <owner>0</owner>
++      <group>0</group>
++    </permissions>
++  </target>
++</pool>
+diff --git a/tests/storagepoolxml2xmlout/pool-netfs-protocol-ver.xml b/tests/storagepoolxml2xmlout/pool-netfs-protocol-ver.xml
+new file mode 100644
+index 0000000000..5fcad1305b
+--- /dev/null
++++ b/tests/storagepoolxml2xmlout/pool-netfs-protocol-ver.xml
+@@ -0,0 +1,21 @@
++<pool type='netfs'>
++  <name>nfsimages</name>
++  <uuid>7641d5a8-af11-f730-a34e-0a7dfcede71f</uuid>
++  <capacity unit='bytes'>0</capacity>
++  <allocation unit='bytes'>0</allocation>
++  <available unit='bytes'>0</available>
++  <source>
++    <host name='localhost'/>
++    <dir path='/var/lib/libvirt/images'/>
++    <format type='nfs'/>
++    <protocol ver='3'/>
++  </source>
++  <target>
++    <path>/mnt</path>
++    <permissions>
++      <mode>0700</mode>
++      <owner>0</owner>
++      <group>0</group>
++    </permissions>
++  </target>
++</pool>
+diff --git a/tests/storagepoolxml2xmltest.c b/tests/storagepoolxml2xmltest.c
+index 29c0e42479..cf41b4d065 100644
+--- a/tests/storagepoolxml2xmltest.c
++++ b/tests/storagepoolxml2xmltest.c
+@@ -86,6 +86,7 @@ mymain(void)
+     DO_TEST("pool-iscsi-auth");
+     DO_TEST("pool-netfs");
+     DO_TEST("pool-netfs-auto");
++    DO_TEST("pool-netfs-protocol-ver");
+     DO_TEST("pool-netfs-gluster");
+     DO_TEST("pool-netfs-cifs");
+     DO_TEST("pool-scsi");
+-- 
+2.21.0
+

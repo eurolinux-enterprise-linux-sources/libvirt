@@ -1,5 +1,5 @@
-From cdd5c75a34654abb2516476b851c6730b4bcb11b Mon Sep 17 00:00:00 2001
-Message-Id: <cdd5c75a34654abb2516476b851c6730b4bcb11b@dist-git>
+From 14781719b38ba33f8870eb9d5ef9e3cdb7d40116 Mon Sep 17 00:00:00 2001
+Message-Id: <14781719b38ba33f8870eb9d5ef9e3cdb7d40116@dist-git>
 From: Michal Privoznik <mprivozn@redhat.com>
 Date: Mon, 21 Jan 2019 09:04:11 -0500
 Subject: [PATCH] virrandom: Avoid undefined behaviour in virRandomBits
@@ -38,5 +38,5 @@ index 3c011a8615..7915f6531e 100644
  }
  
 -- 
-2.20.1
+2.21.0
 

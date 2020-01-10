@@ -1,0 +1,201 @@
+From 9bb6096b3d4cff38af3515c3b45a6a227b407cd4 Mon Sep 17 00:00:00 2001
+Message-Id: <9bb6096b3d4cff38af3515c3b45a6a227b407cd4@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:44 +0200
+Subject: [PATCH] util: Rename some functions of virresctrl
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Some functions in virresctrl are for CAT only, while some of other
+functions are for resource allocation, not just CAT. So change
+their names to reflect the reality.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit f7c7f8ea656facd44152e224bfcf5dc04a023cf1)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <a67fa07cb0ebe995a4486d18259feb34c5a3ed41.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c   |  8 ++++----
+ src/libvirt_private.syms |  4 ++--
+ src/util/virresctrl.c    | 30 +++++++++++++++---------------
+ src/util/virresctrl.h    | 26 +++++++++++++-------------
+ 4 files changed, 34 insertions(+), 34 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 1096499831..e04edd97dc 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -19108,7 +19108,7 @@ virDomainCachetuneDefParseCache(xmlXPathContextPtr ctxt,
+                                   ULLONG_MAX, true) < 0)
+         goto cleanup;
+ 
+-    if (virResctrlAllocSetSize(alloc, level, type, cache, size) < 0)
++    if (virResctrlAllocSetCacheSize(alloc, level, type, cache, size) < 0)
+         goto cleanup;
+ 
+     ret = 0;
+@@ -27061,9 +27061,9 @@ virDomainCachetuneDefFormat(virBufferPtr buf,
+     int ret = -1;
+ 
+     virBufferSetChildIndent(&childrenBuf, buf);
+-    virResctrlAllocForeachSize(cachetune->alloc,
+-                               virDomainCachetuneDefFormatHelper,
+-                               &childrenBuf);
++    virResctrlAllocForeachCache(cachetune->alloc,
++                                virDomainCachetuneDefFormatHelper,
++                                &childrenBuf);
+ 
+ 
+     if (virBufferCheckError(&childrenBuf) < 0)
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 3000d6ee0a..a3b30bf675 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -2657,14 +2657,14 @@ virCacheTypeToString;
+ virResctrlAllocAddPID;
+ virResctrlAllocCreate;
+ virResctrlAllocDeterminePath;
+-virResctrlAllocForeachSize;
++virResctrlAllocForeachCache;
+ virResctrlAllocFormat;
+ virResctrlAllocGetID;
+ virResctrlAllocGetUnused;
+ virResctrlAllocNew;
+ virResctrlAllocRemove;
++virResctrlAllocSetCacheSize;
+ virResctrlAllocSetID;
+-virResctrlAllocSetSize;
+ virResctrlInfoGetCache;
+ virResctrlInfoNew;
+ 
+diff --git a/src/util/virresctrl.c b/src/util/virresctrl.c
+index e492a63b80..6d69c8d4e2 100644
+--- a/src/util/virresctrl.c
++++ b/src/util/virresctrl.c
+@@ -754,11 +754,11 @@ virResctrlAllocCheckCollision(virResctrlAllocPtr alloc,
+ 
+ 
+ int
+-virResctrlAllocSetSize(virResctrlAllocPtr alloc,
+-                       unsigned int level,
+-                       virCacheType type,
+-                       unsigned int cache,
+-                       unsigned long long size)
++virResctrlAllocSetCacheSize(virResctrlAllocPtr alloc,
++                            unsigned int level,
++                            virCacheType type,
++                            unsigned int cache,
++                            unsigned long long size)
+ {
+     if (virResctrlAllocCheckCollision(alloc, level, type, cache)) {
+         virReportError(VIR_ERR_XML_ERROR,
+@@ -773,9 +773,9 @@ virResctrlAllocSetSize(virResctrlAllocPtr alloc,
+ 
+ 
+ int
+-virResctrlAllocForeachSize(virResctrlAllocPtr alloc,
+-                           virResctrlAllocForeachSizeCallback cb,
+-                           void *opaque)
++virResctrlAllocForeachCache(virResctrlAllocPtr alloc,
++                            virResctrlAllocForeachCacheCallback cb,
++                            void *opaque)
+ {
+     int ret = 0;
+     unsigned int level = 0;
+@@ -939,9 +939,9 @@ virResctrlAllocParseProcessCache(virResctrlInfoPtr resctrl,
+ 
+ 
+ static int
+-virResctrlAllocParseProcessLine(virResctrlInfoPtr resctrl,
+-                                virResctrlAllocPtr alloc,
+-                                char *line)
++virResctrlAllocParseCacheLine(virResctrlInfoPtr resctrl,
++                              virResctrlAllocPtr alloc,
++                              char *line)
+ {
+     char **caches = NULL;
+     char *tmp = NULL;
+@@ -1009,7 +1009,7 @@ virResctrlAllocParse(virResctrlInfoPtr resctrl,
+ 
+     lines = virStringSplitCount(schemata, "\n", 0, &nlines);
+     for (i = 0; i < nlines; i++) {
+-        if (virResctrlAllocParseProcessLine(resctrl, alloc, lines[i]) < 0)
++        if (virResctrlAllocParseCacheLine(resctrl, alloc, lines[i]) < 0)
+             goto cleanup;
+     }
+ 
+@@ -1401,8 +1401,8 @@ virResctrlAllocCopyMasks(virResctrlAllocPtr dst,
+  * transforming `sizes` into `masks`.
+  */
+ static int
+-virResctrlAllocMasksAssign(virResctrlInfoPtr resctrl,
+-                           virResctrlAllocPtr alloc)
++virResctrlAllocAssign(virResctrlInfoPtr resctrl,
++                      virResctrlAllocPtr alloc)
+ {
+     int ret = -1;
+     unsigned int level = 0;
+@@ -1526,7 +1526,7 @@ virResctrlAllocCreate(virResctrlInfoPtr resctrl,
+     if (lockfd < 0)
+         goto cleanup;
+ 
+-    if (virResctrlAllocMasksAssign(resctrl, alloc) < 0)
++    if (virResctrlAllocAssign(resctrl, alloc) < 0)
+         goto cleanup;
+ 
+     alloc_str = virResctrlAllocFormat(alloc);
+diff --git a/src/util/virresctrl.h b/src/util/virresctrl.h
+index 9052a2b19a..d657c06008 100644
+--- a/src/util/virresctrl.h
++++ b/src/util/virresctrl.h
+@@ -67,11 +67,11 @@ virResctrlInfoGetCache(virResctrlInfoPtr resctrl,
+ typedef struct _virResctrlAlloc virResctrlAlloc;
+ typedef virResctrlAlloc *virResctrlAllocPtr;
+ 
+-typedef int virResctrlAllocForeachSizeCallback(unsigned int level,
+-                                               virCacheType type,
+-                                               unsigned int cache,
+-                                               unsigned long long size,
+-                                               void *opaque);
++typedef int virResctrlAllocForeachCacheCallback(unsigned int level,
++                                                virCacheType type,
++                                                unsigned int cache,
++                                                unsigned long long size,
++                                                void *opaque);
+ 
+ virResctrlAllocPtr
+ virResctrlAllocNew(void);
+@@ -80,16 +80,16 @@ bool
+ virResctrlAllocIsEmpty(virResctrlAllocPtr alloc);
+ 
+ int
+-virResctrlAllocSetSize(virResctrlAllocPtr alloc,
+-                       unsigned int level,
+-                       virCacheType type,
+-                       unsigned int cache,
+-                       unsigned long long size);
++virResctrlAllocSetCacheSize(virResctrlAllocPtr alloc,
++                            unsigned int level,
++                            virCacheType type,
++                            unsigned int cache,
++                            unsigned long long size);
+ 
+ int
+-virResctrlAllocForeachSize(virResctrlAllocPtr alloc,
+-                           virResctrlAllocForeachSizeCallback cb,
+-                           void *opaque);
++virResctrlAllocForeachCache(virResctrlAllocPtr alloc,
++                            virResctrlAllocForeachCacheCallback cb,
++                            void *opaque);
+ 
+ int
+ virResctrlAllocSetID(virResctrlAllocPtr alloc,
+-- 
+2.21.0
+

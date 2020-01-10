@@ -1,0 +1,43 @@
+From 624a93ae0bd5d4a11223d5704722d0095d88c28c Mon Sep 17 00:00:00 2001
+Message-Id: <624a93ae0bd5d4a11223d5704722d0095d88c28c@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:14 -0400
+Subject: [PATCH] qemu: hotplug: Don't generate alias when detaching
+ controllers
+
+qemuDomainDetachControllerDevice contained code which implied that alias
+might be NULL when detaching the disk and tried to generate it. This is
+no longer possible so we can remove the code.
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit c86735e2d85bf0e7ce8e08ce0b24d5627020ab0e)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-3-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 15d845e7b8..5e11e1997a 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4912,11 +4912,6 @@ int qemuDomainDetachControllerDevice(virQEMUDriverPtr driver,
+         goto cleanup;
+     }
+ 
+-    if (!detach->info.alias) {
+-        if (qemuAssignDeviceControllerAlias(vm->def, priv->qemuCaps, detach) < 0)
+-            goto cleanup;
+-    }
+-
+     if (!async)
+         qemuDomainMarkDeviceForRemoval(vm, &detach->info);
+ 
+-- 
+2.21.0
+

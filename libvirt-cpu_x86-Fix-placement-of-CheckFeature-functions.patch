@@ -1,0 +1,119 @@
+From fe175a3b2ab1176f26116e909a5014611c52339b Mon Sep 17 00:00:00 2001
+Message-Id: <fe175a3b2ab1176f26116e909a5014611c52339b@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 4 Jun 2019 13:04:31 +0200
+Subject: [PATCH] cpu_x86: Fix placement of *CheckFeature functions
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Commit 0a97486e09 moved them outside #ifdef, but after virCPUx86GetHost,
+which will start calling them in the following patch.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 32f577ab10aefda6c4666abd07814c5c39f57788)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1641702
+
+Conflicts:
+	src/cpu/cpu_x86.c
+            - only the last commit (from three upstream commits) moving
+              these functions was backported
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <60813074ba13f616ac2be224f4f800c98b169ec2.1559646067.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_x86.c | 69 ++++++++++++++++++++++++-----------------------
+ 1 file changed, 35 insertions(+), 34 deletions(-)
+
+diff --git a/src/cpu/cpu_x86.c b/src/cpu/cpu_x86.c
+index 1acd8c4f49..bd10862f57 100644
+--- a/src/cpu/cpu_x86.c
++++ b/src/cpu/cpu_x86.c
+@@ -2212,6 +2212,41 @@ x86Encode(virArch arch,
+ }
+ 
+ 
++static int
++virCPUx86CheckFeature(const virCPUDef *cpu,
++                      const char *name)
++{
++    int ret = -1;
++    virCPUx86MapPtr map;
++    virCPUx86ModelPtr model = NULL;
++
++    if (!(map = virCPUx86GetMap()))
++        return -1;
++
++    if (!(model = x86ModelFromCPU(cpu, map, -1)))
++        goto cleanup;
++
++    ret = x86FeatureInData(name, &model->data, map);
++
++ cleanup:
++    x86ModelFree(model);
++    return ret;
++}
++
++
++static int
++virCPUx86DataCheckFeature(const virCPUData *data,
++                          const char *name)
++{
++    virCPUx86MapPtr map;
++
++    if (!(map = virCPUx86GetMap()))
++        return -1;
++
++    return x86FeatureInData(name, &data->data.x86, map);
++}
++
++
+ #if defined(__i386__) || defined(__x86_64__)
+ static inline void
+ cpuidCall(virCPUx86CPUID *cpuid)
+@@ -2888,40 +2923,6 @@ virCPUx86UpdateLive(virCPUDefPtr cpu,
+ }
+ 
+ 
+-static int
+-virCPUx86CheckFeature(const virCPUDef *cpu,
+-                      const char *name)
+-{
+-    int ret = -1;
+-    virCPUx86MapPtr map;
+-    virCPUx86ModelPtr model = NULL;
+-
+-    if (!(map = virCPUx86GetMap()))
+-        return -1;
+-
+-    if (!(model = x86ModelFromCPU(cpu, map, -1)))
+-        goto cleanup;
+-
+-    ret = x86FeatureInData(name, &model->data, map);
+-
+- cleanup:
+-    x86ModelFree(model);
+-    return ret;
+-}
+-
+-
+-static int
+-virCPUx86DataCheckFeature(const virCPUData *data,
+-                          const char *name)
+-{
+-    virCPUx86MapPtr map;
+-
+-    if (!(map = virCPUx86GetMap()))
+-        return -1;
+-
+-    return x86FeatureInData(name, &data->data.x86, map);
+-}
+-
+ static int
+ virCPUx86GetModels(char ***models)
+ {
+-- 
+2.21.0
+

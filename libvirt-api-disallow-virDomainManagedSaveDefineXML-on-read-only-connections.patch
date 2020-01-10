@@ -1,5 +1,5 @@
-From 0f8966e0ce1887610b5eb9d955780662fc854094 Mon Sep 17 00:00:00 2001
-Message-Id: <0f8966e0ce1887610b5eb9d955780662fc854094@dist-git>
+From 20a2fc74e717ca21e1a183b4e210872eb0c56be9 Mon Sep 17 00:00:00 2001
+Message-Id: <20a2fc74e717ca21e1a183b4e210872eb0c56be9@dist-git>
 From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
 Date: Tue, 18 Jun 2019 13:30:00 +0200
 Subject: [PATCH] api: disallow virDomainManagedSaveDefineXML on read-only
@@ -24,10 +24,10 @@ Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
  1 file changed, 1 insertion(+)
 
 diff --git a/src/libvirt-domain.c b/src/libvirt-domain.c
-index 0ba85b9360..3855dfe0dd 100644
+index 697326ae9a..b936dd8eb7 100644
 --- a/src/libvirt-domain.c
 +++ b/src/libvirt-domain.c
-@@ -9487,6 +9487,7 @@ virDomainManagedSaveDefineXML(virDomainPtr domain, const char *dxml,
+@@ -9495,6 +9495,7 @@ virDomainManagedSaveDefineXML(virDomainPtr domain, const char *dxml,
  
      virCheckDomainReturn(domain, -1);
      conn = domain->conn;

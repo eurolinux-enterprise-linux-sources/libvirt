@@ -1,0 +1,43 @@
+From a2f60e6e90112f4bf4a8c2e68d76f472c88b7074 Mon Sep 17 00:00:00 2001
+Message-Id: <a2f60e6e90112f4bf4a8c2e68d76f472c88b7074@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:22 -0400
+Subject: [PATCH] qemu_hotplug: Assume chardev alias always exists in
+ qemuDomainDetachChrDevice
+
+The @tmpChr is looked up in domain definition based on user
+provided chardev XML. Therefore, the alias must have been
+allocated already when domain was started up.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 5657e22212c54651a9e098ceb79c5522d55e0114)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-11-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index d4444bbb5d..36840f977e 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -5607,11 +5607,6 @@ int qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
+     guestfwd = tmpChr->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_CHANNEL &&
+                tmpChr->targetType == VIR_DOMAIN_CHR_CHANNEL_TARGET_TYPE_GUESTFWD;
+ 
+-    if (!tmpChr->info.alias && qemuAssignDeviceChrAlias(vmdef, tmpChr, -1) < 0)
+-        goto cleanup;
+-
+-    sa_assert(tmpChr->info.alias);
+-
+     if (!async && !guestfwd)
+         qemuDomainMarkDeviceForRemoval(vm, &tmpChr->info);
+ 
+-- 
+2.21.0
+

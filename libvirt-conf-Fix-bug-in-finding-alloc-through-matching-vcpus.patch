@@ -1,0 +1,52 @@
+From 408d9e217f05b6c68351804df56aa9c9af7db4e7 Mon Sep 17 00:00:00 2001
+Message-Id: <408d9e217f05b6c68351804df56aa9c9af7db4e7@dist-git>
+From: Wang Huaqiang <huaqiang.wang@intel.com>
+Date: Mon, 15 Apr 2019 17:33:01 +0200
+Subject: [PATCH] conf: Fix bug in finding alloc through matching vcpus
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The @alloc object returned by virDomainResctrlVcpuMatch is not
+properly referenced and un-referenced in virDomainCachetuneDefParse.
+
+This patch fixes this problem.
+
+Signed-off-by: Wang Huaqiang <huaqiang.wang@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 3a1cdb06fd9bc5e35230f6198e697d6ec03d1206)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <7049386040dc0d170193b5fbfc81f2a8335d0063.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 74781fe596..6af14cc06f 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -19089,7 +19089,7 @@ virDomainResctrlVcpuMatch(virDomainDefPtr def,
+          * Just updating memory allocation information of that group
+          */
+         if (virBitmapEqual(def->resctrls[i]->vcpus, vcpus)) {
+-            *alloc = def->resctrls[i]->alloc;
++            *alloc = virObjectRef(def->resctrls[i]->alloc);
+             break;
+         }
+         if (virBitmapOverlaps(def->resctrls[i]->vcpus, vcpus)) {
+@@ -19386,8 +19386,6 @@ virDomainMemorytuneDefParse(virDomainDefPtr def,
+         if (!alloc)
+             goto cleanup;
+         new_alloc = true;
+-    } else {
+-        alloc = virObjectRef(alloc);
+     }
+ 
+     for (i = 0; i < n; i++) {
+-- 
+2.21.0
+

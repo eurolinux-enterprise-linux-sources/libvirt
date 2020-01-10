@@ -1,5 +1,5 @@
-From 883cfd41ab4b39528ba94f272bd2d78e009aa92d Mon Sep 17 00:00:00 2001
-Message-Id: <883cfd41ab4b39528ba94f272bd2d78e009aa92d@dist-git>
+From 000aefe7232ce1dd4c51b923e1a7fedd19fbff7f Mon Sep 17 00:00:00 2001
+Message-Id: <000aefe7232ce1dd4c51b923e1a7fedd19fbff7f@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Tue, 26 Feb 2019 12:22:00 +0100
 Subject: [PATCH] cpu_map: Add more signatures for IvyBridge CPU models

@@ -1,5 +1,5 @@
-From 7a985e4dbab5d6e71e4371c6c961e9f0773d964e Mon Sep 17 00:00:00 2001
-Message-Id: <7a985e4dbab5d6e71e4371c6c961e9f0773d964e@dist-git>
+From 07928211835aa0ff9b5398b0fbfbab9c08e2801d Mon Sep 17 00:00:00 2001
+Message-Id: <07928211835aa0ff9b5398b0fbfbab9c08e2801d@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Thu, 21 Feb 2019 22:14:53 +0100
 Subject: [PATCH] cputest: Add data for Intel(R) Core(TM) i7-7600U

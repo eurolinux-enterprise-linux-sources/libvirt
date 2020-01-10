@@ -1,0 +1,89 @@
+From 74789a3addee2f186e100dcaca4c1aedd95f8434 Mon Sep 17 00:00:00 2001
+Message-Id: <74789a3addee2f186e100dcaca4c1aedd95f8434@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Fri, 5 Apr 2019 10:57:42 +0200
+Subject: [PATCH] qemu: Clarify QEMU_CAPS_KVM
+
+This capability is documented as having one meaning (whether
+KVM is enabled by default) but is actually assigned two other
+meanings over its life: whether the query-kvm QMP command is
+available at first, and later on whether KVM is usable / was
+used during probing.
+
+Since the query-kvm QMP command was available in 1.5.0, we
+can avoid probing for it; additionally, we can simplify the
+logic by setting the flag when it applies instead of initially
+setting it and then clearing it when it doesn't.
+
+The flag's description is also updated to reflect reality.
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit c3be8bb4235b447dc29568f96b8c31cc741fc358)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628469
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190405085744.8179-6-abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 19 ++-----------------
+ src/qemu/qemu_capabilities.h |  2 +-
+ 2 files changed, 3 insertions(+), 18 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index ca044564e5..6386f206b8 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -1003,7 +1003,6 @@ struct virQEMUCapsStringFlags virQEMUCapsCommands[] = {
+     { "block-stream", QEMU_CAPS_BLOCKJOB_ASYNC },
+     { "dump-guest-memory", QEMU_CAPS_DUMP_GUEST_MEMORY },
+     { "query-spice", QEMU_CAPS_SPICE },
+-    { "query-kvm", QEMU_CAPS_KVM },
+     { "block-commit", QEMU_CAPS_BLOCK_COMMIT },
+     { "query-vnc", QEMU_CAPS_VNC },
+     { "drive-mirror", QEMU_CAPS_DRIVE_MIRROR },
+@@ -2585,25 +2584,11 @@ virQEMUCapsProbeQMPKVMState(virQEMUCapsPtr qemuCaps,
+     bool enabled = false;
+     bool present = false;
+ 
+-    if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_KVM))
+-        return 0;
+-
+     if (qemuMonitorGetKVMState(mon, &enabled, &present) < 0)
+         return -1;
+ 
+-    /* The QEMU_CAPS_KVM flag was initially set according to the QEMU
+-     * reporting the recognition of 'query-kvm' QMP command. That merely
+-     * indicates existence of the command though, not whether KVM support
+-     * is actually available, nor whether it is enabled by default.
+-     *
+-     * If it is not present we need to clear the flag, and if it is
+-     * not enabled by default we need to change the flag.
+-     */
+-    if (!present) {
+-        virQEMUCapsClear(qemuCaps, QEMU_CAPS_KVM);
+-    } else if (!enabled) {
+-        virQEMUCapsClear(qemuCaps, QEMU_CAPS_KVM);
+-    }
++    if (present && enabled)
++        virQEMUCapsSet(qemuCaps, QEMU_CAPS_KVM);
+ 
+     return 0;
+ }
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 98668115d6..6acd9fe825 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -65,7 +65,7 @@ typedef enum { /* virQEMUCapsFlags grouping marker for syntax-check */
+     X_QEMU_CAPS_MIGRATE_QEMU_TCP, /* have qemu tcp migration */
+     X_QEMU_CAPS_MIGRATE_QEMU_EXEC, /* have qemu exec migration */
+     X_QEMU_CAPS_DRIVE_CACHE_V2, /* cache= flag wanting new v2 values */
+-    QEMU_CAPS_KVM, /* Whether KVM is enabled by default */
++    QEMU_CAPS_KVM, /* Whether KVM is usable / was used during probing */
+     X_QEMU_CAPS_DRIVE_FORMAT, /* Is -drive format= avail */
+ 
+     /* 15 */
+-- 
+2.21.0
+

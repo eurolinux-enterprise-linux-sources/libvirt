@@ -1,0 +1,62 @@
+From 88a1a0d9cde76b79a59e6177a1dcdf036ec4cea0 Mon Sep 17 00:00:00 2001
+Message-Id: <88a1a0d9cde76b79a59e6177a1dcdf036ec4cea0@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 3 Apr 2019 16:35:44 +0200
+Subject: [PATCH] virsh: man: Document quirks of device-detach and friends
+
+Mention that successful return does not equal to device being detached
+similarly as we do at the API level.
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit e95a66349a751694cf173efa1581712b6fb99851)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1688961
+Message-Id: <7d04a65a6b2dbb7f4ca69d128838437b3e05c5b7.1554302031.git.pkrempa@redhat.com>
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ tools/virsh.pod | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 00cbee19b6..5321f6806a 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -3188,6 +3188,16 @@ or attempting to detach a device that is not present in the domain XML,
+ but shares some specific attributes with one that is present,
+ may lead to unexpected results.
+ 
++B<Quirk>: Device unplug is asynchronous in most cases and requires guest
++cooperation. This means that it's up to the discretion of the guest to disallow
++or delay the unplug arbitrarily. As the libvirt API used in this command was
++designed as synchronous it returns success after some timeout even if the device
++was not unplugged yet to allow further interactions with the domain e.g. if the
++guest is unresponsive. Callers which need to make sure that the
++device was unplugged can use libvirt events (see virsh event) to be notified
++when the device is removed. Note that the event may arrive before the command
++returns.
++
+ If I<--live> is specified, affect a running domain.
+ If I<--config> is specified, affect the next startup of a persistent domain.
+ If I<--current> is specified, affect the current domain state.
+@@ -3235,6 +3245,8 @@ I<--persistent>.
+ If B<--print-xml> is specified, then the XML which would be used to detach the
+ disk is printed instead.
+ 
++Please see documentation for B<detach-device> for known quirks.
++
+ =item B<detach-interface> I<domain> I<type> [I<--mac mac>]
+ [[[I<--live>] [I<--config>] | [I<--current>]] | [I<--persistent>]]
+ 
+@@ -3257,6 +3269,8 @@ an offline domain, and like I<--live> I<--config> for a running domain.
+ Note that older versions of virsh used I<--config> as an alias for
+ I<--persistent>.
+ 
++Please see documentation for B<detach-device> for known quirks.
++
+ =item B<update-device> I<domain> I<file> [I<--force>]
+ [[[I<--live>] [I<--config>] | [I<--current>]] | [I<--persistent>]]
+ 
+-- 
+2.21.0
+

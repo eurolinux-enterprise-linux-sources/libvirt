@@ -1,0 +1,61 @@
+From 7a533f8dbc018411d53eb4436cfc584b070c232b Mon Sep 17 00:00:00 2001
+Message-Id: <7a533f8dbc018411d53eb4436cfc584b070c232b@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 11 Apr 2019 15:14:33 -0400
+Subject: [PATCH] qemu_hotplug: eliminate unnecessary call to
+ qemuDomainDetachNetDevice()
+
+qemuDomainDetachHostDevice() has a check at the end that calls
+qemuDomainDetachNetDevice() in the case that the hostdev is actually a
+Net device of type='hostdev'. A long time ago when device removal was
+(supposedly but not actually) synchronous, this would cause some extra
+code to be run prior to removing the device (e.g. restoring the original MAC
+address of the device, undoing some sort of virtual port profile, etc).
+
+For quite awhile now the device removal has been asynchronous, so that
+"extra teardown" isn't handled by the detach function, but instead is
+handled by the Remove function called at a later time. The result is
+that when we call qemuDomainDetachNetDevice() from
+qemuDomainDetachHostDevice(), it ends up just calling
+qemuDomainDetachThisHostDevice() and returning, which is exactly what
+we do for all other hostdevs anyway.
+
+Based on that, remove the behavioral difference when parent.type ==
+VIR_DOMAIN_DEVICE_NET, and just call qemuDomainDetachThisHostDevice()
+for all hostdevs.
+
+Signed-off-by: Laine Stump <laine@laine.org>
+ACKed-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit 1ed46f3a22fe8570b4237477de5d5adb5a05f455)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-22-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 8 +-------
+ 1 file changed, 1 insertion(+), 7 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index b6fcaadd55..0ae944475e 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -5085,13 +5085,7 @@ int qemuDomainDetachHostDevice(virQEMUDriverPtr driver,
+         return -1;
+     }
+ 
+-    /* If this is a network hostdev, we need to use the higher-level detach
+-     * function so that mac address / virtualport are reset
+-     */
+-    if (detach->parent.type == VIR_DOMAIN_DEVICE_NET)
+-        return qemuDomainDetachNetDevice(driver, vm, &detach->parent, async);
+-    else
+-        return qemuDomainDetachThisHostDevice(driver, vm, detach, async);
++    return qemuDomainDetachThisHostDevice(driver, vm, detach, async);
+ }
+ 
+ 
+-- 
+2.21.0
+

@@ -1,0 +1,132 @@
+From dafb35cfae38f63e861e16623f83392cac3b73dc Mon Sep 17 00:00:00 2001
+Message-Id: <dafb35cfae38f63e861e16623f83392cac3b73dc@dist-git>
+From: =?UTF-8?q?Tom=C3=A1=C5=A1=20Golembiovsk=C3=BD?= <tgolembi@redhat.com>
+Date: Wed, 3 Apr 2019 13:19:17 +0200
+Subject: [PATCH] qemu: Add entry for balloon stat stat-disk-caches
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+QEMU commit bf1e7140e adds reporting of new balloon statistic to QEMU
+2.12. Value represents the amount of memory that can be quickly
+reclaimed without additional I/O. Let's add that too.
+
+Signed-off-by: Tomáš Golembiovský <tgolembi@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit aee046550893e7c0e5ccb4861dd3f0715d31eeb7)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1690122
+Signed-off-by: Jaroslav Suchanek <jsuchane@redhat.com>
+Message-Id: <1554290357-24601-1-git-send-email-jsuchane@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ include/libvirt/libvirt-domain.h | 9 ++++++++-
+ src/libvirt-domain.c             | 3 +++
+ src/qemu/qemu_driver.c           | 1 +
+ src/qemu/qemu_monitor_json.c     | 2 ++
+ tools/virsh-domain-monitor.c     | 2 ++
+ tools/virsh.pod                  | 5 +++++
+ 6 files changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/include/libvirt/libvirt-domain.h b/include/libvirt/libvirt-domain.h
+index 796f2e1408..fdd2d6b8ea 100644
+--- a/include/libvirt/libvirt-domain.h
++++ b/include/libvirt/libvirt-domain.h
+@@ -628,11 +628,18 @@ typedef enum {
+     /* Timestamp of the last update of statistics, in seconds. */
+     VIR_DOMAIN_MEMORY_STAT_LAST_UPDATE     = 9,
+ 
++    /*
++     * The amount of memory, that can be quickly reclaimed without
++     * additional I/O (in kB). Typically these pages are used for caching files
++     * from disk.
++     */
++    VIR_DOMAIN_MEMORY_STAT_DISK_CACHES     = 10,
++
+     /*
+      * The number of statistics supported by this version of the interface.
+      * To add new statistics, add them to the enum and increase this value.
+      */
+-    VIR_DOMAIN_MEMORY_STAT_NR              = 10,
++    VIR_DOMAIN_MEMORY_STAT_NR              = 11,
+ 
+ # ifdef VIR_ENUM_SENTINELS
+     VIR_DOMAIN_MEMORY_STAT_LAST = VIR_DOMAIN_MEMORY_STAT_NR
+diff --git a/src/libvirt-domain.c b/src/libvirt-domain.c
+index 5f7f0bfeba..568023176b 100644
+--- a/src/libvirt-domain.c
++++ b/src/libvirt-domain.c
+@@ -5732,6 +5732,9 @@ virDomainGetInterfaceParameters(virDomainPtr domain,
+  *     Current balloon value (in kb).
+  * VIR_DOMAIN_MEMORY_STAT_LAST_UPDATE
+  *     Timestamp of the last statistic
++ * VIR_DOMAIN_MEMORY_STAT_DISK_CACHES
++ *     Memory that can be reclaimed without additional I/O, typically disk
++ *     caches (in kb).
+  *
+  * Returns: The number of stats provided or -1 in case of failure.
+  */
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 295613ba3c..99d0dad911 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -19788,6 +19788,7 @@ qemuDomainGetStatsBalloon(virQEMUDriverPtr driver,
+         STORE_MEM_RECORD(RSS, "rss")
+         STORE_MEM_RECORD(LAST_UPDATE, "last-update")
+         STORE_MEM_RECORD(USABLE, "usable")
++        STORE_MEM_RECORD(DISK_CACHES, "disk_caches")
+     }
+ 
+ #undef STORE_MEM_RECORD
+diff --git a/src/qemu/qemu_monitor_json.c b/src/qemu/qemu_monitor_json.c
+index 8970d95584..438d82e194 100644
+--- a/src/qemu/qemu_monitor_json.c
++++ b/src/qemu/qemu_monitor_json.c
+@@ -2100,6 +2100,8 @@ int qemuMonitorJSONGetMemoryStats(qemuMonitorPtr mon,
+                       VIR_DOMAIN_MEMORY_STAT_USABLE, 1024);
+     GET_BALLOON_STATS(data, "last-update",
+                       VIR_DOMAIN_MEMORY_STAT_LAST_UPDATE, 1);
++    GET_BALLOON_STATS(statsdata, "stat-disk-caches",
++                      VIR_DOMAIN_MEMORY_STAT_DISK_CACHES, 1024);
+     ret = got;
+  cleanup:
+     virJSONValueFree(cmd);
+diff --git a/tools/virsh-domain-monitor.c b/tools/virsh-domain-monitor.c
+index 87660ee674..b9b4f9739b 100644
+--- a/tools/virsh-domain-monitor.c
++++ b/tools/virsh-domain-monitor.c
+@@ -364,6 +364,8 @@ cmdDomMemStat(vshControl *ctl, const vshCmd *cmd)
+             vshPrint(ctl, "rss %llu\n", stats[i].val);
+         if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_LAST_UPDATE)
+             vshPrint(ctl, "last_update %llu\n", stats[i].val);
++        if (stats[i].tag == VIR_DOMAIN_MEMORY_STAT_DISK_CACHES)
++            vshPrint(ctl, "disk_caches %llu\n", stats[i].val);
+     }
+ 
+     ret = true;
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 3e9c264fe8..00cbee19b6 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -924,6 +924,8 @@ B<Explanation of fields>:
+   usable            - The amount of memory which can be reclaimed by balloon
+ without causing host swapping (in KiB)
+   last-update       - Timestamp of the last update of statistics (in seconds)
++  disk_caches       - The amount of memory that can be reclaimed without
++additional I/O, typically disk caches (in KiB)
+ 
+ For QEMU/KVM with a memory balloon, setting the optional I<--period> to a
+ value larger than 0 in seconds will allow the balloon driver to return
+@@ -1030,6 +1032,9 @@ I<--balloon> returns:
+                     balloon without causing host swapping (in KiB)
+  "balloon.last-update" - timestamp of the last update of statistics
+                          (in seconds)
++ "balloon.disk_caches " - the amount of memory that can be reclaimed
++                          without additional I/O, typically disk
++                          caches (in KiB)
+ 
+ I<--vcpu> returns:
+ 
+-- 
+2.21.0
+

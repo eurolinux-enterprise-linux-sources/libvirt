@@ -1,0 +1,159 @@
+From c7d644f205a64175961218c82f764cdd10766bff Mon Sep 17 00:00:00 2001
+Message-Id: <c7d644f205a64175961218c82f764cdd10766bff@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 07:22:20 -0400
+Subject: [PATCH] access: Modify the VIR_ERR_ACCESS_DENIED to include
+ driverName
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1631606
+
+Changes made to manage and utilize a secondary connection
+driver to APIs outside the scope of the primary connection
+driver have resulted in some confusion processing polkit rules
+since the simple "access denied" error message doesn't provide
+enough of a clue when combined with the "authentication failed:
+access denied by policy" as to which connection driver refused
+or failed the ACL check.
+
+In order to provide some context, let's modify the existing
+"access denied" error returned from the various vir*EnsureACL
+API's to provide the connection driver name that is causing
+the failure. This should provide the context for writing the
+polkit rules that would allow access via the driver, but yet
+still adhere to the virAccessManagerSanitizeError commentary
+regarding not telling the user why access was denied.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 605496be609e153526fcdd3e98df8cf5244bc8fa)
+Message-Id: <20190403112220.23881-1-jferlan@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/access/viraccessmanager.c | 26 ++++++++++++++------------
+ src/rpc/gendispatch.pl        |  3 ++-
+ 2 files changed, 16 insertions(+), 13 deletions(-)
+
+diff --git a/src/access/viraccessmanager.c b/src/access/viraccessmanager.c
+index e7b5bf38da..f5d62604cf 100644
+--- a/src/access/viraccessmanager.c
++++ b/src/access/viraccessmanager.c
+@@ -196,11 +196,13 @@ static void virAccessManagerDispose(void *object)
+  * should the admin need to debug things
+  */
+ static int
+-virAccessManagerSanitizeError(int ret)
++virAccessManagerSanitizeError(int ret,
++                              const char *driverName)
+ {
+     if (ret < 0) {
+         virResetLastError();
+-        virAccessError(VIR_ERR_ACCESS_DENIED, NULL);
++        virAccessError(VIR_ERR_ACCESS_DENIED,
++                       _("'%s' denied access"), driverName);
+     }
+ 
+     return ret;
+@@ -217,7 +219,7 @@ int virAccessManagerCheckConnect(virAccessManagerPtr manager,
+     if (manager->drv->checkConnect)
+         ret = manager->drv->checkConnect(manager, driverName, perm);
+ 
+-    return virAccessManagerSanitizeError(ret);
++    return virAccessManagerSanitizeError(ret, driverName);
+ }
+ 
+ 
+@@ -233,7 +235,7 @@ int virAccessManagerCheckDomain(virAccessManagerPtr manager,
+     if (manager->drv->checkDomain)
+         ret = manager->drv->checkDomain(manager, driverName, domain, perm);
+ 
+-    return virAccessManagerSanitizeError(ret);
++    return virAccessManagerSanitizeError(ret, driverName);
+ }
+ 
+ int virAccessManagerCheckInterface(virAccessManagerPtr manager,
+@@ -248,7 +250,7 @@ int virAccessManagerCheckInterface(virAccessManagerPtr manager,
+     if (manager->drv->checkInterface)
+         ret = manager->drv->checkInterface(manager, driverName, iface, perm);
+ 
+-    return virAccessManagerSanitizeError(ret);
++    return virAccessManagerSanitizeError(ret, driverName);
+ }
+ 
+ int virAccessManagerCheckNetwork(virAccessManagerPtr manager,
+@@ -263,7 +265,7 @@ int virAccessManagerCheckNetwork(virAccessManagerPtr manager,
+     if (manager->drv->checkNetwork)
+         ret = manager->drv->checkNetwork(manager, driverName, network, perm);
+ 
+-    return virAccessManagerSanitizeError(ret);
++    return virAccessManagerSanitizeError(ret, driverName);
+ }
+ 
+ int virAccessManagerCheckNodeDevice(virAccessManagerPtr manager,
+@@ -278,7 +280,7 @@ int virAccessManagerCheckNodeDevice(virAccessManagerPtr manager,
+     if (manager->drv->checkNodeDevice)
+         ret = manager->drv->checkNodeDevice(manager, driverName, nodedev, perm);
+ 
+-    return virAccessManagerSanitizeError(ret);
++    return virAccessManagerSanitizeError(ret, driverName);
+ }
+ 
+ int virAccessManagerCheckNWFilter(virAccessManagerPtr manager,
+@@ -293,7 +295,7 @@ int virAccessManagerCheckNWFilter(virAccessManagerPtr manager,
+     if (manager->drv->checkNWFilter)
+         ret = manager->drv->checkNWFilter(manager, driverName, nwfilter, perm);
+ 
+-    return virAccessManagerSanitizeError(ret);
++    return virAccessManagerSanitizeError(ret, driverName);
+ }
+ 
+ int virAccessManagerCheckNWFilterBinding(virAccessManagerPtr manager,
+@@ -308,7 +310,7 @@ int virAccessManagerCheckNWFilterBinding(virAccessManagerPtr manager,
+     if (manager->drv->checkNWFilterBinding)
+         ret = manager->drv->checkNWFilterBinding(manager, driverName, binding, perm);
+ 
+-    return virAccessManagerSanitizeError(ret);
++    return virAccessManagerSanitizeError(ret, driverName);
+ }
+ 
+ int virAccessManagerCheckSecret(virAccessManagerPtr manager,
+@@ -323,7 +325,7 @@ int virAccessManagerCheckSecret(virAccessManagerPtr manager,
+     if (manager->drv->checkSecret)
+         ret = manager->drv->checkSecret(manager, driverName, secret, perm);
+ 
+-    return virAccessManagerSanitizeError(ret);
++    return virAccessManagerSanitizeError(ret, driverName);
+ }
+ 
+ int virAccessManagerCheckStoragePool(virAccessManagerPtr manager,
+@@ -338,7 +340,7 @@ int virAccessManagerCheckStoragePool(virAccessManagerPtr manager,
+     if (manager->drv->checkStoragePool)
+         ret = manager->drv->checkStoragePool(manager, driverName, pool, perm);
+ 
+-    return virAccessManagerSanitizeError(ret);
++    return virAccessManagerSanitizeError(ret, driverName);
+ }
+ 
+ int virAccessManagerCheckStorageVol(virAccessManagerPtr manager,
+@@ -354,5 +356,5 @@ int virAccessManagerCheckStorageVol(virAccessManagerPtr manager,
+     if (manager->drv->checkStorageVol)
+         ret = manager->drv->checkStorageVol(manager, driverName, pool, vol, perm);
+ 
+-    return virAccessManagerSanitizeError(ret);
++    return virAccessManagerSanitizeError(ret, driverName);
+ }
+diff --git a/src/rpc/gendispatch.pl b/src/rpc/gendispatch.pl
+index 0c4648c0fb..a8b9f5aeca 100755
+--- a/src/rpc/gendispatch.pl
++++ b/src/rpc/gendispatch.pl
+@@ -2199,7 +2199,8 @@ elsif ($mode eq "client") {
+                     print "        virObjectUnref(mgr);\n";
+                     if ($action eq "Ensure") {
+                         print "        if (rv == 0)\n";
+-                        print "            virReportError(VIR_ERR_ACCESS_DENIED, NULL);\n";
++                        print "            virReportError(VIR_ERR_ACCESS_DENIED,\n";
++                        print"                            _(\"'%s' denied access\"), conn->driver->name);\n";
+                         print "        return $fail;\n";
+                     } else {
+                         print "        virResetLastError();\n";
+-- 
+2.21.0
+

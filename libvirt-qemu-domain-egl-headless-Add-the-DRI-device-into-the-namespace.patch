@@ -1,0 +1,46 @@
+From 5b08e3b39e250b822c918fa90a33889b37a48e75 Mon Sep 17 00:00:00 2001
+Message-Id: <5b08e3b39e250b822c918fa90a33889b37a48e75@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:32 +0200
+Subject: [PATCH] qemu: domain: egl-headless: Add the DRI device into the
+ namespace
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Just like for SPICE, we need to put the DRI device into the namespace,
+otherwise it will be left out from the DAC relabeling process.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 53ca6fa4eacb9e519710dacf237997b813f892d2)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <be1a212b440349c207623e5865a373319c49c412.1554791287.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_domain.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 112958f64a..76f48d6f83 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -11472,11 +11472,9 @@ qemuDomainSetupGraphics(virQEMUDriverConfigPtr cfg ATTRIBUTE_UNUSED,
+                         virDomainGraphicsDefPtr gfx,
+                         const struct qemuDomainCreateDeviceData *data)
+ {
+-    const char *rendernode = gfx->data.spice.rendernode;
++    const char *rendernode = virDomainGraphicsGetRenderNode(gfx);
+ 
+-    if (gfx->type != VIR_DOMAIN_GRAPHICS_TYPE_SPICE ||
+-        gfx->data.spice.gl != VIR_TRISTATE_BOOL_YES ||
+-        !rendernode)
++    if (!rendernode)
+         return 0;
+ 
+     return qemuDomainCreateDevice(rendernode, data, false);
+-- 
+2.21.0
+

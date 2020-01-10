@@ -1,0 +1,119 @@
+From a3e0637aa224b31438a8ae550344362ee02a327b Mon Sep 17 00:00:00 2001
+Message-Id: <a3e0637aa224b31438a8ae550344362ee02a327b@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:25 +0200
+Subject: [PATCH] util: Introduce virHostGetDRMRenderNode helper
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This is the first step towards libvirt picking the first available
+render node instead of QEMU. It also makes sense for us to be able to do
+that, since we allow specifying the node directly for SPICE, so if
+there's no render node specified by the user, we should pick the first
+available one. The algorithm used for that is essentially the same as
+the one QEMU uses.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 394809694a5bcb6e1e6890f360c60993c0b63a74)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <48159f44f12685eb8c52061e09c27e37a5a157ea.1554791287.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt_private.syms |  1 +
+ src/util/virutil.c       | 53 ++++++++++++++++++++++++++++++++++++++++
+ src/util/virutil.h       |  2 ++
+ 3 files changed, 56 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index af9b61fbdc..6655dfdecc 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -3116,6 +3116,7 @@ virGetUserName;
+ virGetUserRuntimeDirectory;
+ virGetUserShell;
+ virHexToBin;
++virHostGetDRMRenderNode;
+ virHostHasIOMMU;
+ virIndexToDiskName;
+ virIsDevMapperDevice;
+diff --git a/src/util/virutil.c b/src/util/virutil.c
+index a908422feb..b25d2a5ca4 100644
+--- a/src/util/virutil.c
++++ b/src/util/virutil.c
+@@ -2115,3 +2115,56 @@ virHostHasIOMMU(void)
+     VIR_DIR_CLOSE(iommuDir);
+     return ret;
+ }
++
++
++/**
++ * virHostGetDRMRenderNode:
++ *
++ * Picks the first DRM render node available. Missing DRI or missing DRM render
++ * nodes in the system results in an error.
++ *
++ * Returns an absolute path to the first render node available or NULL in case
++ * of an error with the error being reported.
++ * Caller is responsible for freeing the result string.
++ *
++ */
++char *
++virHostGetDRMRenderNode(void)
++{
++    char *ret = NULL;
++    DIR *driDir = NULL;
++    const char *driPath = "/dev/dri";
++    struct dirent *ent = NULL;
++    int dirErr = 0;
++    bool have_rendernode = false;
++
++    if (virDirOpen(&driDir, driPath) < 0)
++        return NULL;
++
++    while ((dirErr = virDirRead(driDir, &ent, driPath)) > 0) {
++        if (ent->d_type != DT_CHR)
++            continue;
++
++        if (STRPREFIX(ent->d_name, "renderD")) {
++            have_rendernode = true;
++            break;
++        }
++    }
++
++    if (dirErr < 0)
++        goto cleanup;
++
++    /* even if /dev/dri exists, there might be no renderDX nodes available */
++    if (!have_rendernode) {
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("No DRM render nodes available"));
++        goto cleanup;
++    }
++
++    if (virAsprintf(&ret, "%s/%s", driPath, ent->d_name) < 0)
++        goto cleanup;
++
++ cleanup:
++    VIR_DIR_CLOSE(driDir);
++    return ret;
++}
+diff --git a/src/util/virutil.h b/src/util/virutil.h
+index 1ba9635bd9..284c713be4 100644
+--- a/src/util/virutil.h
++++ b/src/util/virutil.h
+@@ -218,6 +218,8 @@ unsigned long long virMemoryMaxValue(bool ulong) ATTRIBUTE_NOINLINE;
+ 
+ bool virHostHasIOMMU(void);
+ 
++char *virHostGetDRMRenderNode(void);
++
+ /**
+  * VIR_ASSIGN_IS_OVERFLOW:
+  * @rvalue: value that is checked (evaluated twice)
+-- 
+2.21.0
+

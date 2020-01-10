@@ -1,0 +1,112 @@
+From dc638f4d9fea8647a190dc9d2dabc4ce81ab2a3c Mon Sep 17 00:00:00 2001
+Message-Id: <dc638f4d9fea8647a190dc9d2dabc4ce81ab2a3c@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Wed, 3 Apr 2019 17:08:57 +0200
+Subject: [PATCH] conf: Fix check for chardev source path
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Attempting to use a chardev definition like
+
+  <serial type='unix'>
+    <target type='isa-serial'/>
+  </serial>
+
+correctly results in an error being reported, since the source
+path - a required piece of information - is missing; however,
+the very similar
+
+  <serial type='unix'>
+    <target type='pci-serial'/>
+  </serial>
+
+was happily accepted by libvirt, only to result in libvirtd
+crashing as soon as the guest was started.
+
+The issue was caused by checking the chardev's targetType
+against whitelisted values from virDomainChrChannelTargetType
+without first checking the chardev's deviceType to make sure
+it is actually a channel, for which the check makes sense,
+rather than a different type of chardev.
+
+The only reason this wasn't spotted earlier is that the
+whitelisted values just so happen to correspond to USB and
+PCI serial devices and Xen and UML consoles respectively,
+all of which are fairly uncommon.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1609720
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+
+(cherry picked from commit 614193fac67445a7e92bf620ffef726ed1bd6f07)
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190403150857.20850-1-abologna@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/conf/domain_conf.c                            | 11 +++++++----
+ .../serial-unix-missing-source.xml                | 15 +++++++++++++++
+ tests/qemuxml2argvtest.c                          |  1 +
+ 3 files changed, 23 insertions(+), 4 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/serial-unix-missing-source.xml
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index eb4e9ac523..712efbb9f9 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -5531,11 +5531,14 @@ virDomainChrSourceDefValidate(const virDomainChrSourceDef *def,
+         break;
+ 
+     case VIR_DOMAIN_CHR_TYPE_UNIX:
+-        /* path can be auto generated */
++        /* The source path can be auto generated for certain specific
++         * types of channels, but in most cases we should report an
++         * error if the user didn't provide it */
+         if (!def->data.nix.path &&
+-            (!chr_def ||
+-             (chr_def->targetType != VIR_DOMAIN_CHR_CHANNEL_TARGET_TYPE_XEN &&
+-              chr_def->targetType != VIR_DOMAIN_CHR_CHANNEL_TARGET_TYPE_VIRTIO))) {
++            !(chr_def &&
++              chr_def->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_CHANNEL &&
++              (chr_def->targetType == VIR_DOMAIN_CHR_CHANNEL_TARGET_TYPE_XEN ||
++               chr_def->targetType == VIR_DOMAIN_CHR_CHANNEL_TARGET_TYPE_VIRTIO))) {
+             virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
+                            _("Missing source path attribute for char device"));
+             return -1;
+diff --git a/tests/qemuxml2argvdata/serial-unix-missing-source.xml b/tests/qemuxml2argvdata/serial-unix-missing-source.xml
+new file mode 100644
+index 0000000000..1e1221f12d
+--- /dev/null
++++ b/tests/qemuxml2argvdata/serial-unix-missing-source.xml
+@@ -0,0 +1,15 @@
++<domain type='qemu'>
++  <name>guest</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>1048576</memory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='aarch64' machine='virt'>hvm</type>
++  </os>
++  <devices>
++    <emulator>/usr/bin/qemu-system-aarch64</emulator>
++    <serial type='unix'>
++      <target type='pci-serial'/>
++    </serial>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index d97dc0ea8d..7a731e2f40 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -1363,6 +1363,7 @@ mymain(void)
+     DO_TEST("serial-unix-chardev",
+             QEMU_CAPS_DEVICE_ISA_SERIAL);
+     DO_TEST_CAPS_LATEST("serial-unix-chardev");
++    DO_TEST_PARSE_ERROR("serial-unix-missing-source", NONE);
+     DO_TEST("serial-tcp-chardev",
+             QEMU_CAPS_DEVICE_ISA_SERIAL);
+     DO_TEST("serial-udp-chardev",
+-- 
+2.21.0
+

@@ -1,5 +1,5 @@
-From 9062f89d17d1ab5d6c5c3efae8c6056149ef0a28 Mon Sep 17 00:00:00 2001
-Message-Id: <9062f89d17d1ab5d6c5c3efae8c6056149ef0a28@dist-git>
+From a9fced99a9fb436909cf9df22502f5f7c7479ebb Mon Sep 17 00:00:00 2001
+Message-Id: <a9fced99a9fb436909cf9df22502f5f7c7479ebb@dist-git>
 From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
 Date: Wed, 15 May 2019 21:40:57 +0100
 Subject: [PATCH] locking: restrict sockets to mode 0600
@@ -17,7 +17,7 @@ Fixes CVE-2019-10132
 
 Reviewed-by: Ján Tomko <jtomko@redhat.com>
 Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
-(cherry picked from a private commit)
+(cherry picked from commit f111e09468693909b1f067aa575efdafd9a262a1)
 Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
 Message-Id: <20190515204058.28077-3-berrange@redhat.com>
 ---

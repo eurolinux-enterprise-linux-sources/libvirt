@@ -1,0 +1,64 @@
+From 4f6f2054b528814285ad5bf8433721c9b8fcaff5 Mon Sep 17 00:00:00 2001
+Message-Id: <4f6f2054b528814285ad5bf8433721c9b8fcaff5@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:28 +0200
+Subject: [PATCH] qemu: command: Introduce
+ qemuBuildGraphicsEGLHeadlessCommandLine helper
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We're going to need a bit more logic for egl-headless down the road so
+prepare a helper just like for the other display types.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit eeb7059aa3f42bcd6d42a41078e588b6b4b25c1e)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <4e0aaf4349699b0588b9eb17ad4e34f309658a72.1554791287.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 52650dc46d..d60fbd4c8c 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -8195,6 +8195,19 @@ qemuBuildGraphicsSPICECommandLine(virQEMUDriverConfigPtr cfg,
+ }
+ 
+ 
++static int
++qemuBuildGraphicsEGLHeadlessCommandLine(virQEMUDriverConfigPtr cfg ATTRIBUTE_UNUSED,
++                                        virCommandPtr cmd,
++                                        virQEMUCapsPtr qemuCaps ATTRIBUTE_UNUSED,
++                                        virDomainGraphicsDefPtr graphics ATTRIBUTE_UNUSED)
++{
++    virCommandAddArg(cmd, "-display");
++    virCommandAddArg(cmd, "egl-headless");
++
++    return 0;
++}
++
++
+ static int
+ qemuBuildGraphicsCommandLine(virQEMUDriverConfigPtr cfg,
+                              virCommandPtr cmd,
+@@ -8226,8 +8239,9 @@ qemuBuildGraphicsCommandLine(virQEMUDriverConfigPtr cfg,
+ 
+             break;
+         case VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS:
+-            virCommandAddArg(cmd, "-display");
+-            virCommandAddArg(cmd, "egl-headless");
++            if (qemuBuildGraphicsEGLHeadlessCommandLine(cfg, cmd,
++                                                        qemuCaps, graphics) < 0)
++                return -1;
+ 
+             break;
+         case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
+-- 
+2.21.0
+

@@ -1,0 +1,96 @@
+From 81d6db6e7af7d9f159cfb1c5b7bfc7b6f16b4b23 Mon Sep 17 00:00:00 2001
+Message-Id: <81d6db6e7af7d9f159cfb1c5b7bfc7b6f16b4b23@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 07:04:46 -0400
+Subject: [PATCH] nwfilter: Add extra verbiage for binding create/delete
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1609454
+
+Add some cautionary words related to the create and delete
+NWFilter Binding use cases and possible issues that may result
+to the virsh nwfilter-binding-{create|delete} descriptions
+and the virNWFilterBinding{CreateXML|Delete) API descriptions.
+
+Essentially summarizing commit 2d9318b6c without using the
+shoot yourself in the foot wording.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit b4833917f12a0ffa4b5957ef77edea737cb8ad58)
+Message-Id: <20190403110446.15118-1-jferlan@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/libvirt-nwfilter.c | 16 ++++++++++++++--
+ tools/virsh.pod        | 14 ++++++++++++--
+ 2 files changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/src/libvirt-nwfilter.c b/src/libvirt-nwfilter.c
+index e572d46c18..3da85adc9e 100644
+--- a/src/libvirt-nwfilter.c
++++ b/src/libvirt-nwfilter.c
+@@ -678,7 +678,14 @@ virNWFilterBindingGetFilterName(virNWFilterBindingPtr binding)
+  * @flags: currently unused, pass 0
+  *
+  * Define a new network filter, based on an XML description
+- * similar to the one returned by virNWFilterGetXMLDesc()
++ * similar to the one returned by virNWFilterGetXMLDesc(). This
++ * API may be used to associate a filter with a currently running
++ * guest that does not have a filter defined for a specific network
++ * port. Since the bindings are generally automatically managed by
++ * the hypervisor, using this command to define a filter for a network
++ * port and then starting the guest afterwards may prevent the guest
++ * from starting if it attempts to use the network port and finds a
++ * filter already defined.
+  *
+  * virNWFilterFree should be used to free the resources after the
+  * binding object is no longer needed.
+@@ -717,7 +724,12 @@ virNWFilterBindingCreateXML(virConnectPtr conn, const char *xml, unsigned int fl
+  * @binding: a binding object
+  *
+  * Delete the binding object. This does not free the
+- * associated virNWFilterBindingPtr object.
++ * associated virNWFilterBindingPtr object. This API
++ * may be used to remove the network port binding filter
++ * currently in use for the guest while the guest is
++ * running without needing to restart the guest. Restoring
++ * the network port binding filter for the running guest
++ * would be accomplished by using virNWFilterBindingCreateXML.
+  *
+  * Returns 0 in case of success and -1 in case of failure.
+  */
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 368ce89ed8..0e704bc407 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -4825,13 +4825,23 @@ of the network filters directly.
+ =item B<nwfilter-binding-create> I<xmlfile>
+ 
+ Associate a network port with a network filter. The network filter backend
+-will immediately attempt to instantiate the filter rules on the port.
++will immediately attempt to instantiate the filter rules on the port. This
++command may be used to associate a filter with a currently running guest
++that does not have a filter defined for a specific network port. Since the
++bindings are generally automatically managed by the hypervisor, using this
++command to define a filter for a network port and then starting the guest
++afterwards may prevent the guest from starting if it attempts to use the
++network port and finds a filter already defined.
+ 
+ =item B<nwfilter-binding-delete> I<port-name>
+ 
+ Disassociate a network port from a network filter. The network filter
+ backend will immediately tear down the filter rules that exist on the
+-port.
++port. This command may be used to remove the network port binding for
++a filter currently in use for the guest while the guest is running
++without needing to restart the guest. Restoring the network port binding
++filter for the running guest would be accomplished by using
++I<nwfilter-binding-create>.
+ 
+ =item B<nwfilter-binding-list>
+ 
+-- 
+2.21.0
+

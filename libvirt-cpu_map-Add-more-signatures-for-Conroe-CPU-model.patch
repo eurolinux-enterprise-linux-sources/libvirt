@@ -1,5 +1,5 @@
-From 76c38a02c95057563349d6298aa70bde014b75c8 Mon Sep 17 00:00:00 2001
-Message-Id: <76c38a02c95057563349d6298aa70bde014b75c8@dist-git>
+From 3161fe76b8f7852521589993fb0330464d5a0307 Mon Sep 17 00:00:00 2001
+Message-Id: <3161fe76b8f7852521589993fb0330464d5a0307@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Tue, 26 Feb 2019 10:45:56 +0100
 Subject: [PATCH] cpu_map: Add more signatures for Conroe CPU model

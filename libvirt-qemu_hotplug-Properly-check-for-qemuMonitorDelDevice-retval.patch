@@ -1,0 +1,63 @@
+From b947ae5274f9a4227f81f13a7973958daeb8d922 Mon Sep 17 00:00:00 2001
+Message-Id: <b947ae5274f9a4227f81f13a7973958daeb8d922@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:24 -0400
+Subject: [PATCH] qemu_hotplug: Properly check for qemuMonitorDelDevice retval
+
+Luckily, the function returns only 0 or -1 so all the checks work
+as expected. Anyway, our rule is that a positive value means
+success so if the function ever returns a positive value these
+checks will fail. Make them check for a negative value properly.
+
+At the same time fix qemuDomainDetachExtensionDevice() reval
+check. It is somewhat related to the aim of this patch.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 8b71b0c727398469b95d025e3ec92b881969412f)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+
+Conflicts: src/qemu/qemu_hotplug.c - qemuDomainDetachExtensionDevice() was added
+                           upstream
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-13-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index b5ccaf4021..963b87f798 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4929,7 +4929,7 @@ int qemuDomainDetachControllerDevice(virQEMUDriverPtr driver,
+         qemuDomainMarkDeviceForRemoval(vm, &detach->info);
+ 
+     qemuDomainObjEnterMonitor(driver, vm);
+-    if (qemuMonitorDelDevice(priv->mon, detach->info.alias)) {
++    if (qemuMonitorDelDevice(priv->mon, detach->info.alias) < 0) {
+         ignore_value(qemuDomainObjExitMonitor(driver, vm));
+         goto cleanup;
+     }
+@@ -6441,7 +6441,7 @@ qemuDomainDetachInputDevice(virDomainObjPtr vm,
+         qemuDomainMarkDeviceForRemoval(vm, &input->info);
+ 
+     qemuDomainObjEnterMonitor(driver, vm);
+-    if (qemuMonitorDelDevice(priv->mon, input->info.alias)) {
++    if (qemuMonitorDelDevice(priv->mon, input->info.alias) < 0) {
+         ignore_value(qemuDomainObjExitMonitor(driver, vm));
+         goto cleanup;
+     }
+@@ -6484,7 +6484,7 @@ qemuDomainDetachVsockDevice(virDomainObjPtr vm,
+         qemuDomainMarkDeviceForRemoval(vm, &vsock->info);
+ 
+     qemuDomainObjEnterMonitor(driver, vm);
+-    if (qemuMonitorDelDevice(priv->mon, vsock->info.alias)) {
++    if (qemuMonitorDelDevice(priv->mon, vsock->info.alias) < 0) {
+         ignore_value(qemuDomainObjExitMonitor(driver, vm));
+         goto cleanup;
+     }
+-- 
+2.21.0
+

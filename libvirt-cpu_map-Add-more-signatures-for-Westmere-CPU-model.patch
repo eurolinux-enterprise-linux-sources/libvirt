@@ -1,5 +1,5 @@
-From c34ca3d596e641381b3397958be5f584f6318777 Mon Sep 17 00:00:00 2001
-Message-Id: <c34ca3d596e641381b3397958be5f584f6318777@dist-git>
+From 7dc1f39e60d8ed40b3dd4f391a488eb6a5f74ca2 Mon Sep 17 00:00:00 2001
+Message-Id: <7dc1f39e60d8ed40b3dd4f391a488eb6a5f74ca2@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Mon, 25 Feb 2019 16:44:11 +0100
 Subject: [PATCH] cpu_map: Add more signatures for Westmere CPU model

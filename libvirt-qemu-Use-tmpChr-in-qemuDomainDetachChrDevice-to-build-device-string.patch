@@ -1,0 +1,43 @@
+From 9a0d6a2eac4a69d548620f80ed0c71fc0cb6d415 Mon Sep 17 00:00:00 2001
+Message-Id: <9a0d6a2eac4a69d548620f80ed0c71fc0cb6d415@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:16 -0400
+Subject: [PATCH] qemu: Use @tmpChr in qemuDomainDetachChrDevice to build
+ device string
+
+So far we are passing @chr to qemuBuildChrDeviceStr. This is
+suboptimal (in fact wrong) because @chr is just parsed XML
+definition provided by user which by definition may lack some
+information. On the other hand, @tmpChr is the one that was found
+using @chr in domain definition so it contains the same amount of
+information or more.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit f538f5ed3a876c3cb67ae5b7a01f133f192aca13)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-5-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 5e11e1997a..46cafef4c2 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -5594,7 +5594,7 @@ int qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
+ 
+     sa_assert(tmpChr->info.alias);
+ 
+-    if (qemuBuildChrDeviceStr(&devstr, vmdef, chr, priv->qemuCaps) < 0)
++    if (qemuBuildChrDeviceStr(&devstr, vmdef, tmpChr, priv->qemuCaps) < 0)
+         goto cleanup;
+ 
+     if (!async)
+-- 
+2.21.0
+

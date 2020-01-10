@@ -1,0 +1,80 @@
+From 7fcdf3bbd65b4f3e21128089a559c064edbcb8dc Mon Sep 17 00:00:00 2001
+Message-Id: <7fcdf3bbd65b4f3e21128089a559c064edbcb8dc@dist-git>
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Tue, 21 May 2019 11:02:12 +0100
+Subject: [PATCH] util: require command args to be non-NULL
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The virCommand APIs do not expect to be given a NULL value for an arg
+name or value. Such a mistake can lead to execution of the wrong
+command, as the NULL may prematurely terminate the list of args.
+Detect this and report suitable error messages.
+
+This identified a flaw in the storage test which was passing a NULL
+instead of the volume path. This flaw was then validated by an incorrect
+set of qemu-img args as expected data.
+
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 912c6b22fc622cd7c7d29c7f8eaeb816b266daac)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1672957
+Message-Id: <20190521100213.16875-2-berrange@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/vircommand.c                                | 10 ++++++++++
+ tests/storagevolxml2argvdata/qcow2-zerocapacity.argv |  2 +-
+ tests/storagevolxml2xmlin/vol-qcow2-zerocapacity.xml |  1 +
+ 3 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/src/util/vircommand.c b/src/util/vircommand.c
+index 6dab105f56..68cf63c28a 100644
+--- a/src/util/vircommand.c
++++ b/src/util/vircommand.c
+@@ -1509,6 +1509,12 @@ virCommandAddArg(virCommandPtr cmd, const char *val)
+     if (!cmd || cmd->has_error)
+         return;
+ 
++    if (val == NULL) {
++        cmd->has_error = EINVAL;
++        abort();
++        return;
++    }
++
+     if (VIR_STRDUP_QUIET(arg, val) < 0) {
+         cmd->has_error = ENOMEM;
+         return;
+@@ -1606,6 +1612,10 @@ virCommandAddArgFormat(virCommandPtr cmd, const char *format, ...)
+ void
+ virCommandAddArgPair(virCommandPtr cmd, const char *name, const char *val)
+ {
++    if (name == NULL || val == NULL) {
++        cmd->has_error = EINVAL;
++        return;
++    }
+     virCommandAddArgFormat(cmd, "%s=%s", name, val);
+ }
+ 
+diff --git a/tests/storagevolxml2argvdata/qcow2-zerocapacity.argv b/tests/storagevolxml2argvdata/qcow2-zerocapacity.argv
+index d83b08b342..45894931ae 100644
+--- a/tests/storagevolxml2argvdata/qcow2-zerocapacity.argv
++++ b/tests/storagevolxml2argvdata/qcow2-zerocapacity.argv
+@@ -1 +1 @@
+-qemu-img create -f qcow2 -o compat=0.10  0K
++qemu-img create -f qcow2 -o compat=0.10 /var/lib/libvirt/images/OtherDemo.img 0K
+diff --git a/tests/storagevolxml2xmlin/vol-qcow2-zerocapacity.xml b/tests/storagevolxml2xmlin/vol-qcow2-zerocapacity.xml
+index 1d1e6deac0..027a73b4bf 100644
+--- a/tests/storagevolxml2xmlin/vol-qcow2-zerocapacity.xml
++++ b/tests/storagevolxml2xmlin/vol-qcow2-zerocapacity.xml
+@@ -1,6 +1,7 @@
+ <volume>
+   <name>OtherDemo.img</name>
+   <target>
++    <path>/var/lib/libvirt/images/OtherDemo.img</path>
+     <format type="qcow2"/>
+   </target>
+   <capacity>0</capacity>
+-- 
+2.21.0
+

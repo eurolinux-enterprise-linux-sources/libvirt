@@ -1,5 +1,5 @@
-From 049bb8956ce077d7ea5e8ac613ebb20c7a6b8715 Mon Sep 17 00:00:00 2001
-Message-Id: <049bb8956ce077d7ea5e8ac613ebb20c7a6b8715@dist-git>
+From 0fffd7d7d2767d8f03407c2c61da6baf0ac181c5 Mon Sep 17 00:00:00 2001
+Message-Id: <0fffd7d7d2767d8f03407c2c61da6baf0ac181c5@dist-git>
 From: John Ferlan <jferlan@redhat.com>
 Date: Tue, 12 Mar 2019 13:55:58 -0400
 Subject: [PATCH] util: Introduce virStorageFileGetNPIVKey

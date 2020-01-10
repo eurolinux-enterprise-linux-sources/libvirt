@@ -1,0 +1,106 @@
+From bd5cb5d5dfff79f092c843116876837d50b60250 Mon Sep 17 00:00:00 2001
+Message-Id: <bd5cb5d5dfff79f092c843116876837d50b60250@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:46 +0200
+Subject: [PATCH] util: Refactor virResctrlAllocFormat of virresctrl
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Refactor virResctrlAllocFormat so that it is easy to support other
+resource allocation technologies.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 65bae2f18c27c4a30a8ea675b7c3767cdfbe4c70)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <18dd3a283af009213d718a81f66fe625f6335ece.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virresctrl.c | 41 ++++++++++++++++++++++++++---------------
+ 1 file changed, 26 insertions(+), 15 deletions(-)
+
+diff --git a/src/util/virresctrl.c b/src/util/virresctrl.c
+index 313f964f21..a38c9261b6 100644
+--- a/src/util/virresctrl.c
++++ b/src/util/virresctrl.c
+@@ -849,17 +849,14 @@ virResctrlAllocGetID(virResctrlAllocPtr alloc)
+ }
+ 
+ 
+-char *
+-virResctrlAllocFormat(virResctrlAllocPtr alloc)
++static int
++virResctrlAllocFormatCache(virResctrlAllocPtr alloc,
++                           virBufferPtr buf)
+ {
+-    virBuffer buf = VIR_BUFFER_INITIALIZER;
+     unsigned int level = 0;
+     unsigned int type = 0;
+     unsigned int cache = 0;
+ 
+-    if (!alloc)
+-        return NULL;
+-
+     for (level = 0; level < alloc->nlevels; level++) {
+         virResctrlAllocPerLevelPtr a_level = alloc->levels[level];
+ 
+@@ -872,7 +869,7 @@ virResctrlAllocFormat(virResctrlAllocPtr alloc)
+             if (!a_type)
+                 continue;
+ 
+-            virBufferAsprintf(&buf, "L%u%s:", level, virResctrlTypeToString(type));
++            virBufferAsprintf(buf, "L%u%s:", level, virResctrlTypeToString(type));
+ 
+             for (cache = 0; cache < a_type->nmasks; cache++) {
+                 virBitmapPtr mask = a_type->masks[cache];
+@@ -882,21 +879,35 @@ virResctrlAllocFormat(virResctrlAllocPtr alloc)
+                     continue;
+ 
+                 mask_str = virBitmapToString(mask, false, true);
+-                if (!mask_str) {
+-                    virBufferFreeAndReset(&buf);
+-                    return NULL;
+-                }
++                if (!mask_str)
++                    return -1;
+ 
+-                virBufferAsprintf(&buf, "%u=%s;", cache, mask_str);
++                virBufferAsprintf(buf, "%u=%s;", cache, mask_str);
+                 VIR_FREE(mask_str);
+             }
+ 
+-            virBufferTrim(&buf, ";", 1);
+-            virBufferAddChar(&buf, '\n');
++            virBufferTrim(buf, ";", 1);
++            virBufferAddChar(buf, '\n');
+         }
+     }
+ 
+-    virBufferCheckError(&buf);
++    return virBufferCheckError(buf);
++}
++
++
++char *
++virResctrlAllocFormat(virResctrlAllocPtr alloc)
++{
++    virBuffer buf = VIR_BUFFER_INITIALIZER;
++
++    if (!alloc)
++        return NULL;
++
++    if (virResctrlAllocFormatCache(alloc, &buf) < 0) {
++        virBufferFreeAndReset(&buf);
++        return NULL;
++    }
++
+     return virBufferContentAndReset(&buf);
+ }
+ 
+-- 
+2.21.0
+

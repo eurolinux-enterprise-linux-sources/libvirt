@@ -1,0 +1,43 @@
+From 3af732efb21503e81d31ff600d024b240d6105f3 Mon Sep 17 00:00:00 2001
+Message-Id: <3af732efb21503e81d31ff600d024b240d6105f3@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:30 +0200
+Subject: [PATCH] conf: gfx: Add egl-headless as a member to
+ virDomainGraphicsDef struct
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since we need to specify the rendernode option onto QEMU cmdline, we
+need this union member to retain consistency in how we build the
+cmdline.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 0a75de221984b971cb841c6918e6746eb22b1547)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <5dc5762e104b6a4729bf6fa9a470f10a6e6c256f.1554791287.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index b1139812d5..2d272f907f 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -1656,6 +1656,9 @@ struct _virDomainGraphicsDef {
+             virTristateBool gl;
+             char *rendernode;
+         } spice;
++        struct {
++            char *rendernode;
++        } egl_headless;
+     } data;
+     /* nListens, listens, and *port are only useful if type is vnc,
+      * rdp, or spice. They've been extracted from the union only to
+-- 
+2.21.0
+

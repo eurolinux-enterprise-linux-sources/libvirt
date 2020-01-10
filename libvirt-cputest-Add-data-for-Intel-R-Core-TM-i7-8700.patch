@@ -1,5 +1,5 @@
-From 9195e10f017bd06435f8eb0c78f2eecf34391531 Mon Sep 17 00:00:00 2001
-Message-Id: <9195e10f017bd06435f8eb0c78f2eecf34391531@dist-git>
+From 3d3c6150b17d01a3a0e74fcdabfeb7700ba2985d Mon Sep 17 00:00:00 2001
+Message-Id: <3d3c6150b17d01a3a0e74fcdabfeb7700ba2985d@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Mon, 4 Mar 2019 16:45:48 +0100
 Subject: [PATCH] cputest: Add data for Intel(R) Core(TM) i7-8700

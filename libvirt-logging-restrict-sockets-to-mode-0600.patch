@@ -1,5 +1,5 @@
-From b87dc9bc856cd8b9d6dbf61ff7b1aa61653748fb Mon Sep 17 00:00:00 2001
-Message-Id: <b87dc9bc856cd8b9d6dbf61ff7b1aa61653748fb@dist-git>
+From 4c11cc47e947eba9329692f857728758959078cf Mon Sep 17 00:00:00 2001
+Message-Id: <4c11cc47e947eba9329692f857728758959078cf@dist-git>
 From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
 Date: Wed, 15 May 2019 21:40:58 +0100
 Subject: [PATCH] logging: restrict sockets to mode 0600
@@ -17,7 +17,7 @@ Fixes CVE-2019-10132
 
 Reviewed-by: Ján Tomko <jtomko@redhat.com>
 Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
-(cherry picked from a private commit)
+(cherry picked from commit e37bd65f9948c1185456b2cdaa3bd6e875af680f)
 Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
 Message-Id: <20190515204058.28077-4-berrange@redhat.com>
 ---

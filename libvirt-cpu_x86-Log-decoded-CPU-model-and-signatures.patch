@@ -1,5 +1,5 @@
-From 8877885f067aaa87b7ab42de914de5e50f4ef32d Mon Sep 17 00:00:00 2001
-Message-Id: <8877885f067aaa87b7ab42de914de5e50f4ef32d@dist-git>
+From f7b450f2998a2027a4626573db9982615600586b Mon Sep 17 00:00:00 2001
+Message-Id: <f7b450f2998a2027a4626573db9982615600586b@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Mon, 4 Mar 2019 16:37:31 +0100
 Subject: [PATCH] cpu_x86: Log decoded CPU model and signatures

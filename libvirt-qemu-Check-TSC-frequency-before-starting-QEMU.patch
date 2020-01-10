@@ -1,0 +1,121 @@
+From 539a83390fb4b4b0dd7b029b7dd4ba2a345611cd Mon Sep 17 00:00:00 2001
+Message-Id: <539a83390fb4b4b0dd7b029b7dd4ba2a345611cd@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 4 Jun 2019 13:04:33 +0200
+Subject: [PATCH] qemu: Check TSC frequency before starting QEMU
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When migrating a domain with invtsc CPU feature enabled, the TSC
+frequency of the destination host must match the frequency used when the
+domain was started on the source host or the destination host has to
+support TSC scaling.
+
+If the frequencies do not match and the destination host does not
+support TSC scaling, QEMU will fail to set the right TSC frequency when
+starting vCPUs on the destination and thus migration will fail. However,
+this is quite late since both host might have spent significant time
+transferring memory and perhaps even storage data.
+
+By adding the check to libvirt we can let migration fail before any data
+starts to be sent over. If for some reason libvirt is unable to detect
+the host's TSC frequency or scaling support, we'll just let QEMU try and
+the migration will either succeed or fail later.
+
+Luckily, we mandate TSC frequency to be explicitly set in the domain XML
+to even allow migration of domains with invtsc. We can just check
+whether the requested frequency is compatible with the current host
+before starting QEMU.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1641702
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 7da62c91f043209e3d40c2dc7655c5e35a4309bf)
+
+Conflicts:
+	src/qemu/qemu_process.c
+            - qemuProcessStartValidateXML function was removed upstream
+              by commit v4.9.0-89-g91afd53cb8
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <f5fcbf9d5afc4e156d1d2c888dc360d06bb29a1a.1559646067.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_process.c | 53 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 53 insertions(+)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 2795796166..7f70d79566 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -5181,6 +5181,56 @@ qemuProcessStartValidateXML(virQEMUDriverPtr driver,
+ }
+ 
+ 
++static int
++qemuProcessStartValidateTSC(virDomainObjPtr vm,
++                            virCapsPtr caps)
++{
++    size_t i;
++    unsigned long long freq = 0;
++    virHostCPUTscInfoPtr tsc;
++
++    for (i = 0; i < vm->def->clock.ntimers; i++) {
++        virDomainTimerDefPtr timer = vm->def->clock.timers[i];
++
++        if (timer->name == VIR_DOMAIN_TIMER_NAME_TSC &&
++            timer->frequency > 0) {
++            freq = timer->frequency;
++            break;
++        }
++    }
++
++    if (freq == 0)
++        return 0;
++
++    VIR_DEBUG("Requested TSC frequency %llu Hz", freq);
++
++    if (!caps->host.cpu || !caps->host.cpu->tsc) {
++        VIR_DEBUG("Host TSC frequency could not be probed");
++        return 0;
++    }
++
++    tsc = caps->host.cpu->tsc;
++    VIR_DEBUG("Host TSC frequency %llu Hz, scaling %s",
++              tsc->frequency, virTristateBoolTypeToString(tsc->scaling));
++
++    if (freq == tsc->frequency || tsc->scaling == VIR_TRISTATE_BOOL_YES)
++        return 0;
++
++    if (tsc->scaling == VIR_TRISTATE_BOOL_ABSENT) {
++        VIR_DEBUG("TSC frequencies do not match and scaling support is "
++                  "unknown, QEMU will try and possibly fail later");
++        return 0;
++    }
++
++    virReportError(VIR_ERR_CONFIG_UNSUPPORTED,
++                   _("Requested TSC frequency %llu Hz does not match "
++                     "host (%llu Hz) and TSC scaling is not supported "
++                     "by the host CPU"),
++                   freq, tsc->frequency);
++    return -1;
++}
++
++
+ /**
+  * qemuProcessStartValidate:
+  * @vm: domain object
+@@ -5241,6 +5291,9 @@ qemuProcessStartValidate(virQEMUDriverPtr driver,
+     if (qemuProcessStartValidateDisks(vm, qemuCaps) < 0)
+         return -1;
+ 
++    if (qemuProcessStartValidateTSC(vm, caps) < 0)
++        return -1;
++
+     VIR_DEBUG("Checking for any possible (non-fatal) issues");
+ 
+     qemuProcessStartWarnShmem(vm);
+-- 
+2.21.0
+

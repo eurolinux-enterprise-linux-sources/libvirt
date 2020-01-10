@@ -1,0 +1,113 @@
+From b6573a089823817a1aa7ae19d7df3aed4845508e Mon Sep 17 00:00:00 2001
+Message-Id: <b6573a089823817a1aa7ae19d7df3aed4845508e@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:52 +0200
+Subject: [PATCH] util: Introduce virResctrlAllocForeachMemory
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Introduce an API that will traverse the memory bandwidth data calling
+a callback function for each defined bandwidth entry.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 10e699dac9f86a4a266a43a5190def7756f3b762)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <40beb201ddf7c987958e792e47925e8438a5984f.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/libvirt_private.syms |  1 +
+ src/util/virresctrl.c    | 33 +++++++++++++++++++++++++++++++++
+ src/util/virresctrl.h    |  9 +++++++++
+ 3 files changed, 43 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index a3b30bf675..de328d7d22 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -2658,6 +2658,7 @@ virResctrlAllocAddPID;
+ virResctrlAllocCreate;
+ virResctrlAllocDeterminePath;
+ virResctrlAllocForeachCache;
++virResctrlAllocForeachMemory;
+ virResctrlAllocFormat;
+ virResctrlAllocGetID;
+ virResctrlAllocGetUnused;
+diff --git a/src/util/virresctrl.c b/src/util/virresctrl.c
+index 21a9247cb6..45fc6fc847 100644
+--- a/src/util/virresctrl.c
++++ b/src/util/virresctrl.c
+@@ -965,6 +965,39 @@ virResctrlAllocForeachCache(virResctrlAllocPtr alloc,
+ }
+ 
+ 
++/* virResctrlAllocForeachMemory
++ * @alloc: Pointer to an active allocation
++ * @cb: Callback function
++ * @opaque: Opaque data to be passed to @cb
++ *
++ * If available, traverse the defined memory bandwidth allocations and
++ * call the @cb function.
++ *
++ * Returns 0 on success, -1 and immediate failure if the @cb has any failure.
++ */
++int
++virResctrlAllocForeachMemory(virResctrlAllocPtr alloc,
++                             virResctrlAllocForeachMemoryCallback cb,
++                             void *opaque)
++{
++    size_t i = 0;
++    virResctrlAllocMemBWPtr mem_bw;
++
++    if (!alloc || !alloc->mem_bw)
++        return 0;
++
++    mem_bw = alloc->mem_bw;
++    for (i = 0; i < mem_bw->nbandwidths; i++) {
++        if (mem_bw->bandwidths[i]) {
++            if (cb(i, *mem_bw->bandwidths[i], opaque) < 0)
++                return -1;
++        }
++    }
++
++    return 0;
++}
++
++
+ int
+ virResctrlAllocSetID(virResctrlAllocPtr alloc,
+                      const char *id)
+diff --git a/src/util/virresctrl.h b/src/util/virresctrl.h
+index d657c06008..5ea5b27d3b 100644
+--- a/src/util/virresctrl.h
++++ b/src/util/virresctrl.h
+@@ -73,6 +73,10 @@ typedef int virResctrlAllocForeachCacheCallback(unsigned int level,
+                                                 unsigned long long size,
+                                                 void *opaque);
+ 
++typedef int virResctrlAllocForeachMemoryCallback(unsigned int id,
++                                                 unsigned int size,
++                                                 void *opaque);
++
+ virResctrlAllocPtr
+ virResctrlAllocNew(void);
+ 
+@@ -91,6 +95,11 @@ virResctrlAllocForeachCache(virResctrlAllocPtr alloc,
+                             virResctrlAllocForeachCacheCallback cb,
+                             void *opaque);
+ 
++int
++virResctrlAllocForeachMemory(virResctrlAllocPtr resctrl,
++                             virResctrlAllocForeachMemoryCallback cb,
++                             void *opaque);
++
+ int
+ virResctrlAllocSetID(virResctrlAllocPtr alloc,
+                      const char *id);
+-- 
+2.21.0
+

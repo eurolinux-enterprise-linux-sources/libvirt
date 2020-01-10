@@ -1,0 +1,44 @@
+From f0ca7633386d603fb49f6445af3bfce464310887 Mon Sep 17 00:00:00 2001
+Message-Id: <f0ca7633386d603fb49f6445af3bfce464310887@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 4 Apr 2019 11:16:16 +0200
+Subject: [PATCH] qemu: Set job statsType for external memory snapshot
+
+Any job which is able to provide statistics that can be queried via
+virDomainGetJob{Stats,Info} has to set an appropriate statsType.
+
+Without a proper statsType qemuDomainJobInfoToParams and
+qemuDomainJobInfoToInfo have no idea what statistics should be sent to
+the API caller.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1688774
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit 1c2a9260e865af8ad7dde9cdd21515800d1864e7)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1690703
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <0c6c01d9917a35259f5f6aabf39483ff2bde6461.1554369361.git.jdenemar@redhat.com>
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ src/qemu/qemu_driver.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/qemu/qemu_driver.c b/src/qemu/qemu_driver.c
+index 99d0dad911..6ab1aa28c5 100644
+--- a/src/qemu/qemu_driver.c
++++ b/src/qemu/qemu_driver.c
+@@ -15230,6 +15230,8 @@ qemuDomainSnapshotCreateActiveExternal(virQEMUDriverPtr driver,
+         if (!qemuMigrationSrcIsAllowed(driver, vm, false, 0))
+             goto cleanup;
+ 
++        priv->job.current->statsType = QEMU_DOMAIN_JOB_STATS_TYPE_SAVEDUMP;
++
+         /* allow the migration job to be cancelled or the domain to be paused */
+         qemuDomainObjSetAsyncJobMask(vm, (QEMU_JOB_DEFAULT_MASK |
+                                           JOB_MASK(QEMU_JOB_SUSPEND) |
+-- 
+2.21.0
+

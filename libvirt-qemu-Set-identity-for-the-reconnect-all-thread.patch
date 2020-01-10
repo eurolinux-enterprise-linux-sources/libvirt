@@ -1,0 +1,94 @@
+From 773d0240b0d5678f0183eed75dbef7e60d54e3f8 Mon Sep 17 00:00:00 2001
+Message-Id: <773d0240b0d5678f0183eed75dbef7e60d54e3f8@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 07:28:30 -0400
+Subject: [PATCH] qemu: Set identity for the reconnect all thread
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1631622
+
+If polkit authentication is enabled, an attempt to open
+the connection failed during virAccessDriverPolkitGetCaller
+when the call to virIdentityGetCurrent returned NULL resulting
+in the errors:
+
+  virAccessDriverPolkitGetCaller:87 : access denied:
+  Policy kit denied action org.libvirt.api.connect.getattr from <anonymous>
+
+Because qemuProcessReconnect runs in a thread during
+daemonRunStateInit processing it doesn't have the thread
+local identity. Thus when the virGetConnectNWFilter is
+called as part of the qemuProcessFiltersInstantiate when
+virDomainConfNWFilterInstantiate is run the attempt to get
+the idenity fails and results in the anonymous error above.
+
+To fix this, let's grab/use the virIdenityPtr of the process
+that will be creating the thread, e.g. what daemonRunStateInit
+has set and use that for our thread. That way any other similar
+processing that uses/requires an identity for any other call
+that would have previously been successfully run won't fail in
+a similar manner.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit b04b82f8cb671f067bad2d5e922acf88f13f0934)
+Message-Id: <20190403112830.13099-1-jferlan@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/qemu/qemu_process.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 485e455a44..6945d76b18 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -81,6 +81,7 @@
+ #include "netdev_bandwidth_conf.h"
+ #include "virresctrl.h"
+ #include "virvsock.h"
++#include "viridentity.h"
+ 
+ #define VIR_FROM_THIS VIR_FROM_QEMU
+ 
+@@ -7621,6 +7622,7 @@ qemuProcessRefreshCPU(virQEMUDriverPtr driver,
+ struct qemuProcessReconnectData {
+     virQEMUDriverPtr driver;
+     virDomainObjPtr obj;
++    virIdentityPtr identity;
+ };
+ /*
+  * Open an existing VM's monitor, re-detect VCPU threads
+@@ -7657,6 +7659,8 @@ qemuProcessReconnect(void *opaque)
+     virCapsPtr caps = NULL;
+     bool retry = true;
+ 
++    virIdentitySetCurrent(data->identity);
++    virObjectUnref(data->identity);
+     VIR_FREE(data);
+ 
+     qemuDomainObjRestoreJob(obj, &oldjob);
+@@ -7878,6 +7882,7 @@ qemuProcessReconnect(void *opaque)
+     virObjectUnref(cfg);
+     virObjectUnref(caps);
+     virNWFilterUnlockFilterUpdates();
++    virIdentitySetCurrent(NULL);
+     return;
+ 
+  error:
+@@ -7915,6 +7920,7 @@ qemuProcessReconnectHelper(virDomainObjPtr obj,
+ 
+     memcpy(data, src, sizeof(*data));
+     data->obj = obj;
++    data->identity = virIdentityGetCurrent();
+ 
+     virNWFilterReadLockFilterUpdates();
+ 
+@@ -7938,6 +7944,7 @@ qemuProcessReconnectHelper(virDomainObjPtr obj,
+ 
+         virDomainObjEndAPI(&obj);
+         virNWFilterUnlockFilterUpdates();
++        virObjectUnref(data->identity);
+         VIR_FREE(data);
+         return -1;
+     }
+-- 
+2.21.0
+

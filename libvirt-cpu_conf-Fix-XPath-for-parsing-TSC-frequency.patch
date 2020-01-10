@@ -1,0 +1,44 @@
+From 3e0b4c3b680df486b750174203da60e01198bddf Mon Sep 17 00:00:00 2001
+Message-Id: <3e0b4c3b680df486b750174203da60e01198bddf@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 6 Jun 2019 09:29:38 +0200
+Subject: [PATCH] cpu_conf: Fix XPath for parsing TSC frequency
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Due to this bug the following command would fail on any host where TSC
+frequency can be probed:
+
+    $ virsh capabilities | virsh cpu-baseline /dev/stdin
+    error: unsupported configuration: Invalid TSC frequency
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1641702
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 4d21d4acf2eac961b8c25f1ec49a9c25f3951fdb)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/cpu_conf.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/conf/cpu_conf.c b/src/conf/cpu_conf.c
+index d0ad265fbe..7a5e642541 100644
+--- a/src/conf/cpu_conf.c
++++ b/src/conf/cpu_conf.c
+@@ -407,8 +407,8 @@ virCPUDefParseXML(xmlXPathContextPtr ctxt,
+             if (VIR_ALLOC(tsc) < 0)
+                 goto cleanup;
+ 
+-            if (virXPathULongLong("./counter[@name='tsc']/@frequency", ctxt,
+-                                  &tsc->frequency) < 0) {
++            if (virXPathULongLong("string(./counter[@name='tsc']/@frequency)",
++                                  ctxt, &tsc->frequency) < 0) {
+                 virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                                _("Invalid TSC frequency"));
+                 goto cleanup;
+-- 
+2.21.0
+

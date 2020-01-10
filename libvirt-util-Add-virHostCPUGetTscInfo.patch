@@ -1,0 +1,154 @@
+From 8953e599b13320239ced8e2422f95a1286847d93 Mon Sep 17 00:00:00 2001
+Message-Id: <8953e599b13320239ced8e2422f95a1286847d93@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 4 Jun 2019 13:04:29 +0200
+Subject: [PATCH] util: Add virHostCPUGetTscInfo
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+On a KVM x86_64 host which supports invariant TSC this function can be
+used to detect the TSC frequency and the availability of TSC scaling.
+
+The magic MSR numbers required to check if VMX scaling is supported on
+the host are documented in Volume 3 of the Intel® 64 and IA-32
+Architectures Software Developer’s Manual.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit f0f6faba63becfab38c928905ac6ed79f9a318b8)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1641702
+
+Conflicts:
+	src/util/virhostcpu.h
+            - virenum.h doesn't exist downstream, the content is still
+              in virutil.h
+            - the comment after #endif changed upstream
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <b44a5f67b95fde34eacabf86c47c1c278d4cf03f.1559646067.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virhostcpu.c | 71 +++++++++++++++++++++++++++++++++++++++++++
+ src/util/virhostcpu.h | 11 +++++++
+ 2 files changed, 82 insertions(+)
+
+diff --git a/src/util/virhostcpu.c b/src/util/virhostcpu.c
+index 1b6570568c..0f84780e09 100644
+--- a/src/util/virhostcpu.c
++++ b/src/util/virhostcpu.c
+@@ -1364,6 +1364,69 @@ virHostCPUGetMSR(unsigned long index,
+     return virHostCPUGetMSRFromKVM(index, msr);
+ }
+ 
++
++# define VMX_PROCBASED_CTLS2_MSR 0x48b
++# define VMX_USE_TSC_SCALING (1 << 25)
++
++/*
++ * This function should only be called when the host CPU supports invariant TSC
++ * (invtsc CPUID feature).
++ *
++ * Returns pointer to the TSC info structure on success,
++ *         NULL when TSC cannot be probed otherwise.
++ */
++virHostCPUTscInfoPtr
++virHostCPUGetTscInfo(void)
++{
++    virHostCPUTscInfoPtr info;
++    VIR_AUTOCLOSE kvmFd = -1;
++    VIR_AUTOCLOSE vmFd = -1;
++    VIR_AUTOCLOSE vcpuFd = -1;
++    uint64_t msr = 0;
++    int rc;
++
++    if ((kvmFd = open(KVM_DEVICE, O_RDONLY)) < 0) {
++        virReportSystemError(errno, _("Unable to open %s"), KVM_DEVICE);
++        return NULL;
++    }
++
++    if ((vmFd = ioctl(kvmFd, KVM_CREATE_VM, 0)) < 0) {
++        virReportSystemError(errno, "%s",
++                             _("Unable to create KVM VM for TSC probing"));
++        return NULL;
++    }
++
++    if ((vcpuFd = ioctl(vmFd, KVM_CREATE_VCPU, 0)) < 0) {
++        virReportSystemError(errno, "%s",
++                             _("Unable to create KVM vCPU for TSC probing"));
++        return NULL;
++    }
++
++    if ((rc = ioctl(vcpuFd, KVM_GET_TSC_KHZ)) < 0) {
++        virReportSystemError(errno, "%s",
++                             _("Unable to probe TSC frequency"));
++        return NULL;
++    }
++
++    if (VIR_ALLOC(info) < 0)
++        return NULL;
++
++    info->frequency = rc * 1000ULL;
++
++    if (virHostCPUGetMSR(VMX_PROCBASED_CTLS2_MSR, &msr) == 0) {
++        /* High 32 bits of the MSR value indicate whether specific control
++         * can be set to 1. */
++        msr >>= 32;
++
++        info->scaling = virTristateBoolFromBool(!!(msr & VMX_USE_TSC_SCALING));
++    }
++
++    VIR_DEBUG("Detected TSC frequency %llu Hz, scaling %s",
++              info->frequency, virTristateBoolTypeToString(info->scaling));
++
++    return info;
++}
++
+ #else
+ 
+ int
+@@ -1375,6 +1438,14 @@ virHostCPUGetMSR(unsigned long index ATTRIBUTE_UNUSED,
+     return -1;
+ }
+ 
++virHostCPUTscInfoPtr
++virHostCPUGetTscInfo(void)
++{
++    virReportSystemError(ENOSYS, "%s",
++                         _("Probing TSC is not supported on this platform"));
++    return NULL;
++}
++
+ #endif /* HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
+           (defined(__i386__) || defined(__x86_64__)) && \
+           (defined(__linux__) || defined(__FreeBSD__)) */
+diff --git a/src/util/virhostcpu.h b/src/util/virhostcpu.h
+index e705623d4f..ee9d755c83 100644
+--- a/src/util/virhostcpu.h
++++ b/src/util/virhostcpu.h
+@@ -27,6 +27,15 @@
+ # include "internal.h"
+ # include "virarch.h"
+ # include "virbitmap.h"
++# include "virutil.h"
++
++
++typedef struct _virHostCPUTscInfo virHostCPUTscInfo;
++typedef virHostCPUTscInfo *virHostCPUTscInfoPtr;
++struct _virHostCPUTscInfo {
++    unsigned long long frequency;
++    virTristateBool scaling;
++};
+ 
+ 
+ int virHostCPUGetStats(int cpuNum,
+@@ -71,4 +80,6 @@ unsigned int virHostCPUGetMicrocodeVersion(void);
+ int virHostCPUGetMSR(unsigned long index,
+                      uint64_t *msr);
+ 
++virHostCPUTscInfoPtr virHostCPUGetTscInfo(void);
++
+ #endif /* __VIR_HOSTCPU_H__*/
+-- 
+2.21.0
+

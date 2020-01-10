@@ -1,0 +1,85 @@
+From 2c69082662aaa4892434bcd16c764029f707ae0d Mon Sep 17 00:00:00 2001
+Message-Id: <2c69082662aaa4892434bcd16c764029f707ae0d@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 11 Apr 2019 15:14:41 -0400
+Subject: [PATCH] qemu_hotplug: remove extra function in middle of
+ DetachController call chain
+
+qemuDomainDetachDeviceControllerLive() just checks if the controller
+type is SCSI, and then either returns failure, or calls
+qemuDomainDetachControllerDevice().
+
+Instead, lets just check for type != SCSI at the top of the latter
+function, and call it directly.
+
+Signed-off-by: Laine Stump <laine@laine.org>
+ACKed-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit e4d96324b48b8aab864212382390a5c4a40970d2)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-30-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 30 ++++++++----------------------
+ 1 file changed, 8 insertions(+), 22 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 930f8d3358..1b15116a9f 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4996,6 +4996,13 @@ int qemuDomainDetachControllerDevice(virQEMUDriverPtr driver,
+     int idx, ret = -1;
+     virDomainControllerDefPtr detach = NULL;
+ 
++    if (dev->data.controller->type != VIR_DOMAIN_CONTROLLER_TYPE_SCSI) {
++        virReportError(VIR_ERR_OPERATION_UNSUPPORTED,
++                       _("'%s' controller cannot be hot unplugged."),
++                       virDomainControllerTypeToString(dev->data.controller->type));
++        return -1;
++    }
++
+     if ((idx = virDomainControllerFind(vm->def,
+                                        dev->data.controller->type,
+                                        dev->data.controller->idx)) < 0) {
+@@ -5638,27 +5645,6 @@ qemuDomainDetachLease(virQEMUDriverPtr driver,
+ }
+ 
+ 
+-static int
+-qemuDomainDetachDeviceControllerLive(virQEMUDriverPtr driver,
+-                                     virDomainObjPtr vm,
+-                                     virDomainDeviceDefPtr dev,
+-                                     bool async)
+-{
+-    virDomainControllerDefPtr cont = dev->data.controller;
+-    int ret = -1;
+-
+-    switch (cont->type) {
+-    case VIR_DOMAIN_CONTROLLER_TYPE_SCSI:
+-        ret = qemuDomainDetachControllerDevice(driver, vm, dev, async);
+-        break;
+-    default :
+-        virReportError(VIR_ERR_OPERATION_UNSUPPORTED,
+-                       _("'%s' controller cannot be hot unplugged."),
+-                       virDomainControllerTypeToString(cont->type));
+-    }
+-    return ret;
+-}
+-
+ int
+ qemuDomainDetachDeviceLive(virDomainObjPtr vm,
+                            virDomainDeviceDefPtr dev,
+@@ -5672,7 +5658,7 @@ qemuDomainDetachDeviceLive(virDomainObjPtr vm,
+         ret = qemuDomainDetachDeviceDiskLive(driver, vm, dev, async);
+         break;
+     case VIR_DOMAIN_DEVICE_CONTROLLER:
+-        ret = qemuDomainDetachDeviceControllerLive(driver, vm, dev, async);
++        ret = qemuDomainDetachControllerDevice(driver, vm, dev, async);
+         break;
+     case VIR_DOMAIN_DEVICE_LEASE:
+         ret = qemuDomainDetachLease(driver, vm, dev->data.lease);
+-- 
+2.21.0
+

@@ -1,0 +1,45 @@
+From fd6730d460560af166d953e8daf8b68df84e030e Mon Sep 17 00:00:00 2001
+Message-Id: <fd6730d460560af166d953e8daf8b68df84e030e@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:13 -0400
+Subject: [PATCH] qemu: hotplug: Don't generate alias when detaching disk
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+It should be impossible to lack an alias in the domain definition. Other
+disk types don't generate it so remove it here as well.
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 2bd9db9659f58864b01f7f51b414e54f45d8d368)
+
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-2-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 397a2bdde2..15d845e7b8 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4685,11 +4685,6 @@ qemuDomainDetachVirtioDiskDevice(virQEMUDriverPtr driver,
+         goto cleanup;
+     }
+ 
+-    if (!detach->info.alias) {
+-        if (qemuAssignDeviceDiskAlias(vm->def, detach) < 0)
+-            goto cleanup;
+-    }
+-
+     if (!async)
+         qemuDomainMarkDeviceForRemoval(vm, &detach->info);
+ 
+-- 
+2.21.0
+

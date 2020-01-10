@@ -1,0 +1,128 @@
+From 58c87fb5d45a70bc10593398d9db5a91a43eb280 Mon Sep 17 00:00:00 2001
+Message-Id: <58c87fb5d45a70bc10593398d9db5a91a43eb280@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Tue, 4 Jun 2019 16:22:05 +0200
+Subject: [PATCH] util: Introduce virNumaNodesetToCPUset()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This helper converts a set of NUMA node to the set of CPUs
+they contain.
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 2d2b26f96fed1e95dd4495168cee73c5c4092634)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1703661
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190604142207.2036-5-abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/libvirt_private.syms |  1 +
+ src/util/virnuma.c       | 55 ++++++++++++++++++++++++++++++++++++++++
+ src/util/virnuma.h       |  2 ++
+ 3 files changed, 58 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index e9c5b5ea33..bf99930802 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -2475,6 +2475,7 @@ virNumaGetPages;
+ virNumaIsAvailable;
+ virNumaNodeIsAvailable;
+ virNumaNodesetIsAvailable;
++virNumaNodesetToCPUset;
+ virNumaSetPagePoolSize;
+ virNumaSetupMemoryPolicy;
+ 
+diff --git a/src/util/virnuma.c b/src/util/virnuma.c
+index fd15714553..75f80dcd30 100644
+--- a/src/util/virnuma.c
++++ b/src/util/virnuma.c
+@@ -311,6 +311,49 @@ virNumaGetNodeCPUs(int node,
+ # undef MASK_CPU_ISSET
+ # undef n_bits
+ 
++/**
++ * virNumaNodesetToCPUset:
++ * @nodeset: bitmap containing a set of NUMA nodes
++ * @cpuset: return location for a bitmap containing a set of CPUs
++ *
++ * Convert a set of NUMA node to the set of CPUs they contain.
++ *
++ * Returns 0 on success, <0 on failure.
++ */
++int
++virNumaNodesetToCPUset(virBitmapPtr nodeset,
++                       virBitmapPtr *cpuset)
++{
++    VIR_AUTOPTR(virBitmap) allNodesCPUs = NULL;
++    size_t nodesetSize;
++    size_t i;
++
++    *cpuset = NULL;
++
++    if (!nodeset)
++        return 0;
++
++    allNodesCPUs = virBitmapNewEmpty();
++    nodesetSize = virBitmapSize(nodeset);
++
++    for (i = 0; i < nodesetSize; i++) {
++        VIR_AUTOPTR(virBitmap) nodeCPUs = NULL;
++
++        if (!virBitmapIsBitSet(nodeset, i))
++            continue;
++
++        if (virNumaGetNodeCPUs(i, &nodeCPUs) < 0)
++            return -1;
++
++        if (virBitmapUnion(allNodesCPUs, nodeCPUs) < 0)
++            return -1;
++    }
++
++    VIR_STEAL_PTR(*cpuset, allNodesCPUs);
++
++    return 0;
++}
++
+ #else /* !WITH_NUMACTL */
+ 
+ int
+@@ -365,6 +408,18 @@ virNumaGetNodeCPUs(int node ATTRIBUTE_UNUSED,
+                    _("NUMA isn't available on this host"));
+     return -1;
+ }
++
++int
++virNumaNodesetToCPUset(virBitmapPtr nodeset ATTRIBUTE_UNUSED,
++                       virBitmapPtr *cpuset)
++{
++    *cpuset = NULL;
++
++    virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                   _("NUMA isn't available on this host"));
++    return -1;
++}
++
+ #endif /* !WITH_NUMACTL */
+ 
+ /**
+diff --git a/src/util/virnuma.h b/src/util/virnuma.h
+index a3ffb6d6c7..df7911db4e 100644
+--- a/src/util/virnuma.h
++++ b/src/util/virnuma.h
+@@ -48,6 +48,8 @@ int virNumaGetNodeMemory(int node,
+ unsigned int virNumaGetMaxCPUs(void);
+ 
+ int virNumaGetNodeCPUs(int node, virBitmapPtr *cpus) ATTRIBUTE_NOINLINE;
++int virNumaNodesetToCPUset(virBitmapPtr nodeset,
++                           virBitmapPtr *cpuset);
+ 
+ int virNumaGetPageInfo(int node,
+                        unsigned int page_size,
+-- 
+2.21.0
+

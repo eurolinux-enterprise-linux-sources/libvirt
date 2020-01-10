@@ -1,0 +1,106 @@
+From 91b7c36af5d91f9ddfe47a3a2b1b35368ef171a4 Mon Sep 17 00:00:00 2001
+Message-Id: <91b7c36af5d91f9ddfe47a3a2b1b35368ef171a4@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Fri, 5 Apr 2019 10:57:40 +0200
+Subject: [PATCH] qemu: Drop QEMU_CAPS_ENABLE_KVM
+
+It was already available in 1.5.0.
+
+Moreover, we're not even formatting it on the QEMU command
+line, ever: we just use it as part of some logic that decides
+whether KVM support should be advertised, and as it turns out
+that logic is actually buggy and dropping this capability
+fixes it.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628469
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 88983855d5496a74b97551860db737c2b17b100e)
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190405085744.8179-4-abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c |  3 ---
+ src/qemu/qemu_capabilities.h |  2 +-
+ tests/qemuxml2argvtest.c     | 11 +++++------
+ 3 files changed, 6 insertions(+), 10 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 4f2051a2bb..c31c991a6f 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -834,7 +834,6 @@ virQEMUCapsInitGuestFromBinary(virCapsPtr caps,
+ 
+     if (virFileExists("/dev/kvm") &&
+         (virQEMUCapsGet(qemubinCaps, QEMU_CAPS_KVM) ||
+-         virQEMUCapsGet(qemubinCaps, QEMU_CAPS_ENABLE_KVM) ||
+          kvmbin))
+         haskvm = true;
+ 
+@@ -2604,7 +2603,6 @@ virQEMUCapsProbeQMPKVMState(virQEMUCapsPtr qemuCaps,
+         virQEMUCapsClear(qemuCaps, QEMU_CAPS_KVM);
+     } else if (!enabled) {
+         virQEMUCapsClear(qemuCaps, QEMU_CAPS_KVM);
+-        virQEMUCapsSet(qemuCaps, QEMU_CAPS_ENABLE_KVM);
+     }
+ 
+     return 0;
+@@ -3912,7 +3910,6 @@ virQEMUCapsIsValid(void *data,
+                                     priv->runUid, priv->runGid) == 0;
+ 
+     if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_KVM) &&
+-        virQEMUCapsGet(qemuCaps, QEMU_CAPS_ENABLE_KVM) &&
+         kvmUsable) {
+         VIR_DEBUG("KVM was not enabled when probing '%s', "
+                   "but it should be usable now",
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 9e8ad5f5c3..98668115d6 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -79,7 +79,7 @@ typedef enum { /* virQEMUCapsFlags grouping marker for syntax-check */
+     X_QEMU_CAPS_XEN_DOMID, /* -xen-domid */
+     X_QEMU_CAPS_MIGRATE_QEMU_UNIX, /* qemu migration via unix sockets */
+     X_QEMU_CAPS_CHARDEV, /* Is the new -chardev arg available */
+-    QEMU_CAPS_ENABLE_KVM, /* -enable-kvm flag */
++    X_QEMU_CAPS_ENABLE_KVM, /* -enable-kvm flag */
+     X_QEMU_CAPS_MONITOR_JSON, /* JSON mode for monitor */
+ 
+     /* 25 */
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 7a731e2f40..f401076731 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -912,16 +912,15 @@ mymain(void)
+     DO_TEST("clock-france", NONE);
+     DO_TEST("clock-hpet-off", NONE);
+     DO_TEST("clock-catchup", QEMU_CAPS_KVM_PIT_TICK_POLICY);
+-    DO_TEST("cpu-kvmclock", QEMU_CAPS_ENABLE_KVM);
+-    DO_TEST("cpu-host-kvmclock", QEMU_CAPS_ENABLE_KVM);
++    DO_TEST("cpu-kvmclock", NONE);
++    DO_TEST("cpu-host-kvmclock", NONE);
+     DO_TEST("kvmclock", QEMU_CAPS_KVM);
+     DO_TEST("clock-timer-hyperv-rtc", QEMU_CAPS_KVM);
+ 
+-    DO_TEST("cpu-eoi-disabled", QEMU_CAPS_ENABLE_KVM);
+-    DO_TEST("cpu-eoi-enabled", QEMU_CAPS_ENABLE_KVM);
++    DO_TEST("cpu-eoi-disabled", NONE);
++    DO_TEST("cpu-eoi-enabled", NONE);
+     DO_TEST("controller-order",
+             QEMU_CAPS_KVM,
+-            QEMU_CAPS_ENABLE_KVM,
+             QEMU_CAPS_PIIX3_USB_UHCI,
+             QEMU_CAPS_CCID_PASSTHRU,
+             QEMU_CAPS_SPICE,
+@@ -933,7 +932,7 @@ mymain(void)
+     DO_TEST("eoi-enabled", NONE);
+     DO_TEST("pv-spinlock-disabled", NONE);
+     DO_TEST("pv-spinlock-enabled", NONE);
+-    DO_TEST("kvmclock+eoi-disabled", QEMU_CAPS_ENABLE_KVM);
++    DO_TEST("kvmclock+eoi-disabled", NONE);
+ 
+     DO_TEST("hyperv", NONE);
+     DO_TEST("hyperv-off", NONE);
+-- 
+2.21.0
+

@@ -1,0 +1,38 @@
+From c0156a27f2ec169bf5452373f0815622d9fcd6ad Mon Sep 17 00:00:00 2001
+Message-Id: <c0156a27f2ec169bf5452373f0815622d9fcd6ad@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 07:12:37 -0400
+Subject: [PATCH] virsh: Add missed fields to pool-define-as item entry
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1615680
+
+Commit id d45bee449 updated the pool-define-as qualifier descriptions
+to add some new fields, but neglected to modify the command item list
+in order to add those fields as well.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit b0451117b399df8107340dee8b653cb48e8da1c8)
+Message-Id: <20190403111237.2009-1-jferlan@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ tools/virsh.pod | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 0e704bc407..3e9c264fe8 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -3822,7 +3822,9 @@ just I<--build> is provided, then B<pool-build> is called with no flags.
+ [I<--auth-type authtype> I<--auth-username username>
+ [I<--secret-usage usage> | I<--secret-uuid uuid>]]
+ [[I<--adapter-name name>] | [I<--adapter-wwnn> wwnn I<--adapter-wwpn> wwpn]
+-[I<--adapter-parent parent>]]
++[I<--adapter-parent parent> |
++ I<--adapter-parent-wwnn parent_wwnn> I<adapter-parent-wwpn parent_wwpn> |
++ I<--adapter-parent-fabric-wwn parent_fabric_wwn>]]
+ [I<--build>] [[I<--overwrite>] | [I<--no-overwrite>]] [I<--print-xml>]
+ 
+ 
+-- 
+2.21.0
+

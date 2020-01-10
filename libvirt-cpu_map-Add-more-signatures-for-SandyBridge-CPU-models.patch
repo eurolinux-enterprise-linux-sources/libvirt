@@ -1,5 +1,5 @@
-From 0b0c3aef9a537d9395d53806ac3695348a47dc09 Mon Sep 17 00:00:00 2001
-Message-Id: <0b0c3aef9a537d9395d53806ac3695348a47dc09@dist-git>
+From 663256a04ab602b25b861db27fdac57876cc8cd2 Mon Sep 17 00:00:00 2001
+Message-Id: <663256a04ab602b25b861db27fdac57876cc8cd2@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Tue, 26 Feb 2019 20:26:35 +0100
 Subject: [PATCH] cpu_map: Add more signatures for SandyBridge CPU models

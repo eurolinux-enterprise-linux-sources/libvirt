@@ -354,5 +354,5 @@ index 790911cacb..85f22063fe 100644
 -VIR_TEST_MAIN(mymain)
 +VIR_TEST_MAIN_PRELOAD(mymain, abs_builddir "/.libs/virfilemock.so")
 -- 
-2.19.1
+2.21.0
 

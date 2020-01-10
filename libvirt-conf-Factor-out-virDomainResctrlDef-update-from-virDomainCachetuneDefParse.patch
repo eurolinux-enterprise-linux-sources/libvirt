@@ -1,0 +1,164 @@
+From 7551c4a8b453278e7a27a8e7a722851af1f23efc Mon Sep 17 00:00:00 2001
+Message-Id: <7551c4a8b453278e7a27a8e7a722851af1f23efc@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:57 +0200
+Subject: [PATCH] conf: Factor out virDomainResctrlDef update from
+ virDomainCachetuneDefParse
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Factor out vcpus virDomainResctrlDef update from
+virDomainCachetuneDefParse and introduce virDomainResctrlAppend.
+virDomainResctrlAppend will format vcpus string and append a new
+virDomainResctrlDef to virDomainDefPtr. So that this logic can
+be reusable.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 72824f67cdb9c474034539e81fb03fb1bc94495f)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <b3da60a6b3ca4eea6712bbbdfba03b6037e41239.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c | 93 +++++++++++++++++++++++++-----------------
+ 1 file changed, 55 insertions(+), 38 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index fb5adbcd10..44bfd75b72 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -19176,6 +19176,58 @@ virDomainCachetuneDefParseCache(xmlXPathContextPtr ctxt,
+ }
+ 
+ 
++static int
++virDomainResctrlAppend(virDomainDefPtr def,
++                       xmlNodePtr node,
++                       virResctrlAllocPtr alloc,
++                       virBitmapPtr vcpus,
++                       unsigned int flags)
++{
++    char *vcpus_str = NULL;
++    char *alloc_id = NULL;
++    virDomainResctrlDefPtr tmp_resctrl = NULL;
++    int ret = -1;
++
++    if (VIR_ALLOC(tmp_resctrl) < 0)
++        goto cleanup;
++
++    /* We need to format it back because we need to be consistent in the naming
++     * even when users specify some "sub-optimal" string there. */
++    vcpus_str = virBitmapFormat(vcpus);
++    if (!vcpus_str)
++        goto cleanup;
++
++    if (!(flags & VIR_DOMAIN_DEF_PARSE_INACTIVE))
++        alloc_id = virXMLPropString(node, "id");
++
++    if (!alloc_id) {
++        /* The number of allocations is limited and the directory structure is flat,
++         * not hierarchical, so we need to have all same allocations in one
++         * directory, so it's nice to have it named appropriately.  For now it's
++         * 'vcpus_...' but it's designed in order for it to be changeable in the
++         * future (it's part of the status XML). */
++        if (virAsprintf(&alloc_id, "vcpus_%s", vcpus_str) < 0)
++            goto cleanup;
++    }
++
++    if (virResctrlAllocSetID(alloc, alloc_id) < 0)
++        goto cleanup;
++
++    tmp_resctrl->vcpus = vcpus;
++    tmp_resctrl->alloc = alloc;
++
++    if (VIR_APPEND_ELEMENT(def->resctrls, def->nresctrls, tmp_resctrl) < 0)
++        goto cleanup;
++
++    ret = 0;
++ cleanup:
++    virDomainResctrlDefFree(tmp_resctrl);
++    VIR_FREE(alloc_id);
++    VIR_FREE(vcpus_str);
++    return ret;
++}
++
++
+ static int
+ virDomainCachetuneDefParse(virDomainDefPtr def,
+                            xmlXPathContextPtr ctxt,
+@@ -19186,19 +19238,12 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+     xmlNodePtr *nodes = NULL;
+     virBitmapPtr vcpus = NULL;
+     virResctrlAllocPtr alloc = NULL;
+-    virDomainResctrlDefPtr tmp_resctrl = NULL;
+-    char *tmp = NULL;
+-    char *vcpus_str = NULL;
+-    char *alloc_id = NULL;
+     ssize_t i = 0;
+     int n;
+     int ret = -1;
+ 
+     ctxt->node = node;
+ 
+-    if (VIR_ALLOC(tmp_resctrl) < 0)
+-        goto cleanup;
+-
+     if (virDomainResctrlParseVcpus(def, node, &vcpus) < 0)
+         goto cleanup;
+ 
+@@ -19236,45 +19281,17 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+         goto cleanup;
+     }
+ 
+-    /* We need to format it back because we need to be consistent in the naming
+-     * even when users specify some "sub-optimal" string there. */
+-    VIR_FREE(vcpus_str);
+-    vcpus_str = virBitmapFormat(vcpus);
+-    if (!vcpus_str)
+-        goto cleanup;
+-
+-    if (!(flags & VIR_DOMAIN_DEF_PARSE_INACTIVE))
+-        alloc_id = virXMLPropString(node, "id");
+-
+-    if (!alloc_id) {
+-        /* The number of allocations is limited and the directory structure is flat,
+-         * not hierarchical, so we need to have all same allocations in one
+-         * directory, so it's nice to have it named appropriately.  For now it's
+-         * 'vcpus_...' but it's designed in order for it to be changeable in the
+-         * future (it's part of the status XML). */
+-        if (virAsprintf(&alloc_id, "vcpus_%s", vcpus_str) < 0)
+-            goto cleanup;
+-    }
+-
+-    if (virResctrlAllocSetID(alloc, alloc_id) < 0)
+-        goto cleanup;
+-
+-    VIR_STEAL_PTR(tmp_resctrl->vcpus, vcpus);
+-    VIR_STEAL_PTR(tmp_resctrl->alloc, alloc);
+-
+-    if (VIR_APPEND_ELEMENT(def->resctrls, def->nresctrls, tmp_resctrl) < 0)
++    if (virDomainResctrlAppend(def, node, alloc, vcpus, flags) < 0)
+         goto cleanup;
++    vcpus = NULL;
++    alloc = NULL;
+ 
+     ret = 0;
+  cleanup:
+     ctxt->node = oldnode;
+-    virDomainResctrlDefFree(tmp_resctrl);
+     virObjectUnref(alloc);
+     virBitmapFree(vcpus);
+-    VIR_FREE(alloc_id);
+-    VIR_FREE(vcpus_str);
+     VIR_FREE(nodes);
+-    VIR_FREE(tmp);
+     return ret;
+ }
+ 
+-- 
+2.21.0
+

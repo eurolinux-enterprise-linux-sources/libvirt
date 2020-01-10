@@ -1,0 +1,107 @@
+From b7a1f0836d350bb4ee6930784a6f219e600ef794 Mon Sep 17 00:00:00 2001
+Message-Id: <b7a1f0836d350bb4ee6930784a6f219e600ef794@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 4 Jun 2019 13:04:27 +0200
+Subject: [PATCH] qemu: Make virQEMUCapsProbeHostCPUForEmulator more generic
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The function is renamed as virQEMUCapsProbeHostCPU and it does not get
+the list of allowed CPU models from qemuCaps anymore. This is
+responsibility is moved to the caller. The result is just a very thin
+wrapper around virCPUGetHost mostly required mocking in tests.
+
+The generic function is used in place of a direct call to virCPUGetHost
+in virQEMUCapsInitHostCPUModel to make sure tests don't accidentally
+probe host CPU.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit dd3fc650de8ef8b05b491c9f362b660e07a857fd)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1641702
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <36a308ac10a2c86970ea3188dcb197c75adddefe.1559646067.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_capabilities.c | 14 ++++++--------
+ src/qemu/qemu_capspriv.h     |  5 ++---
+ tests/qemucpumock.c          |  5 ++---
+ 3 files changed, 10 insertions(+), 14 deletions(-)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index 66eefae988..c5032f9192 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -924,12 +924,10 @@ virQEMUCapsInitGuestFromBinary(virCapsPtr caps,
+ 
+ 
+ virCPUDefPtr
+-virQEMUCapsProbeHostCPUForEmulator(virArch hostArch,
+-                                   virQEMUCapsPtr qemuCaps,
+-                                   virDomainVirtType type)
++virQEMUCapsProbeHostCPU(virArch hostArch,
++                        virDomainCapsCPUModelsPtr models)
+ {
+-    return virCPUGetHost(hostArch, VIR_CPU_TYPE_GUEST, NULL,
+-                         virQEMUCapsGetCPUDefinitions(qemuCaps, type));
++    return virCPUGetHost(hostArch, VIR_CPU_TYPE_GUEST, NULL, models);
+ }
+ 
+ 
+@@ -2960,7 +2958,8 @@ virQEMUCapsInitHostCPUModel(virQEMUCapsPtr qemuCaps,
+     } else if (rc == 1) {
+         VIR_DEBUG("No host CPU model info from QEMU; probing host CPU directly");
+ 
+-        hostCPU = virQEMUCapsProbeHostCPUForEmulator(hostArch, qemuCaps, type);
++        hostCPU = virQEMUCapsProbeHostCPU(hostArch,
++                                          virQEMUCapsGetCPUDefinitions(qemuCaps, type));
+         if (!hostCPU ||
+             virCPUDefCopyModelFilter(cpu, hostCPU, true,
+                                      virQEMUCapsCPUFilterFeatures,
+@@ -2973,8 +2972,7 @@ virQEMUCapsInitHostCPUModel(virQEMUCapsPtr qemuCaps,
+         goto error;
+     } else if (type == VIR_DOMAIN_VIRT_KVM &&
+                virCPUGetHostIsSupported(qemuCaps->arch)) {
+-        if (!(fullCPU = virCPUGetHost(qemuCaps->arch, VIR_CPU_TYPE_GUEST,
+-                                      NULL, NULL)))
++        if (!(fullCPU = virQEMUCapsProbeHostCPU(qemuCaps->arch, NULL)))
+             goto error;
+ 
+         if (!(cpuExpanded = virCPUDefCopy(cpu)) ||
+diff --git a/src/qemu/qemu_capspriv.h b/src/qemu/qemu_capspriv.h
+index cb5e0dd9a9..8e458ef227 100644
+--- a/src/qemu/qemu_capspriv.h
++++ b/src/qemu/qemu_capspriv.h
+@@ -81,9 +81,8 @@ virQEMUCapsSetCPUModelInfo(virQEMUCapsPtr qemuCaps,
+                            qemuMonitorCPUModelInfoPtr modelInfo);
+ 
+ virCPUDefPtr
+-virQEMUCapsProbeHostCPUForEmulator(virArch hostArch,
+-                                   virQEMUCapsPtr qemuCaps,
+-                                   virDomainVirtType type) ATTRIBUTE_NOINLINE;
++virQEMUCapsProbeHostCPU(virArch hostArch,
++                        virDomainCapsCPUModelsPtr models) ATTRIBUTE_NOINLINE;
+ 
+ void
+ virQEMUCapsSetGICCapabilities(virQEMUCapsPtr qemuCaps,
+diff --git a/tests/qemucpumock.c b/tests/qemucpumock.c
+index 74dcfa6291..0e89e9764f 100644
+--- a/tests/qemucpumock.c
++++ b/tests/qemucpumock.c
+@@ -29,9 +29,8 @@
+ 
+ 
+ virCPUDefPtr
+-virQEMUCapsProbeHostCPUForEmulator(virArch hostArch ATTRIBUTE_UNUSED,
+-                                   virQEMUCapsPtr qemuCaps ATTRIBUTE_UNUSED,
+-                                   virDomainVirtType type ATTRIBUTE_UNUSED)
++virQEMUCapsProbeHostCPU(virArch hostArch ATTRIBUTE_UNUSED,
++                        virDomainCapsCPUModelsPtr models ATTRIBUTE_UNUSED)
+ {
+     const char *model = getenv("VIR_TEST_MOCK_FAKE_HOST_CPU");
+ 
+-- 
+2.21.0
+

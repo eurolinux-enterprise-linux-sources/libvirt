@@ -1,0 +1,397 @@
+From a7292e2be3fef0c14d5393120471b1dc5d7a5adb Mon Sep 17 00:00:00 2001
+Message-Id: <a7292e2be3fef0c14d5393120471b1dc5d7a5adb@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:33:00 +0200
+Subject: [PATCH] conf: Add memory bandwidth allocation capability of host
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add new XML section to report host's memory bandwidth allocation
+capability. The format as below example:
+
+ <host>
+ .....
+   <memory_bandwidth>
+     <node id='0' cpus='0-19'>
+       <control granularity='10' min ='10' maxAllocs='8'/>
+     </node>
+   </memory_bandwidth>
+</host>
+
+granularity   ---- granularity of memory bandwidth, unit percentage.
+min           ---- minimum memory bandwidth allowed, unit percentage.
+maxAllocs     ---- maximum memory bandwidth allocation group supported.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 7995fecc25c6bc8d0ebb243ea2c8765b076c8974)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <eda433c39cf6e5462b3076fa3049ac5a042af0c1.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ docs/schemas/capability.rng                   |  33 ++++++
+ src/conf/capabilities.c                       | 107 ++++++++++++++++++
+ src/conf/capabilities.h                       |  11 ++
+ src/util/virresctrl.c                         |  20 ++++
+ src/util/virresctrl.h                         |  15 +++
+ .../resctrl/info/MB/bandwidth_gran            |   1 +
+ .../resctrl/info/MB/min_bandwidth             |   1 +
+ .../linux-resctrl/resctrl/info/MB/num_closids |   1 +
+ .../vircaps-x86_64-resctrl.xml                |   8 ++
+ tests/virresctrldata/resctrl.schemata         |   1 +
+ 10 files changed, 198 insertions(+)
+ create mode 100644 tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/bandwidth_gran
+ create mode 100644 tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/min_bandwidth
+ create mode 100644 tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/num_closids
+
+diff --git a/docs/schemas/capability.rng b/docs/schemas/capability.rng
+index 52164d5ecb..d61515ccbe 100644
+--- a/docs/schemas/capability.rng
++++ b/docs/schemas/capability.rng
+@@ -51,6 +51,9 @@
+       <optional>
+         <ref name='cache'/>
+       </optional>
++      <optional>
++        <ref name='memory_bandwidth'/>
++      </optional>
+       <zeroOrMore>
+         <ref name='secmodel'/>
+       </zeroOrMore>
+@@ -326,6 +329,36 @@
+     </attribute>
+   </define>
+ 
++  <define name='memory_bandwidth'>
++    <element name='memory_bandwidth'>
++      <oneOrMore>
++        <element name='node'>
++          <attribute name='id'>
++            <ref name='unsignedInt'/>
++          </attribute>
++          <attribute name='cpus'>
++            <ref name='cpuset'/>
++          </attribute>
++          <zeroOrMore>
++            <element name='control'>
++              <attribute name='granularity'>
++                <ref name='unsignedInt'/>
++              </attribute>
++            <optional>
++              <attribute name='min'>
++                <ref name='unsignedInt'/>
++            </attribute>
++            </optional>
++              <attribute name='maxAllocs'>
++                <ref name='unsignedInt'/>
++              </attribute>
++            </element>
++          </zeroOrMore>
++        </element>
++      </oneOrMore>
++    </element>
++  </define>
++
+   <define name='guestcaps'>
+     <element name='guest'>
+       <ref name='ostype'/>
+diff --git a/src/conf/capabilities.c b/src/conf/capabilities.c
+index 7a810efa66..3d893447cb 100644
+--- a/src/conf/capabilities.c
++++ b/src/conf/capabilities.c
+@@ -197,6 +197,16 @@ virCapabilitiesFreeNUMAInfo(virCapsPtr caps)
+     caps->host.nnumaCell = 0;
+ }
+ 
++static void
++virCapsHostMemBWNodeFree(virCapsHostMemBWNodePtr ptr)
++{
++    if (!ptr)
++        return;
++
++    virBitmapFree(ptr->cpus);
++    VIR_FREE(ptr);
++}
++
+ static void
+ virCapabilitiesClearSecModel(virCapsHostSecModelPtr secmodel)
+ {
+@@ -239,6 +249,10 @@ virCapsDispose(void *object)
+         virCapsHostCacheBankFree(caps->host.caches[i]);
+     VIR_FREE(caps->host.caches);
+ 
++    for (i = 0; i < caps->host.nnodes; i++)
++        virCapsHostMemBWNodeFree(caps->host.nodes[i]);
++    VIR_FREE(caps->host.nodes);
++
+     VIR_FREE(caps->host.netprefix);
+     VIR_FREE(caps->host.pagesSize);
+     virCPUDefFree(caps->host.cpu);
+@@ -957,6 +971,58 @@ virCapabilitiesFormatCaches(virBufferPtr buf,
+     return 0;
+ }
+ 
++static int
++virCapabilitiesFormatMemoryBandwidth(virBufferPtr buf,
++                                     size_t nnodes,
++                                     virCapsHostMemBWNodePtr *nodes)
++{
++    size_t i = 0;
++    virBuffer controlBuf = VIR_BUFFER_INITIALIZER;
++
++    if (!nnodes)
++        return 0;
++
++    virBufferAddLit(buf, "<memory_bandwidth>\n");
++    virBufferAdjustIndent(buf, 2);
++
++    for (i = 0; i < nnodes; i++) {
++        virCapsHostMemBWNodePtr node = nodes[i];
++        virResctrlInfoMemBWPerNodePtr control = &node->control;
++        char *cpus_str = virBitmapFormat(node->cpus);
++
++        if (!cpus_str)
++            return -1;
++
++        virBufferAsprintf(buf,
++                          "<node id='%u' cpus='%s'",
++                          node->id, cpus_str);
++        VIR_FREE(cpus_str);
++
++        virBufferSetChildIndent(&controlBuf, buf);
++        virBufferAsprintf(&controlBuf,
++                          "<control granularity='%u' min ='%u' "
++                          "maxAllocs='%u'/>\n",
++                          control->granularity, control->min,
++                          control->max_allocation);
++
++        if (virBufferCheckError(&controlBuf) < 0)
++            return -1;
++
++        if (virBufferUse(&controlBuf)) {
++            virBufferAddLit(buf, ">\n");
++            virBufferAddBuffer(buf, &controlBuf);
++            virBufferAddLit(buf, "</node>\n");
++        } else {
++            virBufferAddLit(buf, "/>\n");
++        }
++    }
++
++    virBufferAdjustIndent(buf, -2);
++    virBufferAddLit(buf, "</memory_bandwidth>\n");
++
++    return 0;
++}
++
+ /**
+  * virCapabilitiesFormatXML:
+  * @caps: capabilities to format
+@@ -1060,6 +1126,10 @@ virCapabilitiesFormatXML(virCapsPtr caps)
+                                     caps->host.caches) < 0)
+         goto error;
+ 
++    if (virCapabilitiesFormatMemoryBandwidth(&buf, caps->host.nnodes,
++                                             caps->host.nodes) < 0)
++        goto error;
++
+     for (i = 0; i < caps->host.nsecModels; i++) {
+         virBufferAddLit(&buf, "<secmodel>\n");
+         virBufferAdjustIndent(&buf, 2);
+@@ -1602,6 +1672,40 @@ virCapabilitiesInitResctrl(virCapsPtr caps)
+ }
+ 
+ 
++static int
++virCapabilitiesInitResctrlMemory(virCapsPtr caps)
++{
++    virCapsHostMemBWNodePtr node = NULL;
++    size_t i = 0;
++    int ret = -1;
++
++    for (i = 0; i < caps->host.ncaches; i++) {
++        virCapsHostCacheBankPtr bank = caps->host.caches[i];
++        if (VIR_ALLOC(node) < 0)
++            goto cleanup;
++
++        if (virResctrlInfoGetMemoryBandwidth(caps->host.resctrl,
++                                             bank->level, &node->control) > 0) {
++            node->id = bank->id;
++            if (!(node->cpus = virBitmapNewCopy(bank->cpus)))
++                goto cleanup;
++
++            if (VIR_APPEND_ELEMENT(caps->host.nodes,
++                                   caps->host.nnodes, node) < 0) {
++                goto cleanup;
++            }
++        }
++        virCapsHostMemBWNodeFree(node);
++        node = NULL;
++    }
++
++    ret = 0;
++ cleanup:
++    virCapsHostMemBWNodeFree(node);
++    return ret;
++}
++
++
+ int
+ virCapabilitiesInitCaches(virCapsPtr caps)
+ {
+@@ -1731,6 +1835,9 @@ virCapabilitiesInitCaches(virCapsPtr caps)
+     qsort(caps->host.caches, caps->host.ncaches,
+           sizeof(*caps->host.caches), virCapsHostCacheBankSorter);
+ 
++    if (virCapabilitiesInitResctrlMemory(caps) < 0)
++        goto cleanup;
++
+     ret = 0;
+  cleanup:
+     VIR_FREE(type);
+diff --git a/src/conf/capabilities.h b/src/conf/capabilities.h
+index fe1b9ea455..046e275ac6 100644
+--- a/src/conf/capabilities.h
++++ b/src/conf/capabilities.h
+@@ -151,6 +151,14 @@ struct _virCapsHostCacheBank {
+     virResctrlInfoPerCachePtr *controls;
+ };
+ 
++typedef struct _virCapsHostMemBWNode virCapsHostMemBWNode;
++typedef virCapsHostMemBWNode *virCapsHostMemBWNodePtr;
++struct _virCapsHostMemBWNode {
++    unsigned int id;
++    virBitmapPtr cpus;  /* All CPUs that belong to this node*/
++    virResctrlInfoMemBWPerNode control;
++};
++
+ typedef struct _virCapsHost virCapsHost;
+ typedef virCapsHost *virCapsHostPtr;
+ struct _virCapsHost {
+@@ -175,6 +183,9 @@ struct _virCapsHost {
+     size_t ncaches;
+     virCapsHostCacheBankPtr *caches;
+ 
++    size_t nnodes;
++    virCapsHostMemBWNodePtr *nodes;
++
+     size_t nsecModels;
+     virCapsHostSecModelPtr secModels;
+ 
+diff --git a/src/util/virresctrl.c b/src/util/virresctrl.c
+index adf36a7c0a..4b5442f879 100644
+--- a/src/util/virresctrl.c
++++ b/src/util/virresctrl.c
+@@ -629,6 +629,26 @@ virResctrlInfoIsEmpty(virResctrlInfoPtr resctrl)
+ }
+ 
+ 
++int
++virResctrlInfoGetMemoryBandwidth(virResctrlInfoPtr resctrl,
++                                 unsigned int level,
++                                 virResctrlInfoMemBWPerNodePtr control)
++{
++    virResctrlInfoMemBWPtr membw_info = resctrl->membw_info;
++
++    if (!membw_info)
++        return 0;
++
++    if (membw_info->last_level_cache != level)
++        return 0;
++
++    control->granularity = membw_info->bandwidth_granularity;
++    control->min = membw_info->min_bandwidth;
++    control->max_allocation = membw_info->max_allocation;
++    return 1;
++}
++
++
+ int
+ virResctrlInfoGetCache(virResctrlInfoPtr resctrl,
+                        unsigned int level,
+diff --git a/src/util/virresctrl.h b/src/util/virresctrl.h
+index 8d62517aa1..cfd56ddd06 100644
+--- a/src/util/virresctrl.h
++++ b/src/util/virresctrl.h
+@@ -50,6 +50,17 @@ struct _virResctrlInfoPerCache {
+     unsigned int max_allocation;
+ };
+ 
++typedef struct _virResctrlInfoMemBWPerNode virResctrlInfoMemBWPerNode;
++typedef virResctrlInfoMemBWPerNode *virResctrlInfoMemBWPerNodePtr;
++struct _virResctrlInfoMemBWPerNode {
++    /* Smallest possible increase of the allocation bandwidth in percentage */
++    unsigned int granularity;
++    /* Minimal allocatable bandwidth in percentage */
++    unsigned int min;
++    /* Maximum number of simultaneous allocations */
++    unsigned int max_allocation;
++};
++
+ typedef struct _virResctrlInfo virResctrlInfo;
+ typedef virResctrlInfo *virResctrlInfoPtr;
+ 
+@@ -63,6 +74,10 @@ virResctrlInfoGetCache(virResctrlInfoPtr resctrl,
+                        size_t *ncontrols,
+                        virResctrlInfoPerCachePtr **controls);
+ 
++int
++virResctrlInfoGetMemoryBandwidth(virResctrlInfoPtr resctrl,
++                                 unsigned int level,
++                                 virResctrlInfoMemBWPerNodePtr control);
+ /* Alloc-related things */
+ typedef struct _virResctrlAlloc virResctrlAlloc;
+ typedef virResctrlAlloc *virResctrlAllocPtr;
+diff --git a/tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/bandwidth_gran b/tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/bandwidth_gran
+new file mode 100644
+index 0000000000..f599e28b8a
+--- /dev/null
++++ b/tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/bandwidth_gran
+@@ -0,0 +1 @@
++10
+diff --git a/tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/min_bandwidth b/tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/min_bandwidth
+new file mode 100644
+index 0000000000..f599e28b8a
+--- /dev/null
++++ b/tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/min_bandwidth
+@@ -0,0 +1 @@
++10
+diff --git a/tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/num_closids b/tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/num_closids
+new file mode 100644
+index 0000000000..b8626c4cff
+--- /dev/null
++++ b/tests/vircaps2xmldata/linux-resctrl/resctrl/info/MB/num_closids
+@@ -0,0 +1 @@
++4
+diff --git a/tests/vircaps2xmldata/vircaps-x86_64-resctrl.xml b/tests/vircaps2xmldata/vircaps-x86_64-resctrl.xml
+index 4840614e86..9b00cf0995 100644
+--- a/tests/vircaps2xmldata/vircaps-x86_64-resctrl.xml
++++ b/tests/vircaps2xmldata/vircaps-x86_64-resctrl.xml
+@@ -49,6 +49,14 @@
+         <control granularity='768' min='1536' unit='KiB' type='both' maxAllocs='4'/>
+       </bank>
+     </cache>
++    <memory_bandwidth>
++      <node id='0' cpus='0-5'>
++        <control granularity='10' min ='10' maxAllocs='4'/>
++      </node>
++      <node id='1' cpus='6-11'>
++        <control granularity='10' min ='10' maxAllocs='4'/>
++      </node>
++    </memory_bandwidth>
+   </host>
+ 
+ </capabilities>
+diff --git a/tests/virresctrldata/resctrl.schemata b/tests/virresctrldata/resctrl.schemata
+index fa980e58c9..2578822b70 100644
+--- a/tests/virresctrldata/resctrl.schemata
++++ b/tests/virresctrldata/resctrl.schemata
+@@ -1 +1,2 @@
+ L3:0=000ff;1=000f0
++MB:0=100;1=100
+-- 
+2.21.0
+

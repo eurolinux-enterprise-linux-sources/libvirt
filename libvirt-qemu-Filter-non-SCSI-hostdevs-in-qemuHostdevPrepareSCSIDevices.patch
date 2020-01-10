@@ -1,0 +1,43 @@
+From 3560b106745b8d1ed16203858b4a9434de4d79cf Mon Sep 17 00:00:00 2001
+Message-Id: <3560b106745b8d1ed16203858b4a9434de4d79cf@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Tue, 29 Jan 2019 19:01:49 -0500
+Subject: [PATCH] qemu: Filter non SCSI hostdevs in
+ qemuHostdevPrepareSCSIDevices
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1665474 (RHEL7)
+https://bugzilla.redhat.com/show_bug.cgi?id=1665244 (RHEL8)
+
+When commit 1d94b3e7 added code to walk the [n]hostdevs list looking
+to add shared hostdevs, it should've filtered any hostdevs that were
+not SCSI hostdev's.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit f30ac207ad96a567ade0d8a49023ade9233b2b72)
+Message-Id: <20190130000151.4479-2-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_hostdev.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/qemu/qemu_hostdev.c b/src/qemu/qemu_hostdev.c
+index 1e040f98b7..8b1ad6b447 100644
+--- a/src/qemu/qemu_hostdev.c
++++ b/src/qemu/qemu_hostdev.c
+@@ -278,6 +278,9 @@ qemuHostdevPrepareSCSIDevices(virQEMUDriverPtr driver,
+     for (i = 0; i < nhostdevs; i++) {
+         virDomainDeviceDef dev;
+ 
++        if (!virHostdevIsSCSIDevice(hostdevs[i]))
++            continue;
++
+         dev.type = VIR_DOMAIN_DEVICE_HOSTDEV;
+         dev.data.hostdev = hostdevs[i];
+ 
+-- 
+2.21.0
+

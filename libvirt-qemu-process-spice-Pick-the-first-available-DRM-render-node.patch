@@ -1,0 +1,214 @@
+From 92f60bbc60e5ff60069f6d775d23f228eb3b5c78 Mon Sep 17 00:00:00 2001
+Message-Id: <92f60bbc60e5ff60069f6d775d23f228eb3b5c78@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:27 +0200
+Subject: [PATCH] qemu: process: spice: Pick the first available DRM render
+ node
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Up until now, we formatted 'rendernode=' onto QEMU cmdline only if the
+user specified it in the XML, otherwise we let QEMU do it for us. This
+causes permission issues because by default the /dev/dri/renderDX
+permissions are as follows:
+
+crw-rw----. 1 root video
+
+There's literally no reason why it shouldn't be libvirt picking the DRM
+render node instead of QEMU, that way (and because we're using
+namespaces by default), we can safely relabel the device within the
+namespace.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 27cc9f6ac187924456b658683e490f6d318ebe08)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+
+ Conflicts:
+	tests/qemuxml2argvmock.c
+            Missing context because v4.6.0-309-gd06a8ebe8f and
+            v4.6.0-311-g3411fd4db4 were not backported
+Message-Id: <be2bca27f2b84bfebbe62a699d78bd91e59e96bd.1554791287.git.eskultet@redhat.com>
+
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_process.c                       | 24 +++++++++++++-
+ src/util/virutil.h                            |  2 +-
+ ...pice-gl-auto-rendernode.x86_64-latest.args | 31 +++++++++++++++++++
+ .../graphics-spice-gl-auto-rendernode.xml     | 24 ++++++++++++++
+ tests/qemuxml2argvmock.c                      |  9 ++++++
+ tests/qemuxml2argvtest.c                      |  1 +
+ 6 files changed, 89 insertions(+), 2 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/graphics-spice-gl-auto-rendernode.x86_64-latest.args
+ create mode 100644 tests/qemuxml2argvdata/graphics-spice-gl-auto-rendernode.xml
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index a44f371346..465dabd8e3 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -4751,9 +4751,28 @@ qemuProcessGraphicsSetupListen(virQEMUDriverPtr driver,
+ }
+ 
+ 
++static int
++qemuProcessGraphicsSetupRenderNode(virDomainGraphicsDefPtr graphics,
++                                   virQEMUCapsPtr qemuCaps)
++{
++    if (!virDomainGraphicsNeedsAutoRenderNode(graphics))
++        return 0;
++
++    /* Don't bother picking a DRM node if QEMU doesn't support it. */
++    if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_SPICE_RENDERNODE))
++        return 0;
++
++    if (!(graphics->data.spice.rendernode = virHostGetDRMRenderNode()))
++        return -1;
++
++    return 0;
++}
++
++
+ static int
+ qemuProcessSetupGraphics(virQEMUDriverPtr driver,
+                          virDomainObjPtr vm,
++                         virQEMUCapsPtr qemuCaps,
+                          unsigned int flags)
+ {
+     virDomainGraphicsDefPtr graphics;
+@@ -4764,6 +4783,9 @@ qemuProcessSetupGraphics(virQEMUDriverPtr driver,
+     for (i = 0; i < vm->def->ngraphics; i++) {
+         graphics = vm->def->graphics[i];
+ 
++        if (qemuProcessGraphicsSetupRenderNode(graphics, qemuCaps) < 0)
++            goto cleanup;
++
+         if (qemuProcessGraphicsSetupListen(driver, graphics, vm) < 0)
+             goto cleanup;
+     }
+@@ -5924,7 +5946,7 @@ qemuProcessPrepareDomain(virQEMUDriverPtr driver,
+         goto cleanup;
+ 
+     VIR_DEBUG("Setting graphics devices");
+-    if (qemuProcessSetupGraphics(driver, vm, flags) < 0)
++    if (qemuProcessSetupGraphics(driver, vm, priv->qemuCaps, flags) < 0)
+         goto cleanup;
+ 
+     VIR_DEBUG("Create domain masterKey");
+diff --git a/src/util/virutil.h b/src/util/virutil.h
+index 284c713be4..abbbb7101e 100644
+--- a/src/util/virutil.h
++++ b/src/util/virutil.h
+@@ -218,7 +218,7 @@ unsigned long long virMemoryMaxValue(bool ulong) ATTRIBUTE_NOINLINE;
+ 
+ bool virHostHasIOMMU(void);
+ 
+-char *virHostGetDRMRenderNode(void);
++char *virHostGetDRMRenderNode(void) ATTRIBUTE_NOINLINE;
+ 
+ /**
+  * VIR_ASSIGN_IS_OVERFLOW:
+diff --git a/tests/qemuxml2argvdata/graphics-spice-gl-auto-rendernode.x86_64-latest.args b/tests/qemuxml2argvdata/graphics-spice-gl-auto-rendernode.x86_64-latest.args
+new file mode 100644
+index 0000000000..ee92e1fa5a
+--- /dev/null
++++ b/tests/qemuxml2argvdata/graphics-spice-gl-auto-rendernode.x86_64-latest.args
+@@ -0,0 +1,31 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++QEMU_AUDIO_DRV=spice \
++/usr/bin/qemu-system-i686 \
++-name guest=QEMUGuest1,debug-threads=on \
++-S \
++-object secret,id=masterKey0,format=raw,\
++file=/tmp/lib/domain--1-QEMUGuest1/master-key.aes \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 214 \
++-realtime mlock=off \
++-smp 1,sockets=1,cores=1,threads=1 \
++-uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,fd=1729,server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot strict=on \
++-device piix3-usb-uhci,id=usb,bus=pci.0,addr=0x1.0x2 \
++-spice port=0,gl=on,rendernode=/dev/dri/foo,seamless-migration=on \
++-device cirrus-vga,id=video0,bus=pci.0,addr=0x2 \
++-device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x3 \
++-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,\
++resourcecontrol=deny \
++-msg timestamp=on
+diff --git a/tests/qemuxml2argvdata/graphics-spice-gl-auto-rendernode.xml b/tests/qemuxml2argvdata/graphics-spice-gl-auto-rendernode.xml
+new file mode 100644
+index 0000000000..b48e7bc94e
+--- /dev/null
++++ b/tests/qemuxml2argvdata/graphics-spice-gl-auto-rendernode.xml
+@@ -0,0 +1,24 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219136</memory>
++  <currentMemory unit='KiB'>219136</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <input type='mouse' bus='ps2'/>
++    <input type='keyboard' bus='ps2'/>
++    <graphics type='spice' autoport='no'>
++      <gl enable='yes'/>
++    </graphics>
++    <memballoon model='virtio'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2argvmock.c b/tests/qemuxml2argvmock.c
+index 4df92cf396..d826793d28 100644
+--- a/tests/qemuxml2argvmock.c
++++ b/tests/qemuxml2argvmock.c
+@@ -184,6 +184,15 @@ virNetDevRunEthernetScript(const char *ifname ATTRIBUTE_UNUSED,
+     return 0;
+ }
+ 
++char *
++virHostGetDRMRenderNode(void)
++{
++    char *dst = NULL;
++
++    ignore_value(VIR_STRDUP(dst, "/dev/dri/foo"));
++    return dst;
++}
++
+ void
+ virCommandPassFD(virCommandPtr cmd ATTRIBUTE_UNUSED,
+                  int fd ATTRIBUTE_UNUSED,
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index 693e768d66..f76856dc5f 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -1279,6 +1279,7 @@ mymain(void)
+                     QEMU_CAPS_SPICE,
+                     QEMU_CAPS_EGL_HEADLESS,
+                     QEMU_CAPS_DEVICE_QXL);
++    DO_TEST_CAPS_LATEST("graphics-spice-gl-auto-rendernode");
+ 
+     DO_TEST("input-usbmouse", NONE);
+     DO_TEST("input-usbtablet", NONE);
+-- 
+2.21.0
+

@@ -1,0 +1,101 @@
+From a69ce7395989807eefad14ff7c66540d621bd303 Mon Sep 17 00:00:00 2001
+Message-Id: <a69ce7395989807eefad14ff7c66540d621bd303@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 11 Apr 2019 15:14:49 -0400
+Subject: [PATCH] qemu_hotplug: new function qemuDomainRemoveAuditDevice()
+
+This function can be called with a virDomainDevicePtr and whether or
+not the removal was successful, and it will call the appropriate
+virDomainAudit*() function with the appropriate args for whatever type
+of device it's given (or do nothing, if that's appropriate). This
+permits generalizing some code that currently has a separate copy for
+each type of device.
+
+NB: Although the function initially will be called only with
+success=false, that has been made an argument so that in the future
+(when the qemuDomainRemove*Device() functions have had their common
+functionality consolidated into qemuDomainRemoveDevice()), this new
+common code can call qemuDomainRemoveAuditDevice() for all types.
+
+Signed-off-by: Laine Stump <laine@laine.org>
+ACKed-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit b914e0eca385b52ede39b1b046bc9bf7a4fbbc2a)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-38-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 55 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 55 insertions(+)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index dea881fd0b..482111c46e 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4650,6 +4650,61 @@ qemuDomainRemoveRedirdevDevice(virQEMUDriverPtr driver,
+ }
+ 
+ 
++static void ATTRIBUTE_UNUSED
++qemuDomainRemoveAuditDevice(virDomainObjPtr vm,
++                            virDomainDeviceDefPtr detach,
++                            bool success)
++{
++    switch ((virDomainDeviceType)detach->type) {
++    case VIR_DOMAIN_DEVICE_DISK:
++        virDomainAuditDisk(vm, detach->data.disk->src, NULL, "detach", success);
++        break;
++    case VIR_DOMAIN_DEVICE_NET:
++        virDomainAuditNet(vm, detach->data.net, NULL, "detach", success);
++        break;
++    case VIR_DOMAIN_DEVICE_HOSTDEV:
++        virDomainAuditHostdev(vm, detach->data.hostdev, "detach", success);
++        break;
++
++    case VIR_DOMAIN_DEVICE_INPUT:
++    case VIR_DOMAIN_DEVICE_CHR:
++    case VIR_DOMAIN_DEVICE_RNG:
++    case VIR_DOMAIN_DEVICE_MEMORY:
++    case VIR_DOMAIN_DEVICE_SHMEM:
++    case VIR_DOMAIN_DEVICE_REDIRDEV:
++       /*
++        * These devices are supposed to be audited, but current code
++        * doesn't audit on failure to remove the device.
++        */
++       break;
++
++
++    case VIR_DOMAIN_DEVICE_LEASE:
++    case VIR_DOMAIN_DEVICE_CONTROLLER:
++    case VIR_DOMAIN_DEVICE_WATCHDOG:
++    case VIR_DOMAIN_DEVICE_VSOCK:
++        /* These devices don't have associated audit logs */
++        break;
++
++    case VIR_DOMAIN_DEVICE_FS:
++    case VIR_DOMAIN_DEVICE_SOUND:
++    case VIR_DOMAIN_DEVICE_VIDEO:
++    case VIR_DOMAIN_DEVICE_GRAPHICS:
++    case VIR_DOMAIN_DEVICE_HUB:
++    case VIR_DOMAIN_DEVICE_SMARTCARD:
++    case VIR_DOMAIN_DEVICE_MEMBALLOON:
++    case VIR_DOMAIN_DEVICE_NVRAM:
++    case VIR_DOMAIN_DEVICE_NONE:
++    case VIR_DOMAIN_DEVICE_TPM:
++    case VIR_DOMAIN_DEVICE_PANIC:
++    case VIR_DOMAIN_DEVICE_IOMMU:
++    case VIR_DOMAIN_DEVICE_LAST:
++        /* libvirt doesn't yet support detaching these devices */
++        break;
++    }
++}
++
++
+ int
+ qemuDomainRemoveDevice(virQEMUDriverPtr driver,
+                        virDomainObjPtr vm,
+-- 
+2.21.0
+

@@ -1,0 +1,124 @@
+From c00106d41b74d86ee7357ed62399ea7ffb9cd393 Mon Sep 17 00:00:00 2001
+Message-Id: <c00106d41b74d86ee7357ed62399ea7ffb9cd393@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:56 +0200
+Subject: [PATCH] conf: Factor out vcpus overlapping from
+ virDomainCachetuneDefParse
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Factor out vcpus overlapping detecting part from
+virDomainCachetuneDefParse and introduce virDomainResctrlVcpuMatch.
+Instead of allocating virResctrlAllocPtr by default, allocating
+virResctrlAllocPtr after confirm vcpus not overlap with existing ones.
+And virDomainResctrlVcpuMatch can be reused by other resource control
+technologies. virDomainResctrlVcpuMatch can clarify old vcpus overlap
+error whether an overlap or a redefinition.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit e5cc7c0a0258530000aa9fd930c649b525b6f801)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <ee62ff896868ef147f9d7e6c67a5c151e0c4695b.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c | 51 ++++++++++++++++++++++++++++++++----------
+ 1 file changed, 39 insertions(+), 12 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 07d21f8026..fb5adbcd10 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -19077,6 +19077,31 @@ virDomainResctrlParseVcpus(virDomainDefPtr def,
+ }
+ 
+ 
++static int
++virDomainResctrlVcpuMatch(virDomainDefPtr def,
++                          virBitmapPtr vcpus,
++                          virResctrlAllocPtr *alloc)
++{
++    ssize_t i = 0;
++
++    for (i = 0; i < def->nresctrls; i++) {
++        /* vcpus group has been created, directly use the existing one.
++         * Just updating memory allocation information of that group
++         */
++        if (virBitmapEqual(def->resctrls[i]->vcpus, vcpus)) {
++            *alloc = def->resctrls[i]->alloc;
++            break;
++        }
++        if (virBitmapOverlaps(def->resctrls[i]->vcpus, vcpus)) {
++            virReportError(VIR_ERR_XML_ERROR, "%s",
++                           _("Overlapping vcpus in resctrls"));
++            return -1;
++        }
++    }
++    return 0;
++}
++
++
+ static int
+ virDomainCachetuneDefParseCache(xmlXPathContextPtr ctxt,
+                                 xmlNodePtr node,
+@@ -19160,7 +19185,7 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+     xmlNodePtr oldnode = ctxt->node;
+     xmlNodePtr *nodes = NULL;
+     virBitmapPtr vcpus = NULL;
+-    virResctrlAllocPtr alloc = virResctrlAllocNew();
++    virResctrlAllocPtr alloc = NULL;
+     virDomainResctrlDefPtr tmp_resctrl = NULL;
+     char *tmp = NULL;
+     char *vcpus_str = NULL;
+@@ -19171,9 +19196,6 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+ 
+     ctxt->node = node;
+ 
+-    if (!alloc)
+-        goto cleanup;
+-
+     if (VIR_ALLOC(tmp_resctrl) < 0)
+         goto cleanup;
+ 
+@@ -19191,6 +19213,19 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+         goto cleanup;
+     }
+ 
++    if (virDomainResctrlVcpuMatch(def, vcpus, &alloc) < 0)
++        goto cleanup;
++
++    if (!alloc) {
++        alloc = virResctrlAllocNew();
++        if (!alloc)
++            goto cleanup;
++    } else {
++        virReportError(VIR_ERR_XML_ERROR, "%s",
++                       _("Identical vcpus in cachetunes found"));
++        goto cleanup;
++    }
++
+     for (i = 0; i < n; i++) {
+         if (virDomainCachetuneDefParseCache(ctxt, nodes[i], alloc) < 0)
+             goto cleanup;
+@@ -19201,14 +19236,6 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+         goto cleanup;
+     }
+ 
+-    for (i = 0; i < def->nresctrls; i++) {
+-        if (virBitmapOverlaps(def->resctrls[i]->vcpus, vcpus)) {
+-            virReportError(VIR_ERR_XML_ERROR, "%s",
+-                           _("Overlapping vcpus in cachetunes"));
+-            goto cleanup;
+-        }
+-    }
+-
+     /* We need to format it back because we need to be consistent in the naming
+      * even when users specify some "sub-optimal" string there. */
+     VIR_FREE(vcpus_str);
+-- 
+2.21.0
+

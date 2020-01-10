@@ -1,5 +1,5 @@
-From f01aeffaa7dbb4e9efe61f9826deed14c4cb3b41 Mon Sep 17 00:00:00 2001
-Message-Id: <f01aeffaa7dbb4e9efe61f9826deed14c4cb3b41@dist-git>
+From b8a36e1ebf239a91bf62e861ca25cea3616b644f Mon Sep 17 00:00:00 2001
+Message-Id: <b8a36e1ebf239a91bf62e861ca25cea3616b644f@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Wed, 12 Sep 2018 14:34:33 +0200
 Subject: [PATCH] qemu: Avoid duplicate resume events and state changes
@@ -239,5 +239,5 @@ index 37568165b7..2d51c0fa25 100644
   cleanup:
      virObjectUnref(cfg);
 -- 
-2.19.1
+2.21.0
 

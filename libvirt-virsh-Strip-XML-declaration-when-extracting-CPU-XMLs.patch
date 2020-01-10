@@ -1,0 +1,61 @@
+From 9681d46b1fab8a779e66859dd8f0670c96e446bd Mon Sep 17 00:00:00 2001
+Message-Id: <9681d46b1fab8a779e66859dd8f0670c96e446bd@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 4 Apr 2019 11:48:51 +0200
+Subject: [PATCH] virsh: Strip XML declaration when extracting CPU XMLs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Since commit v4.3.0-336-gc84726fbdd all
+{hypervisor-,}cpu-{baseline,compare} commands use a generic
+vshExtractCPUDefXMLs helper for extracting individual CPU definitions
+from the provided input file. The helper wraps the input file in a
+<container> element so that several independent elements can be easily
+parsed from the file. This works fine except when the file starts with
+XML declaration (<?xml version="1.0" ... ?>) because the XML declaration
+cannot be put inside any element. In fact it has to be at the very
+beginning of the XML document without any preceding white space
+characters. We can just simply skip the XML declaration.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1592737
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit fcd1c865e168bdb9763b19e790c15e80aa29be66)
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <40acb521c9fe289277a2863bbcdd9ad5a0935428.1554371326.git.jdenemar@redhat.com>
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ tools/virsh-host.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/tools/virsh-host.c b/tools/virsh-host.c
+index 16f504bafe..b7f86bdd91 100644
+--- a/tools/virsh-host.c
++++ b/tools/virsh-host.c
+@@ -1130,13 +1130,20 @@ vshExtractCPUDefXMLs(vshControl *ctl,
+     xmlDocPtr xml = NULL;
+     xmlXPathContextPtr ctxt = NULL;
+     xmlNodePtr *nodes = NULL;
++    char *doc;
+     size_t i;
+     int n;
+ 
+     if (virFileReadAll(xmlFile, VSH_MAX_XML_FILE, &buffer) < 0)
+         goto error;
+ 
+-    if (virAsprintf(&xmlStr, "<container>%s</container>", buffer) < 0)
++    /* Strip possible XML declaration */
++    if (STRPREFIX(buffer, "<?xml") && (doc = strstr(buffer, "?>")))
++        doc += 2;
++    else
++        doc = buffer;
++
++    if (virAsprintf(&xmlStr, "<container>%s</container>", doc) < 0)
+         goto error;
+ 
+     if (!(xml = virXMLParseStringCtxt(xmlStr, xmlFile, &ctxt)))
+-- 
+2.21.0
+

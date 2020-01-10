@@ -1,5 +1,5 @@
-From 725d1095dfd473b2a0da59594276413ea6a7fa8b Mon Sep 17 00:00:00 2001
-Message-Id: <725d1095dfd473b2a0da59594276413ea6a7fa8b@dist-git>
+From 6e26897793df5cd001123f4ff805b6598d89b5db Mon Sep 17 00:00:00 2001
+Message-Id: <6e26897793df5cd001123f4ff805b6598d89b5db@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Mon, 10 Sep 2018 19:41:53 +0200
 Subject: [PATCH] qemu: Pass running reason to RESUME event handler
@@ -27,6 +27,7 @@ Reviewed-by: John Ferlan <jferlan@redhat.com>
 
 https://bugzilla.redhat.com/show_bug.cgi?id=1634758
 https://bugzilla.redhat.com/show_bug.cgi?id=1634759
+https://bugzilla.redhat.com/show_bug.cgi?id=1612943
 
 Conflicts:
 	src/qemu/qemu_domain.h
@@ -119,5 +120,5 @@ index 26979faa72..7325bc4c90 100644
      VIR_DEBUG("Updating guest CPU definition");
      if (qemuProcessUpdateGuestCPU(vm->def, priv->qemuCaps, caps, flags) < 0)
 -- 
-2.19.1
+2.21.0
 

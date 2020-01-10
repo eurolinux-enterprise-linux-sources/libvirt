@@ -1,5 +1,5 @@
-From 35c8afb44903ae12239323873af0c0376082b02b Mon Sep 17 00:00:00 2001
-Message-Id: <35c8afb44903ae12239323873af0c0376082b02b@dist-git>
+From 5d260e0603146e1bdb3246498126745ab1a4245a Mon Sep 17 00:00:00 2001
+Message-Id: <5d260e0603146e1bdb3246498126745ab1a4245a@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Thu, 15 Nov 2018 11:16:43 +0100
 Subject: [PATCH] qemu: Fix post-copy migration on the source
@@ -106,5 +106,5 @@ index 9b5cb93325..485e455a44 100644
  }
  
 -- 
-2.20.1
+2.21.0
 

@@ -1,0 +1,313 @@
+From 5b0a3757656c53186fa27ebb8b562ba3e5b7bd69 Mon Sep 17 00:00:00 2001
+Message-Id: <5b0a3757656c53186fa27ebb8b562ba3e5b7bd69@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 09:12:19 -0400
+Subject: [PATCH] storage: Add default mount options for fs/netfs storage pools
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1584663
+
+Modify the command generation to add some default options to the
+fs/netfs storage pools based on the OS type. For Linux, it'll be
+the "nodev, nosuid, noexec". For FreeBSD, it'll be "nosuid, noexec".
+For others, just leave the options alone.
+
+Modify the storagepoolxml2argvtest to handle the fact that the
+same input XML could generate different output XML based on whether
+Linux, FreeBSD, or other was being built.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit f00cde7f1133fee96dc13a80d7f402c704346974)
+
+Resolved conflict in tests/storagepoolxml2argvtest.c since commit
+a15fe1247dfea01b301a825f9b66d09999d059aa is not present downstream.
+
+Resolved build issue in src/storage/storage_util.c since the VIR_AUTOFREE
+is not present downstream.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Message-Id: <20190403131219.16385-8-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/storage/storage_util.c                    | 38 +++++++++++++--
+ .../pool-fs-freebsd.argv                      |  1 +
+ .../pool-fs-linux.argv                        |  1 +
+ .../pool-netfs-auto-freebsd.argv              |  1 +
+ .../pool-netfs-auto-linux.argv                |  1 +
+ .../pool-netfs-cifs-freebsd.argv              |  1 +
+ .../pool-netfs-cifs-linux.argv                |  1 +
+ .../pool-netfs-freebsd.argv                   |  1 +
+ .../pool-netfs-gluster-freebsd.argv           |  2 +
+ .../pool-netfs-gluster-linux.argv             |  2 +
+ .../pool-netfs-linux.argv                     |  1 +
+ tests/storagepoolxml2argvtest.c               | 48 +++++++++++++++----
+ 12 files changed, 86 insertions(+), 12 deletions(-)
+ create mode 100644 tests/storagepoolxml2argvdata/pool-fs-freebsd.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-fs-linux.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-auto-freebsd.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-auto-linux.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-cifs-freebsd.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-cifs-linux.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-freebsd.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-gluster-freebsd.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-gluster-linux.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-linux.argv
+
+diff --git a/src/storage/storage_util.c b/src/storage/storage_util.c
+index 70ce600581..48117bef62 100644
+--- a/src/storage/storage_util.c
++++ b/src/storage/storage_util.c
+@@ -36,6 +36,11 @@
+ # ifndef FS_NOCOW_FL
+ #  define FS_NOCOW_FL                     0x00800000 /* Do not cow file */
+ # endif
++# define default_mount_opts "nodev,nosuid,noexec"
++#elif defined(__FreeBSD__)
++# define default_mount_opts "nosuid,noexec"
++#else
++# define default_mount_opts ""
+ #endif
+ 
+ #if WITH_BLKID
+@@ -4245,12 +4250,36 @@ virStorageBackendFileSystemGetPoolSource(virStoragePoolObjPtr pool)
+ }
+ 
+ 
++static void
++virStorageBackendFileSystemMountAddOptions(virCommandPtr cmd,
++                                           const char *providedOpts)
++{
++    char *mountOpts = NULL;
++    virBuffer buf = VIR_BUFFER_INITIALIZER;
++
++    if (*default_mount_opts != '\0')
++        virBufferAsprintf(&buf, "%s,", default_mount_opts);
++
++    if (providedOpts)
++        virBufferAsprintf(&buf, "%s,", providedOpts);
++
++    virBufferTrim(&buf, ",", -1);
++    mountOpts = virBufferContentAndReset(&buf);
++
++    if (mountOpts)
++        virCommandAddArgList(cmd, "-o", mountOpts, NULL);
++
++    VIR_FREE(mountOpts);
++}
++
++
+ static void
+ virStorageBackendFileSystemMountNFSArgs(virCommandPtr cmd,
+                                         const char *src,
+                                         virStoragePoolDefPtr def)
+ {
+     virCommandAddArgList(cmd, src, def->target.path, NULL);
++    virStorageBackendFileSystemMountAddOptions(cmd, NULL);
+ }
+ 
+ 
+@@ -4262,8 +4291,8 @@ virStorageBackendFileSystemMountGlusterArgs(virCommandPtr cmd,
+     const char *fmt;
+ 
+     fmt = virStoragePoolFormatFileSystemNetTypeToString(def->source.format);
+-    virCommandAddArgList(cmd, "-t", fmt, src, "-o", "direct-io-mode=1",
+-                         def->target.path, NULL);
++    virCommandAddArgList(cmd, "-t", fmt, src, def->target.path, NULL);
++    virStorageBackendFileSystemMountAddOptions(cmd, "direct-io-mode=1");
+ }
+ 
+ 
+@@ -4275,8 +4304,8 @@ virStorageBackendFileSystemMountCIFSArgs(virCommandPtr cmd,
+     const char *fmt;
+ 
+     fmt = virStoragePoolFormatFileSystemNetTypeToString(def->source.format);
+-    virCommandAddArgList(cmd, "-t", fmt, src, def->target.path,
+-                         "-o", "guest", NULL);
++    virCommandAddArgList(cmd, "-t", fmt, src, def->target.path, NULL);
++    virStorageBackendFileSystemMountAddOptions(cmd, "guest");
+ }
+ 
+ 
+@@ -4292,6 +4321,7 @@ virStorageBackendFileSystemMountDefaultArgs(virCommandPtr cmd,
+     else
+         fmt = virStoragePoolFormatFileSystemNetTypeToString(def->source.format);
+     virCommandAddArgList(cmd, "-t", fmt, src, def->target.path, NULL);
++    virStorageBackendFileSystemMountAddOptions(cmd, NULL);
+ }
+ 
+ 
+diff --git a/tests/storagepoolxml2argvdata/pool-fs-freebsd.argv b/tests/storagepoolxml2argvdata/pool-fs-freebsd.argv
+new file mode 100644
+index 0000000000..a35d73e254
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-fs-freebsd.argv
+@@ -0,0 +1 @@
++mount -t ext3 /dev/sda6 /mnt -o nosuid,noexec
+diff --git a/tests/storagepoolxml2argvdata/pool-fs-linux.argv b/tests/storagepoolxml2argvdata/pool-fs-linux.argv
+new file mode 100644
+index 0000000000..19543f442d
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-fs-linux.argv
+@@ -0,0 +1 @@
++mount -t ext3 /dev/sda6 /mnt -o nodev,nosuid,noexec
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-auto-freebsd.argv b/tests/storagepoolxml2argvdata/pool-netfs-auto-freebsd.argv
+new file mode 100644
+index 0000000000..39e5c97aed
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-auto-freebsd.argv
+@@ -0,0 +1 @@
++mount localhost:/var/lib/libvirt/images /mnt -o nosuid,noexec
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-auto-linux.argv b/tests/storagepoolxml2argvdata/pool-netfs-auto-linux.argv
+new file mode 100644
+index 0000000000..1f82d3d29c
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-auto-linux.argv
+@@ -0,0 +1 @@
++mount localhost:/var/lib/libvirt/images /mnt -o nodev,nosuid,noexec
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-cifs-freebsd.argv b/tests/storagepoolxml2argvdata/pool-netfs-cifs-freebsd.argv
+new file mode 100644
+index 0000000000..d72749a032
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-cifs-freebsd.argv
+@@ -0,0 +1 @@
++mount -t cifs //example.com/samba_share /mnt/cifs -o nosuid,noexec,guest
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-cifs-linux.argv b/tests/storagepoolxml2argvdata/pool-netfs-cifs-linux.argv
+new file mode 100644
+index 0000000000..85aa9cf23f
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-cifs-linux.argv
+@@ -0,0 +1 @@
++mount -t cifs //example.com/samba_share /mnt/cifs -o nodev,nosuid,noexec,guest
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-freebsd.argv b/tests/storagepoolxml2argvdata/pool-netfs-freebsd.argv
+new file mode 100644
+index 0000000000..05c1951f32
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-freebsd.argv
+@@ -0,0 +1 @@
++mount -t nfs localhost:/var/lib/libvirt/images /mnt -o nosuid,noexec
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-gluster-freebsd.argv b/tests/storagepoolxml2argvdata/pool-netfs-gluster-freebsd.argv
+new file mode 100644
+index 0000000000..700107d78e
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-gluster-freebsd.argv
+@@ -0,0 +1,2 @@
++mount -t glusterfs example.com:/volume /mnt/gluster -o nosuid,noexec,\
++direct-io-mode=1
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-gluster-linux.argv b/tests/storagepoolxml2argvdata/pool-netfs-gluster-linux.argv
+new file mode 100644
+index 0000000000..9535c8a1b9
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-gluster-linux.argv
+@@ -0,0 +1,2 @@
++mount -t glusterfs example.com:/volume /mnt/gluster -o nodev,nosuid,noexec,\
++direct-io-mode=1
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-linux.argv b/tests/storagepoolxml2argvdata/pool-netfs-linux.argv
+new file mode 100644
+index 0000000000..22fafd7b32
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-linux.argv
+@@ -0,0 +1 @@
++mount -t nfs localhost:/var/lib/libvirt/images /mnt -o nodev,nosuid,noexec
+diff --git a/tests/storagepoolxml2argvtest.c b/tests/storagepoolxml2argvtest.c
+index 3bf2c3b003..0ea8b3b94c 100644
+--- a/tests/storagepoolxml2argvtest.c
++++ b/tests/storagepoolxml2argvtest.c
+@@ -86,6 +86,8 @@ testCompareXMLToArgvFiles(bool shouldFail,
+ struct testInfo {
+     bool shouldFail;
+     const char *pool;
++    bool linuxOut;
++    bool freebsdOut;
+ };
+ 
+ static int
+@@ -100,9 +102,19 @@ testCompareXMLToArgvHelper(const void *data)
+                     abs_srcdir, info->pool) < 0)
+         goto cleanup;
+ 
+-    if (virAsprintf(&cmdline, "%s/storagepoolxml2argvdata/%s.argv",
+-                    abs_srcdir, info->pool) < 0 && !info->shouldFail)
+-        goto cleanup;
++    if (info->linuxOut) {
++        if (virAsprintf(&cmdline, "%s/storagepoolxml2argvdata/%s-linux.argv",
++                        abs_srcdir, info->pool) < 0 && !info->shouldFail)
++            goto cleanup;
++    } else if (info->freebsdOut) {
++        if (virAsprintf(&cmdline, "%s/storagepoolxml2argvdata/%s-freebsd.argv",
++                        abs_srcdir, info->pool) < 0 && !info->shouldFail)
++            goto cleanup;
++    } else {
++        if (virAsprintf(&cmdline, "%s/storagepoolxml2argvdata/%s.argv",
++                        abs_srcdir, info->pool) < 0 && !info->shouldFail)
++            goto cleanup;
++    }
+ 
+     result = testCompareXMLToArgvFiles(info->shouldFail, poolxml, cmdline);
+ 
+@@ -119,9 +131,9 @@ mymain(void)
+ {
+     int ret = 0;
+ 
+-#define DO_TEST_FULL(shouldFail, pool) \
++#define DO_TEST_FULL(shouldFail, pool, linuxOut, freebsdOut) \
+     do { \
+-        struct testInfo info = { shouldFail, pool }; \
++        struct testInfo info = { shouldFail, pool, linuxOut, freebsdOut }; \
+         if (virTestRun("Storage Pool XML-2-argv " pool, \
+                        testCompareXMLToArgvHelper, &info) < 0) \
+             ret = -1; \
+@@ -129,14 +141,19 @@ mymain(void)
+     while (0);
+ 
+ #define DO_TEST(pool, ...) \
+-    DO_TEST_FULL(false, pool)
++    DO_TEST_FULL(false, pool, false, false)
+ 
+ #define DO_TEST_FAIL(pool, ...) \
+-    DO_TEST_FULL(true, pool)
++    DO_TEST_FULL(true, pool, false, false)
++
++#define DO_TEST_LINUX(pool, ...) \
++    DO_TEST_FULL(false, pool, true, false)
++
++#define DO_TEST_FREEBSD(pool, ...) \
++    DO_TEST_FULL(false, pool, false, true)
+ 
+     DO_TEST_FAIL("pool-dir");
+     DO_TEST_FAIL("pool-dir-naming");
+-    DO_TEST("pool-fs");
+     DO_TEST_FAIL("pool-logical");
+     DO_TEST_FAIL("pool-logical-nopath");
+     DO_TEST_FAIL("pool-logical-create");
+@@ -145,10 +162,25 @@ mymain(void)
+     DO_TEST_FAIL("pool-disk-device-nopartsep");
+     DO_TEST_FAIL("pool-iscsi");
+     DO_TEST_FAIL("pool-iscsi-auth");
++#ifdef __linux__
++    DO_TEST_LINUX("pool-fs");
++    DO_TEST_LINUX("pool-netfs");
++    DO_TEST_LINUX("pool-netfs-auto");
++    DO_TEST_LINUX("pool-netfs-gluster");
++    DO_TEST_LINUX("pool-netfs-cifs");
++#elif defined(__FreeBSD__)
++    DO_TEST_FREEBSD("pool-fs");
++    DO_TEST_FREEBSD("pool-netfs");
++    DO_TEST_FREEBSD("pool-netfs-auto");
++    DO_TEST_FREEBSD("pool-netfs-gluster");
++    DO_TEST_FREEBSD("pool-netfs-cifs");
++#else
++    DO_TEST("pool-fs");
+     DO_TEST("pool-netfs");
+     DO_TEST("pool-netfs-auto");
+     DO_TEST("pool-netfs-gluster");
+     DO_TEST("pool-netfs-cifs");
++#endif
+     DO_TEST_FAIL("pool-scsi");
+     DO_TEST_FAIL("pool-scsi-type-scsi-host");
+     DO_TEST_FAIL("pool-scsi-type-fc-host");
+-- 
+2.21.0
+

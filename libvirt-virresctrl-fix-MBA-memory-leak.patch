@@ -1,0 +1,58 @@
+From ab3c999755b0dd9d9c19534fd3f2386b7702a3d7 Mon Sep 17 00:00:00 2001
+Message-Id: <ab3c999755b0dd9d9c19534fd3f2386b7702a3d7@dist-git>
+From: Pavel Hrdina <phrdina@redhat.com>
+Date: Mon, 15 Apr 2019 17:33:05 +0200
+Subject: [PATCH] virresctrl: fix MBA memory leak
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The 'bandwidths' variable is allocated using VIR_RESIZE_N so it has to
+be freed as well.
+
+==118315== 8 bytes in 1 blocks are definitely lost in loss record 299 of 2,401
+==118315==    at 0x4C29DAD: malloc (vg_replace_malloc.c:308)
+==118315==    by 0x4C2C100: realloc (vg_replace_malloc.c:836)
+==118315==    by 0x52C3FAF: virReallocN (viralloc.c:245)
+==118315==    by 0x52C4079: virExpandN (viralloc.c:294)
+==118315==    by 0x532BBA8: virResctrlAllocParseProcessMemoryBandwidth (virresctrl.c:1156)
+==118315==    by 0x532BBA8: virResctrlAllocParseMemoryBandwidthLine (virresctrl.c:1211)
+==118315==    by 0x532BBA8: virResctrlAllocParse (virresctrl.c:1414)
+==118315==    by 0x532BBA8: virResctrlAllocGetGroup (virresctrl.c:1446)
+==118315==    by 0x532C11D: virResctrlAllocGetDefault (virresctrl.c:1464)
+==118315==    by 0x532D15E: virResctrlAllocAssign (virresctrl.c:1923)
+==118315==    by 0x532D15E: virResctrlAllocCreate (virresctrl.c:2042)
+==118315==    by 0x31E1ABEE: qemuProcessResctrlCreate (qemu_process.c:2596)
+==118315==    by 0x31E1ABEE: qemuProcessLaunch (qemu_process.c:6444)
+==118315==    by 0x31E1E341: qemuProcessStart (qemu_process.c:6721)
+==118315==    by 0x31E81315: qemuDomainObjStart.constprop.50 (qemu_driver.c:7288)
+==118315==    by 0x31E81A65: qemuDomainCreateWithFlags (qemu_driver.c:7341)
+==118315==    by 0x54DDB4B: virDomainCreate (libvirt-domain.c:6534)
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+(cherry picked from commit e3c4befef44db8e45a1f0de857ad2ec58d9b961a)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <d843d770626fc25ba17c609978a733fede464e43.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virresctrl.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/util/virresctrl.c b/src/util/virresctrl.c
+index f44d1cde8b..87d212d93c 100644
+--- a/src/util/virresctrl.c
++++ b/src/util/virresctrl.c
+@@ -307,6 +307,7 @@ virResctrlAllocDispose(void *obj)
+         virResctrlAllocMemBWPtr mem_bw = alloc->mem_bw;
+         for (i = 0; i < mem_bw->nbandwidths; i++)
+             VIR_FREE(mem_bw->bandwidths[i]);
++        VIR_FREE(alloc->mem_bw->bandwidths);
+         VIR_FREE(alloc->mem_bw);
+     }
+ 
+-- 
+2.21.0
+

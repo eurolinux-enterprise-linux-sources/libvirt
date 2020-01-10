@@ -1,0 +1,81 @@
+From 6203494c845ce2c2468485274d64f4e041ad4a5b Mon Sep 17 00:00:00 2001
+Message-Id: <6203494c845ce2c2468485274d64f4e041ad4a5b@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:29 +0200
+Subject: [PATCH] qemu: caps: Introduce QEMU_EGL_HEADLESS_RENDERNODE capability
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Now that we have QAPI introspection of display types in QEMU upstream,
+we can check whether the 'rendernode' option is supported with
+egl-headless display type.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 312063b7664c992f959028ef516402ce175c3dfc)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+
+ Conflicts:
+	src/qemu/qemu_capabilities.c
+	src/qemu/qemu_capabilities.h
+	tests/qemucapabilitiesdata/caps_3.1.0.x86_64.xml
+            Context - several other capabilities were not backported.
+Message-Id: <c7b6c70550d4ce83b8a692a1cd2b94f2c8aac402.1554791287.git.eskultet@redhat.com>
+
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_capabilities.c                     | 2 ++
+ src/qemu/qemu_capabilities.h                     | 1 +
+ tests/qemucapabilitiesdata/caps_3.1.0.x86_64.xml | 1 +
+ 3 files changed, 4 insertions(+)
+
+diff --git a/src/qemu/qemu_capabilities.c b/src/qemu/qemu_capabilities.c
+index a27ea85824..66eefae988 100644
+--- a/src/qemu/qemu_capabilities.c
++++ b/src/qemu/qemu_capabilities.c
+@@ -507,6 +507,7 @@ VIR_ENUM_IMPL(virQEMUCaps, QEMU_CAPS_LAST,
+ 
+               /* 315 */
+               "vfio-pci.display",
++              "egl-headless.rendernode"
+     );
+ 
+ 
+@@ -1306,6 +1307,7 @@ static struct virQEMUCapsStringFlags virQEMUCapsQMPSchemaQueries[] = {
+     { "blockdev-add/arg-type/+qcow2/encrypt/+luks/key-secret", QEMU_CAPS_QCOW2_LUKS },
+     { "nbd-server-start/arg-type/tls-creds", QEMU_CAPS_NBD_TLS },
+     { "screendump/arg-type/device", QEMU_CAPS_SCREENDUMP_DEVICE },
++    { "query-display-options/ret-type/+egl-headless/rendernode", QEMU_CAPS_EGL_HEADLESS_RENDERNODE },
+ };
+ 
+ typedef struct _virQEMUCapsObjectTypeProps virQEMUCapsObjectTypeProps;
+diff --git a/src/qemu/qemu_capabilities.h b/src/qemu/qemu_capabilities.h
+index 25ad4218e0..76916d02fa 100644
+--- a/src/qemu/qemu_capabilities.h
++++ b/src/qemu/qemu_capabilities.h
+@@ -491,6 +491,7 @@ typedef enum { /* virQEMUCapsFlags grouping marker for syntax-check */
+ 
+     /* 315 */
+     QEMU_CAPS_VFIO_PCI_DISPLAY, /* -device vfio-pci.display */
++    QEMU_CAPS_EGL_HEADLESS_RENDERNODE, /* -display egl-headless,rendernode= */
+ 
+     QEMU_CAPS_LAST /* this must always be the last item */
+ } virQEMUCapsFlags;
+diff --git a/tests/qemucapabilitiesdata/caps_3.1.0.x86_64.xml b/tests/qemucapabilitiesdata/caps_3.1.0.x86_64.xml
+index cbeea14796..be044c6a7a 100644
+--- a/tests/qemucapabilitiesdata/caps_3.1.0.x86_64.xml
++++ b/tests/qemucapabilitiesdata/caps_3.1.0.x86_64.xml
+@@ -215,6 +215,7 @@
+   <flag name='usb-storage.werror'/>
+   <flag name='egl-headless'/>
+   <flag name='vfio-pci.display'/>
++  <flag name='egl-headless.rendernode'/>
+   <version>3000092</version>
+   <kvmVersion>0</kvmVersion>
+   <microcodeVersion>441682</microcodeVersion>
+-- 
+2.21.0
+

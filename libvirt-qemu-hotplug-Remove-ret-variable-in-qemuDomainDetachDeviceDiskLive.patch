@@ -1,0 +1,62 @@
+From 632d110740498e0aa6828dbfdbace81847b084ff Mon Sep 17 00:00:00 2001
+Message-Id: <632d110740498e0aa6828dbfdbace81847b084ff@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:26 -0400
+Subject: [PATCH] qemu: hotplug: Remove 'ret' variable in
+ qemuDomainDetachDeviceDiskLive
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We don't have any cleanup section, we can return the value directly.
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 70d06898128086e3daecd389db10315a3c361a60)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-15-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 1f41efa180..8047ac773f 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4811,7 +4811,6 @@ qemuDomainDetachDeviceDiskLive(virQEMUDriverPtr driver,
+                                bool async)
+ {
+     virDomainDiskDefPtr disk;
+-    int ret = -1;
+     int idx;
+ 
+     if ((idx = qemuFindDisk(vm->def, dev->data.disk->dst)) < 0) {
+@@ -4825,10 +4824,10 @@ qemuDomainDetachDeviceDiskLive(virQEMUDriverPtr driver,
+     case VIR_DOMAIN_DISK_DEVICE_DISK:
+     case VIR_DOMAIN_DISK_DEVICE_LUN:
+         if (disk->bus == VIR_DOMAIN_DISK_BUS_VIRTIO)
+-            ret = qemuDomainDetachVirtioDiskDevice(driver, vm, disk, async);
++            return qemuDomainDetachVirtioDiskDevice(driver, vm, disk, async);
+         else if (disk->bus == VIR_DOMAIN_DISK_BUS_SCSI ||
+                  disk->bus == VIR_DOMAIN_DISK_BUS_USB)
+-            ret = qemuDomainDetachDiskDevice(driver, vm, disk, async);
++            return qemuDomainDetachDiskDevice(driver, vm, disk, async);
+         else
+             virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                            _("This type of disk cannot be hot unplugged"));
+@@ -4840,7 +4839,7 @@ qemuDomainDetachDeviceDiskLive(virQEMUDriverPtr driver,
+         break;
+     }
+ 
+-    return ret;
++    return -1;
+ }
+ 
+ 
+-- 
+2.21.0
+

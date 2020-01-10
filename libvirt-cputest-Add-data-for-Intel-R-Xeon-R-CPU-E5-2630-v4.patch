@@ -1,5 +1,5 @@
-From c300bfc8b035630e7940a2d3853973c8bc910e72 Mon Sep 17 00:00:00 2001
-Message-Id: <c300bfc8b035630e7940a2d3853973c8bc910e72@dist-git>
+From 2b9e257012ac32127e3269722a02d2ad7ff83cd4 Mon Sep 17 00:00:00 2001
+Message-Id: <2b9e257012ac32127e3269722a02d2ad7ff83cd4@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Thu, 21 Feb 2019 21:51:58 +0100
 Subject: [PATCH] cputest: Add data for Intel(R) Xeon(R) CPU E5-2630 v4

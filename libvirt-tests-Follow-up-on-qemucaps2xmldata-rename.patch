@@ -1,0 +1,38 @@
+From fddead1319d13ceaa0dd5aa8bdc740f05e0fff58 Mon Sep 17 00:00:00 2001
+Message-Id: <fddead1319d13ceaa0dd5aa8bdc740f05e0fff58@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Fri, 5 Apr 2019 10:57:44 +0200
+Subject: [PATCH] tests: Follow up on qemucaps2xmldata rename
+
+The directory has been renamed in 562990849a9d, but a
+reference to it was not updated at the same time, causing
+'make dist' to fail ever since. Fix it.
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+(cherry picked from commit d52dd5911b32a31bb17ee97bb9df5683741603b0)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628469
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190405085744.8179-8-abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tests/Makefile.am | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index 858076df7b..4d0b4f9509 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -122,7 +122,7 @@ EXTRA_DIST = \
+ 	qemuargv2xmldata \
+ 	qemublocktestdata \
+ 	qemucapabilitiesdata \
+-	qemucaps2xmldata \
++	qemucaps2xmloutdata \
+ 	qemuhotplugtestcpus \
+ 	qemuhotplugtestdevices \
+ 	qemuhotplugtestdomains \
+-- 
+2.21.0
+

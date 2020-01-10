@@ -1,0 +1,50 @@
+From 2aadab4741e8637196e729044893584bf4bde33f Mon Sep 17 00:00:00 2001
+Message-Id: <2aadab4741e8637196e729044893584bf4bde33f@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 25 Apr 2019 09:24:47 +0200
+Subject: [PATCH] qemu_hotplug: Initialize @charAlias in
+ qemuDomainRemoveChrDevice
+
+My change in 112f3a8d0f32 was too drastic. The @charAlias
+variable is initialized only if @monitor == true. However, it is
+used even outside of that condition, at which point it's just
+uninitialized pointer.
+
+Reported-by: John Ferlan <jferlan@redhat.com>
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 4b23f18d2c9e13ac6f33fb45dbb79931082125bb)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1658198
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <92831aceb87c1bc226a77904766f434d86f62675.1556177047.git.jdenemar@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 7 +++----
+ 1 file changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 7ad8007a3a..ca8b0aaf62 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4364,13 +4364,12 @@ qemuDomainRemoveChrDevice(virQEMUDriverPtr driver,
+     VIR_DEBUG("Removing character device %s from domain %p %s",
+               chr->info.alias, vm, vm->def->name);
+ 
+-    if (monitor) {
+-        if (!(charAlias = qemuAliasChardevFromDevAlias(chr->info.alias)))
+-            goto cleanup;
++    if (!(charAlias = qemuAliasChardevFromDevAlias(chr->info.alias)))
++        goto cleanup;
+ 
++    if (monitor) {
+         qemuDomainObjEnterMonitor(driver, vm);
+         rc = qemuMonitorDetachCharDev(priv->mon, charAlias);
+-
+         if (qemuDomainObjExitMonitor(driver, vm) < 0)
+             goto cleanup;
+     }
+-- 
+2.21.0
+

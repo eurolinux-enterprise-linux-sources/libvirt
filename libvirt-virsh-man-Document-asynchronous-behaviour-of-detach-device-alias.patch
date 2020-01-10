@@ -1,0 +1,40 @@
+From 3b632d86e7a45ba4ae07fd655340505a144bf942 Mon Sep 17 00:00:00 2001
+Message-Id: <3b632d86e7a45ba4ae07fd655340505a144bf942@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Wed, 3 Apr 2019 16:35:45 +0200
+Subject: [PATCH] virsh: man: Document asynchronous behaviour of
+ detach-device-alias
+
+This command is fully async. Note that users can use virsh event to be
+notified of the guest actually removing the device.
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit 61d1abd5f11cadaf2ac7548e1a42e112bc49ed7e)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1688961
+Message-Id: <50540ced50cfffa59367bf8d026222fe006cd58d.1554302031.git.pkrempa@redhat.com>
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ tools/virsh.pod | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/tools/virsh.pod b/tools/virsh.pod
+index 5321f6806a..79d1efa955 100644
+--- a/tools/virsh.pod
++++ b/tools/virsh.pod
+@@ -3214,7 +3214,10 @@ I<--persistent>.
+ =item B<detach-device-alias> I<domain> I<alias>
+ [[[I<--live>] [I<--config>] | [I<--current>]]]]
+ 
+-Detach a device with given I<alias> from the I<domain>.
++Detach a device with given I<alias> from the I<domain>. This command returns
++successfully after the unplug request was sent to the hypervisor. The actual
++removal of the device is notified asynchronously via libvirt events
++(see virsh event).
+ 
+ If I<--live> is specified, affect a running domain.
+ If I<--config> is specified, affect the next startup of a persistent domain.
+-- 
+2.21.0
+

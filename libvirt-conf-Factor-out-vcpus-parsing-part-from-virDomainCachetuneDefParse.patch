@@ -1,0 +1,99 @@
+From ca59034c25fe39acb246f82587c0c32ba04d6c89 Mon Sep 17 00:00:00 2001
+Message-Id: <ca59034c25fe39acb246f82587c0c32ba04d6c89@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:55 +0200
+Subject: [PATCH] conf: Factor out vcpus parsing part from
+ virDomainCachetuneDefParse
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Extract vcpus parsing part from virDomainCachetuneDefParse into one
+function called virDomainResctrlParseVcpus. So that vcpus parsing logic
+can be reused by other resource control technologies. Adjust error
+message and use node->name so that the error message can fit to all
+technologies.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 6021c3926ba62a2593f0db63e5413e9663c69a5f)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <2f330b4bbface15dce23370d5f212b2240e031cd.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c | 48 +++++++++++++++++++++++++++++-------------
+ 1 file changed, 33 insertions(+), 15 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 0c8afe78c6..07d21f8026 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -19045,6 +19045,38 @@ virDomainDefParseBootOptions(virDomainDefPtr def,
+ }
+ 
+ 
++static int
++virDomainResctrlParseVcpus(virDomainDefPtr def,
++                           xmlNodePtr node,
++                           virBitmapPtr *vcpus)
++{
++    char *vcpus_str = NULL;
++    int ret = -1;
++
++    vcpus_str = virXMLPropString(node, "vcpus");
++    if (!vcpus_str) {
++        virReportError(VIR_ERR_XML_ERROR, _("Missing %s attribute 'vcpus'"),
++                       node->name);
++        goto cleanup;
++    }
++    if (virBitmapParse(vcpus_str, vcpus, VIR_DOMAIN_CPUMASK_LEN) < 0) {
++        virReportError(VIR_ERR_XML_ERROR,
++                       _("Invalid %s attribute 'vcpus' value '%s'"),
++                       node->name, vcpus_str);
++        goto cleanup;
++    }
++
++    /* We need to limit the bitmap to number of vCPUs.  If there's nothing left,
++     * then we can just clean up and return 0 immediately */
++    virBitmapShrink(*vcpus, def->maxvcpus);
++
++    ret = 0;
++ cleanup:
++    VIR_FREE(vcpus_str);
++    return ret;
++}
++
++
+ static int
+ virDomainCachetuneDefParseCache(xmlXPathContextPtr ctxt,
+                                 xmlNodePtr node,
+@@ -19145,22 +19177,8 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+     if (VIR_ALLOC(tmp_resctrl) < 0)
+         goto cleanup;
+ 
+-    vcpus_str = virXMLPropString(node, "vcpus");
+-    if (!vcpus_str) {
+-        virReportError(VIR_ERR_XML_ERROR, "%s",
+-                       _("Missing cachetune attribute 'vcpus'"));
++    if (virDomainResctrlParseVcpus(def, node, &vcpus) < 0)
+         goto cleanup;
+-    }
+-    if (virBitmapParse(vcpus_str, &vcpus, VIR_DOMAIN_CPUMASK_LEN) < 0) {
+-        virReportError(VIR_ERR_XML_ERROR,
+-                       _("Invalid cachetune attribute 'vcpus' value '%s'"),
+-                       vcpus_str);
+-        goto cleanup;
+-    }
+-
+-    /* We need to limit the bitmap to number of vCPUs.  If there's nothing left,
+-     * then we can just clean up and return 0 immediately */
+-    virBitmapShrink(vcpus, def->maxvcpus);
+ 
+     if (virBitmapIsAllClear(vcpus)) {
+         ret = 0;
+-- 
+2.21.0
+

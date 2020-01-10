@@ -1,0 +1,72 @@
+From 9ab3c57972a8a9f762a3905216478e576f0966cf Mon Sep 17 00:00:00 2001
+Message-Id: <9ab3c57972a8a9f762a3905216478e576f0966cf@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:21 -0400
+Subject: [PATCH] qemu_hotplug: Don't build device string in
+ qemuDomainDetachChrDevice
+
+This is basically an old artefact from 24b0821926e when the idea
+was:
+
+1) Build device string only to see if chardev has any -device
+associated with it and thus if device_del is needed
+2) Detach chardev using chardev_del
+
+Now, that DEVICE and DEVICE_DELETED capabilities are assumed for
+every domain 1) does not make sense anymore.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 0c17685760a3ec8bf06c793d47d82dd51428451a)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-10-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 7 +------
+ 1 file changed, 1 insertion(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 43dec329b6..d4444bbb5d 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -5592,7 +5592,6 @@ int qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     virDomainDefPtr vmdef = vm->def;
+     virDomainChrDefPtr tmpChr;
+-    char *devstr = NULL;
+     bool guestfwd = false;
+ 
+     if (!(tmpChr = virDomainChrFind(vmdef, chr))) {
+@@ -5613,9 +5612,6 @@ int qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
+ 
+     sa_assert(tmpChr->info.alias);
+ 
+-    if (qemuBuildChrDeviceStr(&devstr, vmdef, tmpChr, priv->qemuCaps) < 0)
+-        goto cleanup;
+-
+     if (!async && !guestfwd)
+         qemuDomainMarkDeviceForRemoval(vm, &tmpChr->info);
+ 
+@@ -5626,7 +5622,7 @@ int qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
+             goto cleanup;
+         }
+     } else {
+-        if (devstr && qemuMonitorDelDevice(priv->mon, tmpChr->info.alias) < 0) {
++        if (qemuMonitorDelDevice(priv->mon, tmpChr->info.alias) < 0) {
+             ignore_value(qemuDomainObjExitMonitor(driver, vm));
+             goto cleanup;
+         }
+@@ -5646,7 +5642,6 @@ int qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
+  cleanup:
+     if (!async)
+         qemuDomainResetDeviceRemoval(vm);
+-    VIR_FREE(devstr);
+     return ret;
+ }
+ 
+-- 
+2.21.0
+

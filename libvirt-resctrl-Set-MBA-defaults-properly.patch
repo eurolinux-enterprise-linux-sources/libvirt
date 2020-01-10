@@ -1,0 +1,87 @@
+From 893e9283b1ff2334309ab96e6bdf1ac2d325ad22 Mon Sep 17 00:00:00 2001
+Message-Id: <893e9283b1ff2334309ab96e6bdf1ac2d325ad22@dist-git>
+From: Martin Kletzander <mkletzan@redhat.com>
+Date: Mon, 15 Apr 2019 17:33:03 +0200
+Subject: [PATCH] resctrl: Set MBA defaults properly
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Similarly to CAT, when you set some values in an group, remove the group and
+recreate it, the previous values will be kept there.  In order to not get values
+from a previous setting (a previous VM, for example), we need to set them to
+sensible defaults.  The same way we do that for CAT, just set the same values as
+the default group has.
+
+Signed-off-by: Martin Kletzander <mkletzan@redhat.com>
+(cherry picked from commit ceb6725d945490a7153cf8b10ad3cd972d3f1c16)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <25defb79bad13f027d7125e70f2cc6b09f817474.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virresctrl.c | 39 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/src/util/virresctrl.c b/src/util/virresctrl.c
+index f5e4bef7dc..92953dadf9 100644
+--- a/src/util/virresctrl.c
++++ b/src/util/virresctrl.c
+@@ -1829,6 +1829,42 @@ virResctrlAllocMemoryBandwidth(virResctrlInfoPtr resctrl,
+ }
+ 
+ 
++static int
++virResctrlAllocCopyMemBW(virResctrlAllocPtr dst,
++                         virResctrlAllocPtr src)
++{
++    size_t i = 0;
++    virResctrlAllocMemBWPtr dst_bw = NULL;
++    virResctrlAllocMemBWPtr src_bw = src->mem_bw;
++
++    if (!src->mem_bw)
++        return 0;
++
++    if (!dst->mem_bw &&
++        VIR_ALLOC(dst->mem_bw) < 0)
++        return -1;
++
++    dst_bw = dst->mem_bw;
++
++    if (src_bw->nbandwidths > dst_bw->nbandwidths &&
++        VIR_EXPAND_N(dst_bw->bandwidths, dst_bw->nbandwidths,
++                     src_bw->nbandwidths - dst_bw->nbandwidths) < 0)
++        return -1;
++
++    for (i = 0; i < src_bw->nbandwidths; i++) {
++        if (dst_bw->bandwidths[i]) {
++            *dst_bw->bandwidths[i] = 123;
++            continue;
++        }
++        if (VIR_ALLOC(dst_bw->bandwidths[i]) < 0)
++            return -1;
++        *dst_bw->bandwidths[i] = *src_bw->bandwidths[i];
++    }
++
++    return 0;
++}
++
++
+ static int
+ virResctrlAllocCopyMasks(virResctrlAllocPtr dst,
+                          virResctrlAllocPtr src)
+@@ -1896,6 +1932,9 @@ virResctrlAllocAssign(virResctrlInfoPtr resctrl,
+     if (virResctrlAllocCopyMasks(alloc, alloc_default) < 0)
+         goto cleanup;
+ 
++    if (virResctrlAllocCopyMemBW(alloc, alloc_default) < 0)
++        goto cleanup;
++
+     for (level = 0; level < alloc->nlevels; level++) {
+         virResctrlAllocPerLevelPtr a_level = alloc->levels[level];
+         virResctrlAllocPerLevelPtr f_level = NULL;
+-- 
+2.21.0
+

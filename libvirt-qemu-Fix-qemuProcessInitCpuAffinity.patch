@@ -1,0 +1,73 @@
+From 7be804cd87131dbb2a0861e07980826a15dce376 Mon Sep 17 00:00:00 2001
+Message-Id: <7be804cd87131dbb2a0861e07980826a15dce376@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Tue, 4 Jun 2019 16:22:06 +0200
+Subject: [PATCH] qemu: Fix qemuProcessInitCpuAffinity()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Ever since the feature was introduced with commit 0f8e7ae33ace,
+it has contained a logic error in that it attempted to use a NUMA
+node map where a CPU map was expected.
+
+Because of that, guests using <numatune> might fail to start:
+
+  # virsh start guest
+  error: Failed to start domain guest
+  error: cannot set CPU affinity on process 40055: Invalid argument
+
+This was particularly easy to trigger on POWER 8 machines, where
+secondary threads always show up as offline in the host: having
+
+  <numatune>
+    <memory mode='strict' placement='static' nodeset='1'/>
+  </numatune>
+
+in the guest configuration, for example, would result in libvirt
+trying to set the process affinity so that it would prefer
+running on CPU 1, but since that's a secondary thread and thus
+shows up as offline, the operation would fail, and so would
+starting the guest.
+
+Use the newly introduced virNumaNodesetToCPUset() to convert the
+NUMA node map to a CPU map, which in the example above would be
+48,56,64,72,80,88 - a valid input for virProcessSetAffinity().
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1703661
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 5f2212c062c720716b7701fa0a5511311dc6e906)
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190604142207.2036-6-abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_process.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 7f70d79566..4c28f250f6 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2382,11 +2382,16 @@ qemuProcessInitCpuAffinity(virDomainObjPtr vm)
+     if (virDomainNumaGetNodeCount(vm->def->numa) <= 1 &&
+         virDomainNumatuneGetMode(vm->def->numa, -1, &mem_mode) == 0 &&
+         mem_mode == VIR_DOMAIN_NUMATUNE_MEM_STRICT) {
++        virBitmapPtr nodeset = NULL;
++
+         if (virDomainNumatuneMaybeGetNodeset(vm->def->numa,
+                                              priv->autoNodeset,
+-                                             &cpumapToSet,
++                                             &nodeset,
+                                              -1) < 0)
+             goto cleanup;
++
++        if (virNumaNodesetToCPUset(nodeset, &cpumapToSet) < 0)
++            goto cleanup;
+     } else if (vm->def->cputune.emulatorpin) {
+         cpumapToSet = vm->def->cputune.emulatorpin;
+     } else {
+-- 
+2.21.0
+

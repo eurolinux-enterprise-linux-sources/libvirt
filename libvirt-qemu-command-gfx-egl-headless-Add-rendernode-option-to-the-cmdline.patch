@@ -1,0 +1,197 @@
+From 5738081ba1c0cb6453224ccd1281e5a536284a4c Mon Sep 17 00:00:00 2001
+Message-Id: <5738081ba1c0cb6453224ccd1281e5a536284a4c@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:35 +0200
+Subject: [PATCH] qemu: command: gfx: egl-headless: Add 'rendernode' option to
+ the cmdline
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Depending on whether QEMU actually supports the option, we can put the
+'rendernode' on the '-display egl-headless' cmdline.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628892
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 3163de7d0e7ae92b9f3e06479c8cd46e43ac8058)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <e38fbdd202bdda60f02eff1f5b06f1566cb8f93f.1554791287.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_command.c                       | 34 ++++++++++++++++---
+ ...egl-headless-rendernode.x86_64-latest.args | 31 +++++++++++++++++
+ .../graphics-egl-headless.x86_64-latest.args  | 31 +++++++++++++++++
+ ...play-spice-egl-headless.x86_64-latest.args |  2 +-
+ ...isplay-vnc-egl-headless.x86_64-latest.args |  2 +-
+ tests/qemuxml2argvtest.c                      |  2 ++
+ 6 files changed, 95 insertions(+), 7 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/graphics-egl-headless-rendernode.x86_64-latest.args
+ create mode 100644 tests/qemuxml2argvdata/graphics-egl-headless.x86_64-latest.args
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index d60fbd4c8c..929f549a69 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -8198,13 +8198,37 @@ qemuBuildGraphicsSPICECommandLine(virQEMUDriverConfigPtr cfg,
+ static int
+ qemuBuildGraphicsEGLHeadlessCommandLine(virQEMUDriverConfigPtr cfg ATTRIBUTE_UNUSED,
+                                         virCommandPtr cmd,
+-                                        virQEMUCapsPtr qemuCaps ATTRIBUTE_UNUSED,
+-                                        virDomainGraphicsDefPtr graphics ATTRIBUTE_UNUSED)
++                                        virQEMUCapsPtr qemuCaps,
++                                        virDomainGraphicsDefPtr graphics)
+ {
+-    virCommandAddArg(cmd, "-display");
+-    virCommandAddArg(cmd, "egl-headless");
++    int ret = -1;
++    virBuffer opt = VIR_BUFFER_INITIALIZER;
+ 
+-    return 0;
++    virBufferAddLit(&opt, "egl-headless");
++
++    if (graphics->data.egl_headless.rendernode) {
++        if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_EGL_HEADLESS_RENDERNODE)) {
++            virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                           _("This QEMU doesn't support OpenGL rendernode "
++                             "with egl-headless graphics type"));
++            goto cleanup;
++        }
++
++        virBufferAddLit(&opt, ",rendernode=");
++        virQEMUBuildBufferEscapeComma(&opt,
++                                      graphics->data.egl_headless.rendernode);
++    }
++
++    if (virBufferCheckError(&opt) < 0)
++        goto cleanup;
++
++    virCommandAddArg(cmd, "-display");
++    virCommandAddArgBuffer(cmd, &opt);
++
++    ret = 0;
++ cleanup:
++    virBufferFreeAndReset(&opt);
++    return ret;
+ }
+ 
+ 
+diff --git a/tests/qemuxml2argvdata/graphics-egl-headless-rendernode.x86_64-latest.args b/tests/qemuxml2argvdata/graphics-egl-headless-rendernode.x86_64-latest.args
+new file mode 100644
+index 0000000000..ad9079d912
+--- /dev/null
++++ b/tests/qemuxml2argvdata/graphics-egl-headless-rendernode.x86_64-latest.args
+@@ -0,0 +1,31 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++/usr/bin/qemu-system-i686 \
++-name guest=QEMUGuest1,debug-threads=on \
++-S \
++-object secret,id=masterKey0,format=raw,\
++file=/tmp/lib/domain--1-QEMUGuest1/master-key.aes \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 214 \
++-realtime mlock=off \
++-smp 1,sockets=1,cores=1,threads=1 \
++-uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,fd=1729,server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot strict=on \
++-device piix3-usb-uhci,id=usb,bus=pci.0,addr=0x1.0x2 \
++-drive file=/dev/HostVG/QEMUGuest1,format=raw,if=none,id=drive-ide0-0-0 \
++-device ide-hd,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0,bootindex=1 \
++-display egl-headless,rendernode=/dev/dri/foo \
++-device cirrus-vga,id=video0,bus=pci.0,addr=0x2 \
++-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,\
++resourcecontrol=deny \
++-msg timestamp=on
+diff --git a/tests/qemuxml2argvdata/graphics-egl-headless.x86_64-latest.args b/tests/qemuxml2argvdata/graphics-egl-headless.x86_64-latest.args
+new file mode 100644
+index 0000000000..ad9079d912
+--- /dev/null
++++ b/tests/qemuxml2argvdata/graphics-egl-headless.x86_64-latest.args
+@@ -0,0 +1,31 @@
++LC_ALL=C \
++PATH=/bin \
++HOME=/home/test \
++USER=test \
++LOGNAME=test \
++/usr/bin/qemu-system-i686 \
++-name guest=QEMUGuest1,debug-threads=on \
++-S \
++-object secret,id=masterKey0,format=raw,\
++file=/tmp/lib/domain--1-QEMUGuest1/master-key.aes \
++-machine pc,accel=tcg,usb=off,dump-guest-core=off \
++-m 214 \
++-realtime mlock=off \
++-smp 1,sockets=1,cores=1,threads=1 \
++-uuid c7a5fdbd-edaf-9455-926a-d65c16db1809 \
++-no-user-config \
++-nodefaults \
++-chardev socket,id=charmonitor,fd=1729,server,nowait \
++-mon chardev=charmonitor,id=monitor,mode=control \
++-rtc base=utc \
++-no-shutdown \
++-no-acpi \
++-boot strict=on \
++-device piix3-usb-uhci,id=usb,bus=pci.0,addr=0x1.0x2 \
++-drive file=/dev/HostVG/QEMUGuest1,format=raw,if=none,id=drive-ide0-0-0 \
++-device ide-hd,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0,bootindex=1 \
++-display egl-headless,rendernode=/dev/dri/foo \
++-device cirrus-vga,id=video0,bus=pci.0,addr=0x2 \
++-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,\
++resourcecontrol=deny \
++-msg timestamp=on
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.x86_64-latest.args b/tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.x86_64-latest.args
+index 0ac90c81d2..6c090ede9b 100644
+--- a/tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.x86_64-latest.args
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-spice-egl-headless.x86_64-latest.args
+@@ -26,7 +26,7 @@ file=/tmp/lib/domain--1-QEMUGuest2/master-key.aes \
+ -drive file=/dev/HostVG/QEMUGuest2,format=raw,if=none,id=drive-ide0-0-0 \
+ -device ide-hd,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0,bootindex=1 \
+ -spice port=0,seamless-migration=on \
+--display egl-headless \
++-display egl-headless,rendernode=/dev/dri/foo \
+ -device qxl-vga,id=video0,ram_size=67108864,vram_size=67108864,\
+ vram64_size_mb=0,vgamem_mb=16,max_outputs=1,bus=pci.0,addr=0x2 \
+ -device vfio-pci,id=hostdev0,\
+diff --git a/tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.x86_64-latest.args b/tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.x86_64-latest.args
+index cdf545d0e0..b07fb86db5 100644
+--- a/tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.x86_64-latest.args
++++ b/tests/qemuxml2argvdata/hostdev-mdev-display-vnc-egl-headless.x86_64-latest.args
+@@ -26,7 +26,7 @@ file=/tmp/lib/domain--1-QEMUGuest2/master-key.aes \
+ -drive file=/dev/HostVG/QEMUGuest2,format=raw,if=none,id=drive-ide0-0-0 \
+ -device ide-hd,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0,bootindex=1 \
+ -vnc 127.0.0.1:0 \
+--display egl-headless \
++-display egl-headless,rendernode=/dev/dri/foo \
+ -device qxl-vga,id=video0,ram_size=67108864,vram_size=67108864,\
+ vram64_size_mb=0,vgamem_mb=16,max_outputs=1,bus=pci.0,addr=0x2 \
+ -device vfio-pci,id=hostdev0,\
+diff --git a/tests/qemuxml2argvtest.c b/tests/qemuxml2argvtest.c
+index f76856dc5f..a29e63d950 100644
+--- a/tests/qemuxml2argvtest.c
++++ b/tests/qemuxml2argvtest.c
+@@ -1177,6 +1177,8 @@ mymain(void)
+     DO_TEST("graphics-egl-headless",
+             QEMU_CAPS_EGL_HEADLESS,
+             QEMU_CAPS_DEVICE_CIRRUS_VGA);
++    DO_TEST_CAPS_LATEST("graphics-egl-headless");
++    DO_TEST_CAPS_LATEST("graphics-egl-headless-rendernode");
+ 
+     DO_TEST("graphics-vnc", QEMU_CAPS_VNC, QEMU_CAPS_DEVICE_CIRRUS_VGA);
+     DO_TEST("graphics-vnc-socket", QEMU_CAPS_VNC, QEMU_CAPS_DEVICE_CIRRUS_VGA);
+-- 
+2.21.0
+

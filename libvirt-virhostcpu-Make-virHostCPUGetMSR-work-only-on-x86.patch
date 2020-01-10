@@ -1,0 +1,89 @@
+From d3455f2c6bd6d18623c04d05108662ae5df69852 Mon Sep 17 00:00:00 2001
+Message-Id: <d3455f2c6bd6d18623c04d05108662ae5df69852@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Tue, 4 Jun 2019 13:04:26 +0200
+Subject: [PATCH] virhostcpu: Make virHostCPUGetMSR() work only on x86
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Model specific registers are a thing only on x86. Also, the
+/dev/cpu/0/msr path exists only on Linux and the fallback
+mechanism (asking KVM) exists on Linux and FreeBSD only.
+
+Therefore, move the function within #ifdef that checks all
+aforementioned constraints and provide a dummy stub for all
+other cases.
+
+This fixes the build on my arm box, mingw-* builds, etc.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit ae3d812b006b84c6d06605868d19554ea0156392)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1641702
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <d9ea204e7cab0bd9b0e123b207563708fe92d940.1559646067.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virhostcpu.c | 32 ++++++++++++++++++--------------
+ 1 file changed, 18 insertions(+), 14 deletions(-)
+
+diff --git a/src/util/virhostcpu.c b/src/util/virhostcpu.c
+index 2c1404b07a..1b6570568c 100644
+--- a/src/util/virhostcpu.c
++++ b/src/util/virhostcpu.c
+@@ -1297,7 +1297,9 @@ virHostCPUGetMicrocodeVersion(void)
+ #endif /* __linux__ */
+ 
+ 
+-#if HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS)
++#if HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
++    (defined(__i386__) || defined(__x86_64__)) && \
++    (defined(__linux__) || defined(__FreeBSD__))
+ static int
+ virHostCPUGetMSRFromKVM(unsigned long index,
+                         uint64_t *result)
+@@ -1325,19 +1327,6 @@ virHostCPUGetMSRFromKVM(unsigned long index,
+     return 0;
+ }
+ 
+-#else
+-
+-static int
+-virHostCPUGetMSRFromKVM(unsigned long index ATTRIBUTE_UNUSED,
+-                        uint64_t *result ATTRIBUTE_UNUSED)
+-{
+-    virReportSystemError(ENOSYS, "%s",
+-                         _("Reading MSRs via KVM is not supported on this platform"));
+-    return -1;
+-}
+-#endif /* HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS) */
+-
+-
+ /*
+  * Returns 0 on success,
+  *         1 when the MSR is not supported by the host CPU,
+@@ -1374,3 +1363,18 @@ virHostCPUGetMSR(unsigned long index,
+ 
+     return virHostCPUGetMSRFromKVM(index, msr);
+ }
++
++#else
++
++int
++virHostCPUGetMSR(unsigned long index ATTRIBUTE_UNUSED,
++                 uint64_t *msr ATTRIBUTE_UNUSED)
++{
++    virReportSystemError(ENOSYS, "%s",
++                         _("Reading MSRs is not supported on this platform"));
++    return -1;
++}
++
++#endif /* HAVE_LINUX_KVM_H && defined(KVM_GET_MSRS) && \
++          (defined(__i386__) || defined(__x86_64__)) && \
++          (defined(__linux__) || defined(__FreeBSD__)) */
+-- 
+2.21.0
+

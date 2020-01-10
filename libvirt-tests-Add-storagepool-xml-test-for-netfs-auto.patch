@@ -1,0 +1,117 @@
+From c1496d42e09be681644df89059ffa9fbb5417401 Mon Sep 17 00:00:00 2001
+Message-Id: <c1496d42e09be681644df89059ffa9fbb5417401@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 09:12:17 -0400
+Subject: [PATCH] tests: Add storagepool xml test for netfs-auto
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1584663
+
+Cover the case where @netauto would be used to create the command
+line in virStorageBackendFileSystemMountCmd. Essentially when the
+pool type is "netfs", but the "source.format" is empty, create the
+command line properly.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit 515aa0c1847180f8da4287270f872c161993a047)
+Message-Id: <20190403131219.16385-6-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ .../pool-netfs-auto.argv                      |  1 +
+ tests/storagepoolxml2argvtest.c               |  1 +
+ .../storagepoolxml2xmlin/pool-netfs-auto.xml  | 19 ++++++++++++++++++
+ .../storagepoolxml2xmlout/pool-netfs-auto.xml | 20 +++++++++++++++++++
+ tests/storagepoolxml2xmltest.c                |  1 +
+ 5 files changed, 42 insertions(+)
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-auto.argv
+ create mode 100644 tests/storagepoolxml2xmlin/pool-netfs-auto.xml
+ create mode 100644 tests/storagepoolxml2xmlout/pool-netfs-auto.xml
+
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-auto.argv b/tests/storagepoolxml2argvdata/pool-netfs-auto.argv
+new file mode 100644
+index 0000000000..888a0161b8
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-auto.argv
+@@ -0,0 +1 @@
++mount localhost:/var/lib/libvirt/images /mnt
+diff --git a/tests/storagepoolxml2argvtest.c b/tests/storagepoolxml2argvtest.c
+index 54bc07b4e1..3bf2c3b003 100644
+--- a/tests/storagepoolxml2argvtest.c
++++ b/tests/storagepoolxml2argvtest.c
+@@ -146,6 +146,7 @@ mymain(void)
+     DO_TEST_FAIL("pool-iscsi");
+     DO_TEST_FAIL("pool-iscsi-auth");
+     DO_TEST("pool-netfs");
++    DO_TEST("pool-netfs-auto");
+     DO_TEST("pool-netfs-gluster");
+     DO_TEST("pool-netfs-cifs");
+     DO_TEST_FAIL("pool-scsi");
+diff --git a/tests/storagepoolxml2xmlin/pool-netfs-auto.xml b/tests/storagepoolxml2xmlin/pool-netfs-auto.xml
+new file mode 100644
+index 0000000000..d7f7ce8168
+--- /dev/null
++++ b/tests/storagepoolxml2xmlin/pool-netfs-auto.xml
+@@ -0,0 +1,19 @@
++<pool type='netfs'>
++  <name>nfsimages</name>
++  <uuid>7641d5a8-af11-f730-a34e-0a7dfcede71f</uuid>
++  <capacity>0</capacity>
++  <allocation>0</allocation>
++  <available>0</available>
++  <source>
++    <host name='localhost'/>
++    <dir path='/var/lib/libvirt/images'/>
++  </source>
++  <target>
++    <path>/mnt</path>
++    <permissions>
++      <mode>0700</mode>
++      <owner>0</owner>
++      <group>0</group>
++    </permissions>
++  </target>
++</pool>
+diff --git a/tests/storagepoolxml2xmlout/pool-netfs-auto.xml b/tests/storagepoolxml2xmlout/pool-netfs-auto.xml
+new file mode 100644
+index 0000000000..a180ca521c
+--- /dev/null
++++ b/tests/storagepoolxml2xmlout/pool-netfs-auto.xml
+@@ -0,0 +1,20 @@
++<pool type='netfs'>
++  <name>nfsimages</name>
++  <uuid>7641d5a8-af11-f730-a34e-0a7dfcede71f</uuid>
++  <capacity unit='bytes'>0</capacity>
++  <allocation unit='bytes'>0</allocation>
++  <available unit='bytes'>0</available>
++  <source>
++    <host name='localhost'/>
++    <dir path='/var/lib/libvirt/images'/>
++    <format type='auto'/>
++  </source>
++  <target>
++    <path>/mnt</path>
++    <permissions>
++      <mode>0700</mode>
++      <owner>0</owner>
++      <group>0</group>
++    </permissions>
++  </target>
++</pool>
+diff --git a/tests/storagepoolxml2xmltest.c b/tests/storagepoolxml2xmltest.c
+index 974f0afe39..29c0e42479 100644
+--- a/tests/storagepoolxml2xmltest.c
++++ b/tests/storagepoolxml2xmltest.c
+@@ -85,6 +85,7 @@ mymain(void)
+     DO_TEST("pool-iscsi");
+     DO_TEST("pool-iscsi-auth");
+     DO_TEST("pool-netfs");
++    DO_TEST("pool-netfs-auto");
+     DO_TEST("pool-netfs-gluster");
+     DO_TEST("pool-netfs-cifs");
+     DO_TEST("pool-scsi");
+-- 
+2.21.0
+

@@ -1,5 +1,5 @@
-From 919834294448ac9d1569a1f2620ea01d79a86e96 Mon Sep 17 00:00:00 2001
-Message-Id: <919834294448ac9d1569a1f2620ea01d79a86e96@dist-git>
+From eec58172c15c8aa05c3beb0a4200b148d00574e6 Mon Sep 17 00:00:00 2001
+Message-Id: <eec58172c15c8aa05c3beb0a4200b148d00574e6@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Tue, 11 Sep 2018 15:13:08 +0200
 Subject: [PATCH] qemu: Map running reason to resume event detail
@@ -20,6 +20,7 @@ Reviewed-by: John Ferlan <jferlan@redhat.com>
 
 https://bugzilla.redhat.com/show_bug.cgi?id=1634758
 https://bugzilla.redhat.com/show_bug.cgi?id=1634759
+https://bugzilla.redhat.com/show_bug.cgi?id=1612943
 
 Conflicts:
 	src/qemu/qemu_domain.c
@@ -117,5 +118,5 @@ index 7325bc4c90..37568165b7 100644
          if (virDomainSaveStatus(driver->xmlopt, cfg->stateDir, vm, driver->caps) < 0) {
              VIR_WARN("Unable to save status on vm %s after state change",
 -- 
-2.19.1
+2.21.0
 

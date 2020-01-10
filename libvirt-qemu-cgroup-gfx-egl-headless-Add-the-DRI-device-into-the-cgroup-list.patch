@@ -1,0 +1,52 @@
+From 2dbe8c5a7106596ae03e265adb3ba1bb49feeeda Mon Sep 17 00:00:00 2001
+Message-Id: <2dbe8c5a7106596ae03e265adb3ba1bb49feeeda@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:33 +0200
+Subject: [PATCH] qemu: cgroup: gfx: egl-headless: Add the DRI device into the
+ cgroup list
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Just like for SPICE, we need to put the render node DRI device into the
+device cgroup list so that users don't need to add it manually via
+qemu.conf file.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit dc87ee0f3e9cb7982d66230cd2d83b3577275564)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <0f769bd757581c2204c8db960699ed36fab26cef.1554791287.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_cgroup.c | 10 +++-------
+ 1 file changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/src/qemu/qemu_cgroup.c b/src/qemu/qemu_cgroup.c
+index c8fba7f9e6..b679238bfc 100644
+--- a/src/qemu/qemu_cgroup.c
++++ b/src/qemu/qemu_cgroup.c
+@@ -489,15 +489,11 @@ qemuSetupGraphicsCgroup(virDomainObjPtr vm,
+                         virDomainGraphicsDefPtr gfx)
+ {
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+-    const char *rendernode = gfx->data.spice.rendernode;
++    const char *rendernode = virDomainGraphicsGetRenderNode(gfx);
+     int ret;
+ 
+-    if (!virCgroupHasController(priv->cgroup, VIR_CGROUP_CONTROLLER_DEVICES))
+-        return 0;
+-
+-    if (gfx->type != VIR_DOMAIN_GRAPHICS_TYPE_SPICE ||
+-        gfx->data.spice.gl != VIR_TRISTATE_BOOL_YES ||
+-        !rendernode)
++    if (!rendernode ||
++        !virCgroupHasController(priv->cgroup, VIR_CGROUP_CONTROLLER_DEVICES))
+         return 0;
+ 
+     ret = virCgroupAllowDevicePath(priv->cgroup, rendernode,
+-- 
+2.21.0
+

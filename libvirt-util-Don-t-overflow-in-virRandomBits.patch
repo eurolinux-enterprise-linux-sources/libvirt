@@ -1,5 +1,5 @@
-From 9f6fbc0d4d4fd12d51ae8e9ac4152bc0bc835c24 Mon Sep 17 00:00:00 2001
-Message-Id: <9f6fbc0d4d4fd12d51ae8e9ac4152bc0bc835c24@dist-git>
+From f7a3585a8bee3d91b1cd57dabd4c2b506afef596 Mon Sep 17 00:00:00 2001
+Message-Id: <f7a3585a8bee3d91b1cd57dabd4c2b506afef596@dist-git>
 From: Michal Privoznik <mprivozn@redhat.com>
 Date: Mon, 21 Jan 2019 09:04:10 -0500
 Subject: [PATCH] util: Don't overflow in virRandomBits
@@ -42,5 +42,5 @@ index 01cc82a052..3c011a8615 100644
  }
  
 -- 
-2.20.1
+2.21.0
 

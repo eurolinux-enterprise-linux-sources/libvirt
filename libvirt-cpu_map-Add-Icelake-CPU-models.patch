@@ -1,0 +1,220 @@
+From d7968283b11e437d36d8e8606098b10980aa5d5f Mon Sep 17 00:00:00 2001
+Message-Id: <d7968283b11e437d36d8e8606098b10980aa5d5f@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 9 Apr 2019 09:38:40 +0200
+Subject: [PATCH] cpu_map: Add Icelake CPU models
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Introduced in QEMU by commit v3.0.0-156-g8a11c62da9.
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 993d85ae5e2422a664ba5f700ed3bf7abd989cfc)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1526624
+
+Conflicts:
+	src/cpu_map/x86_Icelake-Client.xml
+	src/cpu_map/x86_Icelake-Server.xml
+            - no CPU map split downstream
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <bda8992318e2de7b5d71de824529f6e3604ae058.1554795362.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml | 178 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 178 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 234c62781b..1a4f1321f8 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -2009,6 +2009,184 @@
+       <feature name='xsaveopt'/>
+     </model>
+ 
++    <model name='Icelake-Client'>
++      <signature family='6' model='126'/> <!-- 0706e0 -->
++      <vendor name='Intel'/>
++      <feature name='3dnowprefetch'/>
++      <feature name='abm'/>
++      <feature name='adx'/>
++      <feature name='aes'/>
++      <feature name='apic'/>
++      <feature name='arat'/>
++      <feature name='avx'/>
++      <feature name='avx2'/>
++      <feature name='avx512-vpopcntdq'/>
++      <feature name='avx512bitalg'/>
++      <feature name='avx512vbmi'/>
++      <feature name='avx512vbmi2'/>
++      <feature name='avx512vnni'/>
++      <feature name='bmi1'/>
++      <feature name='bmi2'/>
++      <feature name='clflush'/>
++      <feature name='cmov'/>
++      <feature name='cx16'/>
++      <feature name='cx8'/>
++      <feature name='de'/>
++      <feature name='erms'/>
++      <feature name='f16c'/>
++      <feature name='fma'/>
++      <feature name='fpu'/>
++      <feature name='fsgsbase'/>
++      <feature name='fxsr'/>
++      <feature name='gfni'/>
++      <feature name='hle'/>
++      <feature name='intel-pt'/>
++      <feature name='invpcid'/>
++      <feature name='lahf_lm'/>
++      <feature name='lm'/>
++      <feature name='mca'/>
++      <feature name='mce'/>
++      <feature name='mmx'/>
++      <feature name='movbe'/>
++      <feature name='mpx'/>
++      <feature name='msr'/>
++      <feature name='mtrr'/>
++      <feature name='nx'/>
++      <!-- 'ospke' is a dynamic feature and cannot be enabled manually
++           see QEMU's commit 9ccb9784b57 for more details -->
++      <feature name='pae'/>
++      <feature name='pat'/>
++      <feature name='pcid'/>
++      <feature name='pclmuldq'/>
++      <feature name='pge'/>
++      <feature name='pku'/>
++      <feature name='pni'/>
++      <feature name='popcnt'/>
++      <feature name='pse'/>
++      <feature name='pse36'/>
++      <feature name='rdrand'/>
++      <feature name='rdseed'/>
++      <feature name='rdtscp'/>
++      <feature name='rtm'/>
++      <feature name='sep'/>
++      <feature name='smap'/>
++      <feature name='smep'/>
++      <feature name='spec-ctrl'/>
++      <feature name='ssbd'/>
++      <feature name='sse'/>
++      <feature name='sse2'/>
++      <feature name='sse4.1'/>
++      <feature name='sse4.2'/>
++      <feature name='ssse3'/>
++      <feature name='syscall'/>
++      <feature name='tsc'/>
++      <feature name='tsc-deadline'/>
++      <feature name='umip'/>
++      <feature name='vaes'/>
++      <feature name='vme'/>
++      <feature name='vpclmulqdq'/>
++      <feature name='wbnoinvd'/>
++      <feature name='x2apic'/>
++      <feature name='xgetbv1'/>
++      <feature name='xsave'/>
++      <feature name='xsavec'/>
++      <feature name='xsaveopt'/>
++    </model>
++
++    <model name='Icelake-Server'>
++      <signature family='6' model='134'/> <!-- 080660 -->
++      <vendor name='Intel'/>
++      <feature name='3dnowprefetch'/>
++      <feature name='abm'/>
++      <feature name='adx'/>
++      <feature name='aes'/>
++      <feature name='apic'/>
++      <feature name='arat'/>
++      <feature name='avx'/>
++      <feature name='avx2'/>
++      <feature name='avx512-vpopcntdq'/>
++      <feature name='avx512bitalg'/>
++      <feature name='avx512bw'/>
++      <feature name='avx512cd'/>
++      <feature name='avx512dq'/>
++      <feature name='avx512f'/>
++      <feature name='avx512vbmi'/>
++      <feature name='avx512vbmi2'/>
++      <feature name='avx512vl'/>
++      <feature name='avx512vnni'/>
++      <feature name='bmi1'/>
++      <feature name='bmi2'/>
++      <feature name='clflush'/>
++      <feature name='clflushopt'/>
++      <feature name='clwb'/>
++      <feature name='cmov'/>
++      <feature name='cx16'/>
++      <feature name='cx8'/>
++      <feature name='de'/>
++      <feature name='erms'/>
++      <feature name='f16c'/>
++      <feature name='fma'/>
++      <feature name='fpu'/>
++      <feature name='fsgsbase'/>
++      <feature name='fxsr'/>
++      <feature name='gfni'/>
++      <feature name='hle'/>
++      <feature name='intel-pt'/>
++      <feature name='invpcid'/>
++      <feature name='la57'/>
++      <feature name='lahf_lm'/>
++      <feature name='lm'/>
++      <feature name='mca'/>
++      <feature name='mce'/>
++      <feature name='mmx'/>
++      <feature name='movbe'/>
++      <feature name='mpx'/>
++      <feature name='msr'/>
++      <feature name='mtrr'/>
++      <feature name='nx'/>
++      <!-- 'ospke' is a dynamic feature and cannot be enabled manually
++           see QEMU's commit 9ccb9784b57 for more details -->
++      <feature name='pae'/>
++      <feature name='pat'/>
++      <feature name='pcid'/>
++      <feature name='pclmuldq'/>
++      <feature name='pconfig'/>
++      <feature name='pdpe1gb'/>
++      <feature name='pge'/>
++      <feature name='pku'/>
++      <feature name='pni'/>
++      <feature name='popcnt'/>
++      <feature name='pse'/>
++      <feature name='pse36'/>
++      <feature name='rdrand'/>
++      <feature name='rdseed'/>
++      <feature name='rdtscp'/>
++      <feature name='rtm'/>
++      <feature name='sep'/>
++      <feature name='smap'/>
++      <feature name='smep'/>
++      <feature name='spec-ctrl'/>
++      <feature name='ssbd'/>
++      <feature name='sse'/>
++      <feature name='sse2'/>
++      <feature name='sse4.1'/>
++      <feature name='sse4.2'/>
++      <feature name='ssse3'/>
++      <feature name='syscall'/>
++      <feature name='tsc'/>
++      <feature name='tsc-deadline'/>
++      <feature name='umip'/>
++      <feature name='vaes'/>
++      <feature name='vme'/>
++      <feature name='vpclmulqdq'/>
++      <feature name='wbnoinvd'/>
++      <feature name='x2apic'/>
++      <feature name='xgetbv1'/>
++      <feature name='xsave'/>
++      <feature name='xsavec'/>
++      <feature name='xsaveopt'/>
++    </model>
++
+     <!-- AMD CPUs -->
+     <model name='athlon'>
+       <vendor name='AMD'/>
+-- 
+2.21.0
+

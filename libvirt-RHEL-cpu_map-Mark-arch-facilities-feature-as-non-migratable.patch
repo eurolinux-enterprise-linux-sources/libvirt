@@ -1,5 +1,5 @@
-From a74e5a0ea4e4a938bf9694b3d6194b68e5cffab1 Mon Sep 17 00:00:00 2001
-Message-Id: <a74e5a0ea4e4a938bf9694b3d6194b68e5cffab1@dist-git>
+From ead15fe7a0cd60eb91ff7744b24af15b6c122239 Mon Sep 17 00:00:00 2001
+Message-Id: <ead15fe7a0cd60eb91ff7744b24af15b6c122239@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Wed, 9 Jan 2019 15:39:49 +0100
 Subject: [PATCH] RHEL: cpu_map: Mark arch-facilities feature as non-migratable
@@ -39,5 +39,5 @@ index f1f8048c14..9d53d4b43a 100644
      </feature>
      <feature name='ssbd'>
 -- 
-2.20.1
+2.21.0
 

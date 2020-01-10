@@ -1,0 +1,121 @@
+From 7b4b21814c4a1af212b061e265ee0ca8220abd1e Mon Sep 17 00:00:00 2001
+Message-Id: <7b4b21814c4a1af212b061e265ee0ca8220abd1e@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:26 +0200
+Subject: [PATCH] conf: Introduce virDomainGraphics-related helpers
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+A few simple helpers that allow us to determine whether a graphics can
+and will need to make use of a DRM render node.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 255e073263b55b524f68b64c282e73509f93985e)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <24845c3d51a90b5de6989e70e9de51b07b44ade9.1554791287.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c   | 43 ++++++++++++++++++++++++++++++++++++++++
+ src/conf/domain_conf.h   |  9 +++++++++
+ src/libvirt_private.syms |  3 +++
+ 3 files changed, 55 insertions(+)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 6af14cc06f..d079be2bb5 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -30713,3 +30713,46 @@ virDomainGraphicsDefHasOpenGL(const virDomainDef *def)
+ 
+     return false;
+ }
++
++
++bool
++virDomainGraphicsSupportsRenderNode(const virDomainGraphicsDef *graphics)
++{
++    return graphics->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE;
++}
++
++
++const char *
++virDomainGraphicsGetRenderNode(const virDomainGraphicsDef *graphics)
++{
++    const char *ret = NULL;
++
++    switch (graphics->type) {
++    case VIR_DOMAIN_GRAPHICS_TYPE_SPICE:
++        if (graphics->data.spice.gl == VIR_TRISTATE_BOOL_YES)
++            ret = graphics->data.spice.rendernode;
++        break;
++    case VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS:
++    case VIR_DOMAIN_GRAPHICS_TYPE_SDL:
++    case VIR_DOMAIN_GRAPHICS_TYPE_VNC:
++    case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
++    case VIR_DOMAIN_GRAPHICS_TYPE_DESKTOP:
++    case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
++        break;
++    }
++
++    return ret;
++}
++
++
++bool
++virDomainGraphicsNeedsAutoRenderNode(const virDomainGraphicsDef *graphics)
++{
++    if (!virDomainGraphicsSupportsRenderNode(graphics))
++        return false;
++
++    if (virDomainGraphicsGetRenderNode(graphics))
++        return false;
++
++    return true;
++}
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 65abe9cde6..b1139812d5 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -3651,4 +3651,13 @@ virDomainDefHasManagedPR(const virDomainDef *def);
+ bool
+ virDomainGraphicsDefHasOpenGL(const virDomainDef *def);
+ 
++bool
++virDomainGraphicsSupportsRenderNode(const virDomainGraphicsDef *graphics);
++
++const char *
++virDomainGraphicsGetRenderNode(const virDomainGraphicsDef *graphics);
++
++bool
++virDomainGraphicsNeedsAutoRenderNode(const virDomainGraphicsDef *graphics);
++
+ #endif /* __DOMAIN_CONF_H */
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 6655dfdecc..984a9be18f 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -370,8 +370,10 @@ virDomainGraphicsAuthConnectedTypeToString;
+ virDomainGraphicsDefFree;
+ virDomainGraphicsDefHasOpenGL;
+ virDomainGraphicsGetListen;
++virDomainGraphicsGetRenderNode;
+ virDomainGraphicsListenAppendAddress;
+ virDomainGraphicsListenAppendSocket;
++virDomainGraphicsNeedsAutoRenderNode;
+ virDomainGraphicsSpiceChannelModeTypeFromString;
+ virDomainGraphicsSpiceChannelModeTypeToString;
+ virDomainGraphicsSpiceChannelNameTypeFromString;
+@@ -386,6 +388,7 @@ virDomainGraphicsSpiceStreamingModeTypeFromString;
+ virDomainGraphicsSpiceStreamingModeTypeToString;
+ virDomainGraphicsSpiceZlibCompressionTypeFromString;
+ virDomainGraphicsSpiceZlibCompressionTypeToString;
++virDomainGraphicsSupportsRenderNode;
+ virDomainGraphicsTypeFromString;
+ virDomainGraphicsTypeToString;
+ virDomainGraphicsVNCSharePolicyTypeFromString;
+-- 
+2.21.0
+

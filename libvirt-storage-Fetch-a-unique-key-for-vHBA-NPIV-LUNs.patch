@@ -1,5 +1,5 @@
-From 5e8bad9479e999bf9dd704ec29f83427b260c587 Mon Sep 17 00:00:00 2001
-Message-Id: <5e8bad9479e999bf9dd704ec29f83427b260c587@dist-git>
+From 95c8eb63a3078bfd4a568b02898be2be91e3cd95 Mon Sep 17 00:00:00 2001
+Message-Id: <95c8eb63a3078bfd4a568b02898be2be91e3cd95@dist-git>
 From: John Ferlan <jferlan@redhat.com>
 Date: Tue, 12 Mar 2019 13:55:59 -0400
 Subject: [PATCH] storage: Fetch a unique key for vHBA/NPIV LUNs

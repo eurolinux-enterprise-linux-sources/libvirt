@@ -1,0 +1,54 @@
+From 806c01fea005e3887ad74efa3ecbab8294c0ddca Mon Sep 17 00:00:00 2001
+Message-Id: <806c01fea005e3887ad74efa3ecbab8294c0ddca@dist-git>
+From: "Allen, John" <John.Allen@amd.com>
+Date: Fri, 26 Apr 2019 15:12:01 +0200
+Subject: [PATCH] Handle copying bitmaps to larger data buffers
+
+If a bitmap of a shorter length than the data buffer is passed to
+virBitmapToDataBuf, it will read off the end of the bitmap and copy junk
+into the returned buffer. Add a check to only copy the length of the
+bitmap to the buffer.
+
+The problem can be observed after setting a vcpu affinity using the vcpupin
+command on a system with a large number of cores:
+  # virsh vcpupin example_domain 0 0
+  # virsh vcpupin example_domain 0
+     VCPU   CPU Affinity
+    ---------------------------
+     0      0,192,197-198,202
+
+Signed-off-by: John Allen <john.allen@amd.com>
+(cherry picked from commit 51f9f80d350e633adf479c6a9b3c55f82ca9cbd4)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1703159
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <8c72d73f39288e0a38d72481e771d1df53d593a3.1556284274.git.phrdina@redhat.com>
+Reviewed-by: Andrea Bolognani <abologna@redhat.com>
+---
+ src/util/virbitmap.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/util/virbitmap.c b/src/util/virbitmap.c
+index 0cc5292d8c..0bc0d068bb 100644
+--- a/src/util/virbitmap.c
++++ b/src/util/virbitmap.c
+@@ -832,11 +832,15 @@ virBitmapToDataBuf(virBitmapPtr bitmap,
+                    unsigned char *bytes,
+                    size_t len)
+ {
++    size_t nbytes = bitmap->map_len * (VIR_BITMAP_BITS_PER_UNIT / CHAR_BIT);
+     unsigned long *l;
+     size_t i, j;
+ 
+     memset(bytes, 0, len);
+ 
++    /* If bitmap and buffer differ in size, only fill to the smaller length */
++    len = MIN(len, nbytes);
++
+     /* htole64 is not provided by gnulib, so we do the conversion by hand */
+     l = bitmap->map;
+     for (i = j = 0; i < len; i++, j++) {
+-- 
+2.21.0
+

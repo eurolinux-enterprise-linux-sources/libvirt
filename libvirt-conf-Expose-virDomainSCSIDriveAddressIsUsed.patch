@@ -1,0 +1,68 @@
+From bb9521f7e0e8a67f04b5776cccf8b458a16bc94b Mon Sep 17 00:00:00 2001
+Message-Id: <bb9521f7e0e8a67f04b5776cccf8b458a16bc94b@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 18 Apr 2019 18:43:10 +0200
+Subject: [PATCH] conf: Expose virDomainSCSIDriveAddressIsUsed
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1692296
+
+This function checks if given drive address is already present in
+passed domain definition. Expose the function as it will be used
+shortly.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Tested-by: Daniel Henrique Barboza <danielhb413@gmail.com>
+Reviewed-by: Jim Fehlig <jfehlig@suse.com>
+(cherry picked from commit 89237d534f0fe950d06a2081089154160c6c2224)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <79f85c93272ac232b81cb80f80d1ba396d557198.1555605741.git.mprivozn@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/conf/domain_conf.c   | 2 +-
+ src/conf/domain_conf.h   | 4 ++++
+ src/libvirt_private.syms | 1 +
+ 3 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index 712efbb9f9..1096499831 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -4400,7 +4400,7 @@ virDomainDriveAddressIsUsedByHostdev(const virDomainDef *def,
+  * Return true if the SCSI drive address is already in use, false
+  * otherwise.
+  */
+-static bool
++bool
+ virDomainSCSIDriveAddressIsUsed(const virDomainDef *def,
+                                 const virDomainDeviceDriveAddress *addr)
+ {
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 5e2f21dea3..390bd81aa0 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2785,6 +2785,10 @@ virDomainXMLNamespacePtr
+ virDomainXMLOptionGetNamespace(virDomainXMLOptionPtr xmlopt)
+     ATTRIBUTE_NONNULL(1);
+ 
++bool
++virDomainSCSIDriveAddressIsUsed(const virDomainDef *def,
++                                const virDomainDeviceDriveAddress *addr);
++
+ int virDomainDefPostParse(virDomainDefPtr def,
+                           virCapsPtr caps,
+                           unsigned int parseFlags,
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 3325b90535..3000d6ee0a 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -520,6 +520,7 @@ virDomainRunningReasonTypeToString;
+ virDomainSaveConfig;
+ virDomainSaveStatus;
+ virDomainSaveXML;
++virDomainSCSIDriveAddressIsUsed;
+ virDomainSeclabelTypeFromString;
+ virDomainSeclabelTypeToString;
+ virDomainShmemDefEquals;
+-- 
+2.21.0
+

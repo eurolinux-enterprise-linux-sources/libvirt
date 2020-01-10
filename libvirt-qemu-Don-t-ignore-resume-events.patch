@@ -1,5 +1,5 @@
-From 7359db070b7a1379ea33e2754a00e56ca5e6b29f Mon Sep 17 00:00:00 2001
-Message-Id: <7359db070b7a1379ea33e2754a00e56ca5e6b29f@dist-git>
+From 12fe6020638d011daf9772cc822c28b55d662310 Mon Sep 17 00:00:00 2001
+Message-Id: <12fe6020638d011daf9772cc822c28b55d662310@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Wed, 7 Nov 2018 14:34:52 +0100
 Subject: [PATCH] qemu: Don't ignore resume events
@@ -64,5 +64,5 @@ index 2d51c0fa25..9b5cb93325 100644
      virObjectEventStateQueue(driver->domainEventState, event);
      virObjectUnref(cfg);
 -- 
-2.19.1
+2.21.0
 

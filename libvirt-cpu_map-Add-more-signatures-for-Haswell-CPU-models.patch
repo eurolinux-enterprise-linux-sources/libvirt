@@ -1,5 +1,5 @@
-From b7208e290e2312156f8efbbffad31316d73d8a42 Mon Sep 17 00:00:00 2001
-Message-Id: <b7208e290e2312156f8efbbffad31316d73d8a42@dist-git>
+From 265ba06a2613a05c2b770bfd7ca9a83147d87362 Mon Sep 17 00:00:00 2001
+Message-Id: <265ba06a2613a05c2b770bfd7ca9a83147d87362@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Tue, 26 Feb 2019 12:06:05 +0100
 Subject: [PATCH] cpu_map: Add more signatures for Haswell CPU models

@@ -1,0 +1,163 @@
+From c402803b725543f690abd96175df12dbee224c58 Mon Sep 17 00:00:00 2001
+Message-Id: <c402803b725543f690abd96175df12dbee224c58@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:47 +0200
+Subject: [PATCH] util: Add MBA capability information query to resctrl
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Introducing virResctrlInfoMemBW for the information memory bandwidth
+allocation information.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit a24da791b8d489600807158c45451012ae1a8270)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <5bf94bb7ee189420dfd99b19ff423c9650b1e637.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virresctrl.c | 84 +++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 84 insertions(+)
+
+diff --git a/src/util/virresctrl.c b/src/util/virresctrl.c
+index a38c9261b6..b12a05cb0f 100644
+--- a/src/util/virresctrl.c
++++ b/src/util/virresctrl.c
+@@ -80,6 +80,9 @@ typedef virResctrlInfoPerType *virResctrlInfoPerTypePtr;
+ typedef struct _virResctrlInfoPerLevel virResctrlInfoPerLevel;
+ typedef virResctrlInfoPerLevel *virResctrlInfoPerLevelPtr;
+ 
++typedef struct _virResctrlInfoMemBW virResctrlInfoMemBW;
++typedef virResctrlInfoMemBW *virResctrlInfoMemBWPtr;
++
+ typedef struct _virResctrlAllocPerType virResctrlAllocPerType;
+ typedef virResctrlAllocPerType *virResctrlAllocPerTypePtr;
+ 
+@@ -116,11 +119,30 @@ struct _virResctrlInfoPerLevel {
+     virResctrlInfoPerTypePtr *types;
+ };
+ 
++/* Information about memory bandwidth allocation */
++struct _virResctrlInfoMemBW {
++    /* minimum memory bandwidth allowed */
++    unsigned int min_bandwidth;
++    /* bandwidth granularity */
++    unsigned int bandwidth_granularity;
++    /* Maximum number of simultaneous allocations */
++    unsigned int max_allocation;
++    /* level number of last level cache */
++    unsigned int last_level_cache;
++    /* max id of last level cache, this is used to track
++     * how many last level cache available in host system,
++     * the number of memory bandwidth allocation controller
++     * is identical with last level cache. */
++    unsigned int max_id;
++};
++
+ struct _virResctrlInfo {
+     virObject parent;
+ 
+     virResctrlInfoPerLevelPtr *levels;
+     size_t nlevels;
++
++    virResctrlInfoMemBWPtr membw_info;
+ };
+ 
+ 
+@@ -146,6 +168,7 @@ virResctrlInfoDispose(void *obj)
+         VIR_FREE(level);
+     }
+ 
++    VIR_FREE(resctrl->membw_info);
+     VIR_FREE(resctrl->levels);
+ }
+ 
+@@ -442,6 +465,60 @@ virResctrlGetCacheInfo(virResctrlInfoPtr resctrl,
+ }
+ 
+ 
++static int
++virResctrlGetMemoryBandwidthInfo(virResctrlInfoPtr resctrl)
++{
++    int ret = -1;
++    int rv = -1;
++    virResctrlInfoMemBWPtr i_membw = NULL;
++
++    /* query memory bandwidth allocation info */
++    if (VIR_ALLOC(i_membw) < 0)
++        goto cleanup;
++    rv = virFileReadValueUint(&i_membw->bandwidth_granularity,
++                              SYSFS_RESCTRL_PATH "/info/MB/bandwidth_gran");
++    if (rv == -2) {
++        /* The file doesn't exist, so it's unusable for us,
++         * probably memory bandwidth allocation unsupported */
++        VIR_INFO("The path '" SYSFS_RESCTRL_PATH "/info/MB/bandwidth_gran'"
++                 "does not exist");
++        ret = 0;
++        goto cleanup;
++    } else if (rv < 0) {
++        /* Other failures are fatal, so just quit */
++        goto cleanup;
++    }
++
++    rv = virFileReadValueUint(&i_membw->min_bandwidth,
++                              SYSFS_RESCTRL_PATH "/info/MB/min_bandwidth");
++    if (rv == -2) {
++        /* If the previous file exists, so should this one. Hence -2 is
++         * fatal in this case (errors out in next condition) - the kernel
++         * interface might've changed too much or something else is wrong. */
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("Cannot get min bandwidth from resctrl memory info"));
++    }
++    if (rv < 0)
++        goto cleanup;
++
++    rv = virFileReadValueUint(&i_membw->max_allocation,
++                              SYSFS_RESCTRL_PATH "/info/MB/num_closids");
++    if (rv == -2) {
++         /* Similar reasoning to min_bandwidth above. */
++        virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                       _("Cannot get max allocation from resctrl memory info"));
++    }
++    if (rv < 0)
++        goto cleanup;
++
++    VIR_STEAL_PTR(resctrl->membw_info, i_membw);
++    ret = 0;
++ cleanup:
++    VIR_FREE(i_membw);
++    return ret;
++}
++
++
+ static int
+ virResctrlGetInfo(virResctrlInfoPtr resctrl)
+ {
+@@ -452,6 +529,10 @@ virResctrlGetInfo(virResctrlInfoPtr resctrl)
+     if (ret <= 0)
+         goto cleanup;
+ 
++    ret = virResctrlGetMemoryBandwidthInfo(resctrl);
++    if (ret < 0)
++        goto cleanup;
++
+     ret = virResctrlGetCacheInfo(resctrl, dirp);
+     if (ret < 0)
+         goto cleanup;
+@@ -493,6 +574,9 @@ virResctrlInfoIsEmpty(virResctrlInfoPtr resctrl)
+     if (!resctrl)
+         return true;
+ 
++    if (resctrl->membw_info)
++        return false;
++
+     for (i = 0; i < resctrl->nlevels; i++) {
+         virResctrlInfoPerLevelPtr i_level = resctrl->levels[i];
+ 
+-- 
+2.21.0
+

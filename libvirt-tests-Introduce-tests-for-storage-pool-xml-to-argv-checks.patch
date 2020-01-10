@@ -1,0 +1,293 @@
+From c549a110d3705473ab4435bd164a8e48d5da64a1 Mon Sep 17 00:00:00 2001
+Message-Id: <c549a110d3705473ab4435bd164a8e48d5da64a1@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 09:12:16 -0400
+Subject: [PATCH] tests: Introduce tests for storage pool xml to argv checks
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1584663
+
+Similar to qemuxml2argv and storagevolxml2argv, let's create some
+tests to ensure that the XML generates a consistent command line.
+
+Using the same list of pools as storagepoolxml2xmltest, start with
+the file system tests (fs, netfs, netfs-cifs, netfs-gluster).
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit f2f84b4d4ab289e736e367d2867cf945d17d0b20)
+
+Resolved some build issues:
+
+ * Removed the VIR_FREE defs and used the VIR_FREE for @src. Turns out
+   it was unnecessary for @actualCmdline and was removed in commit
+   5f02df444beea79ef7c94f923c0c36135102d562
+
+ * Removed VIR_STORAGE_POOL_ISCSI_DIRECT from switch since it's not
+   a downstream symbol/option
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Message-Id: <20190403131219.16385-5-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ tests/Makefile.am                             |  12 ++
+ tests/storagepoolxml2argvdata/pool-fs.argv    |   1 +
+ .../pool-netfs-cifs.argv                      |   1 +
+ .../pool-netfs-gluster.argv                   |   1 +
+ tests/storagepoolxml2argvdata/pool-netfs.argv |   1 +
+ tests/storagepoolxml2argvtest.c               | 172 ++++++++++++++++++
+ 6 files changed, 188 insertions(+)
+ create mode 100644 tests/storagepoolxml2argvdata/pool-fs.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-cifs.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-gluster.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs.argv
+ create mode 100644 tests/storagepoolxml2argvtest.c
+
+diff --git a/tests/Makefile.am b/tests/Makefile.am
+index a4ebed489a..858076df7b 100644
+--- a/tests/Makefile.am
++++ b/tests/Makefile.am
+@@ -141,6 +141,7 @@ EXTRA_DIST = \
+ 	storagepoolschemadata \
+ 	storagepoolxml2xmlin \
+ 	storagepoolxml2xmlout \
++	storagepoolxml2argvdata \
+ 	storagevolschemadata \
+ 	storagevolxml2argvdata \
+ 	storagevolxml2xmlin \
+@@ -363,6 +364,7 @@ endif WITH_NWFILTER
+ 
+ if WITH_STORAGE
+ test_programs += storagevolxml2argvtest
++test_programs += storagepoolxml2argvtest
+ test_programs += virstorageutiltest
+ endif WITH_STORAGE
+ 
+@@ -901,6 +903,16 @@ storagevolxml2argvtest_LDADD = \
+ 	../src/libvirt_util.la \
+ 	$(LDADDS)
+ 
++storagepoolxml2argvtest_SOURCES = \
++    storagepoolxml2argvtest.c \
++    testutils.c testutils.h
++storagepoolxml2argvtest_LDADD = \
++	$(LIBXML_LIBS) \
++	../src/libvirt_driver_storage_impl.la \
++	../src/libvirt_conf.la \
++	../src/libvirt_util.la \
++	$(LDADDS)
++
+ else ! WITH_STORAGE
+ EXTRA_DIST += storagevolxml2argvtest.c
+ EXTRA_DIST += virstorageutiltest.c
+diff --git a/tests/storagepoolxml2argvdata/pool-fs.argv b/tests/storagepoolxml2argvdata/pool-fs.argv
+new file mode 100644
+index 0000000000..537ce4cee5
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-fs.argv
+@@ -0,0 +1 @@
++mount -t ext3 /dev/sda6 /mnt
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-cifs.argv b/tests/storagepoolxml2argvdata/pool-netfs-cifs.argv
+new file mode 100644
+index 0000000000..2fef6f5782
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-cifs.argv
+@@ -0,0 +1 @@
++mount -t cifs //example.com/samba_share /mnt/cifs -o guest
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-gluster.argv b/tests/storagepoolxml2argvdata/pool-netfs-gluster.argv
+new file mode 100644
+index 0000000000..4303d514ef
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-gluster.argv
+@@ -0,0 +1 @@
++mount -t glusterfs example.com:/volume -o direct-io-mode=1 /mnt/gluster
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs.argv b/tests/storagepoolxml2argvdata/pool-netfs.argv
+new file mode 100644
+index 0000000000..04127c5087
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs.argv
+@@ -0,0 +1 @@
++mount -t nfs localhost:/var/lib/libvirt/images /mnt
+diff --git a/tests/storagepoolxml2argvtest.c b/tests/storagepoolxml2argvtest.c
+new file mode 100644
+index 0000000000..54bc07b4e1
+--- /dev/null
++++ b/tests/storagepoolxml2argvtest.c
+@@ -0,0 +1,172 @@
++#include <config.h>
++
++#include "internal.h"
++#include "testutils.h"
++#include "datatypes.h"
++#include "storage/storage_util.h"
++#include "testutilsqemu.h"
++#include "virstring.h"
++
++#define VIR_FROM_THIS VIR_FROM_NONE
++
++
++static int
++testCompareXMLToArgvFiles(bool shouldFail,
++                          const char *poolxml,
++                          const char *cmdline)
++{
++    char *actualCmdline = NULL;
++    char *src = NULL;
++    int ret = -1;
++    virCommandPtr cmd = NULL;
++    virStoragePoolDefPtr def = NULL;
++    virStoragePoolObjPtr pool = NULL;
++
++    if (!(def = virStoragePoolDefParseFile(poolxml)))
++        goto cleanup;
++
++    switch ((virStoragePoolType)def->type) {
++    case VIR_STORAGE_POOL_FS:
++    case VIR_STORAGE_POOL_NETFS:
++        if (!(pool = virStoragePoolObjNew())) {
++            VIR_TEST_DEBUG("pool type %d alloc pool obj fails\n", def->type);
++            virStoragePoolDefFree(def);
++            goto cleanup;
++        }
++        virStoragePoolObjSetDef(pool, def);
++
++        if (!(src = virStorageBackendFileSystemGetPoolSource(pool))) {
++            VIR_TEST_DEBUG("pool type %d has no pool source\n", def->type);
++            goto cleanup;
++        }
++
++        cmd = virStorageBackendFileSystemMountCmd(def, src);
++        break;
++
++    case VIR_STORAGE_POOL_DIR:
++    case VIR_STORAGE_POOL_LOGICAL:
++    case VIR_STORAGE_POOL_DISK:
++    case VIR_STORAGE_POOL_ISCSI:
++    case VIR_STORAGE_POOL_SCSI:
++    case VIR_STORAGE_POOL_MPATH:
++    case VIR_STORAGE_POOL_RBD:
++    case VIR_STORAGE_POOL_SHEEPDOG:
++    case VIR_STORAGE_POOL_GLUSTER:
++    case VIR_STORAGE_POOL_ZFS:
++    case VIR_STORAGE_POOL_VSTORAGE:
++    case VIR_STORAGE_POOL_LAST:
++    default:
++        VIR_TEST_DEBUG("pool type %d has no xml2argv test\n", def->type);
++        goto cleanup;
++    };
++
++    if (!(actualCmdline = virCommandToString(cmd))) {
++        VIR_TEST_DEBUG("pool type %d failed to get commandline\n", def->type);
++        goto cleanup;
++    }
++
++    virTestClearCommandPath(actualCmdline);
++    if (virTestCompareToFile(actualCmdline, cmdline) < 0)
++        goto cleanup;
++
++    ret = 0;
++
++ cleanup:
++    virCommandFree(cmd);
++    VIR_FREE(src);
++    VIR_FREE(actualCmdline);
++    virStoragePoolObjEndAPI(&pool);
++    if (shouldFail) {
++        virResetLastError();
++        ret = 0;
++    }
++    return ret;
++}
++
++struct testInfo {
++    bool shouldFail;
++    const char *pool;
++};
++
++static int
++testCompareXMLToArgvHelper(const void *data)
++{
++    int result = -1;
++    const struct testInfo *info = data;
++    char *poolxml = NULL;
++    char *cmdline = NULL;
++
++    if (virAsprintf(&poolxml, "%s/storagepoolxml2xmlin/%s.xml",
++                    abs_srcdir, info->pool) < 0)
++        goto cleanup;
++
++    if (virAsprintf(&cmdline, "%s/storagepoolxml2argvdata/%s.argv",
++                    abs_srcdir, info->pool) < 0 && !info->shouldFail)
++        goto cleanup;
++
++    result = testCompareXMLToArgvFiles(info->shouldFail, poolxml, cmdline);
++
++ cleanup:
++    VIR_FREE(poolxml);
++    VIR_FREE(cmdline);
++
++    return result;
++}
++
++
++static int
++mymain(void)
++{
++    int ret = 0;
++
++#define DO_TEST_FULL(shouldFail, pool) \
++    do { \
++        struct testInfo info = { shouldFail, pool }; \
++        if (virTestRun("Storage Pool XML-2-argv " pool, \
++                       testCompareXMLToArgvHelper, &info) < 0) \
++            ret = -1; \
++       } \
++    while (0);
++
++#define DO_TEST(pool, ...) \
++    DO_TEST_FULL(false, pool)
++
++#define DO_TEST_FAIL(pool, ...) \
++    DO_TEST_FULL(true, pool)
++
++    DO_TEST_FAIL("pool-dir");
++    DO_TEST_FAIL("pool-dir-naming");
++    DO_TEST("pool-fs");
++    DO_TEST_FAIL("pool-logical");
++    DO_TEST_FAIL("pool-logical-nopath");
++    DO_TEST_FAIL("pool-logical-create");
++    DO_TEST_FAIL("pool-logical-noname");
++    DO_TEST_FAIL("pool-disk");
++    DO_TEST_FAIL("pool-disk-device-nopartsep");
++    DO_TEST_FAIL("pool-iscsi");
++    DO_TEST_FAIL("pool-iscsi-auth");
++    DO_TEST("pool-netfs");
++    DO_TEST("pool-netfs-gluster");
++    DO_TEST("pool-netfs-cifs");
++    DO_TEST_FAIL("pool-scsi");
++    DO_TEST_FAIL("pool-scsi-type-scsi-host");
++    DO_TEST_FAIL("pool-scsi-type-fc-host");
++    DO_TEST_FAIL("pool-scsi-type-fc-host-managed");
++    DO_TEST_FAIL("pool-mpath");
++    DO_TEST_FAIL("pool-iscsi-multiiqn");
++    DO_TEST_FAIL("pool-iscsi-vendor-product");
++    DO_TEST_FAIL("pool-sheepdog");
++    DO_TEST_FAIL("pool-gluster");
++    DO_TEST_FAIL("pool-gluster-sub");
++    DO_TEST_FAIL("pool-scsi-type-scsi-host-stable");
++    DO_TEST_FAIL("pool-zfs");
++    DO_TEST_FAIL("pool-zfs-sourcedev");
++    DO_TEST_FAIL("pool-rbd");
++    DO_TEST_FAIL("pool-vstorage");
++    DO_TEST_FAIL("pool-iscsi-direct-auth");
++    DO_TEST_FAIL("pool-iscsi-direct");
++
++    return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
++}
++
++VIR_TEST_MAIN(mymain)
+-- 
+2.21.0
+

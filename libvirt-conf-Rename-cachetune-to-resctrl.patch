@@ -1,0 +1,267 @@
+From 8e87a5625a571d05177c6766405db814b6e8e7b3 Mon Sep 17 00:00:00 2001
+Message-Id: <8e87a5625a571d05177c6766405db814b6e8e7b3@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:54 +0200
+Subject: [PATCH] conf: Rename cachetune to resctrl
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Resctrl not only supports cache tuning, but also memory bandwidth
+tuning. Renaming cachetune to resctrl to reflect that. With resctrl,
+all allocation for different resources (cache, memory bandwidth) are
+aggregated and represented by a virResctrlAllocPtr inside
+virDomainResctrlDef.
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit acc288d655237a22a95c5a1ae7207916fb9efac9)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <9ee9c0993a62ddf084968b211ca82c9e6b62ef0d.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/conf/domain_conf.c  | 44 ++++++++++++++++++++---------------------
+ src/conf/domain_conf.h  | 10 +++++-----
+ src/qemu/qemu_domain.c  |  2 +-
+ src/qemu/qemu_process.c | 18 ++++++++---------
+ 4 files changed, 37 insertions(+), 37 deletions(-)
+
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index e04edd97dc..0c8afe78c6 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -2966,14 +2966,14 @@ virDomainLoaderDefFree(virDomainLoaderDefPtr loader)
+ 
+ 
+ static void
+-virDomainCachetuneDefFree(virDomainCachetuneDefPtr cachetune)
++virDomainResctrlDefFree(virDomainResctrlDefPtr resctrl)
+ {
+-    if (!cachetune)
++    if (!resctrl)
+         return;
+ 
+-    virObjectUnref(cachetune->alloc);
+-    virBitmapFree(cachetune->vcpus);
+-    VIR_FREE(cachetune);
++    virObjectUnref(resctrl->alloc);
++    virBitmapFree(resctrl->vcpus);
++    VIR_FREE(resctrl);
+ }
+ 
+ 
+@@ -3163,9 +3163,9 @@ void virDomainDefFree(virDomainDefPtr def)
+         virDomainShmemDefFree(def->shmems[i]);
+     VIR_FREE(def->shmems);
+ 
+-    for (i = 0; i < def->ncachetunes; i++)
+-        virDomainCachetuneDefFree(def->cachetunes[i]);
+-    VIR_FREE(def->cachetunes);
++    for (i = 0; i < def->nresctrls; i++)
++        virDomainResctrlDefFree(def->resctrls[i]);
++    VIR_FREE(def->resctrls);
+ 
+     VIR_FREE(def->keywrap);
+ 
+@@ -19129,7 +19129,7 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+     xmlNodePtr *nodes = NULL;
+     virBitmapPtr vcpus = NULL;
+     virResctrlAllocPtr alloc = virResctrlAllocNew();
+-    virDomainCachetuneDefPtr tmp_cachetune = NULL;
++    virDomainResctrlDefPtr tmp_resctrl = NULL;
+     char *tmp = NULL;
+     char *vcpus_str = NULL;
+     char *alloc_id = NULL;
+@@ -19142,7 +19142,7 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+     if (!alloc)
+         goto cleanup;
+ 
+-    if (VIR_ALLOC(tmp_cachetune) < 0)
++    if (VIR_ALLOC(tmp_resctrl) < 0)
+         goto cleanup;
+ 
+     vcpus_str = virXMLPropString(node, "vcpus");
+@@ -19183,8 +19183,8 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+         goto cleanup;
+     }
+ 
+-    for (i = 0; i < def->ncachetunes; i++) {
+-        if (virBitmapOverlaps(def->cachetunes[i]->vcpus, vcpus)) {
++    for (i = 0; i < def->nresctrls; i++) {
++        if (virBitmapOverlaps(def->resctrls[i]->vcpus, vcpus)) {
+             virReportError(VIR_ERR_XML_ERROR, "%s",
+                            _("Overlapping vcpus in cachetunes"));
+             goto cleanup;
+@@ -19214,16 +19214,16 @@ virDomainCachetuneDefParse(virDomainDefPtr def,
+     if (virResctrlAllocSetID(alloc, alloc_id) < 0)
+         goto cleanup;
+ 
+-    VIR_STEAL_PTR(tmp_cachetune->vcpus, vcpus);
+-    VIR_STEAL_PTR(tmp_cachetune->alloc, alloc);
++    VIR_STEAL_PTR(tmp_resctrl->vcpus, vcpus);
++    VIR_STEAL_PTR(tmp_resctrl->alloc, alloc);
+ 
+-    if (VIR_APPEND_ELEMENT(def->cachetunes, def->ncachetunes, tmp_cachetune) < 0)
++    if (VIR_APPEND_ELEMENT(def->resctrls, def->nresctrls, tmp_resctrl) < 0)
+         goto cleanup;
+ 
+     ret = 0;
+  cleanup:
+     ctxt->node = oldnode;
+-    virDomainCachetuneDefFree(tmp_cachetune);
++    virDomainResctrlDefFree(tmp_resctrl);
+     virObjectUnref(alloc);
+     virBitmapFree(vcpus);
+     VIR_FREE(alloc_id);
+@@ -27053,7 +27053,7 @@ virDomainCachetuneDefFormatHelper(unsigned int level,
+ 
+ static int
+ virDomainCachetuneDefFormat(virBufferPtr buf,
+-                            virDomainCachetuneDefPtr cachetune,
++                            virDomainResctrlDefPtr resctrl,
+                             unsigned int flags)
+ {
+     virBuffer childrenBuf = VIR_BUFFER_INITIALIZER;
+@@ -27061,7 +27061,7 @@ virDomainCachetuneDefFormat(virBufferPtr buf,
+     int ret = -1;
+ 
+     virBufferSetChildIndent(&childrenBuf, buf);
+-    virResctrlAllocForeachCache(cachetune->alloc,
++    virResctrlAllocForeachCache(resctrl->alloc,
+                                 virDomainCachetuneDefFormatHelper,
+                                 &childrenBuf);
+ 
+@@ -27074,14 +27074,14 @@ virDomainCachetuneDefFormat(virBufferPtr buf,
+         goto cleanup;
+     }
+ 
+-    vcpus = virBitmapFormat(cachetune->vcpus);
++    vcpus = virBitmapFormat(resctrl->vcpus);
+     if (!vcpus)
+         goto cleanup;
+ 
+     virBufferAsprintf(buf, "<cachetune vcpus='%s'", vcpus);
+ 
+     if (!(flags & VIR_DOMAIN_DEF_FORMAT_INACTIVE)) {
+-        const char *alloc_id = virResctrlAllocGetID(cachetune->alloc);
++        const char *alloc_id = virResctrlAllocGetID(resctrl->alloc);
+         if (!alloc_id)
+             goto cleanup;
+ 
+@@ -27202,8 +27202,8 @@ virDomainCputuneDefFormat(virBufferPtr buf,
+                                  def->iothreadids[i]->iothread_id);
+     }
+ 
+-    for (i = 0; i < def->ncachetunes; i++)
+-        virDomainCachetuneDefFormat(&childrenBuf, def->cachetunes[i], flags);
++    for (i = 0; i < def->nresctrls; i++)
++        virDomainCachetuneDefFormat(&childrenBuf, def->resctrls[i], flags);
+ 
+     if (virBufferCheckError(&childrenBuf) < 0)
+         return -1;
+diff --git a/src/conf/domain_conf.h b/src/conf/domain_conf.h
+index 390bd81aa0..65abe9cde6 100644
+--- a/src/conf/domain_conf.h
++++ b/src/conf/domain_conf.h
+@@ -2232,10 +2232,10 @@ struct _virDomainCputune {
+ };
+ 
+ 
+-typedef struct _virDomainCachetuneDef virDomainCachetuneDef;
+-typedef virDomainCachetuneDef *virDomainCachetuneDefPtr;
++typedef struct _virDomainResctrlDef virDomainResctrlDef;
++typedef virDomainResctrlDef *virDomainResctrlDefPtr;
+ 
+-struct _virDomainCachetuneDef {
++struct _virDomainResctrlDef {
+     virBitmapPtr vcpus;
+     virResctrlAllocPtr alloc;
+ };
+@@ -2413,8 +2413,8 @@ struct _virDomainDef {
+ 
+     virDomainCputune cputune;
+ 
+-    virDomainCachetuneDefPtr *cachetunes;
+-    size_t ncachetunes;
++    virDomainResctrlDefPtr *resctrls;
++    size_t nresctrls;
+ 
+     virDomainNumaPtr numa;
+     virDomainResourceDefPtr resource;
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index d80f9b393e..112958f64a 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -3999,7 +3999,7 @@ qemuDomainDefValidate(const virDomainDef *def,
+         }
+     }
+ 
+-    if (def->ncachetunes &&
++    if (def->nresctrls &&
+         def->virtType != VIR_DOMAIN_VIRT_KVM) {
+         virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
+                        _("cachetune is only supported for KVM domains"));
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 208c64381c..a44f371346 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -2584,7 +2584,7 @@ qemuProcessResctrlCreate(virQEMUDriverPtr driver,
+     virCapsPtr caps = NULL;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+ 
+-    if (!vm->def->ncachetunes)
++    if (!vm->def->nresctrls)
+         return 0;
+ 
+     /* Force capability refresh since resctrl info can change
+@@ -2593,9 +2593,9 @@ qemuProcessResctrlCreate(virQEMUDriverPtr driver,
+     if (!caps)
+         return -1;
+ 
+-    for (i = 0; i < vm->def->ncachetunes; i++) {
++    for (i = 0; i < vm->def->nresctrls; i++) {
+         if (virResctrlAllocCreate(caps->host.resctrl,
+-                                  vm->def->cachetunes[i]->alloc,
++                                  vm->def->resctrls[i]->alloc,
+                                   priv->machineName) < 0)
+             goto cleanup;
+     }
+@@ -5411,8 +5411,8 @@ qemuProcessSetupVcpu(virDomainObjPtr vm,
+                             &vcpu->sched) < 0)
+         return -1;
+ 
+-    for (i = 0; i < vm->def->ncachetunes; i++) {
+-        virDomainCachetuneDefPtr ct = vm->def->cachetunes[i];
++    for (i = 0; i < vm->def->nresctrls; i++) {
++        virDomainResctrlDefPtr ct = vm->def->resctrls[i];
+ 
+         if (virBitmapIsBitSet(ct->vcpus, vcpuid)) {
+             if (virResctrlAllocAddPID(ct->alloc, vcpupid) < 0)
+@@ -7108,8 +7108,8 @@ void qemuProcessStop(virQEMUDriverPtr driver,
+     /* Remove resctrl allocation after cgroups are cleaned up which makes it
+      * kind of safer (although removing the allocation should work even with
+      * pids in tasks file */
+-    for (i = 0; i < vm->def->ncachetunes; i++)
+-        virResctrlAllocRemove(vm->def->cachetunes[i]->alloc);
++    for (i = 0; i < vm->def->nresctrls; i++)
++        virResctrlAllocRemove(vm->def->resctrls[i]->alloc);
+ 
+     qemuProcessRemoveDomainStatus(driver, vm);
+ 
+@@ -7835,8 +7835,8 @@ qemuProcessReconnect(void *opaque)
+     if (qemuConnectAgent(driver, obj) < 0)
+         goto error;
+ 
+-    for (i = 0; i < obj->def->ncachetunes; i++) {
+-        if (virResctrlAllocDeterminePath(obj->def->cachetunes[i]->alloc,
++    for (i = 0; i < obj->def->nresctrls; i++) {
++        if (virResctrlAllocDeterminePath(obj->def->resctrls[i]->alloc,
+                                          priv->machineName) < 0)
+             goto error;
+     }
+-- 
+2.21.0
+

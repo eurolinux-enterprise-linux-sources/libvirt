@@ -1,0 +1,70 @@
+From 98189cd7e622bb89ee4916307c1287d97487233a Mon Sep 17 00:00:00 2001
+Message-Id: <98189cd7e622bb89ee4916307c1287d97487233a@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:34 +0200
+Subject: [PATCH] security: dac: gfx: egl-headless: Relabel the DRI device
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Just like for SPICE, we need to change the permissions on the DRI device
+used as the @rendernode for egl-headless graphics type.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit ae00e73cfe91b76849712fb7d928cfefef39a6eb)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+
+ Conflicts:
+	src/security/security_dac.c
+            v4.7.0-58-g3ac7793ad1 was not backported
+Message-Id: <f564d1859c197fb7477e49ce801124e0cc2d506f.1554791287.git.eskultet@redhat.com>
+
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/security/security_dac.c | 15 +++++++--------
+ 1 file changed, 7 insertions(+), 8 deletions(-)
+
+diff --git a/src/security/security_dac.c b/src/security/security_dac.c
+index 74c70dd092..cc2ed10157 100644
+--- a/src/security/security_dac.c
++++ b/src/security/security_dac.c
+@@ -1419,11 +1419,16 @@ virSecurityDACSetGraphicsLabel(virSecurityManagerPtr mgr,
+                                virDomainGraphicsDefPtr gfx)
+ 
+ {
++    const char *rendernode = virDomainGraphicsGetRenderNode(gfx);
+     virSecurityDACDataPtr priv = virSecurityManagerGetPrivateData(mgr);
+     virSecurityLabelDefPtr seclabel;
+     uid_t user;
+     gid_t group;
+ 
++    /* There's nothing to relabel */
++    if (!rendernode)
++        return 0;
++
+     /* Skip chowning the shared render file if namespaces are disabled */
+     if (!priv->mountNamespace)
+         return 0;
+@@ -1435,14 +1440,8 @@ virSecurityDACSetGraphicsLabel(virSecurityManagerPtr mgr,
+     if (virSecurityDACGetIds(seclabel, priv, &user, &group, NULL, NULL) < 0)
+         return -1;
+ 
+-    if (gfx->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE &&
+-        gfx->data.spice.gl == VIR_TRISTATE_BOOL_YES &&
+-        gfx->data.spice.rendernode) {
+-        if (virSecurityDACSetOwnership(priv, NULL,
+-                                       gfx->data.spice.rendernode,
+-                                       user, group) < 0)
+-            return -1;
+-    }
++    if (virSecurityDACSetOwnership(priv, NULL, rendernode, user, group) < 0)
++        return -1;
+ 
+     return 0;
+ }
+-- 
+2.21.0
+

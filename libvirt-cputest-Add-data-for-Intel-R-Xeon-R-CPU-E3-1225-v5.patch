@@ -1,31 +1,30 @@
-From dc31ed12dd6b199cc7963ee6177c7dac0ffea041 Mon Sep 17 00:00:00 2001
-Message-Id: <dc31ed12dd6b199cc7963ee6177c7dac0ffea041@dist-git>
+From 21665cdbf25ce849c08d0c56a44f1483682cd745 Mon Sep 17 00:00:00 2001
+Message-Id: <21665cdbf25ce849c08d0c56a44f1483682cd745@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Fri, 5 Apr 2019 11:19:30 +0200
 Subject: [PATCH] cputest: Add data for Intel(R) Xeon(R) CPU E3-1225 v5
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
-(cherry picked from a private commit)
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 5cd9db3ac11e88846cbcf95fad9f6fae9d880dee)
 
-CVE-2018-12126, CVE-2018-12127, CVE-2018-12130
-
-Conflicts:
-	tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-guest.xml
-	tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-host.xml
-            - intel-pt feature is missing int RHEL-7.6
+CVE-2018-12126, CVE-2018-12127, CVE-2018-12130, CVE-2019-11091
 
 Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
 ---
  tests/cputest.c                               |   1 +
  .../x86_64-cpuid-Xeon-E3-1225-v5-disabled.xml |   7 +
  .../x86_64-cpuid-Xeon-E3-1225-v5-enabled.xml  |   8 +
- .../x86_64-cpuid-Xeon-E3-1225-v5-guest.xml    |  27 +
- .../x86_64-cpuid-Xeon-E3-1225-v5-host.xml     |  28 +
+ .../x86_64-cpuid-Xeon-E3-1225-v5-guest.xml    |  28 +
+ .../x86_64-cpuid-Xeon-E3-1225-v5-host.xml     |  29 +
  .../x86_64-cpuid-Xeon-E3-1225-v5-json.xml     |  11 +
  .../x86_64-cpuid-Xeon-E3-1225-v5.json         | 652 ++++++++++++++++++
  .../x86_64-cpuid-Xeon-E3-1225-v5.sig          |   4 +
  .../x86_64-cpuid-Xeon-E3-1225-v5.xml          |  47 ++
- 9 files changed, 785 insertions(+)
+ 9 files changed, 787 insertions(+)
  create mode 100644 tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-disabled.xml
  create mode 100644 tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-enabled.xml
  create mode 100644 tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-guest.xml
@@ -76,10 +75,10 @@ index 0000000000..0deca9fba6
 +</cpudata>
 diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-guest.xml
 new file mode 100644
-index 0000000000..141c01c841
+index 0000000000..70a0fc3286
 --- /dev/null
 +++ b/tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-guest.xml
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,28 @@
 +<cpu mode='custom' match='exact'>
 +  <model fallback='forbid'>Skylake-Client-IBRS</model>
 +  <vendor>Intel</vendor>
@@ -101,6 +100,7 @@ index 0000000000..141c01c841
 +  <feature policy='require' name='osxsave'/>
 +  <feature policy='require' name='tsc_adjust'/>
 +  <feature policy='require' name='clflushopt'/>
++  <feature policy='require' name='intel-pt'/>
 +  <feature policy='require' name='stibp'/>
 +  <feature policy='require' name='ssbd'/>
 +  <feature policy='require' name='xsaves'/>
@@ -109,10 +109,10 @@ index 0000000000..141c01c841
 +</cpu>
 diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-host.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-host.xml
 new file mode 100644
-index 0000000000..53bfc9728d
+index 0000000000..bbdfb6aa61
 --- /dev/null
 +++ b/tests/cputestdata/x86_64-cpuid-Xeon-E3-1225-v5-host.xml
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,29 @@
 +<cpu>
 +  <arch>x86_64</arch>
 +  <model>Skylake-Client-IBRS</model>
@@ -135,6 +135,7 @@ index 0000000000..53bfc9728d
 +  <feature name='osxsave'/>
 +  <feature name='tsc_adjust'/>
 +  <feature name='clflushopt'/>
++  <feature name='intel-pt'/>
 +  <feature name='stibp'/>
 +  <feature name='ssbd'/>
 +  <feature name='xsaves'/>

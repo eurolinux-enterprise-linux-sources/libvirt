@@ -1,0 +1,68 @@
+From fda8fad673053718fdee4b370476f7a2555437c3 Mon Sep 17 00:00:00 2001
+Message-Id: <fda8fad673053718fdee4b370476f7a2555437c3@dist-git>
+From: Shi Lei <shi_lei@massclouds.com>
+Date: Tue, 4 Jun 2019 13:04:24 +0200
+Subject: [PATCH] util: file: introduce VIR_AUTOCLOSE macro to close fd of the
+ file automatically
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Shi Lei <shi_lei@massclouds.com>
+(cherry picked from commit 09d35afd2c3058688290d5d818343d0f6aa2dd6e)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1641702
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <e13d3c54954aa3f13bedc3cda5b32723d5212a66.1559646067.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virfile.h | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/src/util/virfile.h b/src/util/virfile.h
+index 51c221e069..fa03269289 100644
+--- a/src/util/virfile.h
++++ b/src/util/virfile.h
+@@ -53,6 +53,11 @@ int virFileClose(int *fdptr, virFileCloseFlags flags)
+ int virFileFclose(FILE **file, bool preserve_errno) ATTRIBUTE_RETURN_CHECK;
+ FILE *virFileFdopen(int *fdptr, const char *mode) ATTRIBUTE_RETURN_CHECK;
+ 
++static inline void virForceCloseHelper(int *fd)
++{
++    ignore_value(virFileClose(fd, VIR_FILE_CLOSE_PRESERVE_ERRNO));
++}
++
+ /* For use on normal paths; caller must check return value,
+    and failure sets errno per close. */
+ # define VIR_CLOSE(FD) virFileClose(&(FD), 0)
+@@ -63,8 +68,7 @@ FILE *virFileFdopen(int *fdptr, const char *mode) ATTRIBUTE_RETURN_CHECK;
+ 
+ /* For use on cleanup paths; errno is unaffected by close,
+    and no return value to worry about. */
+-# define VIR_FORCE_CLOSE(FD) \
+-    ignore_value(virFileClose(&(FD), VIR_FILE_CLOSE_PRESERVE_ERRNO))
++# define VIR_FORCE_CLOSE(FD) virForceCloseHelper(&(FD))
+ # define VIR_FORCE_FCLOSE(FILE) ignore_value(virFileFclose(&(FILE), true))
+ 
+ /* Similar VIR_FORCE_CLOSE() but ignores EBADF errors since they are expected
+@@ -79,6 +83,16 @@ FILE *virFileFdopen(int *fdptr, const char *mode) ATTRIBUTE_RETURN_CHECK;
+                  VIR_FILE_CLOSE_PRESERVE_ERRNO | \
+                  VIR_FILE_CLOSE_DONT_LOG))
+ 
++/**
++ * VIR_AUTOCLOSE:
++ *
++ * Macro to automatically force close the fd by calling virForceCloseHelper
++ * when the fd goes out of scope. It's used to eliminate VIR_FORCE_CLOSE
++ * in cleanup sections.
++ */
++# define VIR_AUTOCLOSE __attribute__((cleanup(virForceCloseHelper))) int
++
++
+ /* Opaque type for managing a wrapper around a fd.  */
+ struct _virFileWrapperFd;
+ 
+-- 
+2.21.0
+

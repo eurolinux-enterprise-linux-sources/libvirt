@@ -1,5 +1,5 @@
-From 3c834c19e111e5df17ce7c4206d4c8213709e819 Mon Sep 17 00:00:00 2001
-Message-Id: <3c834c19e111e5df17ce7c4206d4c8213709e819@dist-git>
+From 18528617659bbf6cf61eb3faccdd6794240827f6 Mon Sep 17 00:00:00 2001
+Message-Id: <18528617659bbf6cf61eb3faccdd6794240827f6@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Tue, 26 Feb 2019 12:59:50 +0100
 Subject: [PATCH] cpu_map: Add more signatures for Penryn CPU model

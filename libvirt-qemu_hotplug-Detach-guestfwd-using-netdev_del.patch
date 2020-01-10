@@ -1,0 +1,139 @@
+From 9a33b0d475699d322f3e881c397143eed2dc9b3f Mon Sep 17 00:00:00 2001
+Message-Id: <9a33b0d475699d322f3e881c397143eed2dc9b3f@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:19 -0400
+Subject: [PATCH] qemu_hotplug: Detach guestfwd using netdev_del
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1624204
+
+The guestfwd channels are -netdevs really. Hotunplug them as
+such. Also, DEVICE_DELETED event is not triggered (surprisingly,
+since we're not issuing device_del rather than netdev_del) and
+associated chardev is removed automagically too. This means that
+we need to do qemuDomainRemoveChrDevice() minus monitor call to
+remove the chardev.
+
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 112f3a8d0f324c0705326957cca4508602b25eba)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-8-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 48 ++++++++++++++++++++++++++++-------------
+ 1 file changed, 33 insertions(+), 15 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 680c06c1ed..43dec329b6 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4214,25 +4214,28 @@ qemuDomainRemoveNetDevice(virQEMUDriverPtr driver,
+ static int
+ qemuDomainRemoveChrDevice(virQEMUDriverPtr driver,
+                           virDomainObjPtr vm,
+-                          virDomainChrDefPtr chr)
++                          virDomainChrDefPtr chr,
++                          bool monitor)
+ {
+     virObjectEventPtr event;
+     char *charAlias = NULL;
+     qemuDomainObjPrivatePtr priv = vm->privateData;
+     int ret = -1;
+-    int rc;
++    int rc = 0;
+ 
+     VIR_DEBUG("Removing character device %s from domain %p %s",
+               chr->info.alias, vm, vm->def->name);
+ 
+-    if (!(charAlias = qemuAliasChardevFromDevAlias(chr->info.alias)))
+-        goto cleanup;
++    if (monitor) {
++        if (!(charAlias = qemuAliasChardevFromDevAlias(chr->info.alias)))
++            goto cleanup;
+ 
+-    qemuDomainObjEnterMonitor(driver, vm);
+-    rc = qemuMonitorDetachCharDev(priv->mon, charAlias);
++        qemuDomainObjEnterMonitor(driver, vm);
++        rc = qemuMonitorDetachCharDev(priv->mon, charAlias);
+ 
+-    if (qemuDomainObjExitMonitor(driver, vm) < 0)
+-        goto cleanup;
++        if (qemuDomainObjExitMonitor(driver, vm) < 0)
++            goto cleanup;
++    }
+ 
+     if (rc == 0 &&
+         qemuDomainDelChardevTLSObjects(driver, vm, chr->source, charAlias) < 0)
+@@ -4526,7 +4529,7 @@ qemuDomainRemoveDevice(virQEMUDriverPtr driver,
+         break;
+ 
+     case VIR_DOMAIN_DEVICE_CHR:
+-        ret = qemuDomainRemoveChrDevice(driver, vm, dev->data.chr);
++        ret = qemuDomainRemoveChrDevice(driver, vm, dev->data.chr, true);
+         break;
+     case VIR_DOMAIN_DEVICE_RNG:
+         ret = qemuDomainRemoveRNGDevice(driver, vm, dev->data.rng);
+@@ -5590,6 +5593,7 @@ int qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
+     virDomainDefPtr vmdef = vm->def;
+     virDomainChrDefPtr tmpChr;
+     char *devstr = NULL;
++    bool guestfwd = false;
+ 
+     if (!(tmpChr = virDomainChrFind(vmdef, chr))) {
+         virReportError(VIR_ERR_DEVICE_MISSING,
+@@ -5599,6 +5603,11 @@ int qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
+         goto cleanup;
+     }
+ 
++    /* guestfwd channels are not really -device rather than
++     * -netdev. We need to treat them slightly differently. */
++    guestfwd = tmpChr->deviceType == VIR_DOMAIN_CHR_DEVICE_TYPE_CHANNEL &&
++               tmpChr->targetType == VIR_DOMAIN_CHR_CHANNEL_TARGET_TYPE_GUESTFWD;
++
+     if (!tmpChr->info.alias && qemuAssignDeviceChrAlias(vmdef, tmpChr, -1) < 0)
+         goto cleanup;
+ 
+@@ -5607,22 +5616,31 @@ int qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
+     if (qemuBuildChrDeviceStr(&devstr, vmdef, tmpChr, priv->qemuCaps) < 0)
+         goto cleanup;
+ 
+-    if (!async)
++    if (!async && !guestfwd)
+         qemuDomainMarkDeviceForRemoval(vm, &tmpChr->info);
+ 
+     qemuDomainObjEnterMonitor(driver, vm);
+-    if (devstr && qemuMonitorDelDevice(priv->mon, tmpChr->info.alias) < 0) {
+-        ignore_value(qemuDomainObjExitMonitor(driver, vm));
+-        goto cleanup;
++    if (guestfwd) {
++        if (qemuMonitorRemoveNetdev(priv->mon, tmpChr->info.alias) < 0) {
++            ignore_value(qemuDomainObjExitMonitor(driver, vm));
++            goto cleanup;
++        }
++    } else {
++        if (devstr && qemuMonitorDelDevice(priv->mon, tmpChr->info.alias) < 0) {
++            ignore_value(qemuDomainObjExitMonitor(driver, vm));
++            goto cleanup;
++        }
+     }
+     if (qemuDomainObjExitMonitor(driver, vm) < 0)
+         goto cleanup;
+ 
+-    if (async) {
++    if (guestfwd) {
++        ret = qemuDomainRemoveChrDevice(driver, vm, tmpChr, false);
++    } else if (async) {
+         ret = 0;
+     } else {
+         if ((ret = qemuDomainWaitForDeviceRemoval(vm)) == 1)
+-            ret = qemuDomainRemoveChrDevice(driver, vm, tmpChr);
++            ret = qemuDomainRemoveChrDevice(driver, vm, tmpChr, true);
+     }
+ 
+  cleanup:
+-- 
+2.21.0
+

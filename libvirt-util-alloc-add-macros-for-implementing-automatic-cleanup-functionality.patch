@@ -1,0 +1,82 @@
+From 61ed471220064f39afe088eb76630a4f7fe35b43 Mon Sep 17 00:00:00 2001
+Message-Id: <61ed471220064f39afe088eb76630a4f7fe35b43@dist-git>
+From: Sukrit Bhatnagar <skrtbhtngr@gmail.com>
+Date: Tue, 4 Jun 2019 16:22:02 +0200
+Subject: [PATCH] util: alloc: add macros for implementing automatic cleanup
+ functionality
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+New macros are introduced which help in adding GNU C's cleanup
+attribute to variable declarations. Variables declared with these
+macros will have their allocated memory freed automatically when
+they go out of scope.
+
+Signed-off-by: Sukrit Bhatnagar <skrtbhtngr@gmail.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+(cherry picked from commit dcec13f5a2ba17223d403ff9e9fed916a4dd9c04)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1703661
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190604142207.2036-2-abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/viralloc.h | 42 ++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 42 insertions(+)
+
+diff --git a/src/util/viralloc.h b/src/util/viralloc.h
+index 69d0f904f1..a23aa188bb 100644
+--- a/src/util/viralloc.h
++++ b/src/util/viralloc.h
+@@ -596,4 +596,46 @@ void virAllocTestInit(void);
+ int virAllocTestCount(void);
+ void virAllocTestOOM(int n, int m);
+ void virAllocTestHook(void (*func)(int, void*), void *data);
++
++# define VIR_AUTOPTR_FUNC_NAME(type) type##AutoPtrFree
++
++/**
++ * VIR_DEFINE_AUTOPTR_FUNC:
++ * @type: type of the variable to be freed automatically
++ * @func: cleanup function to be automatically called
++ *
++ * This macro defines a function for automatic freeing of
++ * resources allocated to a variable of type @type. This newly
++ * defined function works as a necessary wrapper around @func.
++ */
++# define VIR_DEFINE_AUTOPTR_FUNC(type, func) \
++    static inline void VIR_AUTOPTR_FUNC_NAME(type)(type **_ptr) \
++    { \
++        if (*_ptr) \
++            (func)(*_ptr); \
++        *_ptr = NULL; \
++    } \
++
++/**
++ * VIR_AUTOFREE:
++ * @type: type of the variable to be freed automatically
++ *
++ * Macro to automatically free the memory allocated to
++ * the variable declared with it by calling virFree
++ * when the variable goes out of scope.
++ */
++# define VIR_AUTOFREE(type) __attribute__((cleanup(virFree))) type
++
++/**
++ * VIR_AUTOPTR:
++ * @type: type of the variable to be freed automatically
++ *
++ * Macro to automatically free the memory allocated to
++ * the variable declared with it by calling the function
++ * defined by VIR_DEFINE_AUTOPTR_FUNC when the variable
++ * goes out of scope.
++ */
++# define VIR_AUTOPTR(type) \
++    __attribute__((cleanup(VIR_AUTOPTR_FUNC_NAME(type)))) type *
++
+ #endif /* __VIR_MEMORY_H_ */
+-- 
+2.21.0
+

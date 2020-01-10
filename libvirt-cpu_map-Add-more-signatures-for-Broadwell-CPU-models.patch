@@ -1,5 +1,5 @@
-From a4fe8dfb0c2df61f1b903e8858cd6430954f30e2 Mon Sep 17 00:00:00 2001
-Message-Id: <a4fe8dfb0c2df61f1b903e8858cd6430954f30e2@dist-git>
+From e7e1e3003d52fee05ef040e273c590a66d90e6f9 Mon Sep 17 00:00:00 2001
+Message-Id: <e7e1e3003d52fee05ef040e273c590a66d90e6f9@dist-git>
 From: Jiri Denemark <Jiri.Denemark@gmail.com>
 Date: Wed, 20 Mar 2019 17:15:16 +0100
 Subject: [PATCH] cpu_map: Add more signatures for Broadwell CPU models

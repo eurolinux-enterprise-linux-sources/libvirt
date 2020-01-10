@@ -1,0 +1,505 @@
+From f1269c8165b8c805e57e37179f893d3f2a1d4f95 Mon Sep 17 00:00:00 2001
+Message-Id: <f1269c8165b8c805e57e37179f893d3f2a1d4f95@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Tue, 9 Apr 2019 09:38:39 +0200
+Subject: [PATCH] cpu_map: Add features for Icelake CPUs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+QEMU commits:
+
+    e37a5c7fa4 (v2.12.0)
+        i386: Add Intel Processor Trace feature support
+
+    c2f193b538 (v2.7.0)
+        target-i386: Add support for UMIP and RDPID CPUID bits
+
+    aff9e6e46a (v2.12.0)
+        x86/cpu: Enable new SSE/AVX/AVX512 cpu features
+
+    f77543772d (v2.9.0)
+        x86: add AVX512_VPOPCNTDQ features
+
+    5131dc433d (v3.1.0)
+        i386: Add CPUID bit for PCONFIG
+
+    59a80a19ca (v3.1.0)
+        i386: Add CPUID bit for WBNOINVD
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 9813081119b6727c8b6067a783465addef06525e)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1526624
+https://bugzilla.redhat.com/show_bug.cgi?id=1527659
+
+Conflicts:
+	src/cpu_map/x86_features.xml
+            - no CPU map split downstream
+
+	tests/cputestdata/x86_64-cpuid-Core-i7-5600U-ibrs-guest.xml
+	tests/cputestdata/x86_64-cpuid-Core-i7-5600U-ibrs-host.xml
+	tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-guest.xml
+	tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-host.xml
+            - the "stibp" feature added upstream by commit eb1b551d21e
+              to libvirt 5.0.0 is already in RHEL-7 thanks to "RHEL:
+              cpu: Add downstream only CPU features for CVE-2017-5715"
+
+	tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-guest.xml
+            - upstream commit e7e1e3003d5 "cpu_map: Add more signatures
+              for Broadwell CPU models" is already backported to RHEL-7
+
+	tests/cputestdata/x86_64-cpuid-Core-i7-7600U-guest.xml
+	tests/cputestdata/x86_64-cpuid-Core-i7-7600U-host.xml
+	tests/cputestdata/x86_64-cpuid-Core-i7-7600U-json.xml
+	tests/cputestdata/x86_64-cpuid-Core-i7-8700-guest.xml
+	tests/cputestdata/x86_64-cpuid-Core-i7-8700-host.xml
+	tests/cputestdata/x86_64-cpuid-Core-i7-8700-json.xml
+            - these tests were added upstream later, but they are
+              already backported to RHEL-7
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <cb4c0855a285ea0c9f8ed17216c3f022adc27b69.1554795361.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml                           | 33 +++++++++++++++++++
+ .../x86_64-cpuid-Core-i5-6600-guest.xml       |  1 +
+ .../x86_64-cpuid-Core-i5-6600-host.xml        |  1 +
+ .../x86_64-cpuid-Core-i7-5600U-arat-guest.xml |  1 +
+ .../x86_64-cpuid-Core-i7-5600U-arat-host.xml  |  1 +
+ .../x86_64-cpuid-Core-i7-5600U-guest.xml      |  1 +
+ .../x86_64-cpuid-Core-i7-5600U-host.xml       |  1 +
+ .../x86_64-cpuid-Core-i7-5600U-ibrs-guest.xml |  1 +
+ .../x86_64-cpuid-Core-i7-5600U-ibrs-host.xml  |  1 +
+ .../x86_64-cpuid-Core-i7-7600U-guest.xml      |  1 +
+ .../x86_64-cpuid-Core-i7-7600U-host.xml       |  1 +
+ .../x86_64-cpuid-Core-i7-7600U-json.xml       |  1 +
+ .../x86_64-cpuid-Core-i7-7700-guest.xml       |  1 +
+ .../x86_64-cpuid-Core-i7-7700-host.xml        |  1 +
+ .../x86_64-cpuid-Core-i7-8700-guest.xml       |  1 +
+ .../x86_64-cpuid-Core-i7-8700-host.xml        |  1 +
+ .../x86_64-cpuid-Core-i7-8700-json.xml        |  1 +
+ .../x86_64-cpuid-Xeon-E3-1245-v5-guest.xml    |  1 +
+ .../x86_64-cpuid-Xeon-E3-1245-v5-host.xml     |  1 +
+ .../x86_64-cpuid-Xeon-E5-2623-v4-guest.xml    |  1 +
+ .../x86_64-cpuid-Xeon-E5-2623-v4-host.xml     |  1 +
+ .../x86_64-cpuid-Xeon-E5-2630-v4-guest.xml    |  1 +
+ .../x86_64-cpuid-Xeon-E5-2630-v4-host.xml     |  1 +
+ .../x86_64-cpuid-Xeon-E5-2650-v4-guest.xml    |  1 +
+ .../x86_64-cpuid-Xeon-E5-2650-v4-host.xml     |  1 +
+ .../x86_64-cpuid-Xeon-Gold-5115-guest.xml     |  1 +
+ .../x86_64-cpuid-Xeon-Gold-5115-host.xml      |  1 +
+ .../x86_64-cpuid-Xeon-Gold-6148-guest.xml     |  1 +
+ .../x86_64-cpuid-Xeon-Gold-6148-host.xml      |  1 +
+ 29 files changed, 61 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 1382c29cd1..234c62781b 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -257,6 +257,9 @@
+     <feature name='clwb'>
+       <cpuid eax_in='0x07' ecx_in='0x00' ebx='0x01000000'/>
+     </feature>
++    <feature name='intel-pt'>
++      <cpuid eax_in='0x07' ecx_in='0x00' ebx='0x02000000'/>
++    </feature>
+     <feature name='avx512pf'>
+       <cpuid eax_in='0x07' ecx_in='0x00' ebx='0x04000000'/>
+     </feature>
+@@ -279,12 +282,36 @@
+     <feature name='avx512vbmi'>
+       <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00000002'/>
+     </feature>
++    <feature name='umip'>
++      <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00000004'/>
++    </feature>
+     <feature name='pku'>
+       <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00000008'/>
+     </feature>
+     <feature name='ospke'>
+       <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00000010'/>
+     </feature>
++    <feature name='avx512vbmi2'>
++      <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00000040'/>
++    </feature>
++    <feature name='gfni'>
++      <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00000100'/>
++    </feature>
++    <feature name='vaes'>
++      <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00000200'/>
++    </feature>
++    <feature name='vpclmulqdq'>
++      <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00000400'/>
++    </feature>
++    <feature name='avx512vnni'>
++      <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00000800'/>
++    </feature>
++    <feature name='avx512bitalg'>
++      <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00001000'/>
++    </feature>
++    <feature name='avx512-vpopcntdq'>
++      <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00004000'/>
++    </feature>
+     <feature name='la57'>
+       <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00010000'/>
+     </feature>
+@@ -295,6 +322,9 @@
+     <feature name='avx512-4fmaps'>
+       <cpuid eax_in='0x07' ecx_in='0x00' edx='0x00000008'/>
+     </feature>
++    <feature name='pconfig'>
++      <cpuid eax_in='0x07' ecx_in='0x00' edx='0x00040000'/>
++    </feature>
+     <feature name='spec-ctrl'>
+       <cpuid eax_in='0x07' ecx_in='0x00' edx='0x04000000'/>
+     </feature>
+@@ -436,6 +466,9 @@
+     </feature>
+ 
+     <!-- More AMD-specific features -->
++    <feature name='wbnoinvd'>
++      <cpuid eax_in='0x80000008' ebx='0x00000200'/>
++    </feature>
+     <feature name='ibpb'>
+       <cpuid eax_in='0x80000008' ebx='0x00001000'/>
+     </feature>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i5-6600-guest.xml b/tests/cputestdata/x86_64-cpuid-Core-i5-6600-guest.xml
+index c3561d5971..5777a0bfba 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i5-6600-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i5-6600-guest.xml
+@@ -19,6 +19,7 @@
+   <feature policy='require' name='osxsave'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='clflushopt'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='xsaves'/>
+   <feature policy='require' name='pdpe1gb'/>
+   <feature policy='require' name='invtsc'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i5-6600-host.xml b/tests/cputestdata/x86_64-cpuid-Core-i5-6600-host.xml
+index c799394eaf..faaa07f19b 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i5-6600-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i5-6600-host.xml
+@@ -20,6 +20,7 @@
+   <feature name='osxsave'/>
+   <feature name='tsc_adjust'/>
+   <feature name='clflushopt'/>
++  <feature name='intel-pt'/>
+   <feature name='xsaves'/>
+   <feature name='pdpe1gb'/>
+   <feature name='invtsc'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-arat-guest.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-arat-guest.xml
+index 877895cf15..e825e2a0fb 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-arat-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-arat-guest.xml
+@@ -22,6 +22,7 @@
+   <feature policy='require' name='rdrand'/>
+   <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='pdpe1gb'/>
+   <feature policy='require' name='abm'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-arat-host.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-arat-host.xml
+index 9b24941e0e..ea622c87c7 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-arat-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-arat-host.xml
+@@ -23,6 +23,7 @@
+   <feature name='rdrand'/>
+   <feature name='arat'/>
+   <feature name='tsc_adjust'/>
++  <feature name='intel-pt'/>
+   <feature name='xsaveopt'/>
+   <feature name='pdpe1gb'/>
+   <feature name='abm'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-guest.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-guest.xml
+index 877895cf15..e825e2a0fb 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-guest.xml
+@@ -22,6 +22,7 @@
+   <feature policy='require' name='rdrand'/>
+   <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='pdpe1gb'/>
+   <feature policy='require' name='abm'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-host.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-host.xml
+index 9b24941e0e..ea622c87c7 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-host.xml
+@@ -23,6 +23,7 @@
+   <feature name='rdrand'/>
+   <feature name='arat'/>
+   <feature name='tsc_adjust'/>
++  <feature name='intel-pt'/>
+   <feature name='xsaveopt'/>
+   <feature name='pdpe1gb'/>
+   <feature name='abm'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-ibrs-guest.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-ibrs-guest.xml
+index 538bfe16ab..5d3093cec1 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-ibrs-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-ibrs-guest.xml
+@@ -22,6 +22,7 @@
+   <feature policy='require' name='rdrand'/>
+   <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='stibp'/>
+   <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='pdpe1gb'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-ibrs-host.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-ibrs-host.xml
+index 004423ee57..a534d2dec5 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-ibrs-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-5600U-ibrs-host.xml
+@@ -23,6 +23,7 @@
+   <feature name='rdrand'/>
+   <feature name='arat'/>
+   <feature name='tsc_adjust'/>
++  <feature name='intel-pt'/>
+   <feature name='stibp'/>
+   <feature name='xsaveopt'/>
+   <feature name='pdpe1gb'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-guest.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-guest.xml
+index 141c01c841..70a0fc3286 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-guest.xml
+@@ -19,6 +19,7 @@
+   <feature policy='require' name='osxsave'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='clflushopt'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='stibp'/>
+   <feature policy='require' name='ssbd'/>
+   <feature policy='require' name='xsaves'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-host.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-host.xml
+index 53bfc9728d..bbdfb6aa61 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-host.xml
+@@ -20,6 +20,7 @@
+   <feature name='osxsave'/>
+   <feature name='tsc_adjust'/>
+   <feature name='clflushopt'/>
++  <feature name='intel-pt'/>
+   <feature name='stibp'/>
+   <feature name='ssbd'/>
+   <feature name='xsaves'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-json.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-json.xml
+index f2c23b6b19..48089c6003 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-json.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-7600U-json.xml
+@@ -6,6 +6,7 @@
+   <feature policy='require' name='hypervisor'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='clflushopt'/>
++  <feature policy='require' name='umip'/>
+   <feature policy='require' name='ssbd'/>
+   <feature policy='require' name='xsaves'/>
+   <feature policy='require' name='pdpe1gb'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-7700-guest.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-7700-guest.xml
+index c3561d5971..5777a0bfba 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-7700-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-7700-guest.xml
+@@ -19,6 +19,7 @@
+   <feature policy='require' name='osxsave'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='clflushopt'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='xsaves'/>
+   <feature policy='require' name='pdpe1gb'/>
+   <feature policy='require' name='invtsc'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-7700-host.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-7700-host.xml
+index c799394eaf..faaa07f19b 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-7700-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-7700-host.xml
+@@ -20,6 +20,7 @@
+   <feature name='osxsave'/>
+   <feature name='tsc_adjust'/>
+   <feature name='clflushopt'/>
++  <feature name='intel-pt'/>
+   <feature name='xsaves'/>
+   <feature name='pdpe1gb'/>
+   <feature name='invtsc'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-8700-guest.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-8700-guest.xml
+index 141c01c841..70a0fc3286 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-8700-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-8700-guest.xml
+@@ -19,6 +19,7 @@
+   <feature policy='require' name='osxsave'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='clflushopt'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='stibp'/>
+   <feature policy='require' name='ssbd'/>
+   <feature policy='require' name='xsaves'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-8700-host.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-8700-host.xml
+index 53bfc9728d..bbdfb6aa61 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-8700-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-8700-host.xml
+@@ -20,6 +20,7 @@
+   <feature name='osxsave'/>
+   <feature name='tsc_adjust'/>
+   <feature name='clflushopt'/>
++  <feature name='intel-pt'/>
+   <feature name='stibp'/>
+   <feature name='ssbd'/>
+   <feature name='xsaves'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Core-i7-8700-json.xml b/tests/cputestdata/x86_64-cpuid-Core-i7-8700-json.xml
+index bf79d435a3..fd7539f7ce 100644
+--- a/tests/cputestdata/x86_64-cpuid-Core-i7-8700-json.xml
++++ b/tests/cputestdata/x86_64-cpuid-Core-i7-8700-json.xml
+@@ -5,6 +5,7 @@
+   <feature policy='require' name='hypervisor'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='clflushopt'/>
++  <feature policy='require' name='umip'/>
+   <feature policy='require' name='ssbd'/>
+   <feature policy='require' name='xsaves'/>
+   <feature policy='require' name='pdpe1gb'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E3-1245-v5-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E3-1245-v5-guest.xml
+index c3561d5971..5777a0bfba 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E3-1245-v5-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E3-1245-v5-guest.xml
+@@ -19,6 +19,7 @@
+   <feature policy='require' name='osxsave'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='clflushopt'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='xsaves'/>
+   <feature policy='require' name='pdpe1gb'/>
+   <feature policy='require' name='invtsc'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E3-1245-v5-host.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E3-1245-v5-host.xml
+index c799394eaf..faaa07f19b 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E3-1245-v5-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E3-1245-v5-host.xml
+@@ -20,6 +20,7 @@
+   <feature name='osxsave'/>
+   <feature name='tsc_adjust'/>
+   <feature name='clflushopt'/>
++  <feature name='intel-pt'/>
+   <feature name='xsaves'/>
+   <feature name='pdpe1gb'/>
+   <feature name='invtsc'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-guest.xml
+index e2ad344497..a5c6d9b471 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-guest.xml
+@@ -24,6 +24,7 @@
+   <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='cmt'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='stibp'/>
+   <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='mbm_total'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-host.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-host.xml
+index 60a7a9339d..43a0b93ab4 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2623-v4-host.xml
+@@ -25,6 +25,7 @@
+   <feature name='arat'/>
+   <feature name='tsc_adjust'/>
+   <feature name='cmt'/>
++  <feature name='intel-pt'/>
+   <feature name='stibp'/>
+   <feature name='xsaveopt'/>
+   <feature name='mbm_total'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-guest.xml
+index c670b1f4df..e2999db8e9 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-guest.xml
+@@ -24,6 +24,7 @@
+   <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='cmt'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='mbm_total'/>
+   <feature policy='require' name='mbm_local'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-host.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-host.xml
+index f482864a98..5dd8d749de 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2630-v4-host.xml
+@@ -25,6 +25,7 @@
+   <feature name='arat'/>
+   <feature name='tsc_adjust'/>
+   <feature name='cmt'/>
++  <feature name='intel-pt'/>
+   <feature name='xsaveopt'/>
+   <feature name='mbm_total'/>
+   <feature name='mbm_local'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-guest.xml
+index c670b1f4df..e2999db8e9 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-guest.xml
+@@ -24,6 +24,7 @@
+   <feature policy='require' name='arat'/>
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='cmt'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='xsaveopt'/>
+   <feature policy='require' name='mbm_total'/>
+   <feature policy='require' name='mbm_local'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-host.xml b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-host.xml
+index f482864a98..5dd8d749de 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-E5-2650-v4-host.xml
+@@ -25,6 +25,7 @@
+   <feature name='arat'/>
+   <feature name='tsc_adjust'/>
+   <feature name='cmt'/>
++  <feature name='intel-pt'/>
+   <feature name='xsaveopt'/>
+   <feature name='mbm_total'/>
+   <feature name='mbm_local'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-Gold-5115-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-Gold-5115-guest.xml
+index 64b69dea56..8f014f6e28 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-Gold-5115-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-Gold-5115-guest.xml
+@@ -21,6 +21,7 @@
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='cmt'/>
+   <feature policy='require' name='clflushopt'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='pku'/>
+   <feature policy='require' name='stibp'/>
+   <feature policy='require' name='xsaves'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-Gold-5115-host.xml b/tests/cputestdata/x86_64-cpuid-Xeon-Gold-5115-host.xml
+index 00e8da7512..9de76fd640 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-Gold-5115-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-Gold-5115-host.xml
+@@ -22,6 +22,7 @@
+   <feature name='tsc_adjust'/>
+   <feature name='cmt'/>
+   <feature name='clflushopt'/>
++  <feature name='intel-pt'/>
+   <feature name='pku'/>
+   <feature name='stibp'/>
+   <feature name='xsaves'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-Gold-6148-guest.xml b/tests/cputestdata/x86_64-cpuid-Xeon-Gold-6148-guest.xml
+index f72bcea68b..f31ca1ffc5 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-Gold-6148-guest.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-Gold-6148-guest.xml
+@@ -21,6 +21,7 @@
+   <feature policy='require' name='tsc_adjust'/>
+   <feature policy='require' name='cmt'/>
+   <feature policy='require' name='clflushopt'/>
++  <feature policy='require' name='intel-pt'/>
+   <feature policy='require' name='pku'/>
+   <feature policy='require' name='xsaves'/>
+   <feature policy='require' name='mbm_total'/>
+diff --git a/tests/cputestdata/x86_64-cpuid-Xeon-Gold-6148-host.xml b/tests/cputestdata/x86_64-cpuid-Xeon-Gold-6148-host.xml
+index 1a68e35c19..b18ceddc60 100644
+--- a/tests/cputestdata/x86_64-cpuid-Xeon-Gold-6148-host.xml
++++ b/tests/cputestdata/x86_64-cpuid-Xeon-Gold-6148-host.xml
+@@ -22,6 +22,7 @@
+   <feature name='tsc_adjust'/>
+   <feature name='cmt'/>
+   <feature name='clflushopt'/>
++  <feature name='intel-pt'/>
+   <feature name='pku'/>
+   <feature name='xsaves'/>
+   <feature name='mbm_total'/>
+-- 
+2.21.0
+

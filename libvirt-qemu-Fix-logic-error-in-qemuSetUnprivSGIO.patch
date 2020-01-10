@@ -1,0 +1,61 @@
+From eec80321b1066ea326746fb70e99575e5d2f2954 Mon Sep 17 00:00:00 2001
+Message-Id: <eec80321b1066ea326746fb70e99575e5d2f2954@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Tue, 29 Jan 2019 19:01:50 -0500
+Subject: [PATCH] qemu: Fix logic error in qemuSetUnprivSGIO
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1669581 (RHEL7)
+https://bugzilla.redhat.com/show_bug.cgi?id=1666605 (RHEL8)
+
+RHEL-only
+
+Commit 8b246c4bb had a logic error with using both DISK and
+sgio which resulted in a DISK that didn't have sgio set falling
+into the else clause and trying to deref a NULL @hostdev resulting
+in a libvirtd crash:
+
+Thread 1 (Thread 0x7ffbc6353700 (LWP 12642)):
+ 0  0x00007ffb958e7d7a in qemuSetUnprivSGIO
+ 1  0x00007ffb958d9d92 in qemuDomainAttachDeviceDiskLive
+ 2  0x00007ffb9594fce8 in qemuDomainAttachDeviceFlags
+ 3  0x00007ffbde399d71 in virDomainAttachDevice
+ 4  0x0000563b73ded4b2 in remoteDispatchDomainAttachDeviceHelper
+
+for hotplug of XML:
+
+<disk device="lun" type="block">
+  <source dev="/dev/sdb"/>
+  <driver name="qemu" type="raw"/>
+  <target bus="scsi" dev="sdb"/>
+</disk>
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Message-Id: <20190130000151.4479-3-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_conf.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_conf.c b/src/qemu/qemu_conf.c
+index 5971f3eb64..768e9d8308 100644
+--- a/src/qemu/qemu_conf.c
++++ b/src/qemu/qemu_conf.c
+@@ -1679,9 +1679,9 @@ qemuSetUnprivSGIO(virDomainDeviceDefPtr dev)
+         goto cleanup;
+ 
+     /* By default, filter the SG_IO commands, i.e. set unpriv_sgio to 0.  */
+-    if (dev->type == VIR_DOMAIN_DEVICE_DISK &&
+-        disk->sgio == VIR_DOMAIN_DEVICE_SGIO_UNFILTERED) {
+-        val = 1;
++    if (dev->type == VIR_DOMAIN_DEVICE_DISK) {
++        if (disk->sgio == VIR_DOMAIN_DEVICE_SGIO_UNFILTERED)
++            val = 1;
+     } else {
+         /* Only settable if <shareable/> was present for hostdev */
+         if (qemuIsSharedHostdev(hostdev) &&
+-- 
+2.21.0
+

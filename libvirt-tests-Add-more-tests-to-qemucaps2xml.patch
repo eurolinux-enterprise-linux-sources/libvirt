@@ -1,0 +1,1090 @@
+From 28e7a0e77e32354ae1e485c4ea5a74a7ed17eadb Mon Sep 17 00:00:00 2001
+Message-Id: <28e7a0e77e32354ae1e485c4ea5a74a7ed17eadb@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Fri, 5 Apr 2019 10:57:39 +0200
+Subject: [PATCH] tests: Add more tests to qemucaps2xml
+
+More specifically, everything that's tested by qemucapabilities
+now goes through qemucaps2xml as well.
+
+Ideally we'll rewrite both so that listing all test cases is
+unnecessary and they get picked up automatically by listing the
+contents of the input directory instead, but that's a refactor
+for another day :)
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit a3676f3763625d06778ee14dd6b006b3ba91846a)
+
+Changes from upstream:
+
+  * Removed references to RISC-V architectures.
+    Necessary for the test suite to pass because we never
+    picked up 869cb692fa1d downstream.
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628469
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190405085744.8179-3-abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tests/qemucapabilitiestest.c                  |  1 +
+ .../qemucaps2xmloutdata/caps_1.5.3.x86_64.xml | 30 +++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_1.7.0.x86_64.xml | 30 +++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.1.1.x86_64.xml | 30 +++++++++++++++++++
+ .../caps_2.10.0.aarch64.xml                   | 29 ++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.10.0.ppc64.xml | 28 +++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.10.0.s390x.xml | 28 +++++++++++++++++
+ .../caps_2.10.0.x86_64.xml                    | 30 +++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.11.0.s390x.xml | 28 +++++++++++++++++
+ .../caps_2.11.0.x86_64.xml                    | 30 +++++++++++++++++++
+ .../caps_2.12.0.aarch64.xml                   | 29 ++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.12.0.ppc64.xml | 28 +++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.12.0.s390x.xml | 28 +++++++++++++++++
+ .../caps_2.12.0.x86_64.xml                    | 30 +++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.4.0.x86_64.xml | 30 +++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.5.0.x86_64.xml | 30 +++++++++++++++++++
+ .../caps_2.6.0.aarch64.xml                    | 29 ++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.6.0.ppc64.xml  | 28 +++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.6.0.x86_64.xml | 30 +++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.7.0.s390x.xml  | 28 +++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.7.0.x86_64.xml | 30 +++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.8.0.s390x.xml  | 28 +++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.8.0.x86_64.xml | 30 +++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.9.0.ppc64.xml  | 28 +++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.9.0.s390x.xml  | 28 +++++++++++++++++
+ .../qemucaps2xmloutdata/caps_2.9.0.x86_64.xml | 30 +++++++++++++++++++
+ .../qemucaps2xmloutdata/caps_3.0.0.ppc64.xml  | 28 +++++++++++++++++
+ .../qemucaps2xmloutdata/caps_3.0.0.x86_64.xml | 30 +++++++++++++++++++
+ tests/qemucaps2xmltest.c                      | 28 +++++++++++++++++
+ 29 files changed, 814 insertions(+)
+ create mode 100644 tests/qemucaps2xmloutdata/caps_1.5.3.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_1.7.0.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.1.1.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.10.0.aarch64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.10.0.ppc64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.10.0.s390x.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.10.0.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.11.0.s390x.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.11.0.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.12.0.aarch64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.12.0.ppc64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.12.0.s390x.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.12.0.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.4.0.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.5.0.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.6.0.aarch64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.6.0.ppc64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.6.0.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.7.0.s390x.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.7.0.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.8.0.s390x.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.8.0.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.9.0.ppc64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.9.0.s390x.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_2.9.0.x86_64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_3.0.0.ppc64.xml
+ create mode 100644 tests/qemucaps2xmloutdata/caps_3.0.0.x86_64.xml
+
+diff --git a/tests/qemucapabilitiestest.c b/tests/qemucapabilitiestest.c
+index 4aec175968..828e3d106c 100644
+--- a/tests/qemucapabilitiestest.c
++++ b/tests/qemucapabilitiestest.c
+@@ -163,6 +163,7 @@ mymain(void)
+             ret = -1; \
+     } while (0)
+ 
++    /* Keep this in sync with qemucaps2xmltest */
+     DO_TEST("x86_64", "caps_1.5.3");
+     DO_TEST("x86_64", "caps_1.6.0");
+     DO_TEST("x86_64", "caps_1.7.0");
+diff --git a/tests/qemucaps2xmloutdata/caps_1.5.3.x86_64.xml b/tests/qemucaps2xmloutdata/caps_1.5.3.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_1.5.3.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_1.7.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_1.7.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_1.7.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.1.1.x86_64.xml b/tests/qemucaps2xmloutdata/caps_2.1.1.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.1.1.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.10.0.aarch64.xml b/tests/qemucaps2xmloutdata/caps_2.10.0.aarch64.xml
+new file mode 100644
+index 0000000000..a879d67df3
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.10.0.aarch64.xml
+@@ -0,0 +1,29 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>aarch64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='aarch64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-aarch64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-aarch64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.10.0.ppc64.xml b/tests/qemucaps2xmloutdata/caps_2.10.0.ppc64.xml
+new file mode 100644
+index 0000000000..74eaf3ba0e
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.10.0.ppc64.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>ppc64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='ppc64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-ppc64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-ppc64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.10.0.s390x.xml b/tests/qemucaps2xmloutdata/caps_2.10.0.s390x.xml
+new file mode 100644
+index 0000000000..20ef995d62
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.10.0.s390x.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>s390x</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='s390x'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-s390x</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-s390x</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.10.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_2.10.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.10.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.11.0.s390x.xml b/tests/qemucaps2xmloutdata/caps_2.11.0.s390x.xml
+new file mode 100644
+index 0000000000..20ef995d62
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.11.0.s390x.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>s390x</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='s390x'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-s390x</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-s390x</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.11.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_2.11.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.11.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.12.0.aarch64.xml b/tests/qemucaps2xmloutdata/caps_2.12.0.aarch64.xml
+new file mode 100644
+index 0000000000..a879d67df3
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.12.0.aarch64.xml
+@@ -0,0 +1,29 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>aarch64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='aarch64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-aarch64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-aarch64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.12.0.ppc64.xml b/tests/qemucaps2xmloutdata/caps_2.12.0.ppc64.xml
+new file mode 100644
+index 0000000000..74eaf3ba0e
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.12.0.ppc64.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>ppc64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='ppc64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-ppc64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-ppc64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.12.0.s390x.xml b/tests/qemucaps2xmloutdata/caps_2.12.0.s390x.xml
+new file mode 100644
+index 0000000000..20ef995d62
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.12.0.s390x.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>s390x</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='s390x'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-s390x</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-s390x</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.12.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_2.12.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.12.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.4.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_2.4.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.4.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.5.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_2.5.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.5.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.6.0.aarch64.xml b/tests/qemucaps2xmloutdata/caps_2.6.0.aarch64.xml
+new file mode 100644
+index 0000000000..a879d67df3
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.6.0.aarch64.xml
+@@ -0,0 +1,29 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>aarch64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='aarch64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-aarch64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-aarch64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.6.0.ppc64.xml b/tests/qemucaps2xmloutdata/caps_2.6.0.ppc64.xml
+new file mode 100644
+index 0000000000..74eaf3ba0e
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.6.0.ppc64.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>ppc64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='ppc64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-ppc64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-ppc64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.6.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_2.6.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.6.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.7.0.s390x.xml b/tests/qemucaps2xmloutdata/caps_2.7.0.s390x.xml
+new file mode 100644
+index 0000000000..20ef995d62
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.7.0.s390x.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>s390x</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='s390x'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-s390x</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-s390x</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.7.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_2.7.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.7.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.8.0.s390x.xml b/tests/qemucaps2xmloutdata/caps_2.8.0.s390x.xml
+new file mode 100644
+index 0000000000..20ef995d62
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.8.0.s390x.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>s390x</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='s390x'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-s390x</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-s390x</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.8.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_2.8.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.8.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.9.0.ppc64.xml b/tests/qemucaps2xmloutdata/caps_2.9.0.ppc64.xml
+new file mode 100644
+index 0000000000..74eaf3ba0e
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.9.0.ppc64.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>ppc64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='ppc64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-ppc64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-ppc64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.9.0.s390x.xml b/tests/qemucaps2xmloutdata/caps_2.9.0.s390x.xml
+new file mode 100644
+index 0000000000..20ef995d62
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.9.0.s390x.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>s390x</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='s390x'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-s390x</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-s390x</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_2.9.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_2.9.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_2.9.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_3.0.0.ppc64.xml b/tests/qemucaps2xmloutdata/caps_3.0.0.ppc64.xml
+new file mode 100644
+index 0000000000..74eaf3ba0e
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_3.0.0.ppc64.xml
+@@ -0,0 +1,28 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>ppc64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='ppc64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-ppc64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-ppc64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmloutdata/caps_3.0.0.x86_64.xml b/tests/qemucaps2xmloutdata/caps_3.0.0.x86_64.xml
+new file mode 100644
+index 0000000000..b58f54fefd
+--- /dev/null
++++ b/tests/qemucaps2xmloutdata/caps_3.0.0.x86_64.xml
+@@ -0,0 +1,30 @@
++<capabilities>
++
++  <host>
++    <cpu>
++      <arch>x86_64</arch>
++    </cpu>
++    <power_management/>
++    <iommu support='no'/>
++  </host>
++
++  <guest>
++    <os_type>hvm</os_type>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      <domain type='qemu'/>
++      <domain type='kvm'>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
++      </domain>
++    </arch>
++    <features>
++      <cpuselection/>
++      <deviceboot/>
++      <disksnapshot default='on' toggle='no'/>
++      <acpi default='on' toggle='yes'/>
++      <apic default='on' toggle='no'/>
++    </features>
++  </guest>
++
++</capabilities>
+diff --git a/tests/qemucaps2xmltest.c b/tests/qemucaps2xmltest.c
+index 65dd97c0a4..cd951b2bb4 100644
+--- a/tests/qemucaps2xmltest.c
++++ b/tests/qemucaps2xmltest.c
+@@ -187,7 +187,35 @@ mymain(void)
+     if (virTestRun(name "(" arch ")", testQemuCapsXML, &data) < 0) \
+         ret = -1
+ 
++    /* Keep this in sync with qemucapabilitiestest */
++    DO_TEST("x86_64", "caps_1.5.3");
+     DO_TEST("x86_64", "caps_1.6.0");
++    DO_TEST("x86_64", "caps_1.7.0");
++    DO_TEST("x86_64", "caps_2.1.1");
++    DO_TEST("x86_64", "caps_2.4.0");
++    DO_TEST("x86_64", "caps_2.5.0");
++    DO_TEST("x86_64", "caps_2.6.0");
++    DO_TEST("x86_64", "caps_2.7.0");
++    DO_TEST("x86_64", "caps_2.8.0");
++    DO_TEST("x86_64", "caps_2.9.0");
++    DO_TEST("x86_64", "caps_2.10.0");
++    DO_TEST("x86_64", "caps_2.11.0");
++    DO_TEST("x86_64", "caps_2.12.0");
++    DO_TEST("x86_64", "caps_3.0.0");
++    DO_TEST("aarch64", "caps_2.6.0");
++    DO_TEST("aarch64", "caps_2.10.0");
++    DO_TEST("aarch64", "caps_2.12.0");
++    DO_TEST("ppc64", "caps_2.6.0");
++    DO_TEST("ppc64", "caps_2.9.0");
++    DO_TEST("ppc64", "caps_2.10.0");
++    DO_TEST("ppc64", "caps_2.12.0");
++    DO_TEST("ppc64", "caps_3.0.0");
++    DO_TEST("s390x", "caps_2.7.0");
++    DO_TEST("s390x", "caps_2.8.0");
++    DO_TEST("s390x", "caps_2.9.0");
++    DO_TEST("s390x", "caps_2.10.0");
++    DO_TEST("s390x", "caps_2.11.0");
++    DO_TEST("s390x", "caps_2.12.0");
+ 
+     return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+-- 
+2.21.0
+

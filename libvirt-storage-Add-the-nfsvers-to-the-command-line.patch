@@ -1,0 +1,147 @@
+From 8e9adc7c2b4e7b6e09ae45b8b31bac0696f99ee1 Mon Sep 17 00:00:00 2001
+Message-Id: <8e9adc7c2b4e7b6e09ae45b8b31bac0696f99ee1@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 09:57:29 -0400
+Subject: [PATCH] storage: Add the nfsvers to the command line
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1584663
+
+If protocolVer present, add the -o nfsvers=# to the command
+line for the NFS Storage Pool
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 3d3647e14f680015495f0f4650df8a2c1e230ec8)
+
+Resolve a build issue since VIR_AUTOFREE is not present downstream.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Message-Id: <20190403135730.2551-2-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/storage/storage_util.c                    | 21 +++++++++++++------
+ .../pool-netfs-protocol-ver-freebsd.argv      |  1 +
+ .../pool-netfs-protocol-ver-linux.argv        |  2 ++
+ .../pool-netfs-protocol-ver.argv              |  1 +
+ tests/storagepoolxml2argvtest.c               |  3 +++
+ 5 files changed, 22 insertions(+), 6 deletions(-)
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-protocol-ver-freebsd.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-protocol-ver-linux.argv
+ create mode 100644 tests/storagepoolxml2argvdata/pool-netfs-protocol-ver.argv
+
+diff --git a/src/storage/storage_util.c b/src/storage/storage_util.c
+index 48117bef62..b0bea21e88 100644
+--- a/src/storage/storage_util.c
++++ b/src/storage/storage_util.c
+@@ -4276,10 +4276,11 @@ virStorageBackendFileSystemMountAddOptions(virCommandPtr cmd,
+ static void
+ virStorageBackendFileSystemMountNFSArgs(virCommandPtr cmd,
+                                         const char *src,
+-                                        virStoragePoolDefPtr def)
++                                        virStoragePoolDefPtr def,
++                                        const char *nfsVers)
+ {
+     virCommandAddArgList(cmd, src, def->target.path, NULL);
+-    virStorageBackendFileSystemMountAddOptions(cmd, NULL);
++    virStorageBackendFileSystemMountAddOptions(cmd, nfsVers);
+ }
+ 
+ 
+@@ -4312,7 +4313,8 @@ virStorageBackendFileSystemMountCIFSArgs(virCommandPtr cmd,
+ static void
+ virStorageBackendFileSystemMountDefaultArgs(virCommandPtr cmd,
+                                             const char *src,
+-                                            virStoragePoolDefPtr def)
++                                            virStoragePoolDefPtr def,
++                                            const char *nfsVers)
+ {
+     const char *fmt;
+ 
+@@ -4321,7 +4323,7 @@ virStorageBackendFileSystemMountDefaultArgs(virCommandPtr cmd,
+     else
+         fmt = virStoragePoolFormatFileSystemNetTypeToString(def->source.format);
+     virCommandAddArgList(cmd, "-t", fmt, src, def->target.path, NULL);
+-    virStorageBackendFileSystemMountAddOptions(cmd, NULL);
++    virStorageBackendFileSystemMountAddOptions(cmd, nfsVers);
+ }
+ 
+ 
+@@ -4339,15 +4341,22 @@ virStorageBackendFileSystemMountCmd(virStoragePoolDefPtr def,
+     bool cifsfs = (def->type == VIR_STORAGE_POOL_NETFS &&
+                    def->source.format == VIR_STORAGE_POOL_NETFS_CIFS);
+     virCommandPtr cmd = NULL;
++    char *nfsVers = NULL;
++
++    if (def->type == VIR_STORAGE_POOL_NETFS && def->source.protocolVer > 0 &&
++        virAsprintf(&nfsVers, "nfsvers=%u", def->source.protocolVer) < 0)
++        return NULL;
+ 
+     cmd = virCommandNew(MOUNT);
+     if (netauto)
+-        virStorageBackendFileSystemMountNFSArgs(cmd, src, def);
++        virStorageBackendFileSystemMountNFSArgs(cmd, src, def, nfsVers);
+     else if (glusterfs)
+         virStorageBackendFileSystemMountGlusterArgs(cmd, src, def);
+     else if (cifsfs)
+         virStorageBackendFileSystemMountCIFSArgs(cmd, src, def);
+     else
+-        virStorageBackendFileSystemMountDefaultArgs(cmd, src, def);
++        virStorageBackendFileSystemMountDefaultArgs(cmd, src, def, nfsVers);
++
++    VIR_FREE(nfsVers);
+     return cmd;
+ }
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-protocol-ver-freebsd.argv b/tests/storagepoolxml2argvdata/pool-netfs-protocol-ver-freebsd.argv
+new file mode 100644
+index 0000000000..59d09d2e5d
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-protocol-ver-freebsd.argv
+@@ -0,0 +1 @@
++mount -t nfs localhost:/var/lib/libvirt/images /mnt -o nosuid,noexec,nfsvers=3
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-protocol-ver-linux.argv b/tests/storagepoolxml2argvdata/pool-netfs-protocol-ver-linux.argv
+new file mode 100644
+index 0000000000..c819a089d2
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-protocol-ver-linux.argv
+@@ -0,0 +1,2 @@
++mount -t nfs localhost:/var/lib/libvirt/images /mnt -o nodev,nosuid,noexec,\
++nfsvers=3
+diff --git a/tests/storagepoolxml2argvdata/pool-netfs-protocol-ver.argv b/tests/storagepoolxml2argvdata/pool-netfs-protocol-ver.argv
+new file mode 100644
+index 0000000000..f26656d5b8
+--- /dev/null
++++ b/tests/storagepoolxml2argvdata/pool-netfs-protocol-ver.argv
+@@ -0,0 +1 @@
++mount -t nfs localhost:/var/lib/libvirt/images /mnt -o nfsvers=3
+diff --git a/tests/storagepoolxml2argvtest.c b/tests/storagepoolxml2argvtest.c
+index 0ea8b3b94c..1e48910566 100644
+--- a/tests/storagepoolxml2argvtest.c
++++ b/tests/storagepoolxml2argvtest.c
+@@ -166,18 +166,21 @@ mymain(void)
+     DO_TEST_LINUX("pool-fs");
+     DO_TEST_LINUX("pool-netfs");
+     DO_TEST_LINUX("pool-netfs-auto");
++    DO_TEST_LINUX("pool-netfs-protocol-ver");
+     DO_TEST_LINUX("pool-netfs-gluster");
+     DO_TEST_LINUX("pool-netfs-cifs");
+ #elif defined(__FreeBSD__)
+     DO_TEST_FREEBSD("pool-fs");
+     DO_TEST_FREEBSD("pool-netfs");
+     DO_TEST_FREEBSD("pool-netfs-auto");
++    DO_TEST_FREEBSD("pool-netfs-protocol-ver");
+     DO_TEST_FREEBSD("pool-netfs-gluster");
+     DO_TEST_FREEBSD("pool-netfs-cifs");
+ #else
+     DO_TEST("pool-fs");
+     DO_TEST("pool-netfs");
+     DO_TEST("pool-netfs-auto");
++    DO_TEST("pool-netfs-protocol-ver");
+     DO_TEST("pool-netfs-gluster");
+     DO_TEST("pool-netfs-cifs");
+ #endif
+-- 
+2.21.0
+

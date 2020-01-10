@@ -1,0 +1,56 @@
+From 95f014690bab53caa5eac8859c03917ba96466dc Mon Sep 17 00:00:00 2001
+Message-Id: <95f014690bab53caa5eac8859c03917ba96466dc@dist-git>
+From: Bing Niu <bing.niu@intel.com>
+Date: Mon, 15 Apr 2019 17:32:48 +0200
+Subject: [PATCH] util: Add MBA check to virResctrlInfoGetCache
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+If we have some membw_info data, then we need to calculate the number
+of MBA controllers on the system. The value cannot be obtained from a
+direct query to the RDT kernel module, but it is the same as the last
+level cache value which is calculated by traversing the cache hierarchy
+of host(/sys/bus/cpu/devices/cpuX/cache/).
+
+Signed-off-by: Bing Niu <bing.niu@intel.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 5aae2b3968c3e474e288cff68547f7aedac86921)
+
+Resolves: https://bugzilla.redhat.com/show_bug.cgi?id=1468650
+
+Signed-off-by: Pavel Hrdina <phrdina@redhat.com>
+Message-Id: <bbacef44dd5c6d0a2d3760f4414e6e2701bd5175.1555342313.git.phrdina@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virresctrl.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/util/virresctrl.c b/src/util/virresctrl.c
+index b12a05cb0f..f454868f1e 100644
+--- a/src/util/virresctrl.c
++++ b/src/util/virresctrl.c
+@@ -608,6 +608,20 @@ virResctrlInfoGetCache(virResctrlInfoPtr resctrl,
+     if (virResctrlInfoIsEmpty(resctrl))
+         return 0;
+ 
++    /* Let's take the opportunity to update the number of last level
++     * cache. This number of memory bandwidth controller is same with
++     * last level cache */
++    if (resctrl->membw_info) {
++        virResctrlInfoMemBWPtr membw_info = resctrl->membw_info;
++
++        if (level > membw_info->last_level_cache) {
++            membw_info->last_level_cache = level;
++            membw_info->max_id = 0;
++        } else if (membw_info->last_level_cache == level) {
++            membw_info->max_id++;
++        }
++    }
++
+     if (level >= resctrl->nlevels)
+         return 0;
+ 
+-- 
+2.21.0
+

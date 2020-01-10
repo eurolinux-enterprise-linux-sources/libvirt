@@ -253,7 +253,7 @@
 Summary: Library providing a simple virtualization API
 Name: libvirt
 Version: 4.5.0
-Release: 10%{?dist}.12%{?extra_release}
+Release: 23%{?dist}%{?extra_release}
 License: LGPLv2+
 URL: https://libvirt.org/
 
@@ -411,19 +411,174 @@ Patch145: libvirt-util-Modify-virStorageFileGetSCSIKey-return.patch
 Patch146: libvirt-storage-Rework-virStorageBackendSCSISerial.patch
 Patch147: libvirt-util-Introduce-virStorageFileGetNPIVKey.patch
 Patch148: libvirt-storage-Fetch-a-unique-key-for-vHBA-NPIV-LUNs.patch
-Patch149: libvirt-cpu_x86-Do-not-cache-microcode-version.patch
-Patch150: libvirt-cputest-Add-data-for-Intel-R-Xeon-R-CPU-E3-1225-v5.patch
-Patch151: libvirt-cpu_map-Define-md-clear-CPUID-bit.patch
-Patch152: libvirt-qemu-Don-t-cache-microcode-version.patch
-Patch153: libvirt-virnwfilterbindingobj-Introduce-and-use-virNWFilterBindingObjStealDef.patch
-Patch154: libvirt-admin-reject-clients-unless-their-UID-matches-the-current-UID.patch
-Patch155: libvirt-locking-restrict-sockets-to-mode-0600.patch
-Patch156: libvirt-logging-restrict-sockets-to-mode-0600.patch
-Patch157: libvirt-virfile-added-GPFS-as-shared-fs.patch
-Patch158: libvirt-api-disallow-virDomainSaveImageGetXMLDesc-on-read-only-connections.patch
-Patch159: libvirt-api-disallow-virDomainManagedSaveDefineXML-on-read-only-connections.patch
-Patch160: libvirt-api-disallow-virConnectGetDomainCapabilities-on-read-only-connections.patch
-Patch161: libvirt-api-disallow-virConnect-HypervisorCPU-on-read-only-connections.patch
+Patch149: libvirt-RHEL-qemu-Alter-val-usage-in-qemuSetUnprivSGIO.patch
+Patch150: libvirt-RHEL-qemu-Alter-qemuSetUnprivSGIO-hostdev-shareable-logic.patch
+Patch151: libvirt-qemu-Filter-non-SCSI-hostdevs-in-qemuHostdevPrepareSCSIDevices.patch
+Patch152: libvirt-qemu-Fix-logic-error-in-qemuSetUnprivSGIO.patch
+Patch153: libvirt-qemu-Fix-crash-trying-to-use-iSCSI-hostdev.patch
+Patch154: libvirt-src-Document-autostart-for-session-demon.patch
+Patch155: libvirt-nwfilter-Add-extra-verbiage-for-binding-create-delete.patch
+Patch156: libvirt-qemu-Remove-duplicated-qemuAgentCheckError.patch
+Patch157: libvirt-qemu-require-reply-from-guest-agent-in-qemuAgentGetInterfaces.patch
+Patch158: libvirt-virsh-Add-missed-fields-to-pool-define-as-item-entry.patch
+Patch159: libvirt-qemu-Add-entry-for-balloon-stat-stat-disk-caches.patch
+Patch160: libvirt-qemu-Set-identity-for-the-reconnect-all-thread.patch
+Patch161: libvirt-docs-schemas-Fix-missing-timestamp-inside-backingStore.patch
+Patch162: libvirt-storage-Remove-secretPath-from-_virStorageBackendQemuImgInfo.patch
+Patch163: libvirt-storage-Allow-for-inputvol-to-have-any-format-for-encryption.patch
+Patch164: libvirt-storage-Allow-inputvol-to-be-encrypted.patch
+Patch165: libvirt-virsh-man-Document-quirks-of-device-detach-and-friends.patch
+Patch166: libvirt-virsh-man-Document-asynchronous-behaviour-of-detach-device-alias.patch
+Patch167: libvirt-access-Modify-the-VIR_ERR_ACCESS_DENIED-to-include-driverName.patch
+Patch168: libvirt-qemu-Put-format-raw-onto-cmd-line-for-SCSI-passthrough.patch
+Patch169: libvirt-virnwfilterbindingobj-Introduce-and-use-virNWFilterBindingObjStealDef.patch
+Patch170: libvirt-logging-ensure-pending-I-O-is-drained-before-reading-position.patch
+Patch171: libvirt-conf-Fix-check-for-chardev-source-path.patch
+Patch172: libvirt-util-skip-RDMA-detection-for-non-PCI-network-devices.patch
+Patch173: libvirt-qemu-Set-job-statsType-for-external-memory-snapshot.patch
+Patch174: libvirt-virsh-Strip-XML-declaration-when-extracting-CPU-XMLs.patch
+Patch175: libvirt-virsh-Require-explicit-domain-for-domxml-to-native.patch
+Patch176: libvirt-storage-Extract-out-mount-command-creation-for-FS-Backend.patch
+Patch177: libvirt-storage-Move-FS-backend-mount-creation-command-helper.patch
+Patch178: libvirt-storage-Move-virStorageBackendFileSystemGetPoolSource.patch
+Patch179: libvirt-tests-Introduce-tests-for-storage-pool-xml-to-argv-checks.patch
+Patch180: libvirt-tests-Add-storagepool-xml-test-for-netfs-auto.patch
+Patch181: libvirt-storage-Rework-virStorageBackendFileSystemMountCmd.patch
+Patch182: libvirt-storage-Add-default-mount-options-for-fs-netfs-storage-pools.patch
+Patch183: libvirt-conf-Add-optional-NFS-Source-Pool-protocol-ver-n-option.patch
+Patch184: libvirt-storage-Add-the-nfsvers-to-the-command-line.patch
+Patch185: libvirt-virsh-Add-source-protocol-ver-for-pool-commands.patch
+Patch186: libvirt-RHEL-conf-storage-Fix-a-memory-leak-in-virStoragePoolDefParseSource.patch
+Patch187: libvirt-tests-Reuse-qemucapabilities-data-for-qemucaps2xml.patch
+Patch188: libvirt-tests-Add-more-tests-to-qemucaps2xml.patch
+Patch189: libvirt-qemu-Drop-QEMU_CAPS_ENABLE_KVM.patch
+Patch190: libvirt-qemu-Avoid-probing-non-native-binaries-all-the-time.patch
+Patch191: libvirt-qemu-Clarify-QEMU_CAPS_KVM.patch
+Patch192: libvirt-qemu-Don-t-check-for-dev-kvm-presence.patch
+Patch193: libvirt-tests-Follow-up-on-qemucaps2xmldata-rename.patch
+Patch194: libvirt-qemu-hotplug-Don-t-generate-alias-when-detaching-disk.patch
+Patch195: libvirt-qemu-hotplug-Don-t-generate-alias-when-detaching-controllers.patch
+Patch196: libvirt-tests-add-channel-unix-guestfwd.patch
+Patch197: libvirt-qemu-Use-tmpChr-in-qemuDomainDetachChrDevice-to-build-device-string.patch
+Patch198: libvirt-qemuL-Drop-user-prefix-for-guestfwd-netdev.patch
+Patch199: libvirt-qemu_hotplug-Attach-guestfwd-using-netdev_add.patch
+Patch200: libvirt-qemu_hotplug-Detach-guestfwd-using-netdev_del.patch
+Patch201: libvirt-qemuhotplugtest-Test-guestfwd-attach-and-detach.patch
+Patch202: libvirt-qemu_hotplug-Don-t-build-device-string-in-qemuDomainDetachChrDevice.patch
+Patch203: libvirt-qemu_hotplug-Assume-chardev-alias-always-exists-in-qemuDomainDetachChrDevice.patch
+Patch204: libvirt-qemu-fix-device-name-passed-to-error-report.patch
+Patch205: libvirt-qemu_hotplug-Properly-check-for-qemuMonitorDelDevice-retval.patch
+Patch206: libvirt-qemu_hotplug-Introduce-and-use-qemuDomainDeleteDevice.patch
+Patch207: libvirt-qemu-hotplug-Remove-ret-variable-in-qemuDomainDetachDeviceDiskLive.patch
+Patch208: libvirt-qemu-hotplug-Use-typecasted-enum-in-qemuDomainDetachDeviceDiskLive.patch
+Patch209: libvirt-qemu-hotplug-Use-switch-statement-for-selecting-disk-bus-function.patch
+Patch210: libvirt-qemu-hotplug-Merge-virtio-and-non-virtio-disk-unplug-code.patch
+Patch211: libvirt-qemu_hotplug-remove-unnecessary-check-for-valid-PCI-address.patch
+Patch212: libvirt-qemu_hotplug-rename-a-virDomainDeviceInfoPtr-to-avoid-confusion.patch
+Patch213: libvirt-qemu_hotplug-eliminate-multiple-identical-qemuDomainDetachHost-Device-functions.patch
+Patch214: libvirt-qemu_hotplug-eliminate-unnecessary-call-to-qemuDomainDetachNetDevice.patch
+Patch215: libvirt-qemu_hotplug-refactor-qemuDomainDetachDiskLive-and-qemuDomainDetachDiskDevice.patch
+Patch216: libvirt-qemu_hotplug-don-t-call-DetachThisHostDevice-for-hostdev-network-devices.patch
+Patch217: libvirt-qemu_hotplug-merge-qemuDomainDetachThisHostDevice-into-qemuDomainDetachHostDevice.patch
+Patch218: libvirt-qemu_hotplug-move-qemuDomainChangeGraphicsPasswords.patch
+Patch219: libvirt-qemu_hotplug-move-almost-all-qemuDomainDetach-functions-together.patch
+Patch220: libvirt-qemu_hotplug-move-Attach-Detach-Lease-functions-with-others-of-same-type.patch
+Patch221: libvirt-qemu_hotplug-move-qemuDomainDetachDeviceLive-to-qemu_hotplug.c.patch
+Patch222: libvirt-qemu_hotplug-remove-extra-function-in-middle-of-DetachController-call-chain.patch
+Patch223: libvirt-qemu_hotplug-pull-qemuDomainUpdateDeviceList-out-of-qemuDomainDetachDeviceLive.patch
+Patch224: libvirt-test-replace-calls-to-individual-detach-functions-with-one-call-to-main-detach.patch
+Patch225: libvirt-qemu_hotplug-make-Detach-functions-called-only-from-qemu_hotplug.c-static.patch
+Patch226: libvirt-qemu_hotplug-rename-dev-to-match-in-qemuDomainDetachDeviceLive.patch
+Patch227: libvirt-qemu_hotplug-separate-Chr-Lease-from-other-devices-in-DetachDevice-switch.patch
+Patch228: libvirt-qemu_hotplug-standardize-the-names-args-calling-of-qemuDomainDetach.patch
+Patch229: libvirt-qemu_hotplug-rename-Chr-and-Lease-Detach-functions.patch
+Patch230: libvirt-qemu_hotplug-new-function-qemuDomainRemoveAuditDevice.patch
+Patch231: libvirt-qemu_hotplug-audit-all-auditable-device-types-in-qemuDomainRemoveAuditDevice.patch
+Patch232: libvirt-qemu_hotplug-consolidate-all-common-detach-code-in-qemuDomainDetachDeviceLive.patch
+Patch233: libvirt-qemu_hotplug-don-t-shutdown-net-device-until-the-guest-has-released-it.patch
+Patch234: libvirt-qemu_hotplug-delay-sending-DEVICE_REMOVED-event-until-after-all-teardown.patch
+Patch235: libvirt-conf-Expose-virDomainSCSIDriveAddressIsUsed.patch
+Patch236: libvirt-qemuhotplugtest-Don-t-plug-a-SCSI-disk-at-unit-7.patch
+Patch237: libvirt-qemu_hotplug-Check-for-duplicate-drive-addresses.patch
+Patch238: libvirt-qemu-Rework-setting-process-affinity.patch
+Patch239: libvirt-qemu-Set-up-EMULATOR-thread-and-cpuset.mems-before-exec-ing-qemu.patch
+Patch240: libvirt-cpu_map-Add-features-for-Icelake-CPUs.patch
+Patch241: libvirt-cpu_map-Add-Icelake-CPU-models.patch
+Patch242: libvirt-cpu_x86-Do-not-cache-microcode-version.patch
+Patch243: libvirt-qemu-Don-t-cache-microcode-version.patch
+Patch244: libvirt-util-Rename-some-functions-of-virresctrl.patch
+Patch245: libvirt-util-Refactor-virResctrlGetInfo-in-virresctrl.patch
+Patch246: libvirt-util-Refactor-virResctrlAllocFormat-of-virresctrl.patch
+Patch247: libvirt-util-Add-MBA-capability-information-query-to-resctrl.patch
+Patch248: libvirt-util-Add-MBA-check-to-virResctrlInfoGetCache.patch
+Patch249: libvirt-util-Add-MBA-allocation-to-virresctrl.patch
+Patch250: libvirt-util-Add-MBA-schemata-parse-and-format-methods.patch
+Patch251: libvirt-util-Add-support-to-calculate-MBA-utilization.patch
+Patch252: libvirt-util-Introduce-virResctrlAllocForeachMemory.patch
+Patch253: libvirt-util-Introduce-virResctrlAllocSetMemoryBandwidth.patch
+Patch254: libvirt-conf-Rename-cachetune-to-resctrl.patch
+Patch255: libvirt-conf-Factor-out-vcpus-parsing-part-from-virDomainCachetuneDefParse.patch
+Patch256: libvirt-conf-Factor-out-vcpus-overlapping-from-virDomainCachetuneDefParse.patch
+Patch257: libvirt-conf-Factor-out-virDomainResctrlDef-update-from-virDomainCachetuneDefParse.patch
+Patch258: libvirt-conf-Add-support-for-memorytune-XML-processing-for-resctrl-MBA.patch
+Patch259: libvirt-conf-Add-return-value-check-to-virResctrlAllocForeachCache.patch
+Patch260: libvirt-conf-Add-memory-bandwidth-allocation-capability-of-host.patch
+Patch261: libvirt-conf-Fix-bug-in-finding-alloc-through-matching-vcpus.patch
+Patch262: libvirt-resctrl-Do-not-calculate-free-bandwidth-for-MBA.patch
+Patch263: libvirt-resctrl-Set-MBA-defaults-properly.patch
+Patch264: libvirt-resctrl-Fix-testing-line.patch
+Patch265: libvirt-virresctrl-fix-MBA-memory-leak.patch
+Patch266: libvirt-test-caps-Add-capabilities-for-QEMU-3.1.0.patch
+Patch267: libvirt-util-Introduce-virHostGetDRMRenderNode-helper.patch
+Patch268: libvirt-conf-Introduce-virDomainGraphics-related-helpers.patch
+Patch269: libvirt-qemu-process-spice-Pick-the-first-available-DRM-render-node.patch
+Patch270: libvirt-qemu-command-Introduce-qemuBuildGraphicsEGLHeadlessCommandLine-helper.patch
+Patch271: libvirt-qemu-caps-Introduce-QEMU_EGL_HEADLESS_RENDERNODE-capability.patch
+Patch272: libvirt-conf-gfx-Add-egl-headless-as-a-member-to-virDomainGraphicsDef-struct.patch
+Patch273: libvirt-conf-gfx-egl-headless-Introduce-a-new-gl-subelement.patch
+Patch274: libvirt-qemu-domain-egl-headless-Add-the-DRI-device-into-the-namespace.patch
+Patch275: libvirt-qemu-cgroup-gfx-egl-headless-Add-the-DRI-device-into-the-cgroup-list.patch
+Patch276: libvirt-security-dac-gfx-egl-headless-Relabel-the-DRI-device.patch
+Patch277: libvirt-qemu-command-gfx-egl-headless-Add-rendernode-option-to-the-cmdline.patch
+Patch278: libvirt-domain-conf-graphics-Fix-picking-DRI-renderer-automatically-for-SPICE.patch
+Patch279: libvirt-qemu-domain-gfx-Fix-shadowing-of-a-function-argument-in-validation.patch
+Patch280: libvirt-qemu_hotplug-Initialize-charAlias-in-qemuDomainRemoveChrDevice.patch
+Patch281: libvirt-Handle-copying-bitmaps-to-larger-data-buffers.patch
+Patch282: libvirt-nwfilter-fix-adding-std-MAC-and-IP-values-to-filter-binding.patch
+Patch283: libvirt-util-suppress-unimportant-ovs-vsctl-errors-when-getting-interface-stats.patch
+Patch284: libvirt-cpu_map-Add-support-for-cldemote-CPU-feature.patch
+Patch285: libvirt-cputest-Add-data-for-Intel-R-Xeon-R-CPU-E3-1225-v5.patch
+Patch286: libvirt-cpu_map-Define-md-clear-CPUID-bit.patch
+Patch287: libvirt-admin-reject-clients-unless-their-UID-matches-the-current-UID.patch
+Patch288: libvirt-locking-restrict-sockets-to-mode-0600.patch
+Patch289: libvirt-logging-restrict-sockets-to-mode-0600.patch
+Patch290: libvirt-util-require-command-args-to-be-non-NULL.patch
+Patch291: libvirt-qemu-use-line-breaks-in-command-line-args-written-to-log.patch
+Patch292: libvirt-virfile-added-GPFS-as-shared-fs.patch
+Patch293: libvirt-util-file-introduce-VIR_AUTOCLOSE-macro-to-close-fd-of-the-file-automatically.patch
+Patch294: libvirt-vircpuhost-Add-support-for-reading-MSRs.patch
+Patch295: libvirt-virhostcpu-Make-virHostCPUGetMSR-work-only-on-x86.patch
+Patch296: libvirt-qemu-Make-virQEMUCapsProbeHostCPUForEmulator-more-generic.patch
+Patch297: libvirt-qemuargv2xmltest-Use-mocked-virQEMUCapsProbeHostCPU.patch
+Patch298: libvirt-util-Add-virHostCPUGetTscInfo.patch
+Patch299: libvirt-conf-Report-TSC-frequency-in-host-CPU-capabilities.patch
+Patch300: libvirt-cpu_x86-Fix-placement-of-CheckFeature-functions.patch
+Patch301: libvirt-cpu_x86-Probe-TSC-frequency-and-scaling-support.patch
+Patch302: libvirt-qemu-Check-TSC-frequency-before-starting-QEMU.patch
+Patch303: libvirt-util-Propagate-numad-failures-correctly.patch
+Patch304: libvirt-util-alloc-add-macros-for-implementing-automatic-cleanup-functionality.patch
+Patch305: libvirt-util-bitmap-define-cleanup-function-using-VIR_DEFINE_AUTOPTR_FUNC.patch
+Patch306: libvirt-util-Introduce-virBitmapUnion.patch
+Patch307: libvirt-util-Introduce-virNumaNodesetToCPUset.patch
+Patch308: libvirt-qemu-Fix-qemuProcessInitCpuAffinity.patch
+Patch309: libvirt-qemu-Fix-leak-in-qemuProcessInitCpuAffinity.patch
+Patch310: libvirt-cpu_conf-Fix-XPath-for-parsing-TSC-frequency.patch
+Patch311: libvirt-qemu-Drop-cleanup-label-from-qemuProcessInitCpuAffinity.patch
+Patch312: libvirt-qemu-Fix-NULL-pointer-access-in-qemuProcessInitCpuAffinity.patch
+Patch313: libvirt-api-disallow-virDomainSaveImageGetXMLDesc-on-read-only-connections.patch
+Patch314: libvirt-api-disallow-virDomainManagedSaveDefineXML-on-read-only-connections.patch
+Patch315: libvirt-api-disallow-virConnectGetDomainCapabilities-on-read-only-connections.patch
+Patch316: libvirt-api-disallow-virConnect-HypervisorCPU-on-read-only-connections.patch
 
 Requires: libvirt-daemon = %{version}-%{release}
 Requires: libvirt-daemon-config-network = %{version}-%{release}
@@ -2325,88 +2480,245 @@ exit 0
 
 
 %changelog
-* Tue Jun 18 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.12
+* Thu Jun 20 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-23
 - api: disallow virDomainSaveImageGetXMLDesc on read-only connections (CVE-2019-10161)
 - api: disallow virDomainManagedSaveDefineXML on read-only connections (CVE-2019-10166)
 - api: disallow virConnectGetDomainCapabilities on read-only connections (CVE-2019-10167)
 - api: disallow virConnect*HypervisorCPU on read-only connections (CVE-2019-10168)
 
-* Wed Jun  5 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.11
-- virfile: added GPFS as shared fs (rhbz#1715867)
+* Wed Jun 12 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-22
+- qemu: Drop cleanup label from qemuProcessInitCpuAffinity() (rhbz#1718172)
+- qemu: Fix NULL pointer access in qemuProcessInitCpuAffinity() (rhbz#1718172)
 
-* Thu May 16 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.10
-- virnwfilterbindingobj: Introduce and use virNWFilterBindingObjStealDef (rhbz#1702173)
+* Thu Jun  6 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-21
+- cpu_conf: Fix XPath for parsing TSC frequency (rhbz#1641702)
+
+* Tue Jun  4 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-20
+- util: alloc: add macros for implementing automatic cleanup functionality (rhbz#1703661)
+- util: bitmap: define cleanup function using VIR_DEFINE_AUTOPTR_FUNC (rhbz#1703661)
+- util: Introduce virBitmapUnion() (rhbz#1703661)
+- util: Introduce virNumaNodesetToCPUset() (rhbz#1703661)
+- qemu: Fix qemuProcessInitCpuAffinity() (rhbz#1703661)
+- qemu: Fix leak in qemuProcessInitCpuAffinity() (rhbz#1703661)
+
+* Tue Jun  4 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-19
+- virfile: added GPFS as shared fs (rhbz#1710728)
+- util: file: introduce VIR_AUTOCLOSE macro to close fd of the file automatically (rhbz#1641702)
+- vircpuhost: Add support for reading MSRs (rhbz#1641702)
+- virhostcpu: Make virHostCPUGetMSR() work only on x86 (rhbz#1641702)
+- qemu: Make virQEMUCapsProbeHostCPUForEmulator more generic (rhbz#1641702)
+- qemuargv2xmltest: Use mocked virQEMUCapsProbeHostCPU (rhbz#1641702)
+- util: Add virHostCPUGetTscInfo (rhbz#1641702)
+- conf: Report TSC frequency in host CPU capabilities (rhbz#1641702)
+- cpu_x86: Fix placement of *CheckFeature functions (rhbz#1641702)
+- cpu_x86: Probe TSC frequency and scaling support (rhbz#1641702)
+- qemu: Check TSC frequency before starting QEMU (rhbz#1641702)
+- util: Propagate numad failures correctly (rhbz#1716387)
+
+* Tue May 21 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-18
 - admin: reject clients unless their UID matches the current UID (CVE-2019-10132)
 - locking: restrict sockets to mode 0600 (CVE-2019-10132)
 - logging: restrict sockets to mode 0600 (CVE-2019-10132)
+- util: require command args to be non-NULL (rhbz#1672957)
+- qemu: use line breaks in command line args written to log (rhbz#1672957)
 
-* Tue Apr 16 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.9
-- qemu: Don't cache microcode version (CVE-2018-12127, CVE-2018-12126, CVE-2018-12130)
+* Tue May 14 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-17
+- cpu_map: Add support for cldemote CPU feature (rhbz#1537777)
+- cputest: Add data for Intel(R) Xeon(R) CPU E3-1225 v5 (CVE-2018-12126, CVE-2018-12127, CVE-2019-11091, CVE-2018-12130)
+- cpu_map: Define md-clear CPUID bit (CVE-2018-12126, CVE-2018-12127, CVE-2019-11091, CVE-2018-12130)
 
-* Wed Apr 10 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.8
-- cpu_x86: Do not cache microcode version (CVE-2018-12126, CVE-2018-12127, CVE-2018-12130)
-- cputest: Add data for Intel(R) Xeon(R) CPU E3-1225 v5 (CVE-2018-12126, CVE-2018-12127, CVE-2018-12130)
-- cpu_map: Define md-clear CPUID bit (CVE-2018-12126, CVE-2018-12127, CVE-2018-12130)
+* Fri May  3 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-16
+- Handle copying bitmaps to larger data buffers (rhbz#1703159)
+- nwfilter: fix adding std MAC and IP values to filter binding (rhbz#1691358)
+- util: suppress unimportant ovs-vsctl errors when getting interface stats (rhbz#1683175)
 
-* Tue Mar 26 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.7
-- cputest: Add data for Intel(R) Xeon(R) CPU E5-2630 v4 (rhbz#1687515)
-- cputest: Add data for Intel(R) Core(TM) i7-7600U (rhbz#1687515)
-- cputest: Add data for Intel(R) Xeon(R) CPU E7540 (rhbz#1687515)
-- cputest: Add data for Intel(R) Xeon(R) CPU E5-2650 (rhbz#1687515)
-- cputest: Add data for Intel(R) Core(TM) i7-8700 (rhbz#1687515)
-- cpu_x86: Separate signature parsing from x86ModelParse (rhbz#1687515)
-- cpu_x86: Add x86ModelCopySignatures helper (rhbz#1687515)
-- cpu_x86: Store CPU signature in an array (rhbz#1687515)
-- cpu_x86: Allow multiple signatures for a CPU model (rhbz#1687515)
-- cpu_map: Add hex representation of signatures (rhbz#1687515)
-- cpu_map: Add more signatures for Conroe CPU model (rhbz#1687515)
-- cpu_map: Add more signatures for Penryn CPU model (rhbz#1687515)
-- cpu_map: Add more signatures for Nehalem CPU models (rhbz#1687515)
-- cpu_map: Add more signatures for Westmere CPU model (rhbz#1687515)
-- cpu_map: Add more signatures for SandyBridge CPU models (rhbz#1687515)
-- cpu_map: Add more signatures for IvyBridge CPU models (rhbz#1687515)
-- cpu_map: Add more signatures for Haswell CPU models (rhbz#1687515)
-- cpu_map: Add more signatures for Broadwell CPU models (rhbz#1687515)
-- cpu_map: Add more signatures for Skylake-Client CPU models (rhbz#1687515)
-- cpu: Don't access invalid memory in virCPUx86Translate (rhbz#1687515)
-- cpu_x86: Log decoded CPU model and signatures (rhbz#1687515)
-- util: Modify virStorageFileGetSCSIKey return (rhbz#1687715)
-- storage: Rework virStorageBackendSCSISerial (rhbz#1687715)
-- util: Introduce virStorageFileGetNPIVKey (rhbz#1687715)
-- storage: Fetch a unique key for vHBA/NPIV LUNs (rhbz#1687715)
+* Thu Apr 25 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-15
+- qemu_hotplug: Initialize @charAlias in qemuDomainRemoveChrDevice (rhbz#1658198)
 
-* Thu Feb 21 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.6
-- RHEL: spec: Require new enough librbd1 (rhbz#1679569)
+* Tue Apr 23 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-14
+- cpu_map: Add features for Icelake CPUs (rhbz#1527659, rhbz#1526624)
+- cpu_map: Add Icelake CPU models (rhbz#1526624)
+- cpu_x86: Do not cache microcode version (rhbz#1576369)
+- qemu: Don't cache microcode version (rhbz#1576369)
+- util: Rename some functions of virresctrl (rhbz#1468650)
+- util: Refactor virResctrlGetInfo in virresctrl (rhbz#1468650)
+- util: Refactor virResctrlAllocFormat of virresctrl (rhbz#1468650)
+- util: Add MBA capability information query to resctrl (rhbz#1468650)
+- util: Add MBA check to virResctrlInfoGetCache (rhbz#1468650)
+- util: Add MBA allocation to virresctrl (rhbz#1468650)
+- util: Add MBA schemata parse and format methods (rhbz#1468650)
+- util: Add support to calculate MBA utilization (rhbz#1468650)
+- util: Introduce virResctrlAllocForeachMemory (rhbz#1468650)
+- util: Introduce virResctrlAllocSetMemoryBandwidth (rhbz#1468650)
+- conf: Rename cachetune to resctrl (rhbz#1468650)
+- conf: Factor out vcpus parsing part from virDomainCachetuneDefParse (rhbz#1468650)
+- conf: Factor out vcpus overlapping from virDomainCachetuneDefParse (rhbz#1468650)
+- conf: Factor out virDomainResctrlDef update from virDomainCachetuneDefParse (rhbz#1468650)
+- conf: Add support for memorytune XML processing for resctrl MBA (rhbz#1468650)
+- conf: Add return value check to virResctrlAllocForeachCache (rhbz#1468650)
+- conf: Add memory bandwidth allocation capability of host (rhbz#1468650)
+- conf: Fix bug in finding alloc through matching vcpus (rhbz#1468650)
+- resctrl: Do not calculate free bandwidth for MBA (rhbz#1468650)
+- resctrl: Set MBA defaults properly (rhbz#1468650)
+- resctrl: Fix testing line (rhbz#1468650)
+- virresctrl: fix MBA memory leak (rhbz#1468650)
+- test: caps: Add capabilities for QEMU 3.1.0 (rhbz#1628892)
+- util: Introduce virHostGetDRMRenderNode helper (rhbz#1628892)
+- conf: Introduce virDomainGraphics-related helpers (rhbz#1628892)
+- qemu: process: spice: Pick the first available DRM render node (rhbz#1628892)
+- qemu: command: Introduce qemuBuildGraphicsEGLHeadlessCommandLine helper (rhbz#1628892)
+- qemu: caps: Introduce QEMU_EGL_HEADLESS_RENDERNODE capability (rhbz#1628892)
+- conf: gfx: Add egl-headless as a member to virDomainGraphicsDef struct (rhbz#1628892)
+- conf: gfx: egl-headless: Introduce a new <gl> subelement (rhbz#1628892)
+- qemu: domain: egl-headless: Add the DRI device into the namespace (rhbz#1628892)
+- qemu: cgroup: gfx: egl-headless: Add the DRI device into the cgroup list (rhbz#1628892)
+- security: dac: gfx: egl-headless: Relabel the DRI device (rhbz#1628892)
+- qemu: command: gfx: egl-headless: Add 'rendernode' option to the cmdline (rhbz#1628892)
+- domain: conf: graphics: Fix picking DRI renderer automatically for SPICE (rhbz#1628892)
+- qemu: domain: gfx: Fix shadowing of a function argument in validation (rhbz#1628892)
 
-* Wed Feb 20 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.5
-- virfile: Detect ceph as shared FS (rhbz#1672178)
-- util: Don't overflow in virRandomBits (rhbz#1667329)
-- virrandom: Avoid undefined behaviour in virRandomBits (rhbz#1667329)
+* Tue Apr 23 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-13
+- storage: Extract out mount command creation for FS Backend (rhbz#1584663)
+- storage: Move FS backend mount creation command helper (rhbz#1584663)
+- storage: Move virStorageBackendFileSystemGetPoolSource (rhbz#1584663)
+- tests: Introduce tests for storage pool xml to argv checks (rhbz#1584663)
+- tests: Add storagepool xml test for netfs-auto (rhbz#1584663)
+- storage: Rework virStorageBackendFileSystemMountCmd (rhbz#1584663)
+- storage: Add default mount options for fs/netfs storage pools (rhbz#1584663)
+- conf: Add optional NFS Source Pool <protocol ver='n'/> option (rhbz#1584663)
+- storage: Add the nfsvers to the command line (rhbz#1584663)
+- virsh: Add source-protocol-ver for pool commands (rhbz#1584663)
+- RHEL: conf: storage: Fix a memory leak in virStoragePoolDefParseSource (rhbz#1584663)
+- tests: Reuse qemucapabilities data for qemucaps2xml (rhbz#1628469)
+- tests: Add more tests to qemucaps2xml (rhbz#1628469)
+- qemu: Drop QEMU_CAPS_ENABLE_KVM (rhbz#1628469)
+- qemu: Avoid probing non-native binaries all the time (rhbz#1628469)
+- qemu: Clarify QEMU_CAPS_KVM (rhbz#1628469)
+- qemu: Don't check for /dev/kvm presence (rhbz#1628469)
+- tests: Follow up on qemucaps2xmldata rename (rhbz#1628469)
+- qemu: hotplug: Don't generate alias when detaching disk (rhbz#1658198)
+- qemu: hotplug: Don't generate alias when detaching controllers (rhbz#1658198)
+- tests: add channel-unix-guestfwd (rhbz#1658198)
+- qemu: Use @tmpChr in qemuDomainDetachChrDevice to build device string (rhbz#1658198)
+- qemuL: Drop "user-" prefix for guestfwd netdev (rhbz#1658198)
+- qemu_hotplug: Attach guestfwd using netdev_add (rhbz#1658198)
+- qemu_hotplug: Detach guestfwd using netdev_del (rhbz#1658198)
+- qemuhotplugtest: Test guestfwd attach and detach (rhbz#1658198)
+- qemu_hotplug: Don't build device string in qemuDomainDetachChrDevice (rhbz#1658198)
+- qemu_hotplug: Assume chardev alias always exists in qemuDomainDetachChrDevice (rhbz#1658198)
+- qemu: fix device name passed to error report (rhbz#1658198)
+- qemu_hotplug: Properly check for qemuMonitorDelDevice retval (rhbz#1658198)
+- qemu_hotplug: Introduce and use qemuDomainDeleteDevice (rhbz#1658198)
+- qemu: hotplug: Remove 'ret' variable in qemuDomainDetachDeviceDiskLive (rhbz#1658198)
+- qemu: hotplug: Use typecasted enum in qemuDomainDetachDeviceDiskLive (rhbz#1658198)
+- qemu: hotplug: Use switch statement for selecting disk bus function (rhbz#1658198)
+- qemu: hotplug: Merge virtio and non-virtio disk unplug code (rhbz#1658198)
+- qemu_hotplug: remove unnecessary check for valid PCI address (rhbz#1658198)
+- qemu_hotplug: rename a virDomainDeviceInfoPtr to avoid confusion (rhbz#1658198)
+- qemu_hotplug: eliminate multiple identical qemuDomainDetachHost*Device() functions (rhbz#1658198)
+- qemu_hotplug: eliminate unnecessary call to qemuDomainDetachNetDevice() (rhbz#1658198)
+- qemu_hotplug: refactor qemuDomainDetachDiskLive and qemuDomainDetachDiskDevice (rhbz#1658198)
+- qemu_hotplug: don't call DetachThisHostDevice for hostdev network devices (rhbz#1658198)
+- qemu_hotplug: merge qemuDomainDetachThisHostDevice into qemuDomainDetachHostDevice (rhbz#1658198)
+- qemu_hotplug: move qemuDomainChangeGraphicsPasswords() (rhbz#1658198)
+- qemu_hotplug: move (almost) all qemuDomainDetach*() functions together (rhbz#1658198)
+- qemu_hotplug: move (Attach|Detach)Lease functions with others of same type (rhbz#1658198)
+- qemu_hotplug: move qemuDomainDetachDeviceLive() to qemu_hotplug.c (rhbz#1658198)
+- qemu_hotplug: remove extra function in middle of DetachController call chain (rhbz#1658198)
+- qemu_hotplug: pull qemuDomainUpdateDeviceList out of qemuDomainDetachDeviceLive (rhbz#1658198)
+- test: replace calls to individual detach functions with one call to main detach (rhbz#1658198)
+- qemu_hotplug: make Detach functions called only from qemu_hotplug.c static (rhbz#1658198)
+- qemu_hotplug: rename dev to match in qemuDomainDetachDeviceLive (rhbz#1658198)
+- qemu_hotplug: separate Chr|Lease from other devices in DetachDevice switch (rhbz#1658198)
+- qemu_hotplug: standardize the names/args/calling of qemuDomainDetach*() (rhbz#1658198)
+- qemu_hotplug: rename Chr and Lease Detach functions (rhbz#1658198)
+- qemu_hotplug: new function qemuDomainRemoveAuditDevice() (rhbz#1658198)
+- qemu_hotplug: audit *all* auditable device types in qemuDomainRemoveAuditDevice (rhbz#1658198)
+- qemu_hotplug: consolidate all common detach code in qemuDomainDetachDeviceLive (rhbz#1658198)
+- qemu_hotplug: don't shutdown net device until the guest has released it (rhbz#1658198)
+- qemu_hotplug: delay sending DEVICE_REMOVED event until after *all* teardown (rhbz#1658198)
+- conf: Expose virDomainSCSIDriveAddressIsUsed (rhbz#1692296)
+- qemuhotplugtest: Don't plug a SCSI disk at unit 7 (rhbz#1692296)
+- qemu_hotplug: Check for duplicate drive addresses (rhbz#1692296)
+- qemu: Rework setting process affinity (rhbz#1695434)
+- qemu: Set up EMULATOR thread and cpuset.mems before exec()-ing qemu (rhbz#1695434)
 
-* Thu Jan 10 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.4
-- qemu: Fix post-copy migration on the source (rhbz#1654732)
-- RHEL: cpu_map: Mark arch-facilities feature as non-migratable (rhbz#1664793)
+* Thu Apr  4 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-12
+- src: Document autostart for session demon (rhbz#1501450)
+- nwfilter: Add extra verbiage for binding create/delete (rhbz#1609454)
+- qemu: Remove duplicated qemuAgentCheckError (rhbz#1663051, CVE-2019-3840)
+- qemu: require reply from guest agent in qemuAgentGetInterfaces (rhbz#1663051, CVE-2019-3840)
+- virsh: Add missed fields to pool-define-as item entry (rhbz#1615680)
+- qemu: Add entry for balloon stat stat-disk-caches (rhbz#1690122)
+- qemu: Set identity for the reconnect all thread (rhbz#1631622)
+- docs: schemas: Fix missing timestamp inside backingStore (rhbz#1594266)
+- storage: Remove secretPath from _virStorageBackendQemuImgInfo (rhbz#1613737)
+- storage: Allow for inputvol to have any format for encryption (rhbz#1613737)
+- storage: Allow inputvol to be encrypted (rhbz#1613737)
+- virsh: man: Document quirks of device-detach and friends (rhbz#1688961)
+- virsh: man: Document asynchronous behaviour of detach-device-alias (rhbz#1688961)
+- access: Modify the VIR_ERR_ACCESS_DENIED to include driverName (rhbz#1631606)
+- qemu: Put format=raw onto cmd line for SCSI passthrough (rhbz#1632833)
+- virnwfilterbindingobj: Introduce and use virNWFilterBindingObjStealDef (rhbz#1686927)
+- logging: ensure pending I/O is drained before reading position (rhbz#1660531)
+- conf: Fix check for chardev source path (rhbz#1609720)
+- util: skip RDMA detection for non-PCI network devices (rhbz#1639258)
+- qemu: Set job statsType for external memory snapshot (rhbz#1690703)
+- virsh: Strip XML declaration when extracting CPU XMLs (rhbz#1592737)
+- virsh: Require explicit --domain for domxml-to-native (rhbz#1633077)
 
-* Thu Nov  8 2018 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.3
-- virfile: Take symlink into account in virFileIsSharedFixFUSE (rhbz#1641798)
-- qemu: Properly report VIR_DOMAIN_EVENT_RESUMED_FROM_SNAPSHOT (rhbz#1634759)
-- qemu: Report more appropriate running reasons (rhbz#1634759)
-- qemu: Pass running reason to RESUME event handler (rhbz#1634759)
-- qemu: Map running reason to resume event detail (rhbz#1634759)
-- qemu: Avoid duplicate resume events and state changes (rhbz#1634759)
-- qemu: Don't ignore resume events (rhbz#1634759)
-
-* Wed Oct 10 2018 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.2
-- virfile: fix cast-align error (rhbz#1635705)
-- virfiletest: Fix test name prefix for virFileInData test (rhbz#1635705)
-- virfiletst: Test virFileIsSharedFS (rhbz#1635705)
-- virFileIsSharedFSType: Detect direct mount points (rhbz#1635705)
-- virfile: Rework virFileIsSharedFixFUSE (rhbz#1635705)
-
-* Mon Oct  8 2018 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.1
-- security: dac: also label listen UNIX sockets (rhbz#1635228)
-- qemu: fix up permissions for pre-created UNIX sockets (rhbz#1635228)
-- virFileIsSharedFSType: Check for fuse.glusterfs too (rhbz#1635705)
+* Wed Mar 27 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-11
+- security: dac: also label listen UNIX sockets (rhbz#1633389)
+- qemu: fix up permissions for pre-created UNIX sockets (rhbz#1633389)
+- virFileIsSharedFSType: Check for fuse.glusterfs too (rhbz#1632711)
+- virfile: fix cast-align error (rhbz#1632711)
+- virfiletest: Fix test name prefix for virFileInData test (rhbz#1632711)
+- virfiletst: Test virFileIsSharedFS (rhbz#1632711)
+- virFileIsSharedFSType: Detect direct mount points (rhbz#1632711)
+- virfile: Rework virFileIsSharedFixFUSE (rhbz#1632711)
+- virfile: Take symlink into account in virFileIsSharedFixFUSE (rhbz#1640465)
+- qemu: Properly report VIR_DOMAIN_EVENT_RESUMED_FROM_SNAPSHOT (rhbz#1612943)
+- qemu: Report more appropriate running reasons (rhbz#1612943)
+- qemu: Pass running reason to RESUME event handler (rhbz#1612943)
+- qemu: Map running reason to resume event detail (rhbz#1612943)
+- qemu: Avoid duplicate resume events and state changes (rhbz#1612943)
+- qemu: Don't ignore resume events (rhbz#1612943)
+- qemu: Fix post-copy migration on the source (rhbz#1647365)
+- RHEL: cpu_map: Mark arch-facilities feature as non-migratable (rhbz#1658406)
+- virfile: Detect ceph as shared FS (rhbz#1665553)
+- util: Don't overflow in virRandomBits (rhbz#1652894)
+- virrandom: Avoid undefined behaviour in virRandomBits (rhbz#1652894)
+- RHEL: spec: Require new enough librbd1 (rhbz#1658652)
+- cputest: Add data for Intel(R) Xeon(R) CPU E5-2630 v4 (rhbz#1558558)
+- cputest: Add data for Intel(R) Core(TM) i7-7600U (rhbz#1558558)
+- cputest: Add data for Intel(R) Xeon(R) CPU E7540 (rhbz#1558558)
+- cputest: Add data for Intel(R) Xeon(R) CPU E5-2650 (rhbz#1558558)
+- cputest: Add data for Intel(R) Core(TM) i7-8700 (rhbz#1558558)
+- cpu_x86: Separate signature parsing from x86ModelParse (rhbz#1558558)
+- cpu_x86: Add x86ModelCopySignatures helper (rhbz#1558558)
+- cpu_x86: Store CPU signature in an array (rhbz#1558558)
+- cpu_x86: Allow multiple signatures for a CPU model (rhbz#1558558)
+- cpu_map: Add hex representation of signatures (rhbz#1558558)
+- cpu_map: Add more signatures for Conroe CPU model (rhbz#1558558)
+- cpu_map: Add more signatures for Penryn CPU model (rhbz#1558558)
+- cpu_map: Add more signatures for Nehalem CPU models (rhbz#1558558)
+- cpu_map: Add more signatures for Westmere CPU model (rhbz#1558558)
+- cpu_map: Add more signatures for SandyBridge CPU models (rhbz#1558558)
+- cpu_map: Add more signatures for IvyBridge CPU models (rhbz#1558558)
+- cpu_map: Add more signatures for Haswell CPU models (rhbz#1558558)
+- cpu_map: Add more signatures for Broadwell CPU models (rhbz#1558558)
+- cpu_map: Add more signatures for Skylake-Client CPU models (rhbz#1558558)
+- cpu: Don't access invalid memory in virCPUx86Translate (rhbz#1558558)
+- cpu_x86: Log decoded CPU model and signatures (rhbz#1558558)
+- util: Modify virStorageFileGetSCSIKey return (rhbz#1657468)
+- storage: Rework virStorageBackendSCSISerial (rhbz#1657468)
+- util: Introduce virStorageFileGetNPIVKey (rhbz#1657468)
+- storage: Fetch a unique key for vHBA/NPIV LUNs (rhbz#1657468)
+- RHEL: qemu: Alter @val usage in qemuSetUnprivSGIO (rhbz#1656360)
+- RHEL: qemu: Alter qemuSetUnprivSGIO hostdev shareable logic (rhbz#1656360)
+- qemu: Filter non SCSI hostdevs in qemuHostdevPrepareSCSIDevices (rhbz#1665474)
+- qemu: Fix logic error in qemuSetUnprivSGIO (rhbz#1669581)
+- qemu: Fix crash trying to use iSCSI hostdev (rhbz#1669586)
 
 * Tue Sep 18 2018 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10
 - conf: correct false boot order error during domain parse (rhbz#1601318)

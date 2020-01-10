@@ -1,0 +1,46 @@
+From e6623828b4e41fab3df1593a670341a55b3f6a71 Mon Sep 17 00:00:00 2001
+Message-Id: <e6623828b4e41fab3df1593a670341a55b3f6a71@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Tue, 29 Jan 2019 19:01:51 -0500
+Subject: [PATCH] qemu: Fix crash trying to use iSCSI hostdev
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1669586 (RHEL7)
+https://bugzilla.redhat.com/show_bug.cgi?id=1669424 (RHEL8)
+
+RHEL-only
+
+Commit 2878c0c7b moved the qemuIsSharedHostdev filter in the
+HOSTDEV half of the logic to allow calling qemuGetHostdevPath;
+however, that neglected to check whether the SCSI hostdev was
+using the iSCSI protocol which has a different overlayed struct
+format (u.iscsi vs. u.host) resulting in attempted access of
+u.host when calling virSCSIDeviceGetDevName.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+Message-Id: <20190130000151.4479-4-jferlan@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/qemu/qemu_conf.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/qemu/qemu_conf.c b/src/qemu/qemu_conf.c
+index 768e9d8308..a81298326f 100644
+--- a/src/qemu/qemu_conf.c
++++ b/src/qemu/qemu_conf.c
+@@ -1667,6 +1667,10 @@ qemuSetUnprivSGIO(virDomainDeviceDefPtr dev)
+     } else if (dev->type == VIR_DOMAIN_DEVICE_HOSTDEV) {
+         hostdev = dev->data.hostdev;
+ 
++        if (hostdev->source.subsys.u.scsi.protocol ==
++            VIR_DOMAIN_HOSTDEV_SCSI_PROTOCOL_TYPE_ISCSI)
++            return 0;
++
+         if (!(hostdev_path = qemuGetHostdevPath(hostdev)))
+             goto cleanup;
+ 
+-- 
+2.21.0
+

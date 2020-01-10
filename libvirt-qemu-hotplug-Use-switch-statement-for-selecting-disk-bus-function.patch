@@ -1,0 +1,65 @@
+From f76ff96c3ea876df4f09af0ed3e75cbaf31837cf Mon Sep 17 00:00:00 2001
+Message-Id: <f76ff96c3ea876df4f09af0ed3e75cbaf31837cf@dist-git>
+From: Peter Krempa <pkrempa@redhat.com>
+Date: Thu, 11 Apr 2019 15:14:28 -0400
+Subject: [PATCH] qemu: hotplug: Use switch statement for selecting disk bus
+ function
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit eb437cfdf8f536293e4a4f5ff0f57058b7e6988a)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-17-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 24 ++++++++++++++++++++----
+ 1 file changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index b7db65964e..5e8583ae8b 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -4823,14 +4823,30 @@ qemuDomainDetachDeviceDiskLive(virQEMUDriverPtr driver,
+     switch ((virDomainDiskDevice) disk->device) {
+     case VIR_DOMAIN_DISK_DEVICE_DISK:
+     case VIR_DOMAIN_DISK_DEVICE_LUN:
+-        if (disk->bus == VIR_DOMAIN_DISK_BUS_VIRTIO)
++
++        switch ((virDomainDiskBus) disk->bus) {
++        case VIR_DOMAIN_DISK_BUS_VIRTIO:
+             return qemuDomainDetachVirtioDiskDevice(driver, vm, disk, async);
+-        else if (disk->bus == VIR_DOMAIN_DISK_BUS_SCSI ||
+-                 disk->bus == VIR_DOMAIN_DISK_BUS_USB)
++
++        case VIR_DOMAIN_DISK_BUS_USB:
++        case VIR_DOMAIN_DISK_BUS_SCSI:
+             return qemuDomainDetachDiskDevice(driver, vm, disk, async);
+-        else
++
++        case VIR_DOMAIN_DISK_BUS_IDE:
++        case VIR_DOMAIN_DISK_BUS_FDC:
++        case VIR_DOMAIN_DISK_BUS_XEN:
++        case VIR_DOMAIN_DISK_BUS_UML:
++        case VIR_DOMAIN_DISK_BUS_SATA:
++        case VIR_DOMAIN_DISK_BUS_SD:
+             virReportError(VIR_ERR_OPERATION_UNSUPPORTED, "%s",
+                            _("This type of disk cannot be hot unplugged"));
++            break;
++
++        case VIR_DOMAIN_DISK_BUS_LAST:
++        default:
++            virReportEnumRangeError(virDomainDiskBus, disk->bus);
++            break;
++        }
+         break;
+ 
+     case VIR_DOMAIN_DISK_DEVICE_CDROM:
+-- 
+2.21.0
+

@@ -1,0 +1,46 @@
+From 3139985e97cbd2e38deeef7d82eb989f348707bc Mon Sep 17 00:00:00 2001
+Message-Id: <3139985e97cbd2e38deeef7d82eb989f348707bc@dist-git>
+From: Jiri Denemark <jdenemar@redhat.com>
+Date: Thu, 25 Apr 2019 16:36:43 +0200
+Subject: [PATCH] cpu_map: Add support for cldemote CPU feature
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Added in QEMU by v2.12.0-481-g0da0fb0628 (released in 3.0).
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 8feeee9ee23f0500cc2585e1b11231c54de8e93d)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1537731
+https://bugzilla.redhat.com/show_bug.cgi?id=1537777
+
+Conflicts:
+	src/cpu_map/x86_features.xml
+            - features are defined in src/cpu/cpu_map.xml downstream
+
+Signed-off-by: Jiri Denemark <jdenemar@redhat.com>
+Message-Id: <bb26b8e5c8323be651bae3d1c15aa04528f2c26d.1556202959.git.jdenemar@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/cpu/cpu_map.xml | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/cpu/cpu_map.xml b/src/cpu/cpu_map.xml
+index 1a4f1321f8..1d65a92e6d 100644
+--- a/src/cpu/cpu_map.xml
++++ b/src/cpu/cpu_map.xml
+@@ -315,6 +315,9 @@
+     <feature name='la57'>
+       <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x00010000'/>
+     </feature>
++    <feature name='cldemote'>
++      <cpuid eax_in='0x07' ecx_in='0x00' ecx='0x02000000'/>
++    </feature>
+ 
+     <feature name='avx512-4vnniw'>
+       <cpuid eax_in='0x07' ecx_in='0x00' edx='0x00000004'/>
+-- 
+2.21.0
+

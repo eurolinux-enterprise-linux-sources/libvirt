@@ -1,0 +1,149 @@
+From a760b1ce1cf91d5aa83409fce9421c39633784fd Mon Sep 17 00:00:00 2001
+Message-Id: <a760b1ce1cf91d5aa83409fce9421c39633784fd@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Tue, 4 Jun 2019 16:22:04 +0200
+Subject: [PATCH] util: Introduce virBitmapUnion()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 1b2ac8010cc1fe871f538b3f48c5e48213c5c074)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1703661
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190604142207.2036-4-abologna@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/libvirt_private.syms |  1 +
+ src/util/virbitmap.c     | 27 +++++++++++++++++++++++++++
+ src/util/virbitmap.h     |  4 ++++
+ tests/virbitmaptest.c    | 38 ++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 70 insertions(+)
+
+diff --git a/src/libvirt_private.syms b/src/libvirt_private.syms
+index 3a99cb6774..e9c5b5ea33 100644
+--- a/src/libvirt_private.syms
++++ b/src/libvirt_private.syms
+@@ -1475,6 +1475,7 @@ virBitmapSubtract;
+ virBitmapToData;
+ virBitmapToDataBuf;
+ virBitmapToString;
++virBitmapUnion;
+ 
+ 
+ # util/virbuffer.h
+diff --git a/src/util/virbitmap.c b/src/util/virbitmap.c
+index d6715025d4..7df0a2d4f3 100644
+--- a/src/util/virbitmap.c
++++ b/src/util/virbitmap.c
+@@ -1269,6 +1269,33 @@ virBitmapIntersect(virBitmapPtr a,
+ }
+ 
+ 
++/**
++ * virBitmapUnion:
++ * @a: bitmap, modified to contain result
++ * @b: other bitmap
++ *
++ * Performs union of two bitmaps: a = union(a, b)
++ *
++ * Returns 0 on success, <0 on failure.
++ */
++int
++virBitmapUnion(virBitmapPtr a,
++               const virBitmap *b)
++{
++    size_t i;
++
++    if (a->nbits < b->nbits &&
++        virBitmapExpand(a, b->nbits - 1) < 0) {
++        return -1;
++    }
++
++    for (i = 0; i < b->map_len; i++)
++        a->map[i] |= b->map[i];
++
++    return 0;
++}
++
++
+ /**
+  * virBitmapSubtract:
+  * @a: minuend/result
+diff --git a/src/util/virbitmap.h b/src/util/virbitmap.h
+index 312e7e2933..5934508d11 100644
+--- a/src/util/virbitmap.h
++++ b/src/util/virbitmap.h
+@@ -151,6 +151,10 @@ bool virBitmapOverlaps(virBitmapPtr b1,
+ void virBitmapIntersect(virBitmapPtr a, virBitmapPtr b)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+ 
++int virBitmapUnion(virBitmapPtr a,
++                   const virBitmap *b)
++    ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
++
+ void virBitmapSubtract(virBitmapPtr a, virBitmapPtr b)
+     ATTRIBUTE_NONNULL(1) ATTRIBUTE_NONNULL(2);
+ 
+diff --git a/tests/virbitmaptest.c b/tests/virbitmaptest.c
+index 2fbafc0a76..cafe865dde 100644
+--- a/tests/virbitmaptest.c
++++ b/tests/virbitmaptest.c
+@@ -740,6 +740,34 @@ test14(const void *opaque)
+     return ret;
+ }
+ 
++/* virBitmapUnion() */
++static int
++test15(const void *opaque)
++{
++    const struct testBinaryOpData *data = opaque;
++    VIR_AUTOPTR(virBitmap) amap = NULL;
++    VIR_AUTOPTR(virBitmap) bmap = NULL;
++    VIR_AUTOPTR(virBitmap) resmap = NULL;
++
++    if (!(amap = virBitmapParseUnlimited(data->a)) ||
++        !(bmap = virBitmapParseUnlimited(data->b)) ||
++        !(resmap = virBitmapParseUnlimited(data->res))) {
++        return -1;
++    }
++
++    if (virBitmapUnion(amap, bmap) < 0)
++        return -1;
++
++    if (!virBitmapEqual(amap, resmap)) {
++        fprintf(stderr,
++                "\n bitmap union failed: union('%s', '%s') != '%s'\n",
++                data->a, data->b, data->res);
++        return -1;
++    }
++
++    return 0;
++}
++
+ 
+ #define TESTBINARYOP(A, B, RES, FUNC) \
+     testBinaryOpData.a = A; \
+@@ -798,6 +826,16 @@ mymain(void)
+     TESTBINARYOP("0-3", "0,^0", "0-3", test14);
+     TESTBINARYOP("0,2", "1,3", "0,2", test14);
+ 
++    /* virBitmapUnion() */
++    virTestCounterReset("test15-");
++    TESTBINARYOP("0-1", "0-1", "0-1", test15);
++    TESTBINARYOP("0", "1", "0-1", test15);
++    TESTBINARYOP("0-1", "2-3", "0-3", test15);
++    TESTBINARYOP("0-3", "1-2", "0-3", test15);
++    TESTBINARYOP("0,^0", "12345", "12345", test15);
++    TESTBINARYOP("12345", "0,^0", "12345", test15);
++    TESTBINARYOP("0,^0", "0,^0", "0,^0", test15);
++
+     return ret;
+ }
+ 
+-- 
+2.21.0
+

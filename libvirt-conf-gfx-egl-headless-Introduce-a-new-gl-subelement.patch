@@ -1,0 +1,307 @@
+From a701d9ee0f3e5cd939356191f25d0ec378dbb5c4 Mon Sep 17 00:00:00 2001
+Message-Id: <a701d9ee0f3e5cd939356191f25d0ec378dbb5c4@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:31 +0200
+Subject: [PATCH] conf: gfx: egl-headless: Introduce a new <gl> subelement
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Unlike with SPICE and SDL which use the <gl> subelement to enable OpenGL
+acceleration, specifying egl-headless graphics in the XML has
+essentially the same meaning, thus in case of egl-headless we don't have
+a need for the 'enable' element attribute and we'll only be interested
+in the 'rendernode' one further down the road.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+(cherry picked from commit 5f931fe39112129efb1204a1aac60b180ef31b42)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <a52b7103d576f2713b6d1839e2bc7e2381b80519.1554791287.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ docs/formatdomain.html.in                     | 11 +++--
+ docs/schemas/domaincommon.rng                 | 17 +++++--
+ src/conf/domain_conf.c                        | 45 ++++++++++++++++++-
+ src/qemu/qemu_process.c                       | 17 +++++--
+ .../graphics-egl-headless-rendernode.xml      | 33 ++++++++++++++
+ .../graphics-egl-headless-rendernode.xml      | 41 +++++++++++++++++
+ tests/qemuxml2xmltest.c                       |  2 +
+ 7 files changed, 156 insertions(+), 10 deletions(-)
+ create mode 100644 tests/qemuxml2argvdata/graphics-egl-headless-rendernode.xml
+ create mode 100644 tests/qemuxml2xmloutdata/graphics-egl-headless-rendernode.xml
+
+diff --git a/docs/formatdomain.html.in b/docs/formatdomain.html.in
+index 8cf2c12524..e848dc1e0d 100644
+--- a/docs/formatdomain.html.in
++++ b/docs/formatdomain.html.in
+@@ -6573,12 +6573,17 @@ qemu-kvm -net nic,model=? /dev/null
+               the other types, for practical reasons it should be paired with
+               either <code>vnc</code> or <code>spice</code> graphics types.
+               This display type is only supported by QEMU domains
+-              (needs QEMU <span class="since">2.10</span> or newer) and doesn't
+-              accept any attributes.
++              (needs QEMU <span class="since">2.10</span> or newer).
++              <span class="Since">5.0.0</span> this element accepts a
++              <code>&lt;gl/&gt;</code> sub-element with an optional attribute
++              <code>rendernode</code> which can be used to specify an absolute
++              path to a host's DRI device to be used for OpenGL rendering.
+             </p>
+             <pre>
+ &lt;graphics type='spice' autoport='yes'/&gt;
+-&lt;graphics type='egl-headless'/&gt;
++&lt;graphics type='egl-headless'&gt;
++  &lt;gl rendernode='/dev/dri/renderD128'/&gt;
++&lt;/graphics&gt;
+             </pre>
+           </dd>
+         </dl>
+diff --git a/docs/schemas/domaincommon.rng b/docs/schemas/domaincommon.rng
+index 48f0637cad..f37ee4d354 100644
+--- a/docs/schemas/domaincommon.rng
++++ b/docs/schemas/domaincommon.rng
+@@ -3383,9 +3383,20 @@
+             </attribute>
+           </optional>
+         </group>
+-        <attribute name="type">
+-          <value>egl-headless</value>
+-        </attribute>
++        <group>
++          <attribute name="type">
++            <value>egl-headless</value>
++          </attribute>
++          <optional>
++            <element name="gl">
++              <optional>
++                <attribute name="rendernode">
++                  <ref name="absFilePath"/>
++                </attribute>
++              </optional>
++            </element>
++          </optional>
++        </group>
+       </choice>
+     </element>
+   </define>
+diff --git a/src/conf/domain_conf.c b/src/conf/domain_conf.c
+index d079be2bb5..1aef0c76f8 100644
+--- a/src/conf/domain_conf.c
++++ b/src/conf/domain_conf.c
+@@ -14274,6 +14274,24 @@ virDomainGraphicsDefParseXMLSpice(virDomainGraphicsDefPtr def,
+ }
+ 
+ 
++static int
++virDomainGraphicsDefParseXMLEGLHeadless(virDomainGraphicsDefPtr def,
++                                        xmlNodePtr node,
++                                        xmlXPathContextPtr ctxt)
++{
++    xmlNodePtr save = ctxt->node;
++    xmlNodePtr glNode;
++
++    ctxt->node = node;
++
++    if ((glNode = virXPathNode("./gl", ctxt)))
++        def->data.egl_headless.rendernode = virXMLPropString(glNode,
++                                                             "rendernode");
++    ctxt->node = save;
++    return 0;
++}
++
++
+ /* Parse the XML definition for a graphics device */
+ static virDomainGraphicsDefPtr
+ virDomainGraphicsDefParseXML(xmlNodePtr node,
+@@ -14323,6 +14341,9 @@ virDomainGraphicsDefParseXML(xmlNodePtr node,
+             goto error;
+         break;
+     case VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS:
++        if (virDomainGraphicsDefParseXMLEGLHeadless(def, node, ctxt) < 0)
++            goto error;
++        break;
+     case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
+         break;
+     }
+@@ -26724,6 +26745,20 @@ virDomainGraphicsDefFormat(virBufferPtr buf,
+         break;
+ 
+     case VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS:
++        if (!def->data.egl_headless.rendernode)
++            break;
++
++        if (!children) {
++            virBufferAddLit(buf, ">\n");
++            virBufferAdjustIndent(buf, 2);
++            children = true;
++        }
++
++        virBufferAddLit(buf, "<gl");
++        virBufferEscapeString(buf, " rendernode='%s'",
++                              def->data.egl_headless.rendernode);
++        virBufferAddLit(buf, "/>\n");
++        break;
+     case VIR_DOMAIN_GRAPHICS_TYPE_LAST:
+         break;
+     }
+@@ -30718,7 +30753,13 @@ virDomainGraphicsDefHasOpenGL(const virDomainDef *def)
+ bool
+ virDomainGraphicsSupportsRenderNode(const virDomainGraphicsDef *graphics)
+ {
+-    return graphics->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE;
++    bool ret = false;
++
++    if (graphics->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE ||
++        graphics->type == VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS)
++        ret = true;
++
++    return ret;
+ }
+ 
+ 
+@@ -30733,6 +30774,8 @@ virDomainGraphicsGetRenderNode(const virDomainGraphicsDef *graphics)
+             ret = graphics->data.spice.rendernode;
+         break;
+     case VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS:
++        ret = graphics->data.egl_headless.rendernode;
++        break;
+     case VIR_DOMAIN_GRAPHICS_TYPE_SDL:
+     case VIR_DOMAIN_GRAPHICS_TYPE_VNC:
+     case VIR_DOMAIN_GRAPHICS_TYPE_RDP:
+diff --git a/src/qemu/qemu_process.c b/src/qemu/qemu_process.c
+index 465dabd8e3..8811aefb95 100644
+--- a/src/qemu/qemu_process.c
++++ b/src/qemu/qemu_process.c
+@@ -4755,14 +4755,25 @@ static int
+ qemuProcessGraphicsSetupRenderNode(virDomainGraphicsDefPtr graphics,
+                                    virQEMUCapsPtr qemuCaps)
+ {
++    char **rendernode = NULL;
++
+     if (!virDomainGraphicsNeedsAutoRenderNode(graphics))
+         return 0;
+ 
+     /* Don't bother picking a DRM node if QEMU doesn't support it. */
+-    if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_SPICE_RENDERNODE))
+-        return 0;
++    if (graphics->type == VIR_DOMAIN_GRAPHICS_TYPE_SPICE) {
++        if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_SPICE_RENDERNODE))
++            return 0;
+ 
+-    if (!(graphics->data.spice.rendernode = virHostGetDRMRenderNode()))
++        rendernode = &graphics->data.spice.rendernode;
++    } else {
++        if (!virQEMUCapsGet(qemuCaps, QEMU_CAPS_EGL_HEADLESS_RENDERNODE))
++            return 0;
++
++        rendernode = &graphics->data.egl_headless.rendernode;
++    }
++
++    if (!(*rendernode = virHostGetDRMRenderNode()))
+         return -1;
+ 
+     return 0;
+diff --git a/tests/qemuxml2argvdata/graphics-egl-headless-rendernode.xml b/tests/qemuxml2argvdata/graphics-egl-headless-rendernode.xml
+new file mode 100644
+index 0000000000..a8d54e75da
+--- /dev/null
++++ b/tests/qemuxml2argvdata/graphics-egl-headless-rendernode.xml
+@@ -0,0 +1,33 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <driver name='qemu' type='raw'/>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'/>
++    <controller type='ide' index='0'/>
++    <controller type='pci' index='0' model='pci-root'/>
++    <input type='mouse' bus='ps2'/>
++    <input type='keyboard' bus='ps2'/>
++    <graphics type='egl-headless'>
++      <gl rendernode='/dev/dri/foo'/>
++    </graphics>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2xmloutdata/graphics-egl-headless-rendernode.xml b/tests/qemuxml2xmloutdata/graphics-egl-headless-rendernode.xml
+new file mode 100644
+index 0000000000..9b7ac89928
+--- /dev/null
++++ b/tests/qemuxml2xmloutdata/graphics-egl-headless-rendernode.xml
+@@ -0,0 +1,41 @@
++<domain type='qemu'>
++  <name>QEMUGuest1</name>
++  <uuid>c7a5fdbd-edaf-9455-926a-d65c16db1809</uuid>
++  <memory unit='KiB'>219100</memory>
++  <currentMemory unit='KiB'>219100</currentMemory>
++  <vcpu placement='static'>1</vcpu>
++  <os>
++    <type arch='i686' machine='pc'>hvm</type>
++    <boot dev='hd'/>
++  </os>
++  <clock offset='utc'/>
++  <on_poweroff>destroy</on_poweroff>
++  <on_reboot>restart</on_reboot>
++  <on_crash>destroy</on_crash>
++  <devices>
++    <emulator>/usr/bin/qemu-system-i686</emulator>
++    <disk type='block' device='disk'>
++      <driver name='qemu' type='raw'/>
++      <source dev='/dev/HostVG/QEMUGuest1'/>
++      <target dev='hda' bus='ide'/>
++      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
++    </disk>
++    <controller type='usb' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x2'/>
++    </controller>
++    <controller type='ide' index='0'>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x1'/>
++    </controller>
++    <controller type='pci' index='0' model='pci-root'/>
++    <input type='mouse' bus='ps2'/>
++    <input type='keyboard' bus='ps2'/>
++    <graphics type='egl-headless'>
++      <gl rendernode='/dev/dri/foo'/>
++    </graphics>
++    <video>
++      <model type='cirrus' vram='16384' heads='1' primary='yes'/>
++      <address type='pci' domain='0x0000' bus='0x00' slot='0x02' function='0x0'/>
++    </video>
++    <memballoon model='none'/>
++  </devices>
++</domain>
+diff --git a/tests/qemuxml2xmltest.c b/tests/qemuxml2xmltest.c
+index 5bd522e765..1f67d74797 100644
+--- a/tests/qemuxml2xmltest.c
++++ b/tests/qemuxml2xmltest.c
+@@ -434,6 +434,8 @@ mymain(void)
+     cfg->spiceAutoUnixSocket = false;
+     DO_TEST("graphics-spice-egl-headless", NONE);
+ 
++    DO_TEST("graphics-egl-headless-rendernode", NONE);
++
+     DO_TEST("input-usbmouse", NONE);
+     DO_TEST("input-usbtablet", NONE);
+     DO_TEST("misc-acpi", NONE);
+-- 
+2.21.0
+

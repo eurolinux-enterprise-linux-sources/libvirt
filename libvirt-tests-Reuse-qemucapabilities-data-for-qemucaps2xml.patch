@@ -1,0 +1,479 @@
+From 479f1a10b13e3029ea71003bdd8d1158711816d8 Mon Sep 17 00:00:00 2001
+Message-Id: <479f1a10b13e3029ea71003bdd8d1158711816d8@dist-git>
+From: Andrea Bolognani <abologna@redhat.com>
+Date: Fri, 5 Apr 2019 10:57:38 +0200
+Subject: [PATCH] tests: Reuse qemucapabilities data for qemucaps2xml
+
+While qemucaps2xml has a meager two test cases to its name, we
+have plenty of data from qemucapabilities which is taken from
+actual QEMU binaries, covers pretty much all supported QEMU
+versions and architectures and is even in the right format already!
+
+Rewrite qemucaps2xml so that it uses qemucapabilities data as
+input. Right now we have a single test case, but we're going to
+add a lot more next.
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+(cherry picked from commit 562990849a9de255b5fefa39be3f301b1bddfa6e)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1628469
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190405085744.8179-2-abologna@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ tests/qemucaps2xmldata/all_1.6.0-1.caps       | 129 ------------------
+ .../nodisksnapshot_1.6.0-1.caps               | 128 -----------------
+ .../nodisksnapshot_1.6.0-1.xml                |  32 -----
+ .../caps_1.6.0.x86_64.xml}                    |  12 +-
+ tests/qemucaps2xmltest.c                      |  33 +++--
+ 5 files changed, 23 insertions(+), 311 deletions(-)
+ delete mode 100644 tests/qemucaps2xmldata/all_1.6.0-1.caps
+ delete mode 100644 tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.caps
+ delete mode 100644 tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.xml
+ rename tests/{qemucaps2xmldata/all_1.6.0-1.xml => qemucaps2xmloutdata/caps_1.6.0.x86_64.xml} (67%)
+
+diff --git a/tests/qemucaps2xmldata/all_1.6.0-1.caps b/tests/qemucaps2xmldata/all_1.6.0-1.caps
+deleted file mode 100644
+index d39d0bebbf..0000000000
+--- a/tests/qemucaps2xmldata/all_1.6.0-1.caps
++++ /dev/null
+@@ -1,129 +0,0 @@
+-  <qemuCaps>
+-    <flag name='mem-path'/>
+-    <flag name='drive-serial'/>
+-    <flag name='chardev'/>
+-    <flag name='enable-kvm'/>
+-    <flag name='monitor-json'/>
+-    <flag name='balloon'/>
+-    <flag name='device'/>
+-    <flag name='sdl'/>
+-    <flag name='smp-topology'/>
+-    <flag name='netdev'/>
+-    <flag name='rtc'/>
+-    <flag name='vhost-net'/>
+-    <flag name='no-hpet'/>
+-    <flag name='no-kvm-pit'/>
+-    <flag name='pci-configfd'/>
+-    <flag name='nodefconfig'/>
+-    <flag name='boot-menu'/>
+-    <flag name='fsdev'/>
+-    <flag name='name-process'/>
+-    <flag name='drive-readonly'/>
+-    <flag name='smbios-type'/>
+-    <flag name='vga-qxl'/>
+-    <flag name='spice'/>
+-    <flag name='vga-none'/>
+-    <flag name='boot-index'/>
+-    <flag name='hda-duplex'/>
+-    <flag name='drive-aio'/>
+-    <flag name='pci-multibus'/>
+-    <flag name='pci-bootindex'/>
+-    <flag name='ccid-emulated'/>
+-    <flag name='ccid-passthru'/>
+-    <flag name='chardev-spicevmc'/>
+-    <flag name='virtio-tx-alg'/>
+-    <flag name='device-qxl-vga'/>
+-    <flag name='pci-multifunction'/>
+-    <flag name='virtio-blk-pci.ioeventfd'/>
+-    <flag name='sga'/>
+-    <flag name='virtio-blk-pci.event_idx'/>
+-    <flag name='virtio-net-pci.event_idx'/>
+-    <flag name='cache-directsync'/>
+-    <flag name='piix3-usb-uhci'/>
+-    <flag name='piix4-usb-uhci'/>
+-    <flag name='usb-ehci'/>
+-    <flag name='ich9-usb-ehci1'/>
+-    <flag name='vt82c686b-usb-uhci'/>
+-    <flag name='pci-ohci'/>
+-    <flag name='usb-hub'/>
+-    <flag name='no-shutdown'/>
+-    <flag name='cache-unsafe'/>
+-    <flag name='rombar'/>
+-    <flag name='ich9-ahci'/>
+-    <flag name='no-acpi'/>
+-    <flag name='fsdev-readonly'/>
+-    <flag name='virtio-blk-pci.scsi'/>
+-    <flag name='blk-sg-io'/>
+-    <flag name='drive-copy-on-read'/>
+-    <flag name='cpu-host'/>
+-    <flag name='fsdev-writeout'/>
+-    <flag name='drive-iotune'/>
+-    <flag name='system_wakeup'/>
+-    <flag name='scsi-disk.channel'/>
+-    <flag name='scsi-block'/>
+-    <flag name='transaction'/>
+-    <flag name='block-job-async'/>
+-    <flag name='scsi-cd'/>
+-    <flag name='ide-cd'/>
+-    <flag name='no-user-config'/>
+-    <flag name='hda-micro'/>
+-    <flag name='dump-guest-memory'/>
+-    <flag name='nec-usb-xhci'/>
+-    <flag name='balloon-event'/>
+-    <flag name='bridge'/>
+-    <flag name='lsi'/>
+-    <flag name='virtio-scsi-pci'/>
+-    <flag name='blockio'/>
+-    <flag name='disable-s3'/>
+-    <flag name='disable-s4'/>
+-    <flag name='ide-drive.wwn'/>
+-    <flag name='scsi-disk.wwn'/>
+-    <flag name='seccomp-sandbox'/>
+-    <flag name='dump-guest-core'/>
+-    <flag name='seamless-migration'/>
+-    <flag name='block-commit'/>
+-    <flag name='vnc'/>
+-    <flag name='drive-mirror'/>
+-    <flag name='usb-host.bootindex'/>
+-    <flag name='blockdev-snapshot-sync'/>
+-    <flag name='qxl'/>
+-    <flag name='VGA'/>
+-    <flag name='cirrus-vga'/>
+-    <flag name='vmware-svga'/>
+-    <flag name='device-video-primary'/>
+-    <flag name='usb-serial'/>
+-    <flag name='usb-net'/>
+-    <flag name='add-fd'/>
+-    <flag name='nbd-server'/>
+-    <flag name='virtio-rng'/>
+-    <flag name='rng-random'/>
+-    <flag name='rng-egd'/>
+-    <flag name='dtb'/>
+-    <flag name='megasas'/>
+-    <flag name='ipv6-migration'/>
+-    <flag name='machine-opt'/>
+-    <flag name='machine-usb-opt'/>
+-    <flag name='pci-bridge'/>
+-    <flag name='vfio-pci'/>
+-    <flag name='vfio-pci.bootindex'/>
+-    <flag name='scsi-generic'/>
+-    <flag name='scsi-generic.bootindex'/>
+-    <flag name='mem-merge'/>
+-    <flag name='vnc-websocket'/>
+-    <flag name='mlock'/>
+-    <flag name='vnc-share-policy'/>
+-    <flag name='device-del-event'/>
+-    <flag name='dmi-to-pci-bridge'/>
+-    <flag name='i440fx-pci-hole64-size'/>
+-    <flag name='q35-pci-hole64-size'/>
+-    <flag name='usb-storage'/>
+-    <flag name='usb-storage.removable'/>
+-    <flag name='virtio-mmio'/>
+-    <flag name='ich9-intel-hda'/>
+-    <flag name='kvm-pit-lost-tick-policy'/>
+-    <flag name='boot-strict'/>
+-    <flag name='pvpanic'/>
+-    <flag name='reboot-timeout'/>
+-    <flag name='enable-fips'/>
+-    <flag name='name-guest'/>
+-  </qemuCaps>
+diff --git a/tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.caps b/tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.caps
+deleted file mode 100644
+index 5a0372c917..0000000000
+--- a/tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.caps
++++ /dev/null
+@@ -1,128 +0,0 @@
+-  <qemuCaps>
+-    <flag name='mem-path'/>
+-    <flag name='drive-serial'/>
+-    <flag name='chardev'/>
+-    <flag name='enable-kvm'/>
+-    <flag name='monitor-json'/>
+-    <flag name='balloon'/>
+-    <flag name='device'/>
+-    <flag name='sdl'/>
+-    <flag name='smp-topology'/>
+-    <flag name='netdev'/>
+-    <flag name='rtc'/>
+-    <flag name='vhost-net'/>
+-    <flag name='no-hpet'/>
+-    <flag name='no-kvm-pit'/>
+-    <flag name='pci-configfd'/>
+-    <flag name='nodefconfig'/>
+-    <flag name='boot-menu'/>
+-    <flag name='fsdev'/>
+-    <flag name='name-process'/>
+-    <flag name='drive-readonly'/>
+-    <flag name='smbios-type'/>
+-    <flag name='vga-qxl'/>
+-    <flag name='spice'/>
+-    <flag name='vga-none'/>
+-    <flag name='boot-index'/>
+-    <flag name='hda-duplex'/>
+-    <flag name='drive-aio'/>
+-    <flag name='pci-multibus'/>
+-    <flag name='pci-bootindex'/>
+-    <flag name='ccid-emulated'/>
+-    <flag name='ccid-passthru'/>
+-    <flag name='chardev-spicevmc'/>
+-    <flag name='virtio-tx-alg'/>
+-    <flag name='device-qxl-vga'/>
+-    <flag name='pci-multifunction'/>
+-    <flag name='virtio-blk-pci.ioeventfd'/>
+-    <flag name='sga'/>
+-    <flag name='virtio-blk-pci.event_idx'/>
+-    <flag name='virtio-net-pci.event_idx'/>
+-    <flag name='cache-directsync'/>
+-    <flag name='piix3-usb-uhci'/>
+-    <flag name='piix4-usb-uhci'/>
+-    <flag name='usb-ehci'/>
+-    <flag name='ich9-usb-ehci1'/>
+-    <flag name='vt82c686b-usb-uhci'/>
+-    <flag name='pci-ohci'/>
+-    <flag name='usb-hub'/>
+-    <flag name='no-shutdown'/>
+-    <flag name='cache-unsafe'/>
+-    <flag name='rombar'/>
+-    <flag name='ich9-ahci'/>
+-    <flag name='no-acpi'/>
+-    <flag name='fsdev-readonly'/>
+-    <flag name='virtio-blk-pci.scsi'/>
+-    <flag name='blk-sg-io'/>
+-    <flag name='drive-copy-on-read'/>
+-    <flag name='cpu-host'/>
+-    <flag name='fsdev-writeout'/>
+-    <flag name='drive-iotune'/>
+-    <flag name='system_wakeup'/>
+-    <flag name='scsi-disk.channel'/>
+-    <flag name='scsi-block'/>
+-    <flag name='transaction'/>
+-    <flag name='block-job-async'/>
+-    <flag name='scsi-cd'/>
+-    <flag name='ide-cd'/>
+-    <flag name='no-user-config'/>
+-    <flag name='hda-micro'/>
+-    <flag name='dump-guest-memory'/>
+-    <flag name='nec-usb-xhci'/>
+-    <flag name='balloon-event'/>
+-    <flag name='bridge'/>
+-    <flag name='lsi'/>
+-    <flag name='virtio-scsi-pci'/>
+-    <flag name='blockio'/>
+-    <flag name='disable-s3'/>
+-    <flag name='disable-s4'/>
+-    <flag name='ide-drive.wwn'/>
+-    <flag name='scsi-disk.wwn'/>
+-    <flag name='seccomp-sandbox'/>
+-    <flag name='dump-guest-core'/>
+-    <flag name='seamless-migration'/>
+-    <flag name='block-commit'/>
+-    <flag name='vnc'/>
+-    <flag name='drive-mirror'/>
+-    <flag name='usb-host.bootindex'/>
+-    <flag name='qxl'/>
+-    <flag name='VGA'/>
+-    <flag name='cirrus-vga'/>
+-    <flag name='vmware-svga'/>
+-    <flag name='device-video-primary'/>
+-    <flag name='usb-serial'/>
+-    <flag name='usb-net'/>
+-    <flag name='add-fd'/>
+-    <flag name='nbd-server'/>
+-    <flag name='virtio-rng'/>
+-    <flag name='rng-random'/>
+-    <flag name='rng-egd'/>
+-    <flag name='dtb'/>
+-    <flag name='megasas'/>
+-    <flag name='ipv6-migration'/>
+-    <flag name='machine-opt'/>
+-    <flag name='machine-usb-opt'/>
+-    <flag name='pci-bridge'/>
+-    <flag name='vfio-pci'/>
+-    <flag name='vfio-pci.bootindex'/>
+-    <flag name='scsi-generic'/>
+-    <flag name='scsi-generic.bootindex'/>
+-    <flag name='mem-merge'/>
+-    <flag name='vnc-websocket'/>
+-    <flag name='mlock'/>
+-    <flag name='vnc-share-policy'/>
+-    <flag name='device-del-event'/>
+-    <flag name='dmi-to-pci-bridge'/>
+-    <flag name='i440fx-pci-hole64-size'/>
+-    <flag name='q35-pci-hole64-size'/>
+-    <flag name='usb-storage'/>
+-    <flag name='usb-storage.removable'/>
+-    <flag name='virtio-mmio'/>
+-    <flag name='ich9-intel-hda'/>
+-    <flag name='kvm-pit-lost-tick-policy'/>
+-    <flag name='boot-strict'/>
+-    <flag name='pvpanic'/>
+-    <flag name='reboot-timeout'/>
+-    <flag name='enable-fips'/>
+-    <flag name='name-guest'/>
+-  </qemuCaps>
+diff --git a/tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.xml b/tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.xml
+deleted file mode 100644
+index 981344e6fd..0000000000
+--- a/tests/qemucaps2xmldata/nodisksnapshot_1.6.0-1.xml
++++ /dev/null
+@@ -1,32 +0,0 @@
+-<capabilities>
+-
+-  <host>
+-    <cpu>
+-      <arch>i686</arch>
+-    </cpu>
+-    <power_management/>
+-    <iommu support='no'/>
+-  </host>
+-
+-  <guest>
+-    <os_type>hvm</os_type>
+-    <arch name='i686'>
+-      <wordsize>32</wordsize>
+-      <emulator>/usr/bin/qemu-system-i386</emulator>
+-      <domain type='qemu'/>
+-      <domain type='kvm'>
+-        <emulator>/usr/bin/qemu-system-i386</emulator>
+-      </domain>
+-    </arch>
+-    <features>
+-      <cpuselection/>
+-      <deviceboot/>
+-      <disksnapshot default='off' toggle='no'/>
+-      <acpi default='on' toggle='yes'/>
+-      <apic default='on' toggle='no'/>
+-      <pae/>
+-      <nonpae/>
+-    </features>
+-  </guest>
+-
+-</capabilities>
+diff --git a/tests/qemucaps2xmldata/all_1.6.0-1.xml b/tests/qemucaps2xmloutdata/caps_1.6.0.x86_64.xml
+similarity index 67%
+rename from tests/qemucaps2xmldata/all_1.6.0-1.xml
+rename to tests/qemucaps2xmloutdata/caps_1.6.0.x86_64.xml
+index efe86b9a12..b58f54fefd 100644
+--- a/tests/qemucaps2xmldata/all_1.6.0-1.xml
++++ b/tests/qemucaps2xmloutdata/caps_1.6.0.x86_64.xml
+@@ -2,7 +2,7 @@
+ 
+   <host>
+     <cpu>
+-      <arch>i686</arch>
++      <arch>x86_64</arch>
+     </cpu>
+     <power_management/>
+     <iommu support='no'/>
+@@ -10,12 +10,12 @@
+ 
+   <guest>
+     <os_type>hvm</os_type>
+-    <arch name='i686'>
+-      <wordsize>32</wordsize>
+-      <emulator>/usr/bin/qemu-system-i386</emulator>
++    <arch name='x86_64'>
++      <wordsize>64</wordsize>
++      <emulator>/usr/bin/qemu-system-x86_64</emulator>
+       <domain type='qemu'/>
+       <domain type='kvm'>
+-        <emulator>/usr/bin/qemu-system-i386</emulator>
++        <emulator>/usr/bin/qemu-system-x86_64</emulator>
+       </domain>
+     </arch>
+     <features>
+@@ -24,8 +24,6 @@
+       <disksnapshot default='on' toggle='no'/>
+       <acpi default='on' toggle='yes'/>
+       <apic default='on' toggle='no'/>
+-      <pae/>
+-      <nonpae/>
+     </features>
+   </guest>
+ 
+diff --git a/tests/qemucaps2xmltest.c b/tests/qemucaps2xmltest.c
+index 5b9152b04d..65dd97c0a4 100644
+--- a/tests/qemucaps2xmltest.c
++++ b/tests/qemucaps2xmltest.c
+@@ -32,7 +32,7 @@ typedef struct _testQemuData testQemuData;
+ typedef testQemuData *testQemuDataPtr;
+ struct _testQemuData {
+     const char *base;
+-    virArch guestarch;
++    const char *archName;
+ };
+ 
+ static virQEMUCapsPtr
+@@ -87,23 +87,28 @@ testGetCaps(char *capsData, const testQemuData *data)
+ {
+     virQEMUCapsPtr qemuCaps = NULL;
+     virCapsPtr caps = NULL;
++    virArch arch = virArchFromString(data->archName);
++    char *binary = NULL;
++
++    if (virAsprintf(&binary, "/usr/bin/qemu-system-%s", data->archName) < 0)
++        goto error;
+ 
+     if ((qemuCaps = testQemuGetCaps(capsData)) == NULL) {
+         fprintf(stderr, "failed to parse qemu capabilities flags");
+         goto error;
+     }
+ 
+-    if ((caps = virCapabilitiesNew(data->guestarch, false, false)) == NULL) {
++    if ((caps = virCapabilitiesNew(arch, false, false)) == NULL) {
+         fprintf(stderr, "failed to create the fake capabilities");
+         goto error;
+     }
+ 
+     if (virQEMUCapsInitGuestFromBinary(caps,
+-                                       "/usr/bin/qemu-system-i386",
++                                       binary,
+                                        qemuCaps,
+                                        NULL,
+                                        NULL,
+-                                       data->guestarch) < 0) {
++                                       arch) < 0) {
+         fprintf(stderr, "failed to create the capabilities from qemu");
+         goto error;
+     }
+@@ -114,6 +119,7 @@ testGetCaps(char *capsData, const testQemuData *data)
+  error:
+     virObjectUnref(qemuCaps);
+     virObjectUnref(caps);
++    VIR_FREE(binary);
+     return NULL;
+ }
+ 
+@@ -127,12 +133,12 @@ testQemuCapsXML(const void *opaque)
+     char *capsXml = NULL;
+     virCapsPtr capsProvided = NULL;
+ 
+-    if (virAsprintf(&xmlFile, "%s/qemucaps2xmldata/%s.xml",
+-                    abs_srcdir, data->base) < 0)
++    if (virAsprintf(&xmlFile, "%s/qemucaps2xmloutdata/%s.%s.xml",
++                    abs_srcdir, data->base, data->archName) < 0)
+         goto cleanup;
+ 
+-    if (virAsprintf(&capsFile, "%s/qemucaps2xmldata/%s.caps",
+-                    abs_srcdir, data->base) < 0)
++    if (virAsprintf(&capsFile, "%s/qemucapabilitiesdata/%s.%s.xml",
++                    abs_srcdir, data->base, data->archName) < 0)
+         goto cleanup;
+ 
+     if (virTestLoadFile(capsFile, &capsData) < 0)
+@@ -175,16 +181,13 @@ mymain(void)
+ 
+     virEventRegisterDefaultImpl();
+ 
+-#define DO_TEST_FULL(name, guest) \
++#define DO_TEST(arch, name) \
++    data.archName = arch; \
+     data.base = name; \
+-    data.guestarch = guest; \
+-    if (virTestRun(name, testQemuCapsXML, &data) < 0) \
++    if (virTestRun(name "(" arch ")", testQemuCapsXML, &data) < 0) \
+         ret = -1
+ 
+-#define DO_TEST(name) DO_TEST_FULL(name, VIR_ARCH_I686)
+-
+-    DO_TEST("all_1.6.0-1");
+-    DO_TEST("nodisksnapshot_1.6.0-1");
++    DO_TEST("x86_64", "caps_1.6.0");
+ 
+     return (ret == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+-- 
+2.21.0
+

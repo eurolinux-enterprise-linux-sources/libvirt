@@ -1,0 +1,344 @@
+From c0b494d6286eea41873c1754ea4c85c3ac1294da Mon Sep 17 00:00:00 2001
+Message-Id: <c0b494d6286eea41873c1754ea4c85c3ac1294da@dist-git>
+From: John Ferlan <jferlan@redhat.com>
+Date: Wed, 3 Apr 2019 07:35:47 -0400
+Subject: [PATCH] storage: Allow inputvol to be encrypted
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1613737
+
+When processing the inputvol for encryption, we need to handle
+the case where the inputvol is encrypted. This then allows for
+the encrypted inputvol to be used either for an output encrypted
+volume or an output volume of some XML provided type.
+
+Add tests to show the various conversion options when either input
+or output is encrypted. This includes when both are encrypted.
+
+Signed-off-by: John Ferlan <jferlan@redhat.com>
+ACKed-by: Michal Privoznik <mprivozn@redhat.com>
+(cherry picked from commit b975afc72504e636ec538ea119bee9a0cd7b63d8)
+Message-Id: <20190403113547.29231-4-jferlan@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/storage/storage_util.c                    | 64 ++++++++++++++++---
+ src/storage/storage_util.h                    |  1 +
+ .../luks-convert-encrypt.argv                 | 11 ++++
+ .../luks-convert-encrypt2fileqcow2.argv       |  7 ++
+ .../luks-convert-encrypt2fileraw.argv         |  7 ++
+ tests/storagevolxml2argvtest.c                | 15 ++++-
+ tests/storagevolxml2xmlin/vol-encrypt1.xml    | 21 ++++++
+ tests/storagevolxml2xmlin/vol-encrypt2.xml    | 21 ++++++
+ 8 files changed, 138 insertions(+), 9 deletions(-)
+ create mode 100644 tests/storagevolxml2argvdata/luks-convert-encrypt.argv
+ create mode 100644 tests/storagevolxml2argvdata/luks-convert-encrypt2fileqcow2.argv
+ create mode 100644 tests/storagevolxml2argvdata/luks-convert-encrypt2fileraw.argv
+ create mode 100644 tests/storagevolxml2xmlin/vol-encrypt1.xml
+ create mode 100644 tests/storagevolxml2xmlin/vol-encrypt2.xml
+
+diff --git a/src/storage/storage_util.c b/src/storage/storage_util.c
+index ed0179d78e..637b90fac1 100644
+--- a/src/storage/storage_util.c
++++ b/src/storage/storage_util.c
+@@ -1077,6 +1077,7 @@ virStorageBackendCreateQemuImgCmdFromVol(virStoragePoolObjPtr pool,
+                                          unsigned int flags,
+                                          const char *create_tool,
+                                          const char *secretPath,
++                                         const char *inputSecretPath,
+                                          virStorageVolEncryptConvertStep convertStep)
+ {
+     virCommandPtr cmd = NULL;
+@@ -1094,6 +1095,8 @@ virStorageBackendCreateQemuImgCmdFromVol(virStoragePoolObjPtr pool,
+         .secretAlias = NULL,
+     };
+     virStorageEncryptionPtr enc = vol->target.encryption;
++    char *inputSecretAlias = NULL;
++    virStorageEncryptionPtr inputenc = inputvol ? inputvol->target.encryption : NULL;
+     virStorageEncryptionInfoDefPtr encinfo = NULL;
+ 
+     virCheckFlags(VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA, NULL);
+@@ -1107,6 +1110,12 @@ virStorageBackendCreateQemuImgCmdFromVol(virStoragePoolObjPtr pool,
+         goto error;
+     }
+ 
++    if (inputenc && inputenc->format != VIR_STORAGE_ENCRYPTION_FORMAT_LUKS) {
++        virReportError(VIR_ERR_CONFIG_UNSUPPORTED, "%s",
++                       _("encryption format of inputvol must be LUKS"));
++        goto error;
++    }
++
+     if (virStorageBackendCreateQemuImgSetInfo(pool, vol, inputvol,
+                                               convertStep, &info) < 0)
+         goto error;
+@@ -1146,6 +1155,20 @@ virStorageBackendCreateQemuImgCmdFromVol(virStoragePoolObjPtr pool,
+         encinfo = &enc->encinfo;
+     }
+ 
++    if (inputenc && convertStep == VIR_STORAGE_VOL_ENCRYPT_CONVERT) {
++        if (!inputSecretPath) {
++            virReportError(VIR_ERR_INTERNAL_ERROR, "%s",
++                           _("path to inputvol secret data file is required"));
++            goto error;
++        }
++        if (virAsprintf(&inputSecretAlias, "%s_encrypt0",
++                        inputvol->name) < 0)
++            goto error;
++        if (storageBackendCreateQemuImgSecretObject(cmd, inputSecretPath,
++                                                    inputSecretAlias) < 0)
++            goto error;
++    }
++
+     if (convertStep != VIR_STORAGE_VOL_ENCRYPT_CONVERT) {
+         if (storageBackendCreateQemuImgSetOptions(cmd, encinfo, info) < 0)
+             goto error;
+@@ -1156,20 +1179,33 @@ virStorageBackendCreateQemuImgCmdFromVol(virStoragePoolObjPtr pool,
+             virCommandAddArgFormat(cmd, "%lluK", info.size_arg);
+     } else {
+         /* source */
+-        virCommandAddArgFormat(cmd, "driver=%s,file.filename=%s",
+-                               info.inputType ? info.inputType : "raw",
+-                               info.inputPath);
++        if (inputenc)
++            virCommandAddArgFormat(cmd,
++                                   "driver=luks,file.filename=%s,key-secret=%s",
++                                   info.inputPath, inputSecretAlias);
++        else
++            virCommandAddArgFormat(cmd, "driver=%s,file.filename=%s",
++                                   info.inputType ? info.inputType : "raw",
++                                   info.inputPath);
+ 
+         /* dest */
+-        virCommandAddArgFormat(cmd, "driver=%s,file.filename=%s,key-secret=%s",
+-                               info.type, info.path, info.secretAlias);
++        if (enc)
++            virCommandAddArgFormat(cmd,
++                                   "driver=%s,file.filename=%s,key-secret=%s",
++                                   info.type, info.path, info.secretAlias);
++        else
++            virCommandAddArgFormat(cmd, "driver=%s,file.filename=%s",
++                                   info.type, info.path);
++
+     }
+     VIR_FREE(info.secretAlias);
++    VIR_FREE(inputSecretAlias);
+ 
+     return cmd;
+ 
+  error:
+     VIR_FREE(info.secretAlias);
++    VIR_FREE(inputSecretAlias);
+     virCommandFree(cmd);
+     return NULL;
+ }
+@@ -1255,6 +1291,7 @@ storageBackendDoCreateQemuImg(virStoragePoolObjPtr pool,
+                               unsigned int flags,
+                               const char *create_tool,
+                               const char *secretPath,
++                              const char *inputSecretPath,
+                               virStorageVolEncryptConvertStep convertStep)
+ {
+     int ret;
+@@ -1262,7 +1299,8 @@ storageBackendDoCreateQemuImg(virStoragePoolObjPtr pool,
+ 
+     cmd = virStorageBackendCreateQemuImgCmdFromVol(pool, vol, inputvol,
+                                                    flags, create_tool,
+-                                                   secretPath, convertStep);
++                                                   secretPath, inputSecretPath,
++                                                   convertStep);
+     if (!cmd)
+         return -1;
+ 
+@@ -1283,6 +1321,7 @@ storageBackendCreateQemuImg(virStoragePoolObjPtr pool,
+     int ret = -1;
+     char *create_tool;
+     char *secretPath = NULL;
++    char *inputSecretPath = NULL;
+     virStorageVolEncryptConvertStep convertStep = VIR_STORAGE_VOL_ENCRYPT_NONE;
+ 
+     virCheckFlags(VIR_STORAGE_VOL_CREATE_PREALLOC_METADATA, -1);
+@@ -1299,16 +1338,21 @@ storageBackendCreateQemuImg(virStoragePoolObjPtr pool,
+         !(secretPath = storageBackendCreateQemuImgSecretPath(pool, vol)))
+         goto cleanup;
+ 
++    if (inputvol && inputvol->target.encryption &&
++        !(inputSecretPath = storageBackendCreateQemuImgSecretPath(pool,
++                                                                  inputvol)))
++        goto cleanup;
++
+     /* Using an input file for encryption requires a multi-step process
+      * to create an image of the same size as the inputvol and then to
+      * convert the inputvol afterwards. */
+-    if (secretPath && inputvol)
++    if ((secretPath || inputSecretPath) && inputvol)
+         convertStep = VIR_STORAGE_VOL_ENCRYPT_CREATE;
+ 
+     do {
+         ret = storageBackendDoCreateQemuImg(pool, vol, inputvol, flags,
+                                             create_tool, secretPath,
+-                                            convertStep);
++                                            inputSecretPath, convertStep);
+ 
+         /* Failure to convert, attempt to delete what we created */
+         if (ret < 0 && convertStep == VIR_STORAGE_VOL_ENCRYPT_CONVERT)
+@@ -1330,6 +1374,10 @@ storageBackendCreateQemuImg(virStoragePoolObjPtr pool,
+         unlink(secretPath);
+         VIR_FREE(secretPath);
+     }
++    if (inputSecretPath) {
++        unlink(inputSecretPath);
++        VIR_FREE(inputSecretPath);
++    }
+     VIR_FREE(create_tool);
+     return ret;
+ }
+diff --git a/src/storage/storage_util.h b/src/storage/storage_util.h
+index 6fc8e8972c..58b991c772 100644
+--- a/src/storage/storage_util.h
++++ b/src/storage/storage_util.h
+@@ -167,6 +167,7 @@ virStorageBackendCreateQemuImgCmdFromVol(virStoragePoolObjPtr pool,
+                                          unsigned int flags,
+                                          const char *create_tool,
+                                          const char *secretPath,
++                                         const char *inputSecretPath,
+                                          virStorageVolEncryptConvertStep convertStep);
+ 
+ int virStorageBackendSCSIFindLUs(virStoragePoolObjPtr pool,
+diff --git a/tests/storagevolxml2argvdata/luks-convert-encrypt.argv b/tests/storagevolxml2argvdata/luks-convert-encrypt.argv
+new file mode 100644
+index 0000000000..b2ad16b7cb
+--- /dev/null
++++ b/tests/storagevolxml2argvdata/luks-convert-encrypt.argv
+@@ -0,0 +1,11 @@
++qemu-img create -f luks \
++--object secret,id=encrypt2.img_encrypt0,file=/path/to/secretFile \
++-o key-secret=encrypt2.img_encrypt0 \
++/var/lib/libvirt/images/encrypt2.img 5242880K
++qemu-img convert --image-opts -n --target-image-opts \
++--object secret,id=encrypt2.img_encrypt0,file=/path/to/secretFile \
++--object secret,id=encrypt1.img_encrypt0,file=/path/to/inputSecretFile \
++driver=luks,file.filename=/var/lib/libvirt/images/encrypt1.img,\
++key-secret=encrypt1.img_encrypt0 \
++driver=luks,file.filename=/var/lib/libvirt/images/encrypt2.img,\
++key-secret=encrypt2.img_encrypt0
+diff --git a/tests/storagevolxml2argvdata/luks-convert-encrypt2fileqcow2.argv b/tests/storagevolxml2argvdata/luks-convert-encrypt2fileqcow2.argv
+new file mode 100644
+index 0000000000..82cb364b61
+--- /dev/null
++++ b/tests/storagevolxml2argvdata/luks-convert-encrypt2fileqcow2.argv
+@@ -0,0 +1,7 @@
++qemu-img create -f qcow2 \
++-o compat=0.10 /var/lib/libvirt/images/sparse-qcow2.img 1073741824K
++qemu-img convert --image-opts -n --target-image-opts \
++--object secret,id=encrypt2.img_encrypt0,file=/path/to/inputSecretFile \
++driver=luks,file.filename=/var/lib/libvirt/images/encrypt2.img,\
++key-secret=encrypt2.img_encrypt0 \
++driver=qcow2,file.filename=/var/lib/libvirt/images/sparse-qcow2.img
+diff --git a/tests/storagevolxml2argvdata/luks-convert-encrypt2fileraw.argv b/tests/storagevolxml2argvdata/luks-convert-encrypt2fileraw.argv
+new file mode 100644
+index 0000000000..2661c345a8
+--- /dev/null
++++ b/tests/storagevolxml2argvdata/luks-convert-encrypt2fileraw.argv
+@@ -0,0 +1,7 @@
++qemu-img create -f raw \
++/var/lib/libvirt/images/sparse.img 1073741824K
++qemu-img convert --image-opts -n --target-image-opts \
++--object secret,id=encrypt2.img_encrypt0,file=/path/to/inputSecretFile \
++driver=luks,file.filename=/var/lib/libvirt/images/encrypt2.img,\
++key-secret=encrypt2.img_encrypt0 \
++driver=raw,file.filename=/var/lib/libvirt/images/sparse.img
+diff --git a/tests/storagevolxml2argvtest.c b/tests/storagevolxml2argvtest.c
+index 6a9a080dd1..105705f348 100644
+--- a/tests/storagevolxml2argvtest.c
++++ b/tests/storagevolxml2argvtest.c
+@@ -85,7 +85,7 @@ testCompareXMLToArgvFiles(bool shouldFail,
+      * convert the inputvol afterwards. Since we only care about the
+      * command line we have to copy code from storageBackendCreateQemuImg
+      * and adjust it for the test needs. */
+-    if (inputvol && vol->target.encryption)
++    if (inputvol && (vol->target.encryption || inputvol->target.encryption))
+         convertStep = VIR_STORAGE_VOL_ENCRYPT_CREATE;
+ 
+     do {
+@@ -93,6 +93,7 @@ testCompareXMLToArgvFiles(bool shouldFail,
+                                                        inputvol, flags,
+                                                        create_tool,
+                                                        "/path/to/secretFile",
++                                                       "/path/to/inputSecretFile",
+                                                        convertStep);
+         if (!cmd) {
+             if (shouldFail) {
+@@ -288,6 +289,18 @@ mymain(void)
+             "pool-dir", "vol-file-qcow2",
+             "luks-convert-qcow2", 0);
+ 
++    DO_TEST("pool-dir", "vol-encrypt2",
++            "pool-dir", "vol-encrypt1",
++            "luks-convert-encrypt", 0);
++
++    DO_TEST("pool-dir", "vol-file",
++            "pool-dir", "vol-encrypt2",
++            "luks-convert-encrypt2fileraw", 0);
++
++    DO_TEST("pool-dir", "vol-file-qcow2",
++            "pool-dir", "vol-encrypt2",
++            "luks-convert-encrypt2fileqcow2", 0);
++
+     return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+ }
+ 
+diff --git a/tests/storagevolxml2xmlin/vol-encrypt1.xml b/tests/storagevolxml2xmlin/vol-encrypt1.xml
+new file mode 100644
+index 0000000000..681734dc7b
+--- /dev/null
++++ b/tests/storagevolxml2xmlin/vol-encrypt1.xml
+@@ -0,0 +1,21 @@
++<volume>
++  <name>encrypt1.img</name>
++  <key>/var/lib/libvirt/images/encrypt1.img</key>
++  <source>
++  </source>
++  <capacity unit="G">5</capacity>
++  <allocation>294912</allocation>
++  <target>
++    <path>/var/lib/libvirt/images/encrypt1.img</path>
++    <format type='raw'/>
++    <permissions>
++      <mode>0644</mode>
++      <owner>0</owner>
++      <group>0</group>
++      <label>unconfined_u:object_r:virt_image_t:s0</label>
++    </permissions>
++    <encryption format='luks'>
++      <secret type='passphrase' uuid='e78d4b51-a2af-485f-b0f5-afca709a80f4'/>
++    </encryption>
++  </target>
++</volume>
+diff --git a/tests/storagevolxml2xmlin/vol-encrypt2.xml b/tests/storagevolxml2xmlin/vol-encrypt2.xml
+new file mode 100644
+index 0000000000..0507d3b9e6
+--- /dev/null
++++ b/tests/storagevolxml2xmlin/vol-encrypt2.xml
+@@ -0,0 +1,21 @@
++<volume>
++  <name>encrypt2.img</name>
++  <key>/var/lib/libvirt/images/encrypt2.img</key>
++  <source>
++  </source>
++  <capacity unit="G">5</capacity>
++  <allocation>294912</allocation>
++  <target>
++    <path>/var/lib/libvirt/images/encrypt2.img</path>
++    <format type='raw'/>
++    <permissions>
++      <mode>0644</mode>
++      <owner>0</owner>
++      <group>0</group>
++      <label>unconfined_u:object_r:virt_image_t:s0</label>
++    </permissions>
++    <encryption format='luks'>
++      <secret type='passphrase' uuid='e78d4b51-a2af-485f-b0f5-afca709af480'/>
++    </encryption>
++  </target>
++</volume>
+-- 
+2.21.0
+

@@ -1,0 +1,91 @@
+From ccd5133d42ea5f02d3c5bc730c3aec534b96b8d5 Mon Sep 17 00:00:00 2001
+Message-Id: <ccd5133d42ea5f02d3c5bc730c3aec534b96b8d5@dist-git>
+From: Michal Privoznik <mprivozn@redhat.com>
+Date: Wed, 3 Apr 2019 15:33:36 +0200
+Subject: [PATCH] qemu: Put format=raw onto cmd line for SCSI passthrough
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1632833
+
+When doing a SCSI passthrough we don't put format= onto the
+command line. This causes qemu to probe the format automatically
+which ends up in a warning in the domain log and possible qemu
+disabling writes to the first block (according to the warning
+message).
+
+Based-on-work-of: Paolo Bonzini <pbonzini@redhat.com>
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 641a95c9b64e74dccb55ebae8f00da3f10c1feae)
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+
+Conflicts: tests/qemuxml2argvdata/hostdev-scsi-lsi.args:
+  tests/qemuxml2argvdata/hostdev-scsi-readonly.args:
+  tests/qemuxml2argvdata/hostdev-scsi-virtio-scsi.args:
+    - Context, since v4.7.0-rc1~268 is not backported
+Signed-off-by: Michal Privoznik <mprivozn@redhat.com>
+Message-Id: <6c743591aaf31e4313ab12dec9171716d55fdb43.1554298414.git.mprivozn@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/qemu/qemu_command.c                              | 2 +-
+ tests/qemuxml2argvdata/hostdev-scsi-lsi.args         | 2 +-
+ tests/qemuxml2argvdata/hostdev-scsi-readonly.args    | 2 +-
+ tests/qemuxml2argvdata/hostdev-scsi-virtio-scsi.args | 2 +-
+ 4 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/qemu/qemu_command.c b/src/qemu/qemu_command.c
+index 98b554627e..d372b1bd79 100644
+--- a/src/qemu/qemu_command.c
++++ b/src/qemu/qemu_command.c
+@@ -4740,7 +4740,7 @@ qemuBuildSCSIHostdevDrvStr(virDomainHostdevDefPtr dev,
+     } else {
+         if (!(source = qemuBuildSCSIHostHostdevDrvStr(dev)))
+             goto error;
+-        virBufferAsprintf(&buf, "file=/dev/%s,if=none", source);
++        virBufferAsprintf(&buf, "file=/dev/%s,if=none,format=raw", source);
+     }
+     VIR_FREE(source);
+ 
+diff --git a/tests/qemuxml2argvdata/hostdev-scsi-lsi.args b/tests/qemuxml2argvdata/hostdev-scsi-lsi.args
+index ffb4cc1eaa..c37a269e45 100644
+--- a/tests/qemuxml2argvdata/hostdev-scsi-lsi.args
++++ b/tests/qemuxml2argvdata/hostdev-scsi-lsi.args
+@@ -25,6 +25,6 @@ server,nowait \
+ -usb \
+ -drive file=/dev/HostVG/QEMUGuest2,format=raw,if=none,id=drive-ide0-0-0 \
+ -device ide-drive,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0 \
+--drive file=/dev/sg0,if=none,id=drive-hostdev0 \
++-drive file=/dev/sg0,if=none,format=raw,id=drive-hostdev0 \
+ -device scsi-generic,bus=scsi0.0,scsi-id=7,drive=drive-hostdev0,id=hostdev0 \
+ -device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x4
+diff --git a/tests/qemuxml2argvdata/hostdev-scsi-readonly.args b/tests/qemuxml2argvdata/hostdev-scsi-readonly.args
+index 938ba3bf3f..061c6c1e9f 100644
+--- a/tests/qemuxml2argvdata/hostdev-scsi-readonly.args
++++ b/tests/qemuxml2argvdata/hostdev-scsi-readonly.args
+@@ -25,7 +25,7 @@ server,nowait \
+ -usb \
+ -drive file=/dev/HostVG/QEMUGuest2,format=raw,if=none,id=drive-ide0-0-0 \
+ -device ide-drive,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0 \
+--drive file=/dev/sg0,if=none,id=drive-hostdev0,readonly=on \
++-drive file=/dev/sg0,if=none,format=raw,id=drive-hostdev0,readonly=on \
+ -device scsi-generic,bus=scsi0.0,channel=0,scsi-id=4,lun=8,\
+ drive=drive-hostdev0,id=hostdev0 \
+ -device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x4
+diff --git a/tests/qemuxml2argvdata/hostdev-scsi-virtio-scsi.args b/tests/qemuxml2argvdata/hostdev-scsi-virtio-scsi.args
+index 18543e24f1..304f11446c 100644
+--- a/tests/qemuxml2argvdata/hostdev-scsi-virtio-scsi.args
++++ b/tests/qemuxml2argvdata/hostdev-scsi-virtio-scsi.args
+@@ -25,7 +25,7 @@ server,nowait \
+ -usb \
+ -drive file=/dev/HostVG/QEMUGuest2,format=raw,if=none,id=drive-ide0-0-0 \
+ -device ide-drive,bus=ide.0,unit=0,drive=drive-ide0-0-0,id=ide0-0-0 \
+--drive file=/dev/sg0,if=none,id=drive-hostdev0 \
++-drive file=/dev/sg0,if=none,format=raw,id=drive-hostdev0 \
+ -device scsi-generic,bus=scsi0.0,channel=0,scsi-id=4,lun=8,\
+ drive=drive-hostdev0,id=hostdev0 \
+ -device virtio-balloon-pci,id=balloon0,bus=pci.0,addr=0x4
+-- 
+2.21.0
+

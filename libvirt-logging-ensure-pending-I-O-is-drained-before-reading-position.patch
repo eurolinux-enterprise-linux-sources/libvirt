@@ -1,0 +1,148 @@
+From c90c82df8b2ce989e628338a6f43b75acdd5a868 Mon Sep 17 00:00:00 2001
+Message-Id: <c90c82df8b2ce989e628338a6f43b75acdd5a868@dist-git>
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Wed, 3 Apr 2019 17:03:46 +0200
+Subject: [PATCH] logging: ensure pending I/O is drained before reading
+ position
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The virtualization driver has two connections to the virtlogd daemon,
+one pipe fd for writing to the log file, and one socket fd for making
+RPC calls. The typical sequence is to write some data to the pipe fd and
+then make an RPC call to determine the current log file offset.
+
+Unfortunately these two operations are not guaranteed to be handling in
+order by virtlogd. The event loop for virtlogd may identify an incoming
+event on both the pipe fd and socket fd in the same iteration of the
+event loop. It is then entirely possible that it will process the socket
+fd RPC call before reading the pending log data from the pipe fd.
+
+As a result the virtualization driver will get an outdated log file
+offset reported back.
+
+This can be seen with the QEMU driver where, when a guest fails to
+start, it will randomly include too much data in the error message it
+has fetched from the log file.
+
+The solution is to ensure we have drained all pending data from the pipe
+fd before reporting the log file offset. The pipe fd is always in
+blocking mode, so cares needs to be taken to avoid blocking. When
+draining this is taken care of by using poll(). The extra complication
+is that they might already be an event loop dispatch pending on the pipe
+fd. If we have just drained the pipe this pending event will be invalid
+so must be discarded.
+
+See also https://bugzilla.redhat.com/show_bug.cgi?id=1356108
+
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+
+(cherry picked from commit cc9e80c59368478d179ee3eb7bf8106664c56870)
+
+https://bugzilla.redhat.com/show_bug.cgi?id=1660531
+
+Signed-off-by: Andrea Bolognani <abologna@redhat.com>
+Message-Id: <20190403150346.20086-1-abologna@redhat.com>
+Reviewed-by: Erik Skultety <eskultet@redhat.com>
+---
+ src/logging/log_handler.c | 48 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 48 insertions(+)
+
+diff --git a/src/logging/log_handler.c b/src/logging/log_handler.c
+index 5364e06dff..25065ed177 100644
+--- a/src/logging/log_handler.c
++++ b/src/logging/log_handler.c
+@@ -34,6 +34,7 @@
+ 
+ #include <unistd.h>
+ #include <fcntl.h>
++#include <poll.h>
+ 
+ #include "configmake.h"
+ 
+@@ -50,6 +51,7 @@ struct _virLogHandlerLogFile {
+     virRotatingFileWriterPtr file;
+     int watch;
+     int pipefd; /* Read from QEMU via this */
++    bool drained;
+ 
+     char *driver;
+     unsigned char domuuid[VIR_UUID_BUFLEN];
+@@ -153,6 +155,11 @@ virLogHandlerDomainLogFileEvent(int watch,
+         return;
+     }
+ 
++    if (logfile->drained) {
++        logfile->drained = false;
++        goto cleanup;
++    }
++
+  reread:
+     len = read(fd, buf, sizeof(buf));
+     if (len < 0) {
+@@ -170,6 +177,7 @@ virLogHandlerDomainLogFileEvent(int watch,
+     if (events & VIR_EVENT_HANDLE_HANGUP)
+         goto error;
+ 
++ cleanup:
+     virObjectUnlock(handler);
+     return;
+ 
+@@ -435,6 +443,44 @@ virLogHandlerDomainOpenLogFile(virLogHandlerPtr handler,
+ }
+ 
+ 
++static void
++virLogHandlerDomainLogFileDrain(virLogHandlerLogFilePtr file)
++{
++    char buf[1024];
++    ssize_t len;
++    struct pollfd pfd;
++    int ret;
++
++    for (;;) {
++        pfd.fd = file->pipefd;
++        pfd.events = POLLIN;
++        pfd.revents = 0;
++
++        ret = poll(&pfd, 1, 0);
++        if (ret < 0) {
++            if (errno == EINTR)
++                continue;
++
++            return;
++        }
++
++        if (ret == 0)
++            return;
++
++        len = read(file->pipefd, buf, sizeof(buf));
++        file->drained = true;
++        if (len < 0) {
++            if (errno == EINTR)
++                continue;
++            return;
++        }
++
++        if (virRotatingFileWriterAppend(file->file, buf, len) != len)
++            return;
++    }
++}
++
++
+ int
+ virLogHandlerDomainGetLogFilePosition(virLogHandlerPtr handler,
+                                       const char *path,
+@@ -465,6 +511,8 @@ virLogHandlerDomainGetLogFilePosition(virLogHandlerPtr handler,
+         goto cleanup;
+     }
+ 
++    virLogHandlerDomainLogFileDrain(file);
++
+     *inode = virRotatingFileWriterGetINode(file->file);
+     *offset = virRotatingFileWriterGetOffset(file->file);
+ 
+-- 
+2.21.0
+

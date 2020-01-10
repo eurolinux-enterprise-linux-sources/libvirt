@@ -1,0 +1,64 @@
+From a3a6757726ad16eb0bdb528c700f982f3145a483 Mon Sep 17 00:00:00 2001
+Message-Id: <a3a6757726ad16eb0bdb528c700f982f3145a483@dist-git>
+From: Laine Stump <laine@laine.org>
+Date: Thu, 11 Apr 2019 15:14:48 -0400
+Subject: [PATCH] qemu_hotplug: rename Chr and Lease Detach functions
+
+qemuDomainDetachDeviceChr and qemuDomainDetachDeviceLease are more
+consistent with each other.
+
+Signed-off-by: Laine Stump <laine@laine.org>
+ACKed-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit e1949c7045377e7b32f0f8ed7c76539b1b5d50da)
+
+Partially-Resolves: https://bugzilla.redhat.com/1658198
+Signed-off-by: Laine Stump <laine@redhat.com>
+Signed-off-by: Laine Stump <laine@laine.org>
+Message-Id: <20190411191453.24055-37-laine@redhat.com>
+Acked-by: Michal Privoznik <mprivozn@redhat.com>
+---
+ src/qemu/qemu_hotplug.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/src/qemu/qemu_hotplug.c b/src/qemu/qemu_hotplug.c
+index 693b8878b5..dea881fd0b 100644
+--- a/src/qemu/qemu_hotplug.c
++++ b/src/qemu/qemu_hotplug.c
+@@ -5392,7 +5392,7 @@ qemuDomainDetachPrepNet(virQEMUDriverPtr driver,
+ 
+ 
+ static int
+-qemuDomainDetachChrDevice(virQEMUDriverPtr driver,
++qemuDomainDetachDeviceChr(virQEMUDriverPtr driver,
+                           virDomainObjPtr vm,
+                           virDomainChrDefPtr chr,
+                           bool async)
+@@ -5636,9 +5636,9 @@ qemuDomainDetachPrepVsock(virDomainObjPtr vm,
+ 
+ 
+ static int
+-qemuDomainDetachLease(virQEMUDriverPtr driver,
+-                      virDomainObjPtr vm,
+-                      virDomainLeaseDefPtr lease)
++qemuDomainDetachDeviceLease(virQEMUDriverPtr driver,
++                            virDomainObjPtr vm,
++                            virDomainLeaseDefPtr lease)
+ {
+     virDomainLeaseDefPtr det_lease;
+     int idx;
+@@ -5675,10 +5675,10 @@ qemuDomainDetachDeviceLive(virDomainObjPtr vm,
+          * Detach functions.
+          */
+     case VIR_DOMAIN_DEVICE_LEASE:
+-        return qemuDomainDetachLease(driver, vm, match->data.lease);
++        return qemuDomainDetachDeviceLease(driver, vm, match->data.lease);
+ 
+     case VIR_DOMAIN_DEVICE_CHR:
+-        return qemuDomainDetachChrDevice(driver, vm, match->data.chr, async);
++        return qemuDomainDetachDeviceChr(driver, vm, match->data.chr, async);
+ 
+         /*
+          * All the other device types follow a very similar pattern -
+-- 
+2.21.0
+

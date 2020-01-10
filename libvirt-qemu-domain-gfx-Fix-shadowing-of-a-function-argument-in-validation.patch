@@ -1,0 +1,40 @@
+From 15126024468aba26fbd4a21145c8ef9456535bee Mon Sep 17 00:00:00 2001
+Message-Id: <15126024468aba26fbd4a21145c8ef9456535bee@dist-git>
+From: Erik Skultety <eskultet@redhat.com>
+Date: Tue, 9 Apr 2019 08:34:37 +0200
+Subject: [PATCH] qemu: domain: gfx: Fix shadowing of a function argument in
+ validation
+
+Since the code was never run, it would have been very hard to spot this
+mistake, especially since the compiler can't really warn about it.
+
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Reviewed-by: John Ferlan <jferlan@redhat.com>
+(cherry picked from commit 414c51b7a11cc52c4276c7220d0b973c57c725d6)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1628892
+Signed-off-by: Erik Skultety <eskultet@redhat.com>
+Message-Id: <0298fbe0dd26d9463c69aaf2b6ecf295d0fc22e2.1554791287.git.eskultet@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/qemu/qemu_domain.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/src/qemu/qemu_domain.c b/src/qemu/qemu_domain.c
+index 76f48d6f83..81699110fc 100644
+--- a/src/qemu/qemu_domain.c
++++ b/src/qemu/qemu_domain.c
+@@ -5570,9 +5570,7 @@ qemuDomainDeviceDefValidateGraphics(const virDomainGraphicsDef *graphics,
+     size_t i;
+ 
+     for (i = 0; i < def->ngraphics; i++) {
+-        graphics = def->graphics[i];
+-
+-        if (graphics->type == VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS) {
++        if (def->graphics[i]->type == VIR_DOMAIN_GRAPHICS_TYPE_EGL_HEADLESS) {
+             have_egl_headless = true;
+             break;
+         }
+-- 
+2.21.0
+

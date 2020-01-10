@@ -1,5 +1,5 @@
-From d0fff22c96e56f72e05009b038fc8a80ae35a6ff Mon Sep 17 00:00:00 2001
-Message-Id: <d0fff22c96e56f72e05009b038fc8a80ae35a6ff@dist-git>
+From c032d2492e245deccc66b34ca1006028d5759d80 Mon Sep 17 00:00:00 2001
+Message-Id: <c032d2492e245deccc66b34ca1006028d5759d80@dist-git>
 From: Jiri Denemark <jdenemar@redhat.com>
 Date: Tue, 26 Feb 2019 09:22:36 +0100
 Subject: [PATCH] cpu_map: Add hex representation of signatures
