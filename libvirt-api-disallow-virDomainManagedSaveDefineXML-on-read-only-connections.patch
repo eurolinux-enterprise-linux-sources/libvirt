@@ -1,0 +1,40 @@
+From 0f8966e0ce1887610b5eb9d955780662fc854094 Mon Sep 17 00:00:00 2001
+Message-Id: <0f8966e0ce1887610b5eb9d955780662fc854094@dist-git>
+From: =?UTF-8?q?J=C3=A1n=20Tomko?= <jtomko@redhat.com>
+Date: Tue, 18 Jun 2019 13:30:00 +0200
+Subject: [PATCH] api: disallow virDomainManagedSaveDefineXML on read-only
+ connections
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The virDomainManagedSaveDefineXML can be used to alter the domain's
+config used for managedsave or even execute arbitrary emulator binaries.
+Forbid it on read-only connections.
+
+Fixes: CVE-2019-10166
+Reported-by: Matthias Gerstner <mgerstner@suse.de>
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+Signed-off-by: Ján Tomko <jtomko@redhat.com>
+Message-Id: <352bf5e963a6482d426f97b0ef36ca019e69280b.1560857354.git.jtomko@redhat.com>
+Reviewed-by: Jiri Denemark <jdenemar@redhat.com>
+---
+ src/libvirt-domain.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/libvirt-domain.c b/src/libvirt-domain.c
+index 0ba85b9360..3855dfe0dd 100644
+--- a/src/libvirt-domain.c
++++ b/src/libvirt-domain.c
+@@ -9487,6 +9487,7 @@ virDomainManagedSaveDefineXML(virDomainPtr domain, const char *dxml,
+ 
+     virCheckDomainReturn(domain, -1);
+     conn = domain->conn;
++    virCheckReadOnlyGoto(conn->flags, error);
+ 
+     if (conn->driver->domainManagedSaveDefineXML) {
+         int ret;
+-- 
+2.22.0
+

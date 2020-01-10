@@ -253,7 +253,7 @@
 Summary: Library providing a simple virtualization API
 Name: libvirt
 Version: 4.5.0
-Release: 10%{?dist}.10%{?extra_release}
+Release: 10%{?dist}.12%{?extra_release}
 License: LGPLv2+
 URL: https://libvirt.org/
 
@@ -419,6 +419,11 @@ Patch153: libvirt-virnwfilterbindingobj-Introduce-and-use-virNWFilterBindingObjS
 Patch154: libvirt-admin-reject-clients-unless-their-UID-matches-the-current-UID.patch
 Patch155: libvirt-locking-restrict-sockets-to-mode-0600.patch
 Patch156: libvirt-logging-restrict-sockets-to-mode-0600.patch
+Patch157: libvirt-virfile-added-GPFS-as-shared-fs.patch
+Patch158: libvirt-api-disallow-virDomainSaveImageGetXMLDesc-on-read-only-connections.patch
+Patch159: libvirt-api-disallow-virDomainManagedSaveDefineXML-on-read-only-connections.patch
+Patch160: libvirt-api-disallow-virConnectGetDomainCapabilities-on-read-only-connections.patch
+Patch161: libvirt-api-disallow-virConnect-HypervisorCPU-on-read-only-connections.patch
 
 Requires: libvirt-daemon = %{version}-%{release}
 Requires: libvirt-daemon-config-network = %{version}-%{release}
@@ -2320,6 +2325,15 @@ exit 0
 
 
 %changelog
+* Tue Jun 18 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.12
+- api: disallow virDomainSaveImageGetXMLDesc on read-only connections (CVE-2019-10161)
+- api: disallow virDomainManagedSaveDefineXML on read-only connections (CVE-2019-10166)
+- api: disallow virConnectGetDomainCapabilities on read-only connections (CVE-2019-10167)
+- api: disallow virConnect*HypervisorCPU on read-only connections (CVE-2019-10168)
+
+* Wed Jun  5 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.11
+- virfile: added GPFS as shared fs (rhbz#1715867)
+
 * Thu May 16 2019 Jiri Denemark <jdenemar@redhat.com> - 4.5.0-10.el7_6.10
 - virnwfilterbindingobj: Introduce and use virNWFilterBindingObjStealDef (rhbz#1702173)
 - admin: reject clients unless their UID matches the current UID (CVE-2019-10132)

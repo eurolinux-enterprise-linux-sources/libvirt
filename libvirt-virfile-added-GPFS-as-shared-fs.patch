@@ -1,0 +1,125 @@
+From e1d05dd50a1147b967afb89c57e77df9b5b5fc2d Mon Sep 17 00:00:00 2001
+Message-Id: <e1d05dd50a1147b967afb89c57e77df9b5b5fc2d@dist-git>
+From: Diego Michelotto <diego.michelotto@cnaf.infn.it>
+Date: Tue, 4 Jun 2019 12:12:26 +0200
+Subject: [PATCH] virfile: added GPFS as shared fs
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Added GPFS as shared file system recognized during live migration
+security checks.
+
+GPFS is 'IBM General Parallel File System' also called
+'IBM Spectrum Scale'
+
+BUG: https://bugzilla.redhat.com/show_bug.cgi?id=1679528
+
+Signed-off-by: Diego Michelotto <diego.michelotto@cnaf.infn.it>
+Signed-off-by: Peter Krempa <pkrempa@redhat.com>
+(cherry picked from commit d163b940a73a0d6b8277a4bccef2b60936933cf0)
+
+https: //bugzilla.redhat.com/show_bug.cgi?id=1715867
+Message-Id: <fa948f8d8b0b236ca7a5207f6d52c13274fe9058.1559642578.git.pkrempa@redhat.com>
+Reviewed-by: Ján Tomko <jtomko@redhat.com>
+---
+ src/util/virfile.c            | 9 ++++++++-
+ src/util/virfile.h            | 1 +
+ tests/virfiledata/mounts3.txt | 1 +
+ tests/virfilemock.c           | 5 +++++
+ tests/virfiletest.c           | 1 +
+ 5 files changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/src/util/virfile.c b/src/util/virfile.c
+index 471d309062..e0564295dd 100644
+--- a/src/util/virfile.c
++++ b/src/util/virfile.c
+@@ -3540,6 +3540,9 @@ int virFilePrintf(FILE *fp, const char *msg, ...)
+ # ifndef CEPH_SUPER_MAGIC
+ #  define CEPH_SUPER_MAGIC 0x00C36400
+ # endif
++# ifndef GPFS_SUPER_MAGIC
++#  define GPFS_SUPER_MAGIC 0x47504653
++# endif
+ 
+ # define PROC_MOUNTS "/proc/mounts"
+ 
+@@ -3688,6 +3691,9 @@ virFileIsSharedFSType(const char *path,
+     if ((fstypes & VIR_FILE_SHFS_CEPH) &&
+         (f_type == CEPH_SUPER_MAGIC))
+         return 1;
++    if ((fstypes & VIR_FILE_SHFS_GPFS) &&
++        (f_type == GPFS_SUPER_MAGIC))
++        return 1;
+ 
+     return 0;
+ }
+@@ -3852,7 +3858,8 @@ int virFileIsSharedFS(const char *path)
+                                  VIR_FILE_SHFS_AFS |
+                                  VIR_FILE_SHFS_SMB |
+                                  VIR_FILE_SHFS_CIFS |
+-                                 VIR_FILE_SHFS_CEPH);
++                                 VIR_FILE_SHFS_CEPH |
++                                 VIR_FILE_SHFS_GPFS);
+ }
+ 
+ 
+diff --git a/src/util/virfile.h b/src/util/virfile.h
+index 1d16e96b59..51c221e069 100644
+--- a/src/util/virfile.h
++++ b/src/util/virfile.h
+@@ -206,6 +206,7 @@ enum {
+     VIR_FILE_SHFS_SMB = (1 << 4),
+     VIR_FILE_SHFS_CIFS = (1 << 5),
+     VIR_FILE_SHFS_CEPH = (1 << 6),
++    VIR_FILE_SHFS_GPFS = (1 << 7),
+ };
+ 
+ int virFileIsSharedFSType(const char *path, int fstypes) ATTRIBUTE_NONNULL(1);
+diff --git a/tests/virfiledata/mounts3.txt b/tests/virfiledata/mounts3.txt
+index 68eded048c..4377e5d471 100644
+--- a/tests/virfiledata/mounts3.txt
++++ b/tests/virfiledata/mounts3.txt
+@@ -35,3 +35,4 @@ host:/gv0 /gluster fuse.glusterfs rw 0 0
+ root@host:/tmp/mkdir /gluster/sshfs fuse.sshfs rw 0 0
+ 192.168.0.1:/ceph/data /ceph ceph rw,noatime,name=cephfs,secret=<hidden>,acl,wsize=16777216 0 0
+ 192.168.0.1,192.168.0.2,192.168.0.3:/ceph/data2 /ceph/multi ceph rw,noatime,name=cephfs,secret=<hidden>,acl,wsize=16777216 0 0
++gpfs_data /gpfs/data gpfs rw,relatime 0 0
+diff --git a/tests/virfilemock.c b/tests/virfilemock.c
+index eb5182df66..02f26433d4 100644
+--- a/tests/virfilemock.c
++++ b/tests/virfilemock.c
+@@ -91,6 +91,9 @@ setmntent(const char *filename, const char *type)
+ #ifndef CEPH_SUPER_MAGIC
+ # define CEPH_SUPER_MAGIC 0x00c36400
+ #endif
++#ifndef GPFS_SUPER_MAGIC
++# define GPFS_SUPER_MAGIC 0x47504653
++#endif
+ 
+ 
+ static int
+@@ -139,6 +142,8 @@ statfs_mock(const char *mtab,
+             ftype = FUSE_SUPER_MAGIC;
+         } else if (STRPREFIX(mb.mnt_type, "ceph")) {
+             ftype = CEPH_SUPER_MAGIC;
++        } else if (STRPREFIX(mb.mnt_type, "gpfs")) {
++            ftype = GPFS_SUPER_MAGIC;
+         } else {
+             /* Everything else is EXT4. We don't care really for other paths. */
+             ftype = EXT4_SUPER_MAGIC;
+diff --git a/tests/virfiletest.c b/tests/virfiletest.c
+index 972c07fdc5..5f17676c75 100644
+--- a/tests/virfiletest.c
++++ b/tests/virfiletest.c
+@@ -460,6 +460,7 @@ mymain(void)
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/some/symlink/file", true);
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/ceph/file", true);
+     DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/ceph/multi/file", true);
++    DO_TEST_FILE_IS_SHARED_FS_TYPE("mounts3.txt", "/gpfs/data", true);
+ 
+     return ret != 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+ }
+-- 
+2.21.0
+
